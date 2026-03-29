@@ -1,0 +1,84 @@
+import { Link } from "react-router-dom";
+import type { PilotSummary } from "@bccweb/types";
+import { useBlob } from "../../hooks/useBlob.js";
+import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
+import { useState } from "react";
+
+export default function PilotsList() {
+  const { data: pilots, loading, error } = useBlob<PilotSummary[]>("pilots.json");
+  const [search, setSearch] = useState("");
+
+  if (loading) return <LoadingSpinner message="Loading pilots…" />;
+  if (error) return <ErrorMessage error={error} title="Could not load pilots" />;
+  if (!pilots || pilots.length === 0) return <p>No pilots found.</p>;
+
+  const filtered = search.trim()
+    ? pilots.filter(
+        (p) =>
+          p.name.toLowerCase().includes(search.toLowerCase()) ||
+          String(p.bhpaNumber ?? "").includes(search)
+      )
+    : pilots;
+
+  return (
+    <div style={{ maxWidth: 800, margin: "0 auto" }}>
+      <h1 style={{ fontSize: "1.75rem", marginTop: 0 }}>Pilots</h1>
+
+      <div style={{ marginBottom: "1rem" }}>
+        <input
+          type="search"
+          placeholder="Search by name or BHPA number…"
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{
+            padding: "0.4rem 0.75rem",
+            border: "1px solid #dee2e6",
+            borderRadius: "0.375rem",
+            fontSize: "0.9rem",
+            width: "100%",
+            maxWidth: 350,
+          }}
+        />
+        <span style={{ marginLeft: "0.75rem", color: "#888", fontSize: "0.85rem" }}>
+          {filtered.length} pilot{filtered.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      <table
+        style={{ width: "100%", borderCollapse: "collapse", fontSize: "0.9rem" }}
+      >
+        <thead>
+          <tr style={{ borderBottom: "2px solid #dee2e6" }}>
+            <th style={{ textAlign: "left", padding: "0.4rem 0.5rem" }}>Name</th>
+            <th style={{ textAlign: "left", padding: "0.4rem 0.5rem" }}>BHPA No</th>
+            <th style={{ textAlign: "left", padding: "0.4rem 0.5rem" }}>Club</th>
+            <th style={{ textAlign: "left", padding: "0.4rem 0.5rem" }}>Rating</th>
+          </tr>
+        </thead>
+        <tbody>
+          {filtered.map((p) => (
+            <tr key={p.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
+              <td style={{ padding: "0.5rem 0.5rem" }}>
+                <Link
+                  to={`/pilots/${p.id}`}
+                  style={{ color: "#0066cc", textDecoration: "none", fontWeight: 500 }}
+                >
+                  {p.name}
+                </Link>
+              </td>
+              <td style={{ padding: "0.5rem 0.5rem", color: "#555", fontFamily: "monospace" }}>
+                {p.bhpaNumber ?? "—"}
+              </td>
+              <td style={{ padding: "0.5rem 0.5rem", color: "#555" }}>
+                {p.clubId ? p.clubId : "—"}
+              </td>
+              <td style={{ padding: "0.5rem 0.5rem", color: "#555" }}>
+                {p.rating ?? "—"}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

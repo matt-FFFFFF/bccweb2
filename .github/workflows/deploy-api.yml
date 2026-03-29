@@ -1,0 +1,61 @@
+name: Deploy API (Functions)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - "packages/types/**"
+      - "packages/scoring/**"
+      - ".github/workflows/deploy-api.yml"
+
+jobs:
+  build_and_deploy:
+    name: Build and Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up mise
+        uses: jdx/mise-action@v2
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Build order matters: types → scoring → api (project references)
+      - name: Build packages/types
+        run: npm run build --workspace packages/types
+
+      - name: Build packages/scoring
+        run: npm run build --workspace packages/scoring
+
+      - name: Build apps/api
+        run: npm run build --workspace apps/api
+
+      - name: Prepare deployment package
+        run: |
+          # Strip devDependencies — build is complete, they are no longer needed.
+          # This shrinks node_modules before we copy it into the deploy package.
+          npm prune --omit=dev
+
+          mkdir -p .deploy
+          cp apps/api/host.json apps/api/package.json .deploy/
+          cp -r apps/api/dist .deploy/dist
+
+          # Copy node_modules into the deploy directory, dereferencing symlinks.
+          # Workspace packages (@bccweb/types, @bccweb/scoring) are symlinks in
+          # the hoisted node_modules; rsync --copy-links replaces them with the
+          # actual compiled package directories so the zip is self-contained.
+          rsync -a --copy-links node_modules/ .deploy/node_modules/
+
+      - name: Deploy to Azure Functions
+        uses: Azure/functions-action@v1
+        with:
+          # Secret: the Function App name from Terraform (func-<project>-<env>)
+          app-name: ${{ secrets.AZURE_FUNCTIONAPP_NAME }}
+          # The prepared directory — functions-action zips this and deploys via Kudu.
+          # WEBSITE_RUN_FROM_PACKAGE=1 is set in Terraform; the zip is mounted read-only.
+          package: .deploy
+          # Secret: XML publish profile downloaded from the Azure portal or via
+          # `az functionapp deployment list-publishing-profiles --xml`.
+          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}

@@ -1,0 +1,492 @@
+/* =========================================================
+   BCC Theme — British Club Challenge
+   Matches the design of advance-bcc.uk
+   ========================================================= */
+
+/* --- Reset / Base ---------------------------------------- */
+*, *::before, *::after {
+  box-sizing: border-box;
+}
+
+html {
+  position: relative;
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: 'Barlow', 'Helvetica Neue', Arial, sans-serif;
+  font-size: 16px;
+  color: #2c2c2c;
+  background: #fff;
+  /* leave bottom room for footer */
+  padding-bottom: 80px;
+}
+
+/* --- Colour tokens --------------------------------------- */
+:root {
+  --bcc-dark:    #222222;
+  --bcc-darker:  #111111;
+  --bcc-coral:   #e05555;    /* "CLUB CHALLENGE" red from logo */
+  --bcc-white:   #ffffff;
+  --bcc-light:   #f5f5f5;
+  --bcc-border:  #ddd;
+  --bcc-muted:   #666;
+  --bcc-navy:    #1a4fa0;    /* used in PDF / links */
+}
+
+/* --- Typography ------------------------------------------ */
+h1, h2, h3, h4, h5, h6 {
+  font-family: 'Barlow', 'Helvetica Neue', Arial, sans-serif;
+  font-weight: 700;
+  color: var(--bcc-dark);
+  margin-top: 0;
+}
+
+a {
+  color: var(--bcc-coral);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  color: #c03030;
+}
+
+/* --- Navbar --------------------------------------------- */
+.bcc-nav {
+  background-color: var(--bcc-dark);
+  border-bottom: 3px solid var(--bcc-coral);
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  padding: 0 1.25rem;
+  min-height: 64px;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.4);
+}
+
+.bcc-nav__logo {
+  display: flex;
+  align-items: center;
+  margin-right: 1.5rem;
+}
+
+.bcc-nav__logo img {
+  height: 44px;
+  display: block;
+}
+
+.bcc-nav__links {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  flex: 1;
+  flex-wrap: wrap;
+}
+
+.bcc-nav__links a,
+.bcc-nav__links button {
+  color: #aaa;
+  text-decoration: none;
+  padding: 0.5rem 0.75rem;
+  border-radius: 3px;
+  font-size: 0.9rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  transition: color 0.15s, background 0.15s;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.bcc-nav__links a:hover,
+.bcc-nav__links button:hover {
+  color: #fff;
+  background: rgba(255,255,255,0.08);
+  text-decoration: none;
+}
+
+.bcc-nav__links a.active {
+  color: var(--bcc-coral);
+}
+
+.bcc-nav__auth {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  margin-left: auto;
+  padding-left: 1rem;
+}
+
+.bcc-nav__auth span {
+  color: #aaa;
+  font-size: 0.85rem;
+}
+
+.bcc-nav__auth a,
+.bcc-nav__auth button {
+  color: var(--bcc-coral);
+  font-size: 0.85rem;
+  font-weight: 600;
+  background: transparent;
+  border: 1px solid var(--bcc-coral);
+  padding: 0.35rem 0.85rem;
+  border-radius: 3px;
+  cursor: pointer;
+  font-family: inherit;
+  transition: background 0.15s, color 0.15s;
+  text-decoration: none;
+}
+
+.bcc-nav__auth a:hover,
+.bcc-nav__auth button:hover {
+  background: var(--bcc-coral);
+  color: #fff;
+  text-decoration: none;
+}
+
+/* --- Hero image banner ----------------------------------- */
+.bcc-hero {
+  width: 100%;
+  overflow: hidden;
+  position: relative;
+  background: var(--bcc-dark);
+}
+
+.bcc-hero__slides {
+  display: flex;
+  transition: transform 0.6s ease-in-out;
+}
+
+.bcc-hero__slide {
+  min-width: 100%;
+}
+
+.bcc-hero__slide img {
+  width: 100%;
+  height: 340px;
+  object-fit: cover;
+  display: block;
+}
+
+.bcc-hero__controls {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+}
+
+.bcc-hero__dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.45);
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: background 0.2s;
+}
+
+.bcc-hero__dot--active {
+  background: var(--bcc-coral);
+}
+
+.bcc-hero__prev,
+.bcc-hero__next {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  background: rgba(0,0,0,0.4);
+  color: #fff;
+  border: none;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.1rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.2s;
+}
+
+.bcc-hero__prev:hover,
+.bcc-hero__next:hover {
+  background: rgba(0,0,0,0.7);
+}
+
+.bcc-hero__prev { left: 14px; }
+.bcc-hero__next { right: 14px; }
+
+/* --- Main content wrapper (non-home pages) -------------- */
+.bcc-main {
+  /* No padding — Home handles its own layout above the fold.
+     Inner pages use .bcc-page for consistent padding. */
+}
+
+/* --- Page wrapper --------------------------------------- */
+.bcc-page {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem;
+}
+
+/* Inner pages (not Home) add padding directly via bcc-page */
+.bcc-main > *:not(.bcc-hero):not(.bcc-page) {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 1.5rem 1.25rem;
+}
+
+/* --- Home intro text ------------------------------------ */
+.bcc-intro {
+  text-align: center;
+  padding: 1.5rem 1rem;
+  border-bottom: 1px solid var(--bcc-border);
+  margin-bottom: 2rem;
+}
+
+.bcc-intro p {
+  color: var(--bcc-muted);
+  max-width: 680px;
+  margin: 0 auto 0.75rem;
+  line-height: 1.7;
+}
+
+.bcc-intro__actions {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 1.25rem;
+}
+
+/* --- Buttons ------------------------------------------- */
+.bcc-btn {
+  display: inline-block;
+  padding: 0.55rem 1.2rem;
+  border-radius: 3px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-decoration: none;
+  cursor: pointer;
+  border: 2px solid transparent;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  font-family: inherit;
+}
+
+.bcc-btn--primary {
+  background: var(--bcc-coral);
+  color: #fff;
+  border-color: var(--bcc-coral);
+}
+
+.bcc-btn--primary:hover {
+  background: #c03030;
+  border-color: #c03030;
+  color: #fff;
+  text-decoration: none;
+}
+
+.bcc-btn--outline {
+  background: transparent;
+  color: var(--bcc-coral);
+  border-color: var(--bcc-coral);
+}
+
+.bcc-btn--outline:hover {
+  background: var(--bcc-coral);
+  color: #fff;
+  text-decoration: none;
+}
+
+.bcc-btn--ghost {
+  background: transparent;
+  color: var(--bcc-dark);
+  border-color: var(--bcc-border);
+}
+
+.bcc-btn--ghost:hover {
+  background: var(--bcc-light);
+  text-decoration: none;
+}
+
+/* --- Section headings ----------------------------------- */
+.bcc-section-title {
+  font-size: 1.05rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--bcc-dark);
+  border-left: 3px solid var(--bcc-coral);
+  padding-left: 0.65rem;
+  margin-bottom: 1rem;
+}
+
+.bcc-section-title a {
+  font-size: 0.8rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+  margin-left: 0.75rem;
+  color: var(--bcc-coral);
+}
+
+/* --- Tables -------------------------------------------- */
+.bcc-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.bcc-table thead tr {
+  background: var(--bcc-dark);
+  color: #fff;
+}
+
+.bcc-table thead th {
+  padding: 0.5rem 0.75rem;
+  font-weight: 600;
+  text-align: left;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.bcc-table thead th:first-child { border-radius: 0; }
+
+.bcc-table tbody tr {
+  border-bottom: 1px solid var(--bcc-border);
+  transition: background 0.1s;
+}
+
+.bcc-table tbody tr:hover {
+  background: var(--bcc-light);
+}
+
+.bcc-table tbody td {
+  padding: 0.5rem 0.75rem;
+  vertical-align: middle;
+}
+
+.bcc-table--striped tbody tr:nth-child(even) {
+  background: #fafafa;
+}
+
+/* top-3 bold */
+.bcc-table__rank--top {
+  font-weight: 700;
+}
+
+/* --- Round cards --------------------------------------- */
+.bcc-round-card {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.65rem 0.9rem;
+  border: 1px solid var(--bcc-border);
+  border-left: 3px solid var(--bcc-coral);
+  border-radius: 3px;
+  text-decoration: none;
+  color: inherit;
+  background: #fff;
+  transition: box-shadow 0.15s, border-color 0.15s;
+  margin-bottom: 0.5rem;
+}
+
+.bcc-round-card:hover {
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  text-decoration: none;
+  color: inherit;
+}
+
+.bcc-round-card__site {
+  font-weight: 600;
+  color: var(--bcc-dark);
+}
+
+.bcc-round-card__date {
+  color: var(--bcc-muted);
+  font-size: 0.85rem;
+  margin-left: 0.5rem;
+}
+
+/* --- Footer -------------------------------------------- */
+.bcc-footer {
+  position: absolute;
+  bottom: 0;
+  width: 100%;
+  height: 72px;
+  background: var(--bcc-dark);
+  border-top: 3px solid var(--bcc-coral);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3rem;
+  padding: 0 1.5rem;
+}
+
+.bcc-footer img {
+  height: 36px;
+  object-fit: contain;
+  filter: brightness(0) invert(1);
+  opacity: 0.75;
+  transition: opacity 0.2s;
+}
+
+.bcc-footer a:hover img {
+  opacity: 1;
+}
+
+/* --- Status badge tweaks ------------------------------- */
+.bcc-status--Proposed      { background: #fff3cd; color: #856404; }
+.bcc-status--Confirmed     { background: #cfe2ff; color: #084298; }
+.bcc-status--BriefComplete { background: #d0d0ff; color: #3a00a8; }
+.bcc-status--Locked        { background: #fff3cd; color: #664d03; }
+.bcc-status--Complete      { background: #d1e7dd; color: #0a3622; }
+.bcc-status--Cancelled     { background: #f8d7da; color: #58151c; }
+.bcc-status--Active        { background: #d1e7dd; color: #0a3622; }
+.bcc-status--Inactive      { background: #e9ecef; color: #495057; }
+
+/* --- Form elements ------------------------------------- */
+input, select, textarea {
+  font-family: inherit;
+}
+
+input[type="text"],
+input[type="email"],
+input[type="password"],
+select,
+textarea {
+  border: 1px solid var(--bcc-border);
+  border-radius: 3px;
+  padding: 0.45rem 0.75rem;
+  font-size: 0.9rem;
+  transition: border-color 0.15s;
+  width: 100%;
+}
+
+input[type="text"]:focus,
+input[type="email"]:focus,
+input[type="password"]:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--bcc-coral);
+  box-shadow: 0 0 0 3px rgba(224,85,85,0.15);
+}
+
+/* --- Responsive ---------------------------------------- */
+@media (max-width: 640px) {
+  .bcc-nav__logo img { height: 34px; }
+  .bcc-hero__slide img { height: 220px; }
+  .bcc-nav__links a, .bcc-nav__links button { font-size: 0.82rem; padding: 0.4rem 0.5rem; }
+  .bcc-footer { gap: 1.5rem; }
+  .bcc-footer img { height: 26px; }
+}

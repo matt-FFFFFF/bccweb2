@@ -1,0 +1,16 @@
+{
+  "name": "@bccweb/migrate",
+  "version": "1.0.0",
+  "description": "One-time SQL → Blob Storage migration script",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "migrate": "node migrate.mjs",
+    "validate": "node validate.mjs"
+  },
+  "dependencies": {
+    "mssql": "^11.0.1",
+    "@azure/storage-blob": "^12.27.0",
+    "uuid": "^11.1.0"
+  }
+}

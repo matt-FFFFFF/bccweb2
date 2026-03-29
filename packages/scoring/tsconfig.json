@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "outDir": "./dist",
+    "rootDir": "./src",
+    "composite": true,
+    "isolatedModules": true
+  },
+  "references": [
+    { "path": "../types" }
+  ],
+  "include": ["src"],
+  "exclude": ["src/**/__tests__"]
+}

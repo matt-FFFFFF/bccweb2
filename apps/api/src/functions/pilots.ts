@@ -1,0 +1,319 @@
+/**
+ * Pilot endpoints — Phase 2 + Phase 5
+ *
+ * GET  /api/pilots      — pilot index (public)
+ * GET  /api/pilots/{id} — pilot detail (public)
+ * POST /api/pilots      — create pilot (Admin) — Phase 5
+ * PUT  /api/pilots/{id} — update pilot profile (Admin or own Pilot) — Phase 5
+ */
+
+import {
+  app,
+  HttpRequest,
+  HttpResponseInit,
+  InvocationContext,
+} from "@azure/functions";
+import { randomUUID } from "crypto";
+import type {
+  Pilot,
+  PilotSummary,
+  WingClass,
+  CoachType,
+  PilotRatingValue,
+  ManufacturerRef,
+  ClubRef,
+} from "@bccweb/types";
+import { getBlobClient, readBlob, writeBlob } from "../lib/blob.js";
+import {
+  getCallerIdentity,
+  unauthorizedResponse,
+  forbiddenResponse,
+} from "../lib/auth.js";
+
+// ─── GET /api/pilots ──────────────────────────────────────────────────────────
+
+async function getPilots(
+  _req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  try {
+    const pilots = await readBlob<PilotSummary[]>(getBlobClient("pilots.json"));
+    pilots.sort((a, b) => a.name.localeCompare(b.name));
+    return { status: 200, jsonBody: pilots };
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      return { status: 200, jsonBody: [] };
+    }
+    throw err;
+  }
+}
+
+// ─── GET /api/pilots/{id} ─────────────────────────────────────────────────────
+
+async function getPilotById(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const id = req.params["id"];
+  if (!id) return { status: 400, jsonBody: { error: "Missing pilot id" } };
+
+  try {
+    const pilot = await readBlob<Pilot>(getBlobClient(`pilots/${id}.json`));
+    return { status: 200, jsonBody: pilot };
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      return { status: 404, jsonBody: { error: "Pilot not found" } };
+    }
+    throw err;
+  }
+}
+
+// ─── POST /api/pilots ─────────────────────────────────────────────────────────
+
+interface CreatePilotBody {
+  firstName: string;
+  lastName: string;
+  phoneNumber?: string;
+  email?: string;        // stored in index for auto-linking
+  bhpaNumber?: number;
+  coachType?: CoachType;
+  pilotRating?: PilotRatingValue;
+  wingClass?: WingClass;
+  wingManufacturer?: ManufacturerRef;
+  wingModel?: string;
+  wingColours?: string;
+  helmetColour?: string;
+  harnessType?: string;
+  harnessColour?: string;
+  emergencyContactName?: string;
+  emergencyPhoneNumber?: string;
+  medicalInfo?: string;
+  pureTrackId?: number;
+  pureTrackLink?: string;
+  currentClub?: ClubRef;
+}
+
+async function createPilot(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!caller.roles.includes("Admin")) return forbiddenResponse();
+
+  let body: CreatePilotBody;
+  try {
+    body = (await req.json()) as CreatePilotBody;
+  } catch {
+    return { status: 400, jsonBody: { error: "Invalid JSON" } };
+  }
+
+  if (!body.firstName?.trim() || !body.lastName?.trim()) {
+    return { status: 400, jsonBody: { error: "firstName and lastName are required" } };
+  }
+
+  const id = randomUUID();
+  const fullName = `${body.firstName.trim()} ${body.lastName.trim()}`;
+
+  const pilot: Pilot = {
+    id,
+    bhpaNumber: body.bhpaNumber,
+    coachType: body.coachType ?? "None",
+    pilotRating: body.pilotRating ?? "Pilot",
+    pureTrackId: body.pureTrackId,
+    pureTrackLink: body.pureTrackLink,
+    helmetColour: body.helmetColour,
+    harnessType: body.harnessType,
+    harnessColour: body.harnessColour,
+    emergencyContactName: body.emergencyContactName,
+    emergencyPhoneNumber: body.emergencyPhoneNumber,
+    medicalInfo: body.medicalInfo,
+    wingClass: body.wingClass,
+    wingManufacturer: body.wingManufacturer,
+    wingModel: body.wingModel,
+    wingColours: body.wingColours,
+    person: {
+      id: randomUUID(),
+      firstName: body.firstName.trim(),
+      lastName: body.lastName.trim(),
+      fullName,
+      phoneNumber: body.phoneNumber,
+    },
+    currentClub: body.currentClub,
+    seasonClubs: [],
+    userId: null,
+  };
+
+  await writeBlob(`pilots/${id}.json`, pilot);
+  await upsertPilotInIndex(pilot, body.email);
+
+  return { status: 201, jsonBody: pilot };
+}
+
+// ─── PUT /api/pilots/{id} ─────────────────────────────────────────────────────
+
+interface UpdatePilotBody {
+  firstName?: string;
+  lastName?: string;
+  phoneNumber?: string;
+  helmetColour?: string;
+  harnessType?: string;
+  harnessColour?: string;
+  emergencyContactName?: string;
+  emergencyPhoneNumber?: string;
+  medicalInfo?: string;
+  wingClass?: WingClass;
+  wingManufacturer?: ManufacturerRef;
+  wingModel?: string;
+  wingColours?: string;
+  currentClub?: ClubRef;
+  // Admin-only fields
+  bhpaNumber?: number;
+  coachType?: CoachType;
+  pilotRating?: PilotRatingValue;
+  pureTrackId?: number;
+  pureTrackLink?: string;
+  email?: string;
+}
+
+async function updatePilot(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const id = req.params["id"];
+  if (!id) return { status: 400, jsonBody: { error: "Missing pilot id" } };
+
+  const isAdmin = caller.roles.includes("Admin");
+  const isSelf = caller.pilotId === id;
+
+  if (!isAdmin && !isSelf) return forbiddenResponse();
+
+  let existing: Pilot;
+  try {
+    existing = await readBlob<Pilot>(getBlobClient(`pilots/${id}.json`));
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      return { status: 404, jsonBody: { error: "Pilot not found" } };
+    }
+    throw err;
+  }
+
+  let body: UpdatePilotBody;
+  try {
+    body = (await req.json()) as UpdatePilotBody;
+  } catch {
+    return { status: 400, jsonBody: { error: "Invalid JSON" } };
+  }
+
+  // Build updated pilot — common fields (both Admin and self)
+  const firstName = body.firstName?.trim() ?? existing.person.firstName;
+  const lastName = body.lastName?.trim() ?? existing.person.lastName;
+
+  const updated: Pilot = {
+    ...existing,
+    // Self-service fields
+    helmetColour: body.helmetColour ?? existing.helmetColour,
+    harnessType: body.harnessType ?? existing.harnessType,
+    harnessColour: body.harnessColour ?? existing.harnessColour,
+    emergencyContactName:
+      body.emergencyContactName ?? existing.emergencyContactName,
+    emergencyPhoneNumber:
+      body.emergencyPhoneNumber ?? existing.emergencyPhoneNumber,
+    medicalInfo: body.medicalInfo ?? existing.medicalInfo,
+    wingClass: body.wingClass ?? existing.wingClass,
+    wingManufacturer: body.wingManufacturer ?? existing.wingManufacturer,
+    wingModel: body.wingModel ?? existing.wingModel,
+    wingColours: body.wingColours ?? existing.wingColours,
+    currentClub: body.currentClub ?? existing.currentClub,
+    person: {
+      ...existing.person,
+      firstName,
+      lastName,
+      fullName: `${firstName} ${lastName}`,
+      phoneNumber: body.phoneNumber ?? existing.person.phoneNumber,
+    },
+    // Admin-only fields
+    ...(isAdmin && {
+      bhpaNumber: body.bhpaNumber ?? existing.bhpaNumber,
+      coachType: body.coachType ?? existing.coachType,
+      pilotRating: body.pilotRating ?? existing.pilotRating,
+      pureTrackId: body.pureTrackId ?? existing.pureTrackId,
+      pureTrackLink: body.pureTrackLink ?? existing.pureTrackLink,
+    }),
+  };
+
+  await writeBlob(`pilots/${id}.json`, updated);
+  await upsertPilotInIndex(updated, isAdmin ? body.email : undefined);
+
+  return { status: 200, jsonBody: updated };
+}
+
+// ─── Index helper ─────────────────────────────────────────────────────────────
+
+async function upsertPilotInIndex(
+  pilot: Pilot,
+  email?: string
+): Promise<void> {
+  let index: PilotSummary[] = [];
+  try {
+    index = await readBlob<PilotSummary[]>(getBlobClient("pilots.json"));
+  } catch {
+    // index may not exist yet
+  }
+
+  const existing = index.find((p) => p.id === pilot.id);
+  const entry: PilotSummary = {
+    ...(existing ?? {}),
+    id: pilot.id,
+    legacyId: pilot.legacyId,
+    bhpaNumber: pilot.bhpaNumber,
+    name: pilot.person.fullName,
+    email: email ?? existing?.email,
+    clubId: pilot.currentClub?.id,
+    rating: pilot.pilotRating,
+    userId: pilot.userId,
+  };
+
+  const idx = index.findIndex((p) => p.id === pilot.id);
+  if (idx >= 0) {
+    index[idx] = entry;
+  } else {
+    index.push(entry);
+  }
+
+  index.sort((a, b) => a.name.localeCompare(b.name));
+  await writeBlob("pilots.json", index);
+}
+
+// ─── Registration ─────────────────────────────────────────────────────────────
+
+app.http("getPilots", {
+  methods: ["GET"],
+  authLevel: "anonymous",
+  route: "pilots",
+  handler: getPilots,
+});
+
+app.http("getPilotById", {
+  methods: ["GET"],
+  authLevel: "anonymous",
+  route: "pilots/{id}",
+  handler: getPilotById,
+});
+
+app.http("createPilot", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "pilots",
+  handler: createPilot,
+});
+
+app.http("updatePilot", {
+  methods: ["PUT"],
+  authLevel: "anonymous",
+  route: "pilots/{id}",
+  handler: updatePilot,
+});

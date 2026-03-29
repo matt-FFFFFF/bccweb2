@@ -1,0 +1,28 @@
+# ── Stage 1: Build ────────────────────────────────────────────────────────────
+FROM node:20-alpine AS build
+WORKDIR /build
+
+# Copy manifests first for better layer caching
+COPY package.json package-lock.json tsconfig.base.json ./
+COPY packages/types/package.json ./packages/types/
+COPY apps/web/package.json        ./apps/web/
+
+RUN npm ci
+
+COPY packages/types ./packages/types
+COPY apps/web       ./apps/web
+
+# VITE_BLOB_BASE_URL intentionally unset — defaults to /blob (proxied by Caddy)
+# Bootstrap: build types first (no @bccweb imports), materialise the symlink,
+# then run the normal web build (tsc --noEmit + vite).
+RUN node_modules/.bin/tsc --project packages/types/tsconfig.json
+RUN rm -rf node_modules/@bccweb/types && cp -r packages/types node_modules/@bccweb/types
+RUN npm run build --workspace apps/web
+
+# ── Stage 2: Serve (Caddy) ────────────────────────────────────────────────────
+FROM caddy:alpine
+
+COPY --from=build /build/dist/web /srv
+COPY apps/web/Caddyfile /etc/caddy/Caddyfile
+
+EXPOSE 80

@@ -1,0 +1,32 @@
+{
+  "name": "@bccweb/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/src/index.js",
+  "scripts": {
+    "build": "tsc --project tsconfig.json",
+    "watch": "tsc --project tsconfig.json --watch",
+    "start": "func start",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@azure/communication-email": "^1.1.0",
+    "@azure/functions": "^4.6.0",
+    "@azure/identity": "^4.5.0",
+    "@azure/storage-blob": "^12.25.0",
+    "@bccweb/scoring": "*",
+    "@bccweb/types": "*",
+    "@sparticuz/chromium": "^143.0.4",
+    "@types/bcryptjs": "^2.4.6",
+    "bcryptjs": "^3.0.3",
+    "handlebars": "^4.7.9",
+    "jsonwebtoken": "^9.0.2",
+    "puppeteer-core": "^24.40.0"
+  },
+  "devDependencies": {
+    "@types/jsonwebtoken": "^9.0.7",
+    "@types/node": "^20.14.0",
+    "typescript": "^5.4.5"
+  }
+}
