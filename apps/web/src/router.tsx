@@ -24,6 +24,7 @@ import Terms from "./pages/Terms.js";
 import AdminUsers from "./pages/admin/Users.js";
 import AdminClubs from "./pages/admin/Clubs.js";
 import SeasonClubs from "./pages/admin/SeasonClubs.js";
+import PilotSeasonClubs from "./pages/admin/PilotSeasonClubs.js";
 import Frequencies from "./pages/admin/Frequencies.js";
 import AdminSites from "./pages/admin/Sites.js";
 import AdminConfig from "./pages/admin/Config.js";
@@ -199,6 +200,7 @@ export default function App() {
           <Route path="/admin/users" element={<RequireAuth><Page><AdminUsers /></Page></RequireAuth>} />
           <Route path="/admin/clubs" element={<RequireAuth><Page><AdminClubs /></Page></RequireAuth>} />
           <Route path="/admin/seasons/:year/clubs" element={<RequireAuth><Page><SeasonClubs /></Page></RequireAuth>} />
+          <Route path="/admin/pilot-season-clubs" element={<RequireAuth><Page><PilotSeasonClubs /></Page></RequireAuth>} />
           <Route path="/admin/frequencies" element={<RequireAuth><Page><Frequencies /></Page></RequireAuth>} />
           <Route path="/admin/sites" element={<RequireAuth><Page><AdminSites /></Page></RequireAuth>} />
           <Route path="/admin/config" element={<RequireAuth><Page><AdminConfig /></Page></RequireAuth>} />
