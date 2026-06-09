@@ -30,3 +30,9 @@ test-results/
 tests/e2e/playwright-report/
 tests/e2e/test-results/
 
+# Terraform plan artifacts
+iac/plan.binary
+
+# OpenCode session state
+.omo/
+
