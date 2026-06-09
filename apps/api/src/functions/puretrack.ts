@@ -1,12 +1,13 @@
 /**
- * PureTrack manual trigger endpoint — Phase 4
+ * PureTrack endpoints — Phase 4
  *
  * POST /api/rounds/{id}/puretrack/create-groups
+ *   Manually (re-)creates PureTrack groups for a locked round.
+ *   Auth: RoundsCoord or Admin only.
  *
- * Manually (re-)creates PureTrack groups for a locked round.
- * Useful if the automatic creation on lock failed, or to recreate after an unlock/re-lock.
- *
- * Auth: RoundsCoord or Admin only.
+ * GET /api/admin/puretrack/groups?roundId={id}
+ *   Lists persisted PureTrackGroup records for a round.
+ *   Auth: Admin, or RoundsCoord scoped to the round's organising club.
  */
 
 import {
@@ -15,7 +16,8 @@ import {
   HttpResponseInit,
   InvocationContext,
 } from "@azure/functions";
-import type { Round, Pilot } from "@bccweb/types";
+import { BlobServiceClient } from "@azure/storage-blob";
+import type { Round, Pilot, PureTrackGroup } from "@bccweb/types";
 import { getPrivateBlobClient, readBlob, writePrivateBlob, withPrivateLease } from "../lib/blob.js";
 import {
   getCallerIdentity,
@@ -32,6 +34,47 @@ function isCoord(roles: string[]): boolean {
   return roles.includes("RoundsCoord") || roles.includes("Admin");
 }
 
+function isAdmin(roles: string[]): boolean {
+  return roles.includes("Admin");
+}
+
+// ─── Private container accessor (listing only) ────────────────────────────────
+
+function getPrivateContainerClient() {
+  const conn = process.env["BLOB_CONNECTION_STRING"];
+  if (!conn) throw new Error("BLOB_CONNECTION_STRING is not set");
+  const svc = BlobServiceClient.fromConnectionString(conn);
+  const name = process.env["BLOB_PRIVATE_CONTAINER_NAME"] ?? "data-private";
+  return svc.getContainerClient(name);
+}
+
+async function listPureTrackGroupsForRound(roundId: string): Promise<PureTrackGroup[]> {
+  const container = getPrivateContainerClient();
+  const groups: PureTrackGroup[] = [];
+
+  for await (const item of container.listBlobsFlat({ prefix: "puretrack-groups/" })) {
+    if (!item.name.endsWith(".json")) continue;
+    try {
+      const blobClient = container.getBlobClient(item.name);
+      const response = await blobClient.download();
+      const chunks: Buffer[] = [];
+      for await (const chunk of response.readableStreamBody!) {
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+      }
+      const data = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as PureTrackGroup;
+      if (data.roundId === roundId) {
+        groups.push(data);
+      }
+    } catch {
+      // skip unreadable blobs
+    }
+  }
+
+  return groups;
+}
+
+// ─── POST /api/rounds/{id}/puretrack/create-groups ───────────────────────────
+
 async function createPureTrackGroupsHandler(
   req: HttpRequest,
   _ctx: InvocationContext
@@ -43,7 +86,6 @@ async function createPureTrackGroupsHandler(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
-  // Load round
   let round: Round;
   try {
     round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
@@ -63,7 +105,6 @@ async function createPureTrackGroupsHandler(
     };
   }
 
-  // Collect pilot PureTrack IDs
   const pilotIds = round.teams.flatMap((t) =>
     t.pilots
       .filter((s) => s.status === "Filled" && s.pilotId)
@@ -87,17 +128,17 @@ async function createPureTrackGroupsHandler(
     })
   );
 
-  // Create groups
   let result: PureTrackRoundResult | null;
   try {
-    result = await createPureTrackGroups(round, pilotPureTrackIds);
+    result = await createPureTrackGroups(round, pilotPureTrackIds, {
+      callerUserId: caller.userId,
+    });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[puretrack] createPureTrackGroups failed for round ${id}:`, err);
     throw new HttpError(502, "PURETRACK_UPSTREAM_ERROR", msg);
   }
 
-  // Persist group IDs back onto the round blob (under lease)
   const path = `rounds/${id}.json`;
   if (!result) {
     return { status: 200, jsonBody: null };
@@ -125,6 +166,40 @@ async function createPureTrackGroupsHandler(
   return { status: 200, jsonBody: result };
 }
 
+// ─── GET /api/admin/puretrack/groups ─────────────────────────────────────────
+
+async function listPureTrackGroupsHandler(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isCoord(caller.roles)) return forbiddenResponse();
+
+  const roundId = req.query.get("roundId");
+  if (!roundId) throw new HttpError(400, "MISSING_ROUND_ID", "roundId query parameter is required");
+
+  if (!isAdmin(caller.roles)) {
+    // RoundsCoord: verify they belong to the round's organising club
+    let round: Round;
+    try {
+      round = await readBlob<Round>(getPrivateBlobClient(`rounds/${roundId}.json`));
+    } catch (err: unknown) {
+      if ((err as { statusCode?: number }).statusCode === 404) {
+        throw new HttpError(404, "NOT_FOUND", "Round not found");
+      }
+      throw new HttpError(500, "INTERNAL");
+    }
+
+    if (!round.organisingClub || round.organisingClub.id !== caller.clubId) {
+      return forbiddenResponse();
+    }
+  }
+
+  const groups = await listPureTrackGroupsForRound(roundId);
+  return { status: 200, jsonBody: groups };
+}
+
 // ─── Registration ─────────────────────────────────────────────────────────────
 
 app.http("createPureTrackGroups", {
@@ -132,4 +207,11 @@ app.http("createPureTrackGroups", {
   authLevel: "anonymous",
   route: "rounds/{id}/puretrack/create-groups",
   handler: withErrorHandler(createPureTrackGroupsHandler),
+});
+
+app.http("listPureTrackGroups", {
+  methods: ["GET"],
+  authLevel: "anonymous",
+  route: "admin/puretrack/groups",
+  handler: withErrorHandler(listPureTrackGroupsHandler),
 });

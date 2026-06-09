@@ -16,13 +16,15 @@
  *   Team group:  "BCC {ddd dd MMM yy} {teamName}"
  */
 
-import type { Round, Team } from "@bccweb/types";
+import { randomUUID } from "crypto";
+import type { Round, Team, PureTrackGroup } from "@bccweb/types";
+import { writePrivateBlob } from "./blob.js";
 
 const BASE_URL = "https://puretrack.io";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-interface PureTrackGroup {
+interface PureTrackApiGroup {
   id: number;
   name: string;
   slug: string;
@@ -136,7 +138,7 @@ function authHeaders(session: PureTrackSession): Record<string, string> {
 async function createGroup(
   session: PureTrackSession,
   name: string
-): Promise<PureTrackGroup> {
+): Promise<PureTrackApiGroup> {
   const body = {
     id: null,
     name,
@@ -211,6 +213,32 @@ export function teamGroupName(date: string, teamName: string): string {
   return `BCC ${formatRoundDate(date)} ${teamName}`;
 }
 
+// ─── Blob persistence helpers ─────────────────────────────────────────────────
+
+async function writePureTrackGroupBlob(
+  group: PureTrackApiGroup,
+  pilotIds: string[],
+  roundId: string,
+  createdAt: string,
+  options: { teamId?: string; callerUserId?: string }
+): Promise<string> {
+  const blobId = randomUUID();
+  const record: PureTrackGroup = {
+    id: blobId,
+    name: group.name,
+    slug: group.slug,
+    pilotIds,
+    roundId,
+    createdAt,
+    externalId: String(group.id),
+    externalUrl: `${BASE_URL}/group/${group.slug}`,
+    ...(options.teamId ? { teamId: options.teamId } : {}),
+    ...(options.callerUserId ? { createdBy: options.callerUserId } : {}),
+  };
+  await writePrivateBlob(`puretrack-groups/${blobId}.json`, record);
+  return blobId;
+}
+
 // ─── Public API ───────────────────────────────────────────────────────────────
 
 export interface PureTrackRoundResult {
@@ -224,6 +252,10 @@ export interface PureTrackRoundResult {
   }>;
 }
 
+export interface CreatePureTrackGroupsOptions {
+  callerUserId?: string;
+}
+
 /**
  * Create PureTrack groups for a locked round.
  *
@@ -232,21 +264,30 @@ export interface PureTrackRoundResult {
  *  - One group per team (pilots in that team)
  *  - Adds each pilot's PureTrack ID to both their team group and the round group
  *
+ * After each successful group creation, persists a PureTrackGroup blob at
+ * puretrack-groups/{uuid}.json in the private container.
+ *
  * Returns IDs/slugs to store back on the round blob.
  */
 export async function createPureTrackGroups(
   round: Round,
   /** Map from pilotId → pureTrackId (only filled pilots with a PureTrack ID) */
-  pilotPureTrackIds: Map<string, number>
+  pilotPureTrackIds: Map<string, number>,
+  options: CreatePureTrackGroupsOptions = {}
 ): Promise<PureTrackRoundResult | null> {
-  // 2. Create per-team groups and collect pilot IDs for each
   const teamResults: PureTrackRoundResult["teams"] = [];
   const allPureTrackIds: number[] = [];
-  const teamImports: Array<{ team: Team; pureTrackIds: number[] }> = [];
+  const allBccPilotIds: string[] = [];
+  const teamImports: Array<{
+    team: Team;
+    pureTrackIds: number[];
+    bccPilotIds: string[];
+  }> = [];
 
   for (const team of round.teams) {
     const filledPilots = team.pilots.filter((s) => s.status === "Filled" && s.pilotId);
     const teamPureTrackIds: number[] = [];
+    const teamBccPilotIds: string[] = [];
 
     for (const slot of filledPilots) {
       const pureTrackId = pilotPureTrackIds.get(slot.pilotId!);
@@ -255,16 +296,20 @@ export async function createPureTrackGroups(
         continue;
       }
       teamPureTrackIds.push(pureTrackId);
+      teamBccPilotIds.push(slot.pilotId!);
     }
 
-    if (filledPilots.length === 0) continue; // skip empty teams
+    if (filledPilots.length === 0) continue;
 
     if (teamPureTrackIds.length > 0) {
-      teamImports.push({ team, pureTrackIds: teamPureTrackIds });
+      teamImports.push({ team, pureTrackIds: teamPureTrackIds, bccPilotIds: teamBccPilotIds });
     }
 
-    for (const id of teamPureTrackIds) {
-      if (!allPureTrackIds.includes(id)) allPureTrackIds.push(id);
+    for (let i = 0; i < teamPureTrackIds.length; i++) {
+      if (!allPureTrackIds.includes(teamPureTrackIds[i])) {
+        allPureTrackIds.push(teamPureTrackIds[i]);
+        allBccPilotIds.push(teamBccPilotIds[i]);
+      }
     }
   }
 
@@ -273,17 +318,53 @@ export async function createPureTrackGroups(
     return null;
   }
 
-  const session = await authenticate();
+  const now = new Date().toISOString();
 
-  // 1. Create round-level group
-  const gName = roundGroupName(round.site.name, round.date);
-  const roundGroup = await createGroup(session, gName);
+  let session: PureTrackSession;
+  try {
+    session = await authenticate();
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error("[METRIC] puretrack.create.failed", { roundId: round.id, reason });
+    throw err;
+  }
 
-  for (const { team, pureTrackIds } of teamImports) {
+  let roundGroup: PureTrackApiGroup;
+  try {
+    const gName = roundGroupName(round.site.name, round.date);
+    roundGroup = await createGroup(session, gName);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.error("[METRIC] puretrack.create.failed", { roundId: round.id, type: "round-group", reason });
+    throw err;
+  }
+
+  await writePureTrackGroupBlob(roundGroup, allBccPilotIds, round.id, now, {
+    callerUserId: options.callerUserId,
+  }).catch((err) => {
+    console.warn("[puretrack] Failed to write round group blob:", err);
+  });
+
+  for (const { team, pureTrackIds, bccPilotIds } of teamImports) {
     const tName = teamGroupName(round.date, team.teamName);
     // Add small delay between group creations to avoid rate-limit burst (mirrors existing app)
     await new Promise((r) => setTimeout(r, 100));
-    const teamGroup = await createGroup(session, tName);
+
+    let teamGroup: PureTrackApiGroup;
+    try {
+      teamGroup = await createGroup(session, tName);
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : String(err);
+      console.error("[METRIC] puretrack.create.failed", { roundId: round.id, teamId: team.id, type: "team-group", reason });
+      throw err;
+    }
+
+    await writePureTrackGroupBlob(teamGroup, bccPilotIds, round.id, now, {
+      teamId: team.id,
+      callerUserId: options.callerUserId,
+    }).catch((err) => {
+      console.warn("[puretrack] Failed to write team group blob:", err);
+    });
 
     teamResults.push({
       teamId: team.id,
@@ -294,7 +375,6 @@ export async function createPureTrackGroups(
     await importPilots(session, teamGroup.id, pureTrackIds);
   }
 
-  // 3. Import all pilots into the round group
   await importPilots(session, roundGroup.id, allPureTrackIds);
 
   return {

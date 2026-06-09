@@ -555,3 +555,47 @@ reconcile field population.
   API: unauthenticated calls to `/club-history` return 403, so the section gracefully
   shows an empty state rather than crashing).
 - `source` badge uses subtle colour-coding: grey for "legacy", green for "current".
+
+### Task 28: Pilot Season Clubs (Assign)
+- **Reassign Mechanism**: POST `/api/admin/pilot-season-clubs?reassign=true` is used for explicit reassignment to cleanly handle DELETE+POST without needing two clicks.
+- **Denorm Map**: Private blob `seasons/{year}/pilot-club-map.json` maintains `{ [pilotId]: clubId }` lookup for rapid O(1) matching during scoring instead of full `pilots/*.json` scan.
+
+## Task 39 notes — PureTrackGroup first-class entity + admin inspection endpoint
+
+### PureTrack API response shape (group creation)
+- POST /api/groups returns: `{ id: number, name: string, slug: string }`
+- `id` is an integer external group ID on PureTrack's system
+- `slug` is the URL-friendly identifier used in the group URL: `https://puretrack.io/group/{slug}`
+- Credentials (API key, email, password, session tokens) are never stored in the group blob
+
+### Blob path layout
+- Private container (`data-private`): `puretrack-groups/{uuid}.json`
+- One blob per group created: 1 round-level group + N team-level groups
+- Round group blob: `teamId` field absent; `pilotIds` = all BCC pilot UUIDs with valid pureTrackId
+- Team group blob: `teamId` field present; `pilotIds` = BCC pilot UUIDs in that team with valid pureTrackId
+- `externalId` = `String(ptApiGroup.id)` (number → string)
+- `externalUrl` = `https://puretrack.io/group/{slug}`
+- Blob is written right after the `createGroup` API call succeeds, before `importPilots`
+- If `createGroup` fails, blob is never written (error propagates, no orphan records)
+
+### Listing / filter strategy
+- Admin inspection endpoint `GET /api/admin/puretrack/groups?roundId={id}` lists all blobs under
+  `puretrack-groups/` prefix via `ContainerClient.listBlobsFlat({ prefix: "puretrack-groups/" })`
+  and filters in-memory by `data.roundId === roundId`
+- This is a full scan of the prefix; acceptable at current scale (1–2 groups per round × few rounds)
+- If scaling concern arises later, add a `puretrack-groups-index/{roundId}.json` index blob
+- RoundsCoord scope check: load the round blob, compare `round.organisingClub.id` with `caller.clubId`
+
+### TypeScript / Vitest notes
+- `vi.fn<TFn>()` signature in Vitest 4: single generic parameter is the full function type,
+  e.g. `vi.fn<(path: string, data: unknown, leaseId?: string) => Promise<void>>()`
+  NOT the two-tuple form `vi.fn<[Args], Return>()` which is rejected by strict TS
+- `vi.hoisted()` is required when a spy variable used inside `vi.mock()` factory needs to be
+  accessible both inside the factory and in test assertions
+- `blob.ts` was NOT modified (per MUST NOT DO); listing uses a local `getPrivateContainerClient()`
+  in `functions/puretrack.ts` that duplicates the small connection pattern from `blob.ts`
+
+### Local interface rename
+- `puretrack.ts` lib had a local `interface PureTrackGroup { id: number; name: string; slug: string }`
+  for the PureTrack API response. Renamed to `PureTrackApiGroup` to avoid conflict with the new
+  `PureTrackGroup` entity exported from `@bccweb/types`

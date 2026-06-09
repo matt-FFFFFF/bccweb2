@@ -488,6 +488,22 @@ export interface RoundBrief {
   teams: BriefTeamEntry[];
 }
 
+// ─── PureTrack ───────────────────────────────────────────────────────────────
+
+export interface PureTrackGroup {
+  id: string;
+  name: string;
+  slug: string;
+  pilotIds: string[];
+  roundId: string;
+  teamId?: string;
+  createdAt: string;
+  createdBy?: string;
+  externalId?: string;
+  externalUrl?: string;
+  legacyId?: number;
+}
+
 // ─── Results ─────────────────────────────────────────────────────────────────
 
 export interface RoundResult {

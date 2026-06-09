@@ -11,6 +11,7 @@ export default defineConfig({
       "src/lib/__tests__/telemetryRedactor.test.ts",
       "src/lib/__tests__/pdf.test.ts",
       "src/lib/__tests__/teamCaptain.test.ts",
+      "src/lib/__tests__/puretrack.groupBlob.test.ts",
       "src/lib/signTofly/__tests__/**/*.test.ts",
     ],
     setupFiles: [
