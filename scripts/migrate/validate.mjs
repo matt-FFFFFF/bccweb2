@@ -18,6 +18,7 @@
  */
 
 import { BlobServiceClient } from "@azure/storage-blob";
+import { findPiiInObject, PII_FIELDS } from "../lib/pii.mjs";
 
 const BLOB_CS = process.env.BLOB_CONNECTION_STRING;
 const CONTAINER = process.env.BLOB_CONTAINER ?? "data";
@@ -70,6 +71,38 @@ async function readBlob(path, required = true) {
     }
     fail(`${path} — download error: ${err.message}`);
     return null;
+  }
+}
+
+// ─── PII scan ─────────────────────────────────────────────────────────────────
+
+async function scanPublicBlobForPii(path) {
+  const client = containerClient.getBlockBlobClient(path);
+  try {
+    const buf = await client.downloadToBuffer();
+    let parsed;
+    try {
+      parsed = JSON.parse(buf.toString("utf-8"));
+    } catch {
+      fail(`${path} — invalid JSON`);
+      return;
+    }
+
+    const hits = findPiiInObject(parsed, PII_FIELDS);
+    if (hits.length === 0) {
+      ok(`${path} — no PII fields`);
+      return;
+    }
+
+    for (const hit of hits) {
+      fail(`${path} — PII field ${hit.field} at ${hit.path}`);
+    }
+  } catch (err) {
+    if (err.statusCode === 404) {
+      fail(`${path} — blob not found (404)`);
+      return;
+    }
+    fail(`${path} — download error: ${err.message}`);
   }
 }
 
@@ -154,6 +187,15 @@ async function main() {
 
   await readBlob("manufacturers.json");
   await readBlob("pilot-ratings.json");
+
+  console.log("");
+
+  console.log("── Public blob PII scan ──");
+  for await (const blob of containerClient.listBlobsFlat()) {
+    if (blob.name.endsWith(".json")) {
+      await scanPublicBlobForPii(blob.name);
+    }
+  }
 
   console.log("");
 
