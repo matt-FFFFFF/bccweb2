@@ -323,3 +323,12 @@
   "60s op" test calls `vi.setConfig({ testTimeout: 70_000 })` inside the test body which does not
   override the 15 s global timeout in Vitest 4. Broadening to a glob would re-introduce that
   pre-existing failure. New lib tests are added explicitly to the `include` array instead.
+
+## Task 23 notes — Brief safety fields and images
+- Brief images are stored as private binary blobs at `round-briefs/{roundId}/image-{n}.png`; `RoundBrief.imagePaths` stores only those private paths, and the SPA loads thumbnails through authenticated `/api/rounds/{id}/brief/images/{n}` rather than `VITE_BLOB_BASE_URL`.
+- PDF generation uses an inline Handlebars `default` helper for explicit `Not provided` fallback values. Brief image binaries are not embedded in the PDF to avoid new dependencies and extra blob fetches; the PDF prints a `See briefing images: <count>` line when images exist.
+
+## Task 17 notes — Sign-to-Fly wording + brief versioning
+- Wording hash algorithm is exactly `crypto.createHash("sha256").update(html, "utf8").digest("hex")`; the seeded legacy v1 hash is `d25039385dcb52fd848abf7633e185e2e77eb1a0421b62a1f01f0db90288bd7b`.
+- Brief hash material fields are limited to operational/safety brief content and W3W points: briefing/check-in/land-by times, narrative, wind, direction of flight, expected landing, airspace/hazards, NOTAMs, BENO line, briefer notes, and site parking/briefing/takeoff W3W. Cosmetic briefer identity/phone and site/location names are excluded.
+- `scripts/seed-wording.mjs` idempotency: if `sign-to-fly/wording/1.json` exists with the same hash, it skips the version blob and rewrites only the active pointer; if the existing v1 hash differs, it fails rather than mutating legal history.

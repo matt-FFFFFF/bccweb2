@@ -33,6 +33,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { pathToFileURL } from "node:url";
 import sql from "mssql";
 import { BlobServiceClient } from "@azure/storage-blob";
 import { getOrCreateUuid, saveIdMap } from "./id-map.mjs";
@@ -52,15 +53,6 @@ const BLOB_CS = process.env.BLOB_CONNECTION_STRING;
 const CONTAINER = process.env.BLOB_CONTAINER ?? "data";
 const PRIVATE_CONTAINER = process.env.BLOB_PRIVATE_CONTAINER ?? "data-private";
 
-if (!SQL_CS) {
-  console.error("Missing SQL_CONNECTION_STRING env var");
-  process.exit(1);
-}
-if (!BLOB_CS) {
-  console.error("Missing BLOB_CONNECTION_STRING env var");
-  process.exit(1);
-}
-
 // ─── Log masking ─────────────────────────────────────────────────────────────
 
 function maskConnectionString(s) {
@@ -73,11 +65,19 @@ function maskConnectionString(s) {
 
 // ─── Blob helpers ─────────────────────────────────────────────────────────────
 
-const blobService = BlobServiceClient.fromConnectionString(BLOB_CS);
-const containerClient = blobService.getContainerClient(CONTAINER);
-const privateContainerClient = blobService.getContainerClient(PRIVATE_CONTAINER);
+let containerClient;
+let privateContainerClient;
+
+function initBlobClients() {
+  if (containerClient && privateContainerClient) return;
+  if (!BLOB_CS) throw new Error("Missing BLOB_CONNECTION_STRING env var");
+  const blobService = BlobServiceClient.fromConnectionString(BLOB_CS);
+  containerClient = blobService.getContainerClient(CONTAINER);
+  privateContainerClient = blobService.getContainerClient(PRIVATE_CONTAINER);
+}
 
 async function uploadBlob(path, obj) {
+  initBlobClients();
   const json = JSON.stringify(obj, null, 2);
   if (DRY_RUN) {
     console.log(`  [DRY] would write ${path} (${json.length} bytes) → public`);
@@ -103,6 +103,7 @@ async function uploadBlob(path, obj) {
 }
 
 async function uploadPrivateBlob(path, obj) {
+  initBlobClients();
   const json = JSON.stringify(obj, null, 2);
   if (DRY_RUN) {
     console.log(`  [DRY] would write ${path} (${json.length} bytes) → private`);
@@ -125,6 +126,48 @@ async function uploadPrivateBlob(path, obj) {
   await client.upload(json, Buffer.byteLength(json), {
     blobHTTPHeaders: { blobContentType: "application/json" },
   });
+}
+
+async function uploadPrivateBinaryBlob(path, bytes, contentType) {
+  initBlobClients();
+  if (DRY_RUN) {
+    console.log(`  [DRY] would write ${path} (${bytes.length} bytes) → private`);
+    return;
+  }
+  const client = privateContainerClient.getBlockBlobClient(path);
+  if (RESUME) {
+    try {
+      const buf = await client.downloadToBuffer();
+      const existingHash = createHash("sha256").update(buf).digest("hex");
+      const newHash = createHash("sha256").update(bytes).digest("hex");
+      if (existingHash === newHash) {
+        console.log(`  [RESUME] skip ${path} (unchanged)`);
+        return;
+      }
+    } catch {
+    }
+  }
+  await client.uploadData(bytes, {
+    blobHTTPHeaders: { blobContentType: contentType },
+  });
+}
+
+export function briefImageBlobFromLegacy(image) {
+  if (image == null) return null;
+  if (Buffer.isBuffer(image)) return image.length > 0 ? image : null;
+  if (image instanceof Uint8Array) {
+    const bytes = Buffer.from(image);
+    return bytes.length > 0 ? bytes : null;
+  }
+  if (typeof image === "string" && image.trim().length > 0) {
+    const bytes = Buffer.from(image, "base64");
+    return bytes.length > 0 ? bytes : null;
+  }
+  return null;
+}
+
+export function briefImagePath(roundId, imageNumber = 1) {
+  return `round-briefs/${roundId}/image-${imageNumber}.png`;
 }
 
 // ─── Enum mappings ────────────────────────────────────────────────────────────
@@ -158,7 +201,9 @@ function mapSiteStatus(description) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
-  // Production guard — must be the very first check before any SQL connection attempt
+  if (!SQL_CS) throw new Error("Missing SQL_CONNECTION_STRING env var");
+  if (!BLOB_CS) throw new Error("Missing BLOB_CONNECTION_STRING env var");
+
   if (/Server=tcp:.*bcc-prod/i.test(SQL_CS)) {
     if (!(FORCE_PRODUCTION && process.env.PRODUCTION_CONFIRM === "YES")) {
       console.error("refusing to run against production without --force-production");
@@ -690,6 +735,8 @@ async function main() {
   saveIdMap();
   console.log(`  wrote ${roundsSummary.length} rounds\n`);
 
+  const pilotNameMap = Object.fromEntries(pilotsSummary.map((p) => [p.id, p.name]));
+
   // ── 9. Round briefs ─────────────────────────────────────────────────────────
   console.log("Step 9: round-briefs/{uuid}.json");
   const briefResult = await pool.request().query(`
@@ -699,39 +746,65 @@ async function main() {
            rb.BriefingTime, rb.LandByTime, rb.CheckInByTime,
            rb.NumTeamsInRound, rb.NumPilotsInRound,
            rb.WindSpeed_Direction, rb.DirectionOfFlight, rb.ExpectedLandingArea,
-           rb.AirspaceAndHazards, rb.NOTAMs, rb.BENO_LineDescription, rb.BriefersNotes
+           rb.AirspaceAndHazards, rb.NOTAMs, rb.BENO_LineDescription, rb.BriefersNotes,
+           rb.Image
     FROM RoundBriefs rb
   `);
   let briefCount = 0;
   for (const r of briefResult.recordset) {
     const roundId = roundUuid.get(r.RoundID);
     if (!roundId) continue;
+    const roundDoc = roundDocs.get(roundId);
+    const imageBytes = briefImageBlobFromLegacy(r.Image);
+    const imagePaths = imageBytes ? [briefImagePath(roundId)] : [];
+    if (imageBytes) {
+      await uploadPrivateBinaryBlob(imagePaths[0], imageBytes, "image/png");
+    }
     const brief = {
       roundId,
       legacyId: r.ID,
       generatedAt: new Date().toISOString(),
-      data: {
-        siteName: r.SiteName,
-        brieferName: r.BrieferName,
-        brieferBhpaCoachLevel: r.BrieferBHPA_CoachLevel,
-        brieferBhpaNumber: r.BrieferBHPA_Number,
-        brieferPhoneNumber: r.BrieferPhoneNumber,
-        brieferEmailAddress: r.BrieferEmailAddress,
-        roundDate: r.RoundDate ? new Date(r.RoundDate).toISOString().slice(0, 10) : null,
-        organisingClubName: r.OrganisingClubName,
-        briefingTime: r.BriefingTime ? new Date(r.BriefingTime).toTimeString().slice(0, 5) : null,
-        landByTime: r.LandByTime ? new Date(r.LandByTime).toTimeString().slice(0, 5) : null,
-        checkInByTime: r.CheckInByTime ? new Date(r.CheckInByTime).toTimeString().slice(0, 5) : null,
-        numTeamsInRound: r.NumTeamsInRound,
-        numPilotsInRound: r.NumPilotsInRound,
-        windSpeedDirection: r.WindSpeed_Direction,
-        directionOfFlight: r.DirectionOfFlight,
-        expectedLandingArea: r.ExpectedLandingArea,
-        airspaceAndHazards: r.AirspaceAndHazards,
-        notams: r.NOTAMs,
-        benoLineDescription: r.BENO_LineDescription,
-        briefersNotes: r.BriefersNotes,
+      date: r.RoundDate ? new Date(r.RoundDate).toISOString().slice(0, 10) : (roundDoc?.date ?? null),
+      siteName: r.SiteName ?? roundDoc?.site?.name ?? "",
+      ...(roundDoc?.site?.parkingW3W ? { parkingW3W: roundDoc.site.parkingW3W } : {}),
+      ...(roundDoc?.site?.briefingW3W ? { briefingW3W: roundDoc.site.briefingW3W } : {}),
+      ...(roundDoc?.site?.takeOffW3W ? { takeOffW3W: roundDoc.site.takeOffW3W } : {}),
+      ...(r.BriefingTime ? { briefingTime: new Date(r.BriefingTime).toTimeString().slice(0, 5) } : {}),
+      ...(r.LandByTime ? { landByTime: new Date(r.LandByTime).toTimeString().slice(0, 5) } : {}),
+      ...(r.CheckInByTime ? { checkInByTime: new Date(r.CheckInByTime).toTimeString().slice(0, 5) } : {}),
+      ...(r.OrganisingClubName ? { organisingClubName: r.OrganisingClubName } : {}),
+      ...(roundDoc?.pureTrackGroupName ? { pureTrackGroupName: roundDoc.pureTrackGroupName } : {}),
+      ...(roundDoc?.pureTrackGroupSlug ? { pureTrackGroupSlug: roundDoc.pureTrackGroupSlug } : {}),
+      ...(r.WindSpeed_Direction ? { windSpeedDirection: r.WindSpeed_Direction } : {}),
+      ...(r.DirectionOfFlight ? { directionOfFlight: r.DirectionOfFlight } : {}),
+      ...(r.ExpectedLandingArea ? { expectedLandingArea: r.ExpectedLandingArea } : {}),
+      ...(r.AirspaceAndHazards ? { airspaceAndHazards: r.AirspaceAndHazards } : {}),
+      ...(r.NOTAMs ? { NOTAMs: r.NOTAMs } : {}),
+      ...(r.BENO_LineDescription ? { BENO_LineDescription: r.BENO_LineDescription } : {}),
+      ...(r.BriefersNotes ? { briefersNotes: r.BriefersNotes } : {}),
+      briefer: {
+        ...(r.BrieferName ? { name: r.BrieferName } : {}),
+        ...(r.BrieferBHPA_CoachLevel ? { bhpaCoachLevel: r.BrieferBHPA_CoachLevel } : {}),
+        ...(r.BrieferBHPA_Number ? { bhpaNumber: r.BrieferBHPA_Number } : {}),
+        ...(r.BrieferPhoneNumber ? { phoneNumber: r.BrieferPhoneNumber } : {}),
+        ...(r.BrieferEmailAddress ? { emailAddress: r.BrieferEmailAddress } : {}),
       },
+      ...(imagePaths.length > 0 ? { imagePaths } : {}),
+      teams: (roundDoc?.teams ?? []).map((team) => ({
+        teamName: team.teamName,
+        clubName: team.club?.name ?? "",
+        ...(team.pureTrackGroupId ? { pureTrackGroupId: team.pureTrackGroupId } : {}),
+        ...(team.pureTrackGroupSlug ? { pureTrackGroupSlug: team.pureTrackGroupSlug } : {}),
+        pilots: team.pilots
+          .filter((pilot) => pilot.pilotId && pilot.snapshot)
+          .map((pilot) => ({
+            placeInTeam: pilot.placeInTeam,
+            pilotId: pilot.pilotId,
+            name: pilot.pilotId ? (pilotNameMap[pilot.pilotId] ?? pilot.pilotId) : "Unknown",
+            isScoring: pilot.isScoring,
+            snapshot: pilot.snapshot,
+          })),
+      })),
     };
     await uploadPrivateBlob(`round-briefs/${roundId}.json`, brief);
     briefCount++;
@@ -760,7 +833,6 @@ async function main() {
     });
 
     // results/{year}.json — per-round results
-    const pilotNameMap = Object.fromEntries(pilotsSummary.map((p) => [p.id, p.name]));
     const results = buildSeasonResults(season, roundDocs, pilotNameMap);
     await uploadBlob(`results/${season.year}.json`, results);
 
@@ -899,8 +971,10 @@ function buildSeasonResults(season, allRoundDocs, pilotNameMap) {
 
 // ─── Run ─────────────────────────────────────────────────────────────────────
 
-main().catch((err) => {
-  console.error("\nMigration failed:", err.message);
-  console.error(err.stack);
-  process.exit(1);
-});
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((err) => {
+    console.error("\nMigration failed:", err.message);
+    console.error(err.stack);
+    process.exit(1);
+  });
+}
