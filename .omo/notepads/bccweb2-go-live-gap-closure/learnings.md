@@ -332,3 +332,51 @@
 - Wording hash algorithm is exactly `crypto.createHash("sha256").update(html, "utf8").digest("hex")`; the seeded legacy v1 hash is `d25039385dcb52fd848abf7633e185e2e77eb1a0421b62a1f01f0db90288bd7b`.
 - Brief hash material fields are limited to operational/safety brief content and W3W points: briefing/check-in/land-by times, narrative, wind, direction of flight, expected landing, airspace/hazards, NOTAMs, BENO line, briefer notes, and site parking/briefing/takeoff W3W. Cosmetic briefer identity/phone and site/location names are excluded.
 - `scripts/seed-wording.mjs` idempotency: if `sign-to-fly/wording/1.json` exists with the same hash, it skips the version blob and rewrites only the active pointer; if the existing v1 hash differs, it fails rather than mutating legal history.
+
+## Task 22 notes — Privacy scan + telemetry redactor + GDPR anonymize
+
+### Runbook location
+- Chose option (b): runbooks written to `docs/runbooks/privacy.md` and `docs/runbooks/gdpr-erasure.md` (tracked in git, not under .omo/ which is gitignored).
+- This keeps legal/compliance documents in the repo alongside the code they govern.
+
+### False positive in initial scan: wingClass in results/ blobs
+- Initial scan flagged `wingClass` in all `results/{year}.json` blobs (32 violations).
+- Root cause: `wingClass` (EN A/B/C/D) is the paraglider safety-rating CLASS used as the wing-factor multiplier in scoring. It is part of the official public `RoundResult` interface and was intentionally included by T21 migration.
+- Decision: removed `wingClass` from `PII_FIELDS` in both `scripts/lib/pii.mjs` and `apps/api/src/lib/telemetryRedactor.ts`. Exception documented in `docs/runbooks/privacy.md` (approved: Matt White, 2026-06-09).
+- Remaining equipment fields that ARE PII: `wingModel`, `wingColours`, `harnessType`, `harnessColour`, `helmetColour` — these identify specific personal equipment.
+
+### Single source of truth for PII_FIELDS
+- `scripts/lib/pii.mjs` is authoritative (used by scanner + GDPR script).
+- `apps/api/src/lib/telemetryRedactor.ts` carries a TS-native copy (documented with a sync warning comment). Cross-package .mjs imports from TypeScript would require `allowArbitraryExtensions` and awkward path mapping — duplicate is simpler.
+
+### CI service-container pattern (Azurite in GitHub Actions)
+```yaml
+services:
+  azurite:
+    image: mcr.microsoft.com/azure-storage/azurite
+    ports:
+      - 10000:10000
+    options: >-
+      --health-cmd "nc -z localhost 10000"
+      --health-interval 5s
+      --health-timeout 5s
+      --health-retries 15
+```
+- `nc -z localhost 10000` is the correct health check (netcat TCP probe).
+- Seed step uses an inline `node -` script with `import` statements; works because GitHub Actions ubuntu-latest ships Node 20+.
+- `BLOB_CONNECTION_STRING` is set as a job-level env var using the Azurite well-known dev string.
+
+### GDPR script double-lock pattern
+- Matches T8 production guard: requires BOTH `--confirm` CLI flag AND `GDPR_ANONYMIZE_CONFIRM=YES` env var.
+- Script logs field NAMES not VALUES in audit log (privacy-safe audit trail).
+- Auth tokens at `auth/tokens/{hash}.json` are enumerated and deleted best-effort (listing may fail gracefully).
+
+### PiiRedactingTelemetryProcessor binding
+- `this.process = this.process.bind(this)` in constructor allows the App Insights SDK to call `.addTelemetryProcessor(processor.process)` without losing `this` context.
+
+### Privacy scanner exit code capture with tee
+- `node script.mjs 2>&1 | tee file` captures exit code of `tee` not `node`; use sequential form instead: `node ... > file 2>&1; echo "exit: $?" >> file`.
+
+### wingClass in PilotSnapshot (rounds/{id}.json — private)
+- `PilotSnapshot` embeds `wingClass` in the private round blob at lock time. This is acceptable: it's private, it's the scoring class, and it's the historical record of what the pilot flew.
+- The public-facing equivalent in `RoundResult` is also `wingClass` — same decision applies (scoring category, not PII).

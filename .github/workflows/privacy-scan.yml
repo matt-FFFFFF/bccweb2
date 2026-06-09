@@ -1,0 +1,87 @@
+name: Privacy Scan
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  privacy-scan:
+    name: PII Leak Detection
+    runs-on: ubuntu-latest
+
+    services:
+      azurite:
+        image: mcr.microsoft.com/azure-storage/azurite
+        ports:
+          - 10000:10000
+        options: >-
+          --health-cmd "nc -z localhost 10000"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 15
+
+    env:
+      BLOB_CONNECTION_STRING: >-
+        DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up mise
+        uses: jdx/mise-action@v2
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create Azurite containers
+        run: node scripts/init-storage.mjs
+
+      - name: Seed public container with clean test data
+        # Upload representative public blobs that contain no PII fields.
+        # This seeds the same shape that the live migration produces post-T21.
+        run: |
+          node - <<'EOF'
+          import { BlobServiceClient } from "@azure/storage-blob";
+
+          const cs = process.env.BLOB_CONNECTION_STRING;
+          const svc = BlobServiceClient.fromConnectionString(cs);
+          const pub = svc.getContainerClient("data");
+
+          const blobs = {
+            "pilots.json": JSON.stringify([
+              { id: "pilot-uuid-1", name: "Alice Smith", clubId: "club-1", rating: "Pilot" },
+              { id: "pilot-uuid-2", name: "Bob Jones",  clubId: "club-1", rating: "Club Pilot" }
+            ], null, 2),
+            "clubs.json": JSON.stringify([
+              { id: "club-1", name: "Acme Hang Gliding Club" }
+            ], null, 2),
+            "rounds.json": JSON.stringify([
+              { id: "round-1", date: "2024-06-01", status: "Complete", seasonYear: 2024, siteId: "site-1", siteName: "Mam Tor" }
+            ], null, 2),
+            "seasons.json": JSON.stringify([
+              { id: "season-2024", year: 2024, active: true }
+            ], null, 2),
+          };
+
+          for (const [name, content] of Object.entries(blobs)) {
+            const client = pub.getBlockBlobClient(name);
+            await client.upload(content, Buffer.byteLength(content), {
+              blobHTTPHeaders: { blobContentType: "application/json" },
+            });
+            console.log("seeded:", name);
+          }
+          EOF
+
+      - name: Run privacy scanner
+        run: node scripts/privacy-scan.mjs
+
+      - name: Upload scan report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: privacy-scan-failure
+          path: |
+            .omo/evidence/
+          if-no-files-found: ignore
