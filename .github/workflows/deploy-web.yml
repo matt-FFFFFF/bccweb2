@@ -15,6 +15,7 @@ jobs:
   build_and_deploy:
     name: Build and Deploy
     runs-on: ubuntu-latest
+    if: ${{ success() }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,3 +44,33 @@ jobs:
           skip_app_build: true
           # The Functions are deployed separately; SWA just proxies /api/*
           api_location: ""
+
+      # NO auto-rollback: this smoke gate must fail the workflow so the operator
+      # investigates immediately and performs any rollback manually in Azure Portal.
+      - name: Smoke test
+        if: ${{ success() }}
+        env:
+          WEB_HOST: ${{ vars.WEB_HOST }}
+        run: |
+          set -euo pipefail
+
+          url="https://${WEB_HOST}/"
+          headers_ok=0
+          for _ in $(seq 1 24); do
+            headers="$(curl -fsSI "$url" || true)"
+            if printf '%s' "$headers" | grep -qi '^content-type: text/html'; then
+              headers_ok=1
+              break
+            fi
+            sleep 5
+          done
+
+          if [ "$headers_ok" -ne 1 ]; then
+            echo "::error::Post-deploy smoke failed"
+            exit 1
+          fi
+
+          if ! curl -fsS "$url" | grep -Eiq 'BCC'; then
+            echo "::error::Post-deploy smoke failed"
+            exit 1
+          fi
