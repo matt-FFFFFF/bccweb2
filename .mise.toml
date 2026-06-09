@@ -1,6 +1,6 @@
 [tools]
 node = "20.20.2"
-terraform = "1.10.5"
+terraform = "latest"
 
 [tools."npm:azure-functions-core-tools"]
 version = "4.9.0"

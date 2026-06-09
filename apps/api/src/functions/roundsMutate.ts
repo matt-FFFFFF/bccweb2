@@ -31,7 +31,7 @@ import type {
   BriefTeamEntry,
 } from "@bccweb/types";
 import { scoreRound } from "@bccweb/scoring";
-import { getBlobClient, readBlob, writeBlob, withLease, getBlockBlobClient } from "../lib/blob.js";
+import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob, withLease, withPrivateLease, getBlockBlobClient, getPrivateBlockBlobClient } from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -72,7 +72,7 @@ const DEFAULT_CONFIG: Config = {
 
 async function loadConfig(): Promise<Config> {
   try {
-    return await readBlob<Config>(getBlobClient("config.json"));
+    return await readBlob<Config>(getPrivateBlobClient("config.json"));
   } catch {
     return DEFAULT_CONFIG;
   }
@@ -114,7 +114,7 @@ async function createRound(
   // Load site
   let site: Site;
   try {
-    site = await readBlob<Site>(getBlobClient(`sites/${siteId}.json`));
+    site = await readBlob<Site>(getPrivateBlobClient(`sites/${siteId}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 400, jsonBody: { error: "Site not found" } };
@@ -140,7 +140,7 @@ async function createRound(
   if (body.organisingClubId) {
     try {
       const club = await readBlob<{ id: string; name: string }>(
-        getBlobClient(`clubs/${body.organisingClubId}.json`)
+        getPrivateBlobClient(`clubs/${body.organisingClubId}.json`)
       );
       organisingClub = { id: club.id, name: club.name };
     } catch {
@@ -172,7 +172,7 @@ async function createRound(
   };
 
   // Write primary round blob
-  await writeBlob(`rounds/${id}.json`, round);
+  await writePrivateBlob(`rounds/${id}.json`, round);
 
   // Append round ID to season (with lease for atomicity)
   try {
@@ -225,8 +225,8 @@ async function updateRound(
   let updated: Round;
 
   try {
-    updated = await withLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getBlobClient(path));
+    updated = await withPrivateLease(path, async (leaseId) => {
+      const r = await readBlob<Round>(getPrivateBlobClient(path));
 
       if (r.isLocked) {
         const err = new Error("Round is locked — unlock before editing");
@@ -247,7 +247,7 @@ async function updateRound(
         let site: Site;
         try {
           site = await readBlob<Site>(
-            getBlobClient(`sites/${body.siteId}.json`)
+            getPrivateBlobClient(`sites/${body.siteId}.json`)
           );
         } catch {
           const err = new Error("Site not found");
@@ -266,7 +266,7 @@ async function updateRound(
       if (body.organisingClubId) {
         try {
           const club = await readBlob<{ id: string; name: string }>(
-            getBlobClient(`clubs/${body.organisingClubId}.json`)
+            getPrivateBlobClient(`clubs/${body.organisingClubId}.json`)
           );
           r.organisingClub = { id: club.id, name: club.name };
         } catch {
@@ -274,7 +274,7 @@ async function updateRound(
         }
       }
 
-      await writeBlob(path, r, leaseId);
+      await writePrivateBlob(path, r, leaseId);
       return r;
     });
   } catch (err: unknown) {
@@ -305,8 +305,8 @@ async function transition(
   let updated: Round;
 
   try {
-    updated = await withLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getBlobClient(path));
+    updated = await withPrivateLease(path, async (leaseId) => {
+      const r = await readBlob<Round>(getPrivateBlobClient(path));
 
       if (!allowedFrom.includes(r.status)) {
         const err = new Error(
@@ -319,7 +319,7 @@ async function transition(
       r.status = to;
       if (extra) await extra(r);
 
-      await writeBlob(path, r, leaseId);
+      await writePrivateBlob(path, r, leaseId);
       return r;
     });
   } catch (err: unknown) {
@@ -394,7 +394,7 @@ async function postLockAsync(lockedRound: Round): Promise<void> {
       uniquePilotIds.map(async (pilotId) => {
         try {
           const pilot = await readBlob<Pilot>(
-            getBlobClient(`pilots/${pilotId}.json`)
+            getPrivateBlobClient(`pilots/${pilotId}.json`)
           );
           if (pilot.pureTrackId) {
             pilotPureTrackIds.set(pilotId, pilot.pureTrackId);
@@ -413,8 +413,8 @@ async function postLockAsync(lockedRound: Round): Promise<void> {
     // Persist PureTrack IDs back onto the round blob (under lease)
     const path = `rounds/${roundId}.json`;
     try {
-      updatedRound = await withLease(path, async (leaseId) => {
-        const r = await readBlob<Round>(getBlobClient(path));
+      updatedRound = await withPrivateLease(path, async (leaseId) => {
+        const r = await readBlob<Round>(getPrivateBlobClient(path));
         r.pureTrackGroupId = ptResult.roundGroupId;
         r.pureTrackGroupName = ptResult.roundGroupName;
         r.pureTrackGroupSlug = ptResult.roundGroupSlug;
@@ -425,7 +425,7 @@ async function postLockAsync(lockedRound: Round): Promise<void> {
             team.pureTrackGroupSlug = tr.groupSlug;
           }
         }
-        await writeBlob(path, r, leaseId);
+        await writePrivateBlob(path, r, leaseId);
         return r;
       });
     } catch (persistErr) {
@@ -444,7 +444,7 @@ async function postLockAsync(lockedRound: Round): Promise<void> {
     let siteGuideUrl: string | undefined;
     try {
       const site = await readBlob<Site>(
-        getBlobClient(`sites/${updatedRound.site.id}.json`)
+        getPrivateBlobClient(`sites/${updatedRound.site.id}.json`)
       );
       siteGuideUrl = site.guideUrl;
     } catch {
@@ -504,7 +504,7 @@ async function postLockAsync(lockedRound: Round): Promise<void> {
 
   // ── 3. Upload brief JSON ──────────────────────────────────────────────────
   try {
-    await writeBlob(`round-briefs/${roundId}.json`, brief);
+    await writePrivateBlob(`round-briefs/${roundId}.json`, brief);
     console.log(`${logPrefix} Brief JSON uploaded`);
   } catch (jsonErr) {
     console.error(`${logPrefix} Failed to upload brief JSON:`, jsonErr);
@@ -517,7 +517,7 @@ async function postLockAsync(lockedRound: Round): Promise<void> {
     pdfBuffer = await generateBriefPdf(brief);
     console.log(`${logPrefix} PDF generated (${pdfBuffer.length} bytes)`);
 
-    const pdfBlobClient = getBlockBlobClient(`round-briefs/${roundId}.pdf`);
+    const pdfBlobClient = getPrivateBlockBlobClient(`round-briefs/${roundId}.pdf`);
     await pdfBlobClient.upload(pdfBuffer, pdfBuffer.length, {
       blobHTTPHeaders: { blobContentType: "application/pdf" },
       metadata: {
@@ -587,7 +587,7 @@ async function lockRound(
   // Read round first (outside lease) to gather pilot IDs
   let round: Round;
   try {
-    round = await readBlob<Round>(getBlobClient(path));
+    round = await readBlob<Round>(getPrivateBlobClient(path));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 404, jsonBody: { error: "Round not found" } };
@@ -615,7 +615,7 @@ async function lockRound(
     uniquePilotIds.map(async (pilotId) => {
       try {
         const pilot = await readBlob<Pilot>(
-          getBlobClient(`pilots/${pilotId}.json`)
+          getPrivateBlobClient(`pilots/${pilotId}.json`)
         );
         snapshotMap.set(pilotId, {
           wingClass: (pilot.wingClass ?? "EN B") as WingClass,
@@ -640,8 +640,8 @@ async function lockRound(
   // Now apply under lease
   let updated: Round;
   try {
-    updated = await withLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getBlobClient(path));
+    updated = await withPrivateLease(path, async (leaseId) => {
+      const r = await readBlob<Round>(getPrivateBlobClient(path));
 
       if (r.status !== "BriefComplete") {
         const err = new Error("Round status changed concurrently");
@@ -662,7 +662,7 @@ async function lockRound(
         }
       }
 
-      await writeBlob(path, r, leaseId);
+      await writePrivateBlob(path, r, leaseId);
       return r;
     });
   } catch (err: unknown) {
@@ -726,8 +726,8 @@ async function completeRound(
   let updated: Round;
 
   try {
-    updated = await withLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getBlobClient(path));
+    updated = await withPrivateLease(path, async (leaseId) => {
+      const r = await readBlob<Round>(getPrivateBlobClient(path));
 
       if (r.status !== "Locked") {
         const err = new Error(
@@ -741,7 +741,7 @@ async function completeRound(
       scored.status = "Complete";
       scored.isLocked = false;
 
-      await writeBlob(path, scored, leaseId);
+      await writePrivateBlob(path, scored, leaseId);
       return scored;
     });
   } catch (err: unknown) {
@@ -787,10 +787,10 @@ async function updateNarrative(
   let updated: Round;
 
   try {
-    updated = await withLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getBlobClient(path));
+    updated = await withPrivateLease(path, async (leaseId) => {
+      const r = await readBlob<Round>(getPrivateBlobClient(path));
       r.narrative = body.narrative;
-      await writeBlob(path, r, leaseId);
+      await writePrivateBlob(path, r, leaseId);
       return r;
     });
   } catch (err: unknown) {

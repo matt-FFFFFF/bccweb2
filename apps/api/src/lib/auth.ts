@@ -1,7 +1,7 @@
 import { HttpRequest } from "@azure/functions";
 import jwt from "jsonwebtoken";
 import type { CallerIdentity, User } from "@bccweb/types";
-import { getBlobClient, readBlob, writeBlob } from "./blob.js";
+import { getBlobClient, getPrivateBlobClient, readBlob, writePrivateBlob } from "./blob.js";
 
 // ─── JWT validation ────────────────────────────────────────────────────────
 
@@ -38,7 +38,7 @@ export async function getOrCreateUser(
   email: string
 ): Promise<User> {
   const userPath = `users/${userId}.json`;
-  const blobClient = getBlobClient(userPath);
+  const blobClient = getPrivateBlobClient(userPath);
 
   try {
     return await readBlob<User>(blobClient);
@@ -76,7 +76,7 @@ export async function getOrCreateUser(
       createdAt: new Date().toISOString(),
     };
 
-    await writeBlob(userPath, newUser);
+    await writePrivateBlob(userPath, newUser);
     await updateUserIndex(email, userId);
 
     return newUser;
@@ -89,14 +89,14 @@ async function updateUserIndex(email: string, userId: string): Promise<void> {
   let index: Record<string, string> = {};
   try {
     index = await readBlob<Record<string, string>>(
-      getBlobClient(indexPath)
+      getPrivateBlobClient(indexPath)
     );
   } catch {
     // index doesn't exist yet; start fresh
   }
 
   index[email.toLowerCase()] = userId;
-  await writeBlob(indexPath, index);
+  await writePrivateBlob(indexPath, index);
 }
 
 // ─── Main middleware ───────────────────────────────────────────────────────

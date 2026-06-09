@@ -1,0 +1,16 @@
+import { defineConfig } from "vitest/config";
+
+export default defineConfig({
+  test: {
+    include: ["src/__tests__/**/*.test.ts"],
+    setupFiles: [
+      "src/__tests__/helpers/setup.ts",
+      "src/__tests__/helpers/azurite.ts",
+    ],
+    testTimeout: 15_000,
+    // Run tests within a file sequentially for reliable blob state
+    sequence: {
+      concurrent: false,
+    },
+  },
+});

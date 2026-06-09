@@ -14,6 +14,9 @@
  *   BLOB_CONNECTION_STRING="..." node scripts/admin-users.mjs find user@example.com
  *   BLOB_CONNECTION_STRING="..." node scripts/admin-users.mjs reset-password user@example.com
  *
+ * All user/auth data lives in the private container (default "data-private").
+ * Override with BLOB_PRIVATE_CONTAINER_NAME env var if needed.
+ *
  * For local Azurite:
  *   BLOB_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IkvFpEgBm+Nwj4gEWH9A3RoLOHKvPVZLqGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;" \
  *   node scripts/admin-users.mjs list
@@ -27,7 +30,7 @@ import { stdin, stdout, exit } from "node:process";
 // ─── Config ──────────────────────────────────────────────────────────────────
 
 const BLOB_CS = process.env.BLOB_CONNECTION_STRING;
-const CONTAINER = process.env.BLOB_CONTAINER_NAME ?? "data";
+const PRIVATE_CONTAINER = process.env.BLOB_PRIVATE_CONTAINER_NAME ?? "data-private";
 const BCRYPT_COST = 12;
 
 if (!BLOB_CS) {
@@ -36,7 +39,7 @@ if (!BLOB_CS) {
 }
 
 const blobService = BlobServiceClient.fromConnectionString(BLOB_CS);
-const container = blobService.getContainerClient(CONTAINER);
+const container = blobService.getContainerClient(PRIVATE_CONTAINER);
 
 // ─── Blob helpers ─────────────────────────────────────────────────────────────
 

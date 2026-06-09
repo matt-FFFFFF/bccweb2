@@ -18,7 +18,7 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type { User } from "@bccweb/types";
-import { getBlobClient, readBlob, writeBlob } from "../lib/blob.js";
+import { getPrivateBlobClient, readBlob, writePrivateBlob } from "../lib/blob.js";
 import { getOrCreateUser } from "../lib/auth.js";
 import {
   AuthCredential,
@@ -86,7 +86,7 @@ async function register(
     emailVerified: false,
     createdAt: new Date().toISOString(),
   };
-  await writeBlob(`auth/${userId}.json`, credential);
+  await writePrivateBlob(`auth/${userId}.json`, credential);
 
   // Create user record (pilot auto-link + user-index update)
   await getOrCreateUser(userId, email);
@@ -132,13 +132,13 @@ async function verifyEmail(
   const credPath = `auth/${result.userId}.json`;
   let cred: AuthCredential;
   try {
-    cred = await readBlob<AuthCredential>(getBlobClient(credPath));
+    cred = await readBlob<AuthCredential>(getPrivateBlobClient(credPath));
   } catch {
     return { status: 400, jsonBody: { error: "Invalid token" } };
   }
 
   cred.emailVerified = true;
-  await writeBlob(credPath, cred);
+  await writePrivateBlob(credPath, cred);
 
   return {
     status: 200,
@@ -176,7 +176,7 @@ async function resendVerification(
 
   let cred: AuthCredential;
   try {
-    cred = await readBlob<AuthCredential>(getBlobClient(`auth/${userId}.json`));
+    cred = await readBlob<AuthCredential>(getPrivateBlobClient(`auth/${userId}.json`));
   } catch {
     return silentOk;
   }
@@ -236,7 +236,7 @@ async function login(
   let cred: AuthCredential;
   try {
     cred = await readBlob<AuthCredential>(
-      getBlobClient(`auth/${userId}.json`)
+      getPrivateBlobClient(`auth/${userId}.json`)
     );
   } catch {
     return invalidCreds;
@@ -290,7 +290,7 @@ async function refresh(
   // Confirm user still exists and get their email
   let user: User;
   try {
-    user = await readBlob<User>(getBlobClient(`users/${userId}.json`));
+    user = await readBlob<User>(getPrivateBlobClient(`users/${userId}.json`));
   } catch {
     return { status: 401, jsonBody: { error: "User not found" } };
   }
@@ -327,7 +327,7 @@ async function forgotPassword(
   if (!userId) return silentOk;
 
   try {
-    await readBlob<AuthCredential>(getBlobClient(`auth/${userId}.json`));
+    await readBlob<AuthCredential>(getPrivateBlobClient(`auth/${userId}.json`));
   } catch {
     return silentOk; // account not fully set up
   }
@@ -375,13 +375,13 @@ async function resetPassword(
   const credPath = `auth/${result.userId}.json`;
   let cred: AuthCredential;
   try {
-    cred = await readBlob<AuthCredential>(getBlobClient(credPath));
+    cred = await readBlob<AuthCredential>(getPrivateBlobClient(credPath));
   } catch {
     return { status: 400, jsonBody: { error: "Invalid token" } };
   }
 
   cred.passwordHash = await hashPassword(body.newPassword);
-  await writeBlob(credPath, cred);
+  await writePrivateBlob(credPath, cred);
 
   return {
     status: 200,

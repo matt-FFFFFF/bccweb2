@@ -1,8 +1,8 @@
 /**
  * Pilot endpoints — Phase 2 + Phase 5
  *
- * GET  /api/pilots      — pilot index (public)
- * GET  /api/pilots/{id} — pilot detail (public)
+ * GET  /api/pilots      — pilot index (auth required; Admin=all, RoundsCoord=own club, Pilot=403)
+ * GET  /api/pilots/{id} — pilot detail (auth required; Admin=any, RoundsCoord=own club, Pilot=own only)
  * POST /api/pilots      — create pilot (Admin) — Phase 5
  * PUT  /api/pilots/{id} — update pilot profile (Admin or own Pilot) — Phase 5
  */
@@ -23,7 +23,7 @@ import type {
   ManufacturerRef,
   ClubRef,
 } from "@bccweb/types";
-import { getBlobClient, readBlob, writeBlob } from "../lib/blob.js";
+import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob } from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -33,12 +33,27 @@ import {
 // ─── GET /api/pilots ──────────────────────────────────────────────────────────
 
 async function getPilots(
-  _req: HttpRequest,
+  req: HttpRequest,
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const isAdmin = caller.roles.includes("Admin");
+  const isCoord = caller.roles.includes("RoundsCoord");
+
+  // Pilots (and users with no special role) cannot list all pilots
+  if (!isAdmin && !isCoord) return forbiddenResponse();
+
   try {
-    const pilots = await readBlob<PilotSummary[]>(getBlobClient("pilots.json"));
+    let pilots = await readBlob<PilotSummary[]>(getBlobClient("pilots.json"));
     pilots.sort((a, b) => a.name.localeCompare(b.name));
+
+    // RoundsCoord sees only pilots from their own club
+    if (isCoord && !isAdmin) {
+      pilots = pilots.filter((p) => p.clubId === caller.clubId);
+    }
+
     return { status: 200, jsonBody: pilots };
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
@@ -54,11 +69,27 @@ async function getPilotById(
   req: HttpRequest,
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
   const id = req.params["id"];
   if (!id) return { status: 400, jsonBody: { error: "Missing pilot id" } };
 
+  const isAdmin = caller.roles.includes("Admin");
+  const isCoord = caller.roles.includes("RoundsCoord");
+  const isSelf = caller.pilotId === id;
+
+  // Pilot-role users can only view their own profile
+  if (!isAdmin && !isCoord && !isSelf) return forbiddenResponse();
+
   try {
-    const pilot = await readBlob<Pilot>(getBlobClient(`pilots/${id}.json`));
+    const pilot = await readBlob<Pilot>(getPrivateBlobClient(`pilots/${id}.json`));
+
+    // RoundsCoord can only view pilots in their own club
+    if (isCoord && !isAdmin && pilot.currentClub?.id !== caller.clubId) {
+      return forbiddenResponse();
+    }
+
     return { status: 200, jsonBody: pilot };
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
@@ -144,7 +175,7 @@ async function createPilot(
     userId: null,
   };
 
-  await writeBlob(`pilots/${id}.json`, pilot);
+  await writePrivateBlob(`pilots/${id}.json`, pilot);
   await upsertPilotInIndex(pilot, body.email);
 
   return { status: 201, jsonBody: pilot };
@@ -193,7 +224,7 @@ async function updatePilot(
 
   let existing: Pilot;
   try {
-    existing = await readBlob<Pilot>(getBlobClient(`pilots/${id}.json`));
+    existing = await readBlob<Pilot>(getPrivateBlobClient(`pilots/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 404, jsonBody: { error: "Pilot not found" } };
@@ -245,7 +276,7 @@ async function updatePilot(
     }),
   };
 
-  await writeBlob(`pilots/${id}.json`, updated);
+  await writePrivateBlob(`pilots/${id}.json`, updated);
   await upsertPilotInIndex(updated, isAdmin ? body.email : undefined);
 
   return { status: 200, jsonBody: updated };

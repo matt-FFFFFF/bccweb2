@@ -36,6 +36,7 @@ import { v4 as uuidv4 } from "uuid";
 const SQL_CS = process.env.SQL_CONNECTION_STRING;
 const BLOB_CS = process.env.BLOB_CONNECTION_STRING;
 const CONTAINER = process.env.BLOB_CONTAINER ?? "data";
+const PRIVATE_CONTAINER = process.env.BLOB_PRIVATE_CONTAINER ?? "data-private";
 const DRY_RUN = process.env.DRY_RUN === "1";
 
 if (!SQL_CS) {
@@ -51,14 +52,27 @@ if (!BLOB_CS) {
 
 const blobService = BlobServiceClient.fromConnectionString(BLOB_CS);
 const containerClient = blobService.getContainerClient(CONTAINER);
+const privateContainerClient = blobService.getContainerClient(PRIVATE_CONTAINER);
 
 async function uploadBlob(path, obj) {
   const json = JSON.stringify(obj, null, 2);
   if (DRY_RUN) {
-    console.log(`  [DRY] would write ${path} (${json.length} bytes)`);
+    console.log(`  [DRY] would write ${path} (${json.length} bytes) → public`);
     return;
   }
   const client = containerClient.getBlockBlobClient(path);
+  await client.upload(json, Buffer.byteLength(json), {
+    blobHTTPHeaders: { blobContentType: "application/json" },
+  });
+}
+
+async function uploadPrivateBlob(path, obj) {
+  const json = JSON.stringify(obj, null, 2);
+  if (DRY_RUN) {
+    console.log(`  [DRY] would write ${path} (${json.length} bytes) → private`);
+    return;
+  }
+  const client = privateContainerClient.getBlockBlobClient(path);
   await client.upload(json, Buffer.byteLength(json), {
     blobHTTPHeaders: { blobContentType: "application/json" },
   });
@@ -101,7 +115,8 @@ function mapSiteStatus(description) {
 async function main() {
   console.log("BCCWeb SQL → Blob Migration");
   console.log(`  SQL: ${SQL_CS.replace(/Password=[^;]+/, "Password=***")}`);
-  console.log(`  Blob container: ${CONTAINER}`);
+  console.log(`  Blob container (public):  ${CONTAINER}`);
+  console.log(`  Blob container (private): ${PRIVATE_CONTAINER}`);
   if (DRY_RUN) console.log("  DRY RUN — no blobs will be written");
   console.log("");
 
@@ -137,8 +152,8 @@ async function main() {
       "EN D 2-liner": 0.5,
     },
   };
-  await uploadBlob("config.json", config);
-  console.log("  wrote config.json\n");
+  await uploadPrivateBlob("config.json", config);
+  console.log("  wrote config.json → private\n");
 
   // ── 2. Manufacturers ───────────────────────────────────────────────────────
   console.log("Step 2: manufacturers.json");
@@ -148,9 +163,9 @@ async function main() {
     mfrUuid.set(r.ID, id);
     return { id, legacyId: r.ID, name: r.Name };
   });
-  await uploadBlob("manufacturers.json", manufacturersList);
+  await uploadPrivateBlob("manufacturers.json", manufacturersList);
   for (const m of manufacturersList) {
-    await uploadBlob(`manufacturers/${m.id}.json`, m);
+    await uploadPrivateBlob(`manufacturers/${m.id}.json`, m);
   }
   console.log(`  wrote ${manufacturersList.length} manufacturers\n`);
 
@@ -162,7 +177,7 @@ async function main() {
     ratingUuid.set(r.ID, id);
     return { id, legacyId: r.ID, description: r.Description };
   });
-  await uploadBlob("pilot-ratings.json", ratingsList);
+  await uploadPrivateBlob("pilot-ratings.json", ratingsList);
   console.log(`  wrote ${ratingsList.length} pilot ratings\n`);
 
   // ── 4. Clubs ───────────────────────────────────────────────────────────────
@@ -176,7 +191,7 @@ async function main() {
   }
   await uploadBlob("clubs.json", clubsList.map(({ id, name }) => ({ id, name })));
   for (const c of clubsList) {
-    await uploadBlob(`clubs/${c.id}.json`, c);
+    await uploadPrivateBlob(`clubs/${c.id}.json`, c);
   }
   console.log(`  wrote ${clubsList.length} clubs\n`);
 
@@ -216,11 +231,11 @@ async function main() {
   }
   await uploadBlob("sites.json", sitesList.map(({ id, name, status, clubId }) => ({ id, name, status, clubId })));
   for (const s of sitesList) {
-    await uploadBlob(`sites/${s.id}.json`, s);
+    await uploadPrivateBlob(`sites/${s.id}.json`, s);
   }
   // Re-write club docs with updated sites arrays
   for (const c of clubsList) {
-    await uploadBlob(`clubs/${c.id}.json`, c);
+    await uploadPrivateBlob(`clubs/${c.id}.json`, c);
   }
   console.log(`  wrote ${sitesList.length} sites\n`);
 
@@ -348,7 +363,7 @@ async function main() {
       userId: null, // no user accounts migrated — pilots self-register post-migration
     };
 
-    await uploadBlob(`pilots/${id}.json`, pilotDoc);
+    await uploadPrivateBlob(`pilots/${id}.json`, pilotDoc);
 
     pilotsSummary.push({
       id,
@@ -574,13 +589,13 @@ async function main() {
       teams,
     };
 
-    await uploadBlob(`rounds/${id}.json`, roundDoc);
+    await uploadPrivateBlob(`rounds/${id}.json`, roundDoc);
 
     // Apply scoring for completed rounds
     if (status === "Complete") {
       scoreRound(roundDoc, config);
       // Re-write with scored data
-      await uploadBlob(`rounds/${id}.json`, roundDoc);
+      await uploadPrivateBlob(`rounds/${id}.json`, roundDoc);
     }
 
     // Retain in memory for step 10 league/results computation
@@ -648,7 +663,7 @@ async function main() {
         briefersNotes: r.BriefersNotes,
       },
     };
-    await uploadBlob(`round-briefs/${roundId}.json`, brief);
+    await uploadPrivateBlob(`round-briefs/${roundId}.json`, brief);
     briefCount++;
   }
   console.log(`  wrote ${briefCount} round briefs\n`);

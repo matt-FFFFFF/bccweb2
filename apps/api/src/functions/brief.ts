@@ -12,7 +12,7 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { RoundBrief } from "@bccweb/types";
-import { getBlobClient, readBlob } from "../lib/blob.js";
+import { getPrivateBlobClient, readBlob } from "../lib/blob.js";
 
 // ─── GET /api/rounds/{id}/brief ───────────────────────────────────────────────
 
@@ -26,7 +26,7 @@ async function getRoundBrief(
   let brief: RoundBrief;
   try {
     brief = await readBlob<RoundBrief>(
-      getBlobClient(`round-briefs/${id}.json`)
+      getPrivateBlobClient(`round-briefs/${id}.json`)
     );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
@@ -53,7 +53,7 @@ async function getRoundBriefPdf(
   const id = req.params["id"];
   if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
 
-  const blobClient = getBlobClient(`round-briefs/${id}.pdf`);
+  const blobClient = getPrivateBlobClient(`round-briefs/${id}.pdf`);
 
   let downloadRes: Awaited<ReturnType<typeof blobClient.download>>;
   try {

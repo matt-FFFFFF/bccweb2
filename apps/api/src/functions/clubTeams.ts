@@ -19,7 +19,7 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type { Club, ClubTeam, ClubTeamSummary } from "@bccweb/types";
-import { getBlobClient, readBlob, writeBlob } from "../lib/blob.js";
+import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob } from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -104,7 +104,7 @@ async function createClubTeam(
   // Load club to get name
   let clubName: string;
   try {
-    const club = await readBlob<Club>(getBlobClient(`clubs/${body.clubId}.json`));
+    const club = await readBlob<Club>(getPrivateBlobClient(`clubs/${body.clubId}.json`));
     clubName = club.name;
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
@@ -144,7 +144,7 @@ async function createClubTeam(
     createdAt: new Date().toISOString(),
   };
 
-  await writeBlob(`club-teams/${id}.json`, team);
+  await writePrivateBlob(`club-teams/${id}.json`, team);
   await upsertTeamInIndex(team);
 
   return { status: 201, jsonBody: team };
@@ -165,7 +165,7 @@ async function updateClubTeam(
 
   let existing: ClubTeam;
   try {
-    existing = await readBlob<ClubTeam>(getBlobClient(`club-teams/${id}.json`));
+    existing = await readBlob<ClubTeam>(getPrivateBlobClient(`club-teams/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 404, jsonBody: { error: "Club team not found" } };
@@ -215,7 +215,7 @@ async function updateClubTeam(
     teamName: body.teamName.trim(),
   };
 
-  await writeBlob(`club-teams/${id}.json`, updated);
+  await writePrivateBlob(`club-teams/${id}.json`, updated);
   await upsertTeamInIndex(updated);
 
   return { status: 200, jsonBody: updated };
@@ -236,7 +236,7 @@ async function deleteClubTeam(
 
   let existing: ClubTeam;
   try {
-    existing = await readBlob<ClubTeam>(getBlobClient(`club-teams/${id}.json`));
+    existing = await readBlob<ClubTeam>(getPrivateBlobClient(`club-teams/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 404, jsonBody: { error: "Club team not found" } };
@@ -250,7 +250,7 @@ async function deleteClubTeam(
 
   // Soft delete: remove from index and delete the blob
   await removeTeamFromIndex(id);
-  await getBlobClient(`club-teams/${id}.json`).delete();
+  await getPrivateBlobClient(`club-teams/${id}.json`).delete();
 
   return { status: 200, jsonBody: { id } };
 }

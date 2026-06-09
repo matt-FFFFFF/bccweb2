@@ -46,9 +46,11 @@ function Nav() {
         <NavLink to="/results" className={({ isActive }) => isActive ? "active" : ""}>
           Results
         </NavLink>
-        <NavLink to="/pilots" className={({ isActive }) => isActive ? "active" : ""}>
-          Pilots
-        </NavLink>
+        {isCoord && (
+          <NavLink to="/pilots" className={({ isActive }) => isActive ? "active" : ""}>
+            Pilots
+          </NavLink>
+        )}
         {isCoord && (
           <NavLink to="/rounds/new" className={({ isActive }) => isActive ? "active" : ""}>
             + New Round
@@ -117,6 +119,22 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
+/**
+ * Wraps routes that require Admin or RoundsCoord role.
+ * Redirects unauthenticated users to /login and Pilot-only users to /.
+ */
+function RequireCoord({ children }: { children: React.ReactNode }) {
+  const { identity, loading } = useAuth();
+  const location = useLocation();
+  if (loading) return null;
+  if (!identity) return <Navigate to={loginUrl(location.pathname)} replace />;
+  const isCoord =
+    identity.roles.includes("RoundsCoord") ||
+    identity.roles.includes("Admin");
+  if (!isCoord) return <Navigate to="/" replace />;
+  return <>{children}</>;
+}
+
 /** Redirect /results → /results/:activeYear (or first season year) */
 function ResultsRedirect() {
   const { data: seasons } = useBlob<SeasonSummary[]>("seasons.json");
@@ -153,7 +171,7 @@ export default function App() {
           <Route path="/results/:year/rounds" element={<Page><RoundResults /></Page>} />
 
           {/* Pilots */}
-          <Route path="/pilots" element={<RequireAuth><Page><PilotsList /></Page></RequireAuth>} />
+          <Route path="/pilots" element={<RequireCoord><Page><PilotsList /></Page></RequireCoord>} />
           <Route path="/pilots/:id" element={<RequireAuth><Page><PilotProfile /></Page></RequireAuth>} />
 
           {/* Auth */}

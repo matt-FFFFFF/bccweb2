@@ -1,9 +1,13 @@
 # ─── Azure Communication Services (ACS) — Email ───────────────────────────────
 #
 # Resources:
-#   azurerm_communication_service         — ACS base resource (connection string)
-#   azurerm_email_communication_service   — Email channel
-#   azurerm_email_communication_service_domain — CustomerManaged domain (requires DNS)
+#   azapi_resource.acs              — ACS base resource (connection string)
+#   azapi_resource.acs_email        — Email channel
+#   azapi_resource.acs_email_domain — CustomerManaged domain (requires DNS)
+#
+# The email domain is linked to the ACS service via the `linkedDomains`
+# property on the communicationServices resource (no separate association
+# resource needed with azapi).
 #
 # Variables required (set in terraform.tfvars or CI secrets):
 #   acs_email_domain    — Your verified sending domain, e.g. "mail.yourdomain.com"
@@ -51,22 +55,20 @@ variable "puretrack_password" {
   sensitive   = true
 }
 
-# ─── ACS Base Resource ────────────────────────────────────────────────────────
-
-resource "azurerm_communication_service" "main" {
-  name                = "acs-${local.prefix}"
-  resource_group_name = azurerm_resource_group.main.name
-  data_location       = "Europe"
-  tags                = local.tags
-}
-
 # ─── ACS Email Service ────────────────────────────────────────────────────────
 
-resource "azurerm_email_communication_service" "main" {
-  name                = "acs-email-${local.prefix}"
-  resource_group_name = azurerm_resource_group.main.name
-  data_location       = "Europe"
-  tags                = local.tags
+resource "azapi_resource" "acs_email" {
+  type      = "Microsoft.Communication/emailServices@2023-04-01"
+  name      = "acs-email-${local.prefix}"
+  parent_id = azapi_resource.resource_group.id
+  location  = "global"
+  tags      = local.tags
+
+  body = {
+    properties = {
+      dataLocation = "Europe"
+    }
+  }
 }
 
 # ─── Custom Domain (CustomerManaged) ─────────────────────────────────────────
@@ -75,36 +77,67 @@ resource "azurerm_email_communication_service" "main" {
 # Add all returned DNS records at your domain registrar, then verify in the
 # Azure portal or via: az communication email domain verify ...
 
-resource "azurerm_email_communication_service_domain" "main" {
-  name              = var.acs_email_domain
-  email_service_id  = azurerm_email_communication_service.main.id
-  domain_management = "CustomerManaged"
-  tags              = local.tags
+resource "azapi_resource" "acs_email_domain" {
+  type      = "Microsoft.Communication/emailServices/domains@2023-04-01"
+  name      = var.acs_email_domain
+  parent_id = azapi_resource.acs_email.id
+  location  = "global"
+  tags      = local.tags
+
+  body = {
+    properties = {
+      domainManagement = "CustomerManaged"
+    }
+  }
+
+  response_export_values = ["properties.verificationRecords"]
 }
 
-# ─── Link Email domain to ACS base resource ───────────────────────────────────
+# ─── ACS Base Resource ────────────────────────────────────────────────────────
+#
+# The email domain is linked via the `linkedDomains` property, replacing
+# the separate azurerm_communication_service_email_domain_association resource.
 
-resource "azurerm_communication_service_email_domain_association" "main" {
-  communication_service_id = azurerm_communication_service.main.id
-  email_service_domain_id  = azurerm_email_communication_service_domain.main.id
+resource "azapi_resource" "acs" {
+  type      = "Microsoft.Communication/communicationServices@2023-04-01"
+  name      = "acs-${local.prefix}"
+  parent_id = azapi_resource.resource_group.id
+  location  = "global"
+  tags      = local.tags
+
+  body = {
+    properties = {
+      dataLocation  = "Europe"
+      linkedDomains = [azapi_resource.acs_email_domain.id]
+    }
+  }
+}
+
+# ─── ACS Connection String ────────────────────────────────────────────────────
+
+resource "azapi_resource_action" "acs_keys" {
+  type        = "Microsoft.Communication/communicationServices@2023-04-01"
+  resource_id = azapi_resource.acs.id
+  action      = "listKeys"
+  method      = "POST"
+
+  response_export_values = ["primaryConnectionString"]
 }
 
 # ─── Function App settings — ACS + PureTrack ─────────────────────────────────
 #
-# Merge into the existing function app. Terraform merges app_settings blocks;
-# we use a separate azurerm_linux_function_app_slot-style approach by
-# adding these settings into the main function app via a locals merge.
-# NOTE: Because azurerm_linux_function_app only allows one app_settings block,
-# we extend it here by overriding the resource in functions.tf via local values.
-# The actual injection is done in functions.tf using local.all_app_settings.
+# The Function App's siteConfig.appSettings expects a list of {name, value}
+# objects. We build it here and concat it in functions.tf.
 
 locals {
-  acs_app_settings = {
-    ACS_CONNECTION_STRING = azurerm_communication_service.main.primary_connection_string
-    ACS_SENDER_ADDRESS    = var.acs_sender_address
-    ROUND_BRIEF_EMAILS    = var.round_brief_emails
-    PURETRACK_API_KEY     = var.puretrack_api_key
-    PURETRACK_EMAIL       = var.puretrack_email
-    PURETRACK_PASSWORD    = var.puretrack_password
-  }
+  acs_connection_string = azapi_resource_action.acs_keys.output.primaryConnectionString
+
+  acs_app_settings_list = [
+    { name = "ACS_CONNECTION_STRING", value = local.acs_connection_string },
+    { name = "ACS_SENDER_ADDRESS", value = var.acs_sender_address },
+    { name = "ROUND_BRIEF_EMAILS", value = var.round_brief_emails },
+    { name = "PURETRACK_API_KEY", value = var.puretrack_api_key },
+    { name = "PURETRACK_EMAIL", value = var.puretrack_email },
+    { name = "PURETRACK_PASSWORD", value = var.puretrack_password },
+  ]
 }

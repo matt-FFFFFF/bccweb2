@@ -8,7 +8,7 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { getBlobClient, getBlockBlobClient, readBlob, writeBlob } from "./blob.js";
+import { getPrivateBlobClient, getPrivateBlockBlobClient, readBlob, writePrivateBlob } from "./blob.js";
 
 // ─── Internal types ───────────────────────────────────────────────────────────
 
@@ -93,7 +93,7 @@ export async function generateShortLivedToken(
   ).toISOString();
 
   const tokenDoc: AuthToken = { userId, type, expiresAt };
-  await writeBlob(`auth/tokens/${hash}.json`, tokenDoc);
+  await writePrivateBlob(`auth/tokens/${hash}.json`, tokenDoc);
   return raw;
 }
 
@@ -110,7 +110,7 @@ export async function consumeShortLivedToken(
 
   let tokenDoc: AuthToken;
   try {
-    tokenDoc = await readBlob<AuthToken>(getBlobClient(blobPath));
+    tokenDoc = await readBlob<AuthToken>(getPrivateBlobClient(blobPath));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { error: "Invalid or expired token" };
@@ -125,7 +125,7 @@ export async function consumeShortLivedToken(
 
   // Delete on first use (best-effort)
   try {
-    await getBlockBlobClient(blobPath).delete();
+    await getPrivateBlockBlobClient(blobPath).delete();
   } catch {
     // Ignore — the expiry check is the real guard
   }
@@ -139,7 +139,7 @@ export async function consumeShortLivedToken(
 export async function lookupUserByEmail(email: string): Promise<string | null> {
   try {
     const index = await readBlob<Record<string, string>>(
-      getBlobClient("user-index.json")
+      getPrivateBlobClient("user-index.json")
     );
     return index[email.toLowerCase()] ?? null;
   } catch {

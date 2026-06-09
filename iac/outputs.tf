@@ -1,27 +1,27 @@
 output "swa_url" {
   description = "Public URL of the Static Web App"
-  value       = "https://${azurerm_static_web_app.web.default_host_name}"
+  value       = "https://${local.swa_default_host_name}"
 }
 
 output "swa_api_key" {
   description = "Deployment token for the Static Web App (used by CI/CD)"
-  value       = azurerm_static_web_app.web.api_key
+  value       = local.swa_api_key
   sensitive   = true
 }
 
 output "function_app_name" {
   description = "Name of the Function App (used by CI/CD)"
-  value       = azurerm_linux_function_app.api.name
+  value       = azapi_resource.function_app.name
 }
 
 output "storage_account_name" {
   description = "Storage account name"
-  value       = azurerm_storage_account.main.name
+  value       = azapi_resource.storage.name
 }
 
 output "resource_group_name" {
   description = "Resource group name"
-  value       = azurerm_resource_group.main.name
+  value       = azapi_resource.resource_group.name
 }
 
 # ─── ACS Email DNS records ────────────────────────────────────────────────────
@@ -30,8 +30,7 @@ output "resource_group_name" {
 output "acs_domain_verification_records" {
   description = "DNS TXT/CNAME records required to verify the ACS sending domain. Add at your registrar."
   value = {
-    domain               = azurerm_email_communication_service_domain.main.name
-    verification_records = azurerm_email_communication_service_domain.main.verification_records
+    domain               = azapi_resource.acs_email_domain.name
+    verification_records = azapi_resource.acs_email_domain.output.properties.verificationRecords
   }
 }
-

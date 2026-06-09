@@ -7,7 +7,13 @@ import type {
   WingClass,
 } from "@bccweb/types";
 import { computeLeague } from "@bccweb/scoring";
-import { getBlobClient, readBlob, writeBlob, withLease } from "./blob.js";
+import {
+  getBlobClient,
+  getPrivateBlobClient,
+  readBlob,
+  writeBlob,
+  withLease,
+} from "./blob.js";
 
 // ─── updateRoundsIndex ────────────────────────────────────────────────────────
 
@@ -74,7 +80,7 @@ export async function recomputeSeason(seasonYear: number): Promise<void> {
   // Load all rounds in parallel; skip rounds that fail to load
   const maybeRounds = await Promise.all(
     season.rounds.map((id) =>
-      readBlob<Round>(getBlobClient(`rounds/${id}.json`)).catch(() => null)
+      readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`)).catch(() => null)
     )
   );
   const rounds = maybeRounds.filter((r): r is Round => r !== null);

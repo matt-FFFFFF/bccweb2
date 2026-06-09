@@ -14,7 +14,7 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type { Site, SiteSummary, SiteStatus } from "@bccweb/types";
-import { getBlobClient, readBlob, writeBlob } from "../lib/blob.js";
+import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob } from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -87,7 +87,7 @@ async function createSite(
     contactInfo: body.contactInfo,
   };
 
-  await writeBlob(`sites/${id}.json`, site);
+  await writePrivateBlob(`sites/${id}.json`, site);
   await upsertSiteInIndex({
     id,
     name: site.name,
@@ -113,7 +113,7 @@ async function updateSite(
 
   let existing: Site;
   try {
-    existing = await readBlob<Site>(getBlobClient(`sites/${id}.json`));
+    existing = await readBlob<Site>(getPrivateBlobClient(`sites/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 404, jsonBody: { error: "Site not found" } };
@@ -141,7 +141,7 @@ async function updateSite(
     id: existing.id, // immutable
   };
 
-  await writeBlob(`sites/${id}.json`, updated);
+  await writePrivateBlob(`sites/${id}.json`, updated);
   await upsertSiteInIndex({
     id,
     name: updated.name,

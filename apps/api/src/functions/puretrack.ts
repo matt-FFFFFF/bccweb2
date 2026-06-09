@@ -16,7 +16,7 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { Round, Pilot } from "@bccweb/types";
-import { getBlobClient, readBlob, writeBlob, withLease } from "../lib/blob.js";
+import { getPrivateBlobClient, readBlob, writePrivateBlob, withPrivateLease } from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -45,7 +45,7 @@ async function createPureTrackGroupsHandler(
   // Load round
   let round: Round;
   try {
-    round = await readBlob<Round>(getBlobClient(`rounds/${id}.json`));
+    round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 404, jsonBody: { error: "Round not found" } };
@@ -75,7 +75,7 @@ async function createPureTrackGroupsHandler(
     uniquePilotIds.map(async (pilotId) => {
       try {
         const pilot = await readBlob<Pilot>(
-          getBlobClient(`pilots/${pilotId}.json`)
+          getPrivateBlobClient(`pilots/${pilotId}.json`)
         );
         if (pilot.pureTrackId) {
           pilotPureTrackIds.set(pilotId, pilot.pureTrackId);
@@ -102,8 +102,8 @@ async function createPureTrackGroupsHandler(
   // Persist group IDs back onto the round blob (under lease)
   const path = `rounds/${id}.json`;
   try {
-    await withLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getBlobClient(path));
+    await withPrivateLease(path, async (leaseId) => {
+      const r = await readBlob<Round>(getPrivateBlobClient(path));
       r.pureTrackGroupId = result.roundGroupId;
       r.pureTrackGroupName = result.roundGroupName;
       r.pureTrackGroupSlug = result.roundGroupSlug;
@@ -114,7 +114,7 @@ async function createPureTrackGroupsHandler(
           team.pureTrackGroupSlug = teamResult.groupSlug;
         }
       }
-      await writeBlob(path, r, leaseId);
+      await writePrivateBlob(path, r, leaseId);
     });
   } catch (err) {
     // Not fatal — groups were created, IDs just didn't persist; log and continue

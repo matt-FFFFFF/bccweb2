@@ -14,7 +14,7 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type { Round, Flight, ScoringType, PilotSlot } from "@bccweb/types";
-import { getBlobClient, readBlob, writeBlob, withLease } from "../lib/blob.js";
+import { getPrivateBlobClient, readBlob, writePrivateBlob, withPrivateLease } from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -39,15 +39,15 @@ async function mutateLocked(
 ): Promise<Round | HttpResponseInit> {
   const path = `rounds/${roundId}.json`;
   try {
-    return await withLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getBlobClient(path));
+    return await withPrivateLease(path, async (leaseId) => {
+      const r = await readBlob<Round>(getPrivateBlobClient(path));
       const err = fn(r);
       if (err) {
         const e = new Error(err);
         (e as { isValidation?: boolean }).isValidation = true;
         throw e;
       }
-      await writeBlob(path, r, leaseId);
+      await writePrivateBlob(path, r, leaseId);
       return r;
     });
   } catch (e: unknown) {
@@ -190,7 +190,7 @@ async function updateFlight(
   // Pre-read to find the slot and check auth
   let ownerPilotId: string | null = null;
   try {
-    const r = await readBlob<Round>(getBlobClient(`rounds/${roundId}.json`));
+    const r = await readBlob<Round>(getPrivateBlobClient(`rounds/${roundId}.json`));
     const slot = findSlotByFlight(r, flightId);
     if (!slot) return { status: 404, jsonBody: { error: "Flight not found" } };
     ownerPilotId = slot.pilotId;

@@ -47,7 +47,6 @@ const targets = [
   { label: "clubs.json",        url: `${BLOB_BASE_URL}/clubs.json`,         group: "blob" },
   { label: "sites.json",        url: `${BLOB_BASE_URL}/sites.json`,         group: "blob" },
   { label: "seasons.json",      url: `${BLOB_BASE_URL}/seasons.json`,       group: "blob" },
-  { label: "config.json",       url: `${BLOB_BASE_URL}/config.json`,        group: "blob" },
   // ── API endpoints ────────────────────────────────────────────────────────
   { label: "GET /api/health",   url: `${BASE_URL}/api/health`,              group: "api"  },
   { label: "GET /api/rounds",   url: `${BASE_URL}/api/rounds`,              group: "api"  },

@@ -27,23 +27,35 @@ After `make clean`, `tsbuildinfo` files are also deleted to prevent stale increm
 |---|---|
 | `tsconfig.base.json` | Shared TS options: ES2022, NodeNext, strict, declarations |
 | `.mise.toml` | Tool versions: Node 20.20.2, Terraform 1.10.5, func 4.9.0 |
-| `Makefile` | Build (`make build`), dev (`make dev`), clean (`make clean`), etc. |
+| `Makefile` | Build (`make build`), dev (`make dev`), test (`make test`), clean (`make clean`) |
 | `docker-compose.yml` | Azurite (storage emulator) + API + Web (Caddy) |
+| `vitest.workspace.ts` | Vitest workspace config — lists testable packages |
 
 ## Data Storage
 
-Single Azure Blob Storage container `"data"` with **blob-level public read access**.
-The SPA reads public blobs directly (no API hop). Writes always go through the API.
-`withLease()` in `apps/api/src/lib/blob.ts` provides atomic read-modify-write (30s lease).
+Two Azure Blob Storage containers:
 
-Key blob paths:
-- `rounds.json`, `rounds/{uuid}.json` — round index and full round documents
+- **`data`** — public (`publicAccess = "Blob"`), SPA reads directly (no API hop)
+- **`data-private`** — private (`publicAccess = "None"`), API access only
+
+`withLease()` / `withPrivateLease()` in `apps/api/src/lib/blob.ts` provides atomic
+read-modify-write (30s lease) on either container.
+
+Public blob paths (SPA reads via `useBlob` / `VITE_BLOB_BASE_URL`):
+- `rounds.json` — round index
 - `seasons.json`, `seasons/{year}.json`, `results/{year}.json` — season/league data
-- `pilots.json`, `pilots/{uuid}.json` — pilot index and profiles
-- `clubs.json`, `club-teams.json`, `club-teams/{uuid}.json` — clubs and club teams
-- `sites.json` — sites reference data
+- `pilots.json` — pilot index (summary only)
+- `clubs.json`, `club-teams.json` — club and team indexes
+- `sites.json` — sites index
+
+Private blob paths (API only, requires authentication):
+- `rounds/{uuid}.json` — full round details (pilot lists, scores, flights)
+- `pilots/{uuid}.json` — pilot profiles (medical, emergency contacts, phone)
+- `clubs/{uuid}.json`, `club-teams/{uuid}.json`, `sites/{uuid}.json` — full detail records
+- `config.json` — admin configuration
 - `users/{uuid}.json`, `user-index.json` — user records and email→id lookup
 - `auth/{uuid}.json`, `auth/tokens/{hash}.json` — credentials and short-lived tokens
+- `round-briefs/{uuid}.json`, `round-briefs/{uuid}.pdf` — pilot safety briefs
 
 ## API (`apps/api`)
 
@@ -83,3 +95,15 @@ Key pages: `Home`, `RoundsList`, `RoundDetail`, `RoundManage`, `League`, `RoundR
 | `RoundsCoord` | Manage rounds and club teams for their own `clubId` |
 | `Pilot` | Read authenticated data, view own profile |
 | (unauthenticated) | Read public blobs (results, seasons, pilot list) |
+
+## Testing
+
+**Framework**: Vitest 4.1.2 (root devDep, workspace mode).
+Run: `make test` or `npx vitest run`. Watch: `npm run test:watch`. Coverage: `npm run test:coverage`.
+
+Current test coverage:
+- `packages/scoring` — 16 tests covering `scoreRound()` and `computeLeague()` (`src/__tests__/scoring.test.ts`)
+- `apps/api` — no tests yet
+- `apps/web` — no tests yet
+
+Test implementation plan: `.opencode/plans/test-implementation.md`

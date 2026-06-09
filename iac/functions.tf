@@ -1,46 +1,60 @@
 # ─── Consumption Plan (Y1 / Linux) ───────────────────────────────────────────
 
-resource "azurerm_service_plan" "functions" {
-  name                = "asp-${local.prefix}-fn"
-  resource_group_name = azurerm_resource_group.main.name
-  location            = azurerm_resource_group.main.location
-  os_type             = "Linux"
-  sku_name            = "Y1"
-  tags                = local.tags
+resource "azapi_resource" "service_plan" {
+  type      = "Microsoft.Web/serverfarms@2022-09-01"
+  name      = "asp-${local.prefix}-fn"
+  parent_id = azapi_resource.resource_group.id
+  location  = azapi_resource.resource_group.location
+  tags      = local.tags
+
+  body = {
+    kind = "linux"
+    sku = {
+      name = "Y1"
+      tier = "Dynamic"
+    }
+    properties = {
+      reserved = true # required for Linux
+    }
+  }
 }
 
 # ─── Function App ─────────────────────────────────────────────────────────────
 
-resource "azurerm_linux_function_app" "api" {
-  name                       = "func-${local.prefix}"
-  resource_group_name        = azurerm_resource_group.main.name
-  location                   = azurerm_resource_group.main.location
-  service_plan_id            = azurerm_service_plan.functions.id
-  storage_account_name       = azurerm_storage_account.main.name
-  storage_account_access_key = azurerm_storage_account.main.primary_access_key
+resource "azapi_resource" "function_app" {
+  type      = "Microsoft.Web/sites@2022-09-01"
+  name      = "func-${local.prefix}"
+  parent_id = azapi_resource.resource_group.id
+  location  = azapi_resource.resource_group.location
+  tags      = local.tags
 
-  site_config {
-    application_stack {
-      node_version = "20"
-    }
-    cors {
-      allowed_origins = [
-        "https://${azurerm_static_web_app.web.default_host_name}"
-      ]
+  body = {
+    kind = "functionapp,linux"
+    properties = {
+      serverFarmId = azapi_resource.service_plan.id
+      siteConfig = {
+        linuxFxVersion = "NODE|20"
+        appSettings = concat(
+          [
+            { name = "FUNCTIONS_WORKER_RUNTIME", value = "node" },
+            { name = "FUNCTIONS_NODE_BLOCK_ON_ENTRY_POINT_ERROR", value = "true" },
+            { name = "WEBSITE_RUN_FROM_PACKAGE", value = "1" },
+            { name = "AzureWebJobsStorage", value = local.storage_primary_connection_string },
+            { name = "BLOB_CONNECTION_STRING", value = local.storage_primary_connection_string },
+            { name = "BLOB_CONTAINER_NAME", value = azapi_resource.storage_container_data.name },
+            { name = "BLOB_PRIVATE_CONTAINER_NAME", value = azapi_resource.storage_container_data_private.name },
+            { name = "JWT_SECRET", value = var.jwt_secret },
+          ],
+          local.acs_app_settings_list
+        )
+        cors = {
+          allowedOrigins = [
+            "https://${local.swa_default_host_name}"
+          ]
+        }
+      }
     }
   }
 
-  app_settings = merge(
-    {
-      FUNCTIONS_WORKER_RUNTIME                  = "node"
-      FUNCTIONS_NODE_BLOCK_ON_ENTRY_POINT_ERROR = "true"
-      WEBSITE_RUN_FROM_PACKAGE                  = "1"
-      BLOB_CONNECTION_STRING                    = azurerm_storage_account.main.primary_connection_string
-      BLOB_CONTAINER_NAME                       = azurerm_storage_container.data.name
-      JWT_SECRET                                = var.jwt_secret
-    },
-    local.acs_app_settings
-  )
-
-  tags = local.tags
+  response_export_values = ["name"]
 }

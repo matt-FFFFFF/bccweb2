@@ -15,7 +15,7 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { Config, Round, User, UserRole } from "@bccweb/types";
-import { getBlobClient, readBlob, writeBlob } from "../lib/blob.js";
+import { getPrivateBlobClient, readBlob, writePrivateBlob } from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -48,7 +48,7 @@ async function recomputeRound(
 
   let round: Round;
   try {
-    round = await readBlob<Round>(getBlobClient(`rounds/${id}.json`));
+    round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 404, jsonBody: { error: "Round not found" } };
@@ -89,7 +89,7 @@ async function getConfig(
   if (!isAdmin(caller.roles)) return forbiddenResponse();
 
   try {
-    const config = await readBlob<Config>(getBlobClient("config.json"));
+    const config = await readBlob<Config>(getPrivateBlobClient("config.json"));
     return { status: 200, jsonBody: config };
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
@@ -143,7 +143,7 @@ async function updateConfig(
   };
 
   try {
-    existing = await readBlob<Config>(getBlobClient("config.json"));
+    existing = await readBlob<Config>(getPrivateBlobClient("config.json"));
   } catch {
     // start with defaults
   }
@@ -158,7 +158,7 @@ async function updateConfig(
     },
   };
 
-  await writeBlob("config.json", updated);
+  await writePrivateBlob("config.json", updated);
   return { status: 200, jsonBody: updated };
 }
 
@@ -175,7 +175,7 @@ async function listUsers(
   let index: Record<string, string> = {};
   try {
     index = await readBlob<Record<string, string>>(
-      getBlobClient("user-index.json")
+      getPrivateBlobClient("user-index.json")
     );
   } catch {
     return { status: 200, jsonBody: [] };
@@ -184,7 +184,7 @@ async function listUsers(
   const userIds = Object.values(index);
   const users = await Promise.all(
     userIds.map((id) =>
-      readBlob<User>(getBlobClient(`users/${id}.json`)).catch(() => null)
+      readBlob<User>(getPrivateBlobClient(`users/${id}.json`)).catch(() => null)
     )
   );
 
@@ -216,7 +216,7 @@ async function setUserRoles(
 
   let user: User;
   try {
-    user = await readBlob<User>(getBlobClient(`users/${userId}.json`));
+    user = await readBlob<User>(getPrivateBlobClient(`users/${userId}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 404, jsonBody: { error: "User not found" } };
@@ -231,7 +231,7 @@ async function setUserRoles(
     ...(body.clubId !== undefined && { clubId: body.clubId }),
   };
 
-  await writeBlob(`users/${userId}.json`, updated);
+  await writePrivateBlob(`users/${userId}.json`, updated);
   return { status: 200, jsonBody: updated };
 }
 

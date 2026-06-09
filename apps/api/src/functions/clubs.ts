@@ -14,7 +14,7 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type { Club, ClubSummary } from "@bccweb/types";
-import { getBlobClient, readBlob, writeBlob } from "../lib/blob.js";
+import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob } from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -68,7 +68,7 @@ async function createClub(
     teams: [],
   };
 
-  await writeBlob(`clubs/${id}.json`, club);
+  await writePrivateBlob(`clubs/${id}.json`, club);
   await upsertClubInIndex({ id, name: club.name });
 
   return { status: 201, jsonBody: club };
@@ -89,7 +89,7 @@ async function updateClub(
 
   let existing: Club;
   try {
-    existing = await readBlob<Club>(getBlobClient(`clubs/${id}.json`));
+    existing = await readBlob<Club>(getPrivateBlobClient(`clubs/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 404, jsonBody: { error: "Club not found" } };
@@ -112,7 +112,7 @@ async function updateClub(
     id: existing.id, // immutable
   };
 
-  await writeBlob(`clubs/${id}.json`, updated);
+  await writePrivateBlob(`clubs/${id}.json`, updated);
   await upsertClubInIndex({ id, name: updated.name });
 
   return { status: 200, jsonBody: updated };

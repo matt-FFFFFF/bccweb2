@@ -1,7 +1,9 @@
+import { useState, useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { Round, PilotSummary } from "@bccweb/types";
 import { useBlob } from "../../hooks/useBlob.js";
 import { useAuth } from "../../hooks/useAuth.js";
+import { api, ApiError } from "../../lib/api.js";
 import { StatusBadge } from "../../components/StatusBadge.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
 
@@ -38,12 +40,41 @@ export default function RoundDetail() {
   const { id } = useParams<{ id: string }>();
   const { identity } = useAuth();
 
-  const {
-    data: round,
-    loading,
-    error,
-    notFound,
-  } = useBlob<Round>(id ? `rounds/${id}.json` : null);
+  const [round, setRound] = useState<Round | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<Error | null>(null);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    if (!id) {
+      setLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setNotFound(false);
+
+    api
+      .get<Round>(`rounds/${id}`)
+      .then((data) => {
+        if (!cancelled) {
+          setRound(data);
+          setLoading(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setLoading(false);
+          setError(err as Error);
+          setNotFound(err instanceof ApiError && err.status === 404);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [id]);
 
   const { data: pilotsIndex } = useBlob<PilotSummary[]>("pilots.json");
 

@@ -17,7 +17,7 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type { Round, Team, PilotSlot } from "@bccweb/types";
-import { getBlobClient, readBlob, writeBlob, withLease } from "../lib/blob.js";
+import { getPrivateBlobClient, readBlob, writePrivateBlob, withPrivateLease } from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -43,15 +43,15 @@ async function mutateLocked(
   const path = `rounds/${id}.json`;
 
   try {
-    return await withLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getBlobClient(path));
+    return await withPrivateLease(path, async (leaseId) => {
+      const r = await readBlob<Round>(getPrivateBlobClient(path));
       const err = mutateFn(r);
       if (err) {
         const e = new Error(err);
         (e as { isValidation?: boolean }).isValidation = true;
         throw e;
       }
-      await writeBlob(path, r, leaseId);
+      await writePrivateBlob(path, r, leaseId);
       return r;
     });
   } catch (e: unknown) {
@@ -84,7 +84,7 @@ async function addTeam(
   let clubName: string;
   try {
     const club = await readBlob<{ id: string; name: string }>(
-      getBlobClient(`clubs/${body.clubId}.json`)
+      getPrivateBlobClient(`clubs/${body.clubId}.json`)
     );
     clubName = club.name;
   } catch (err: unknown) {
@@ -172,7 +172,7 @@ async function addPilot(
 
   // Verify pilot exists
   try {
-    await readBlob(getBlobClient(`pilots/${body.pilotId}.json`));
+    await readBlob(getPrivateBlobClient(`pilots/${body.pilotId}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 400, jsonBody: { error: "Pilot not found" } };

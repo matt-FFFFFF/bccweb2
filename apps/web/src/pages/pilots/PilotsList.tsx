@@ -1,15 +1,44 @@
+import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import type { PilotSummary } from "@bccweb/types";
-import { useBlob } from "../../hooks/useBlob.js";
+import { api, ApiError } from "../../lib/api.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
-import { useState } from "react";
 
 export default function PilotsList() {
-  const { data: pilots, loading, error } = useBlob<PilotSummary[]>("pilots.json");
+  const [pilots, setPilots] = useState<PilotSummary[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
 
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    api
+      .get<PilotSummary[]>("pilots")
+      .then((data) => {
+        if (!cancelled) {
+          setPilots(data);
+          setLoading(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setError(
+            err instanceof ApiError
+              ? err.message
+              : "Could not load pilots"
+          );
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   if (loading) return <LoadingSpinner message="Loading pilots…" />;
-  if (error) return <ErrorMessage error={error} title="Could not load pilots" />;
+  if (error) return <ErrorMessage error={new Error(error)} title="Could not load pilots" />;
   if (!pilots || pilots.length === 0) return <p>No pilots found.</p>;
 
   const filtered = search.trim()

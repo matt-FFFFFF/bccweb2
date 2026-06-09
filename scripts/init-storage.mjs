@@ -26,7 +26,8 @@ const VERSION = "2020-10-02";
  *               undefined → private (Functions-only access)
  */
 const CONTAINERS = [
-  { name: "data", publicAccess: "blob" },
+  { name: "data",         publicAccess: "blob" },
+  { name: "data-private", publicAccess: undefined },  // private
 ];
 
 /**

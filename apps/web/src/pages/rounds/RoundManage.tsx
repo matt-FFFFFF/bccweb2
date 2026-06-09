@@ -10,7 +10,7 @@
  * - Flight logging (log / edit / delete)
  */
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 import type {
   Round,
@@ -23,7 +23,7 @@ import type {
 } from "@bccweb/types";
 import { useBlob } from "../../hooks/useBlob.js";
 import { useAuth } from "../../hooks/useAuth.js";
-import { api } from "../../lib/api.js";
+import { api, ApiError } from "../../lib/api.js";
 import { StatusBadge } from "../../components/StatusBadge.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
 
@@ -993,34 +993,60 @@ export default function RoundManage() {
   const { id } = useParams<{ id: string }>();
   const { identity, loading: authLoading } = useAuth();
 
-  const {
-    data: round,
-    loading: roundLoading,
-    error: roundError,
-    notFound,
-  } = useBlob<Round>(id ? `rounds/${id}.json` : null);
+  const [round, setRound] = useState<Round | null>(null);
+  const [roundLoading, setRoundLoading] = useState(true);
+  const [roundError, setRoundError] = useState<Error | null>(null);
+  const [notFound, setNotFound] = useState(false);
 
   const { data: pilotsIndex } = useBlob<PilotSummary[]>("pilots.json");
   const { data: clubs } = useBlob<ClubSummary[]>("clubs.json");
 
-  // Round data is loaded from blob, but after mutations we need to reload.
-  // We trigger reloads by incrementing a counter that changes the blob path
-  // key — but useBlob caches by path string. Instead, track a separately
-  // fetched "live" round that overrides the blob data after any mutation.
-  const [liveRound, setLiveRound] = useState<Round | null>(null);
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
-
-  const displayRound = liveRound ?? round;
 
   const loadRound = useCallback(async () => {
     if (!id) return;
     try {
       const r = await api.get<Round>(`rounds/${id}`);
-      setLiveRound(r);
-    } catch {
-      // ignore — the blob version is still shown
+      setRound(r);
+      setRoundError(null);
+      setNotFound(false);
+    } catch (err: unknown) {
+      setRoundError(err as Error);
+      setNotFound(err instanceof ApiError && err.status === 404);
     }
+  }, [id]);
+
+  // Initial load
+  useEffect(() => {
+    if (!id) {
+      setRoundLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setRoundLoading(true);
+    setRoundError(null);
+    setNotFound(false);
+
+    api
+      .get<Round>(`rounds/${id}`)
+      .then((data) => {
+        if (!cancelled) {
+          setRound(data);
+          setRoundLoading(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          setRoundLoading(false);
+          setRoundError(err as Error);
+          setNotFound(err instanceof ApiError && err.status === 404);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
   }, [id]);
 
   async function runAction(label: string, fn: () => Promise<unknown>) {
@@ -1053,9 +1079,9 @@ export default function RoundManage() {
   }
   if (notFound) return <p>Round not found.</p>;
   if (roundError) return <ErrorMessage error={roundError} title="Could not load round" />;
-  if (!displayRound) return null;
+  if (!round) return null;
 
-  const r = displayRound;
+  const r = round;
   const workflowActions = WORKFLOW[r.status] ?? [];
 
   return (

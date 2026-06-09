@@ -1,3 +1,4 @@
+import { describe, test, expect } from "vitest";
 import { scoreRound, computeLeague } from "../index.js";
 import type { Round, Config, PilotSlot, Team } from "@bccweb/types";
 

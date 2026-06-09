@@ -5,7 +5,11 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { RoundSummary, Round } from "@bccweb/types";
-import { getBlobClient, readBlob } from "../lib/blob.js";
+import { getBlobClient, getPrivateBlobClient, readBlob } from "../lib/blob.js";
+import {
+  getCallerIdentity,
+  unauthorizedResponse,
+} from "../lib/auth.js";
 
 // ─── GET /api/rounds ──────────────────────────────────────────────────────────
 
@@ -34,11 +38,14 @@ async function getRoundById(
   req: HttpRequest,
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
   const id = req.params["id"];
   if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
 
   try {
-    const round = await readBlob<Round>(getBlobClient(`rounds/${id}.json`));
+    const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
     return { status: 200, jsonBody: round };
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {

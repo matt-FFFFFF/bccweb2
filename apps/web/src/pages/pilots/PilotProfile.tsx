@@ -1,9 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
 import type { Pilot, CoachType, PilotRatingValue, WingClass } from "@bccweb/types";
-import { useBlob } from "../../hooks/useBlob.js";
 import { useAuth } from "../../hooks/useAuth.js";
-import { api } from "../../lib/api.js";
+import { api, ApiError } from "../../lib/api.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
@@ -247,13 +246,45 @@ export default function PilotProfile() {
   const { identity } = useAuth();
   const [refresh, setRefresh] = useState(0);
 
-  const { data: pilot, loading, error, notFound } = useBlob<Pilot>(
-    id ? `pilots/${id}.json?v=${refresh}` : null
-  );
+  const [pilot, setPilot] = useState<Pilot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [notFound, setNotFound] = useState(false);
+
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    setLoading(true);
+    setError(null);
+    setNotFound(false);
+    api
+      .get<Pilot>(`pilots/${id}`)
+      .then((data) => {
+        if (!cancelled) {
+          setPilot(data);
+          setLoading(false);
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          if (err instanceof ApiError && err.status === 404) {
+            setNotFound(true);
+          } else {
+            setError(
+              err instanceof ApiError ? err.message : "Could not load pilot"
+            );
+          }
+          setLoading(false);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [id, refresh]);
 
   if (loading) return <LoadingSpinner message="Loading pilot profile…" />;
   if (notFound) return <p>Pilot not found.</p>;
-  if (error) return <ErrorMessage error={error} title="Could not load pilot" />;
+  if (error) return <ErrorMessage error={new Error(error)} title="Could not load pilot" />;
   if (!pilot) return null;
 
   const canEdit =
