@@ -69,3 +69,26 @@ vi.mock("../../lib/email.js", () => ({
   passwordResetEmailText: vi.fn().mockReturnValue("reset"),
   getBriefRecipients: vi.fn().mockReturnValue([]),
 }));
+
+// ─── Email mock helpers ───────────────────────────────────────────────────────
+//
+// vi.mock above is hoisted by Vitest above this static import, so the `sendEmail`
+// imported here is the mocked function. Do NOT reorder.
+
+import { sendEmail } from "../../lib/email.js";
+
+export interface CapturedEmail {
+  to: string[];
+  subject: string;
+  html?: string;
+  text?: string;
+}
+
+export function getSentEmails(): CapturedEmail[] {
+  const calls = vi.mocked(sendEmail).mock.calls as Array<[CapturedEmail]>;
+  return calls.map(([opts]) => opts);
+}
+
+export function clearSentEmails(): void {
+  vi.mocked(sendEmail).mockClear();
+}
