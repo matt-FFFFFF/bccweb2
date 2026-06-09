@@ -290,3 +290,36 @@
 ### ApiError constructor change — watch for callers
 - Old 2-arg constructor `(status, message)` → new 3-arg minimum `(status, code, message)`.
 - `RoundBrief.tsx` had an inline `new ApiError(res.status, msg)` for PDF download errors; updated to `new ApiError(res.status, "DOWNLOAD_FAILED", msg)` to restore compile.
+
+## Task 16 notes — Rate-limit + account lockout on /api/auth/*
+
+### Rate-limit limits chosen (capacity = 1-minute budget; refillPerMin = same value)
+| endpoint            | capacity | rationale |
+|---------------------|----------|-----------|
+| login               |       10 | 10 attempts/min is generous for humans, hard for automated spray |
+| register            |        3 | sends email; 3/min prevents abuse while allowing quick retries |
+| forgot-password     |        3 | sends email; same as register |
+| reset-password      |        5 | token already gated; 5/min allows mobile copy-paste retries |
+| verify-email        |       10 | GET-link clicks; generous as browsers may retry |
+| refresh             |       30 | called on page load / tab focus; must stay permissive |
+| resend-verification |        3 | sends email; same as register |
+
+### Lockout window rationale
+- Failure window: 10 minutes (same window as NIST 800-63B brute-force window guidance)
+- Max failures: 5 (below typical dict-attack burst of 10-20/s; high enough to tolerate fat-finger)
+- Lockout duration: 15 minutes (long enough to be disruptive to attacker; short enough for pilot
+  who forgot their password to recover without a support ticket)
+- Lockout by userId (NOT IP): paragliding meets share NAT gateways — IP lockout would lock
+  innocent pilots competing alongside an attacker on the same cell connection.
+
+### HttpError headers extension (Task 12 extension)
+- Added optional 4th constructor param `headers?: Record<string, string>` to `HttpError`.
+- `withErrorHandler` now spreads `err.headers` into the returned `HttpResponseInit` when present.
+- Used by `rateLimit()` to attach `Retry-After: <secs>` to every 429 response.
+- No existing tests broken: existing `HttpError(status, code, detail)` calls ignore the new param.
+
+### vitest.config.ts include strategy
+- The file `src/lib/__tests__/blob.test.ts` was intentionally omitted from the include list — its
+  "60s op" test calls `vi.setConfig({ testTimeout: 70_000 })` inside the test body which does not
+  override the 15 s global timeout in Vitest 4. Broadening to a glob would re-introduce that
+  pre-existing failure. New lib tests are added explicitly to the `include` array instead.
