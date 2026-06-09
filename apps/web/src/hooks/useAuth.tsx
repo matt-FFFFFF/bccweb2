@@ -1,5 +1,6 @@
 import type { CallerIdentity } from "@bccweb/types";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 
 // ─── Auth error ──────────────────────────────────────────────────────────────
 
@@ -66,6 +67,8 @@ export interface AuthState {
   loading: boolean;
   /** The authenticated user's identity, or null if not signed in */
   identity: CallerIdentity | null;
+  /** True while apiFetch is in the middle of a token refresh */
+  isRefreshing: boolean;
   /**
    * Sign in with email and password. Throws an Error with a human-readable
    * message on failure (wrong credentials, unverified email, etc.).
@@ -86,6 +89,8 @@ const AuthContext = createContext<AuthState | null>(null);
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [identity, setIdentity] = useState<CallerIdentity | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const navigate = useNavigate();
 
   useEffect(() => {
     let cancelled = false;
@@ -192,7 +197,31 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, []);
 
-  const value: AuthState = { loading, identity, login, logout };
+  // Track in-progress refresh so consumers can show a loading indicator
+  useEffect(() => {
+    const onStart = () => setIsRefreshing(true);
+    const onEnd = () => setIsRefreshing(false);
+    window.addEventListener("bcc:refresh-start", onStart);
+    window.addEventListener("bcc:refresh-end", onEnd);
+    return () => {
+      window.removeEventListener("bcc:refresh-start", onStart);
+      window.removeEventListener("bcc:refresh-end", onEnd);
+    };
+  }, []);
+
+  // When apiFetch exhausts the refresh (refresh itself fails), clear local
+  // state and redirect to the login page preserving the return destination.
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      logout();
+      const returnPath = window.location.pathname + window.location.search;
+      navigate(loginUrl(returnPath));
+    };
+    window.addEventListener("bcc:auth-expired", handleAuthExpired);
+    return () => window.removeEventListener("bcc:auth-expired", handleAuthExpired);
+  }, [logout, navigate]);
+
+  const value: AuthState = { loading, identity, isRefreshing, login, logout };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

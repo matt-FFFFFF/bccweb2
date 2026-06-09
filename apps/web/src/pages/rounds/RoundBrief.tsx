@@ -229,7 +229,7 @@ export default function RoundBrief() {
       if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
 
       const res = await fetch(`/api/rounds/${id}/brief/pdf`, { headers });
-      if (!res.ok) throw new ApiError(res.status, `Could not download PDF (${res.status})`);
+      if (!res.ok) throw new ApiError(res.status, "DOWNLOAD_FAILED", `Could not download PDF (${res.status})`);
 
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);

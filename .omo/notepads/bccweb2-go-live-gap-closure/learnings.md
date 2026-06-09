@@ -255,3 +255,38 @@
 - Conditional upload with ifMatch ETag works correctly: 412 on stale ETag
 - All 10 concurrent upload calls in the concurrency test got 9x HTTP 412 as expected
 - [METRIC] auth.token.reused console.warn logged for each 412
+
+## Task 11 notes — Pilot index lease + atomic recompute tmp-swap
+- Pilot index writes now create `pilots.json` if absent, then acquire a public blob lease and perform read-modify-write through `getBlobClient`/`getBlockBlobClient().uploadData(..., { conditions: { leaseId } })`; sorting ties by id avoids nondeterministic order for equal names.
+- Recompute uses a separate sentinel lease blob `seasons/{year}.json.lock` containing `{"purpose":"recompute-lock"}` and consumes Task 10 `withLeaseRenewing`; heavy reads/scoring happen before the lease.
+- Swap strategy chosen: upload deterministic bytes to `{path}.tmp`, then `beginCopyFromURL(tmp.url)` to final, then delete tmp only after copy success. If final copy fails, tmp remains for forensics.
+- `stableStringify()` recursively sorts object keys, drops `undefined`, appends a trailing newline, and relies on explicit domain array sorts before stringify (`rounds` by date/id, league by rank/score/club/team, result teams/pilots by score with stable tie-breakers).
+- Same-process concurrent `recomputeSeason(year)` calls share one in-flight promise before hitting Azure, so duplicate fire-and-forget callers wait/no-op and emit one final season swap in tests.
+- Azurite quirk: `beginCopyFromURL` works for local same-container copies in tests, but spies need to match encoded blob names in URLs (`seasons%2F...`) when counting/capturing copy attempts.
+
+## Task 13 notes — 401 auto-refresh with single-flight lock
+
+### Mock strategy for fetch in jsdom Vitest tests
+- `vi.spyOn(globalThis, 'fetch').mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => { ... })` is the correct approach — no heavy deps (no MSW, no fetch-mock).
+- Mock callbacks require explicit parameter types when `strict: true` / `noImplicitAny` is on; `async (input)` without annotation causes TS7006. Use `(input: RequestInfo | URL, init?: RequestInit)` signature.
+- Distinguish first call vs retry in mock by inspecting `init?.headers["Authorization"]`: first call has old token, retry has new token (read from localStorage after refresh).
+- `mockResolvedValue(response)` is fine for tests that only need one fixed response (e.g. ApiError shape test).
+
+### localStorage in jsdom
+- `localStorage` is available globally in jsdom env; `localStorage.clear()` in `beforeEach`/`afterEach` is sufficient — no special setup needed.
+- `window.dispatchEvent(new CustomEvent("bcc:auth-expired"))` is synchronous in jsdom. A listener registered before the `await api.get(...)` call will have fired by the time the awaited promise rejects, so assertions on the event array are safe immediately after `await expect(...).rejects.toThrow()`.
+- Module-level state (`refreshInFlight`) resets to null naturally between tests because `.finally(() => { refreshInFlight = null })` runs as part of promise settlement, which is always complete before the test's `await` resolves/rejects.
+
+### Event-name conventions
+- `bcc:refresh-start` — fired by `refreshAccessToken()` at the top of the try block (before the fetch)
+- `bcc:refresh-end` — fired in the `finally` block of `refreshAccessToken()`, always fires whether refresh succeeded or failed; runs BEFORE the returned promise settles
+- `bcc:auth-expired` — fired in the `catch` block of `refreshAccessToken()` when refresh fails; tokens already cleared from localStorage at point of dispatch
+- `AuthProvider` subscribes to all three via `window.addEventListener` in separate `useEffect` hooks; `bcc:auth-expired` triggers `logout()` (clears React state) + `navigate(loginUrl(...))` via `useNavigate`
+
+### Single-flight correctness invariant
+- The assignment `refreshInFlight = refreshAccessToken().finally(...)` is synchronous — no `await` sits between the `if (refreshInFlight === null)` check and the assignment. JavaScript's single-threaded event loop guarantees that between any two `await` boundaries, code is atomic, so exactly one concurrent caller wins the race to set `refreshInFlight`.
+- `localStorage.setItem(ACCESS_TOKEN_KEY, accessToken)` happens inside `refreshAccessToken()` BEFORE its async function resolves, so all `await refreshInFlight` continuations see the new token when they read `localStorage` on the next line.
+
+### ApiError constructor change — watch for callers
+- Old 2-arg constructor `(status, message)` → new 3-arg minimum `(status, code, message)`.
+- `RoundBrief.tsx` had an inline `new ApiError(res.status, msg)` for PDF download errors; updated to `new ApiError(res.status, "DOWNLOAD_FAILED", msg)` to restore compile.
