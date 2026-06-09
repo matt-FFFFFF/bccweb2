@@ -30,6 +30,8 @@ export type RoundStatus =
   | "Complete"
   | "Cancelled";
 
+export { normalizeStatus } from "./status.js";
+
 export type PilotSlotStatus = "Empty" | "Filled";
 
 export type ScoringType = "XC" | "Manual";
@@ -98,6 +100,9 @@ export interface Club extends ClubSummary {
   sites: string[]; // site uuids
   /** @deprecated Use ClubTeam entities instead */
   teams?: string[];
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 // ─── Club Team ────────────────────────────────────────────────────────────────
@@ -112,6 +117,7 @@ export interface ClubTeamSummary {
 
 export interface ClubTeam extends ClubTeamSummary {
   createdAt: string; // ISO date string
+  legacyId?: number;
 }
 
 // ─── Site ─────────────────────────────────────────────────────────────────────
@@ -132,6 +138,9 @@ export interface Site extends SiteSummary {
   takeOffW3W?: string;
   guideUrl?: string;
   contactInfo?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 // ─── Manufacturer ─────────────────────────────────────────────────────────────
@@ -147,6 +156,7 @@ export interface Manufacturer {
 export interface PilotRating {
   id: string;
   description: PilotRatingValue;
+  legacyId?: number;
 }
 
 // ─── Pilot ────────────────────────────────────────────────────────────────────
@@ -163,6 +173,28 @@ export interface PilotSeasonClub {
   seasonYear: number;
   clubId: string;
   clubName: string;
+}
+
+export interface Frequency {
+  id: string;
+  label: string;
+  position: number;
+  legacyId?: number;
+}
+
+export interface SeasonClub {
+  id: string;
+  seasonYear: number;
+  clubId: string;
+  numTeams: number;
+  acceptedTsCs: boolean;
+  acceptedTsCsAt?: string;
+  acceptedTsCsBy?: string;
+  frequency?: Frequency;
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  legacyId?: number;
 }
 
 export interface PilotSummary {
@@ -198,6 +230,9 @@ export interface Pilot {
   currentClub?: ClubRef;
   seasonClubs: PilotSeasonClub[];
   userId: string | null; // B2C oid, null until linked
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
 }
 
 // ─── Season ───────────────────────────────────────────────────────────────────
@@ -221,6 +256,7 @@ export interface LeagueEntry {
 export interface Season extends SeasonSummary {
   rounds: string[]; // round uuids
   leagueTable: LeagueEntry[];
+  legacyId?: number;
 }
 
 // ─── Round ────────────────────────────────────────────────────────────────────
@@ -293,6 +329,11 @@ export interface Team {
   pureTrackGroupId?: number;
   pureTrackGroupSlug?: string;
   pilots: PilotSlot[];
+  captainPilotId?: string | null;
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  legacyId?: number;
 }
 
 export interface Round {
@@ -314,6 +355,54 @@ export interface Round {
   organisingClub?: ClubRef;
   season: { year: number };
   teams: Team[];
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+}
+
+// ─── Sign-to-Fly / Audit ─────────────────────────────────────────────────────
+
+export interface Signature {
+  id: string;
+  roundId: string;
+  teamId: string;
+  place: number;
+  pilotId: string;
+  userId: string;
+  signedAt: string | null;
+  briefVersion: number | null;
+  briefHash: string | null;
+  wordingVersion: number | null;
+  wordingHash: string | null;
+  ip: string | null;
+  userAgent: string | null;
+  source: "pilot-self" | "coord-override" | "legacy-migrated";
+  overrideReason?: string;
+  overrideBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  updatedBy?: string;
+  legacyId?: number;
+}
+
+export interface BriefVersion {
+  version: number;
+  hash: string;
+  createdAt: string;
+  createdBy: string;
+  supersededAt?: string;
+  supersededBy?: number;
+}
+
+export interface SignToFlyWording {
+  version: number;
+  hash: string;
+  html: string;
+  plainText: string;
+  createdAt: string;
+  createdBy: string;
+  supersededAt?: string;
+  supersededBy?: number;
 }
 
 // ─── Round Brief ──────────────────────────────────────────────────────────────
