@@ -24,12 +24,13 @@
  *   2. manufacturers.json
  *   3. pilot-ratings.json
  *   4. clubs.json + clubs/{uuid}.json
- *   5. sites.json + sites/{uuid}.json
- *   6. seasons.json (partial) + seasons/{year}.json (partial)
- *   7. pilots.json + pilots/{uuid}.json
- *   8. rounds.json + rounds/{uuid}.json (with teams/pilots/flights embedded)
- *   9. round-briefs/{uuid}.json
- *  10. Recompute seasons/{year}.json (league) + results/{year}.json
+ *   5. frequencies.json + season-clubs/{year}/{clubId}.json
+ *   6. sites.json + sites/{uuid}.json
+ *   7. seasons.json (partial) + seasons/{year}.json (partial)
+ *   8. pilots.json + pilots/{uuid}.json
+ *   9. rounds.json + rounds/{uuid}.json (with teams/pilots/flights embedded)
+ *  10. round-briefs/{uuid}.json
+ *  11. Recompute seasons/{year}.json (league) + results/{year}.json
  */
 
 import { createHash } from "node:crypto";
@@ -38,6 +39,8 @@ import sql from "mssql";
 import { BlobServiceClient } from "@azure/storage-blob";
 import { getOrCreateUuid, saveIdMap } from "./id-map.mjs";
 import { normalizeStatus } from "../lib/status.mjs";
+import { buildPilotClubHistory } from "./pilot-club-history-logic.mjs";
+import { writeDiscardedCounts } from "./discarded-counts.mjs";
 
 // ─── CLI flags ────────────────────────────────────────────────────────────────
 
@@ -170,6 +173,22 @@ export function briefImagePath(roundId, imageNumber = 1) {
   return `round-briefs/${roundId}/image-${imageNumber}.png`;
 }
 
+export function normalizeWebsiteUrl(value) {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+export function manufacturerFromLegacyRow(r) {
+  const websiteUrl = normalizeWebsiteUrl(r.WebsiteUrl);
+  return {
+    id: getOrCreateUuid("manufacturer", r.ID),
+    legacyId: r.ID,
+    name: r.Name,
+    ...(websiteUrl ? { websiteUrl } : {}),
+  };
+}
+
 export function legacySignaturePath(roundId, teamId, place) {
   return `signatures/${roundId}/${teamId}-${place}-vlegacy.json`;
 }
@@ -222,6 +241,22 @@ function mapSiteStatus(description) {
   return description.trim() === "Active" ? "Active" : "Inactive";
 }
 
+function pick(row, names) {
+  for (const name of names) {
+    if (Object.prototype.hasOwnProperty.call(row, name) && row[name] != null) return row[name];
+  }
+  return null;
+}
+
+async function safeQuery(pool, query) {
+  try {
+    return (await pool.request().query(query)).recordset;
+  } catch (err) {
+    if (err?.number === 208 || /Invalid object name/i.test(err?.message ?? "")) return [];
+    throw err;
+  }
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -258,6 +293,7 @@ async function main() {
   const mfrUuid = new Map();       // SQL int ID → uuid
   const mfrNameBySqlId = new Map(); // SQL int ID → manufacturer name
   const ratingUuid = new Map();    // SQL int ID → uuid
+  const frequencyUuid = new Map(); // SQL int ID → uuid
 
   // ── 1. config.json ──────────────────────────────────────────────────────────
   console.log("Step 1: config.json");
@@ -282,12 +318,12 @@ async function main() {
 
   // ── 2. Manufacturers ────────────────────────────────────────────────────────
   console.log("Step 2: manufacturers.json");
-  const mfrs = await pool.request().query("SELECT ID, Name FROM Manufacturers ORDER BY Name");
+  const mfrs = await pool.request().query("SELECT ID, Name, WebsiteUrl FROM Manufacturers ORDER BY Name");
   const manufacturersList = mfrs.recordset.map((r) => {
-    const id = getOrCreateUuid("manufacturer", r.ID);
-    mfrUuid.set(r.ID, id);
+    const mfr = manufacturerFromLegacyRow(r);
+    mfrUuid.set(r.ID, mfr.id);
     mfrNameBySqlId.set(r.ID, r.Name);
-    return { id, legacyId: r.ID, name: r.Name };
+    return mfr;
   });
   await uploadPrivateBlob("manufacturers.json", manufacturersList);
   for (const m of manufacturersList) {
@@ -324,8 +360,81 @@ async function main() {
   saveIdMap();
   console.log(`  wrote ${clubsList.length} clubs\n`);
 
+  console.log("Step 5: frequencies.json + season-clubs/{year}/{clubId}.json");
+  const frequencyRows = await safeQuery(pool, "SELECT * FROM Frequencies ORDER BY ID");
+  const frequenciesList = frequencyRows.map((r, i) => {
+    const legacyId = pick(r, ["ID", "Id", "FrequencyID", "Frequency_ID"]);
+    const id = getOrCreateUuid("frequency", legacyId ?? `row-${i + 1}`);
+    if (legacyId != null) frequencyUuid.set(legacyId, id);
+    return {
+      id,
+      ...(legacyId != null ? { legacyId } : {}),
+      label: String(pick(r, ["Label", "Name", "Description", "Frequency", "Title"]) ?? `Frequency ${i + 1}`),
+      position: Number(pick(r, ["Position", "SortOrder", "DisplayOrder", "Order"]) ?? i + 1),
+    };
+  });
+  await uploadPrivateBlob("frequencies.json", frequenciesList);
+
+  const seasonClubFrequencyRows = await safeQuery(pool, "SELECT * FROM SeasonClubFrequency");
+  const frequencyBySeasonClubLegacyId = new Map();
+  for (const r of seasonClubFrequencyRows) {
+    const seasonClubLegacyId = pick(r, ["SeasonClub_ID", "SeasonClubID", "seasonClub_ID", "seasonClubID"]);
+    const frequencyLegacyId = pick(r, ["Frequency_ID", "FrequencyID", "frequency_ID", "frequencyID"]);
+    const frequencyId = frequencyLegacyId != null ? frequencyUuid.get(frequencyLegacyId) : null;
+    if (seasonClubLegacyId != null && frequencyId) frequencyBySeasonClubLegacyId.set(seasonClubLegacyId, frequencyId);
+  }
+
+  const seasonClubRows = await safeQuery(pool, "SELECT * FROM SeasonClubs ORDER BY ID");
+  const seasonRowsForSeasonClubs = await safeQuery(pool, "SELECT ID, Year FROM Seasons");
+  const seasonYearByLegacyId = new Map(seasonRowsForSeasonClubs.map((s) => [s.ID, s.Year]));
+  const seasonClubIndexByYear = new Map();
+  for (const r of seasonClubRows) {
+    const legacyId = pick(r, ["ID", "Id", "SeasonClubID"]);
+    const seasonLegacyId = pick(r, ["Season_ID", "SeasonID", "season_ID", "seasonID"]);
+    const clubLegacyId = pick(r, ["Club_ID", "ClubID", "club_ID", "clubID"]);
+    const seasonYear = seasonYearByLegacyId.get(seasonLegacyId);
+    const clubId = clubLegacyId != null ? clubUuid.get(clubLegacyId) : null;
+    const club = clubId ? clubsList.find((c) => c.id === clubId) : null;
+    if (!seasonYear || !club) continue;
+    const frequencyId = legacyId != null ? frequencyBySeasonClubLegacyId.get(legacyId) : null;
+    const frequency = frequencyId ? frequenciesList.find((f) => f.id === frequencyId) : undefined;
+    const acceptedAtRaw = pick(r, ["AcceptedTsCsAt", "AcceptedTcsAt", "TermsAcceptedAt", "CreatedAt", "DateCreated"]);
+    const acceptedTsCsAt = acceptedAtRaw ? new Date(acceptedAtRaw).toISOString() : null;
+    const numTeams = Number(pick(r, ["NumTeams", "numTeams", "NumberOfTeams", "NoTeams"]) ?? 1);
+    const id = getOrCreateUuid("season-club", `${seasonYear}-${club.id}`);
+    const seasonClub = {
+      id,
+      ...(legacyId != null ? { legacyId } : {}),
+      seasonYear,
+      clubId: club.id,
+      numTeams,
+      acceptedTsCs: true,
+      acceptedTsCsAt,
+      acceptedTsCsBy: null,
+      ...(frequency ? { frequency, frequencyId: frequency.id } : {}),
+    };
+    await uploadPrivateBlob(`season-clubs/${seasonYear}/${club.id}.json`, seasonClub);
+    if (!seasonClubIndexByYear.has(seasonYear)) seasonClubIndexByYear.set(seasonYear, []);
+    seasonClubIndexByYear.get(seasonYear).push({
+      id,
+      seasonYear,
+      clubId: club.id,
+      clubName: club.name,
+      numTeams,
+      ...(frequency ? { frequencyId: frequency.id, frequencyLabel: frequency.label } : {}),
+      acceptedTsCs: true,
+      ...(acceptedTsCsAt ? { acceptedTsCsAt } : {}),
+    });
+  }
+  for (const [year, index] of seasonClubIndexByYear.entries()) {
+    index.sort((a, b) => a.clubName.localeCompare(b.clubName));
+    await uploadBlob(`season-clubs/${year}/index.json`, index);
+  }
+  saveIdMap();
+  console.log(`  wrote ${frequenciesList.length} frequencies and ${seasonClubRows.length} season club rows\n`);
+
   // ── 5. Sites ────────────────────────────────────────────────────────────────
-  console.log("Step 5: sites.json + sites/{uuid}.json");
+  console.log("Step 6: sites.json + sites/{uuid}.json");
   const sites = await pool
     .request()
     .query(`
@@ -369,8 +478,8 @@ async function main() {
   saveIdMap();
   console.log(`  wrote ${sitesList.length} sites\n`);
 
-  // ── 6. Seasons (partial) ────────────────────────────────────────────────────
-  console.log("Step 6: seasons.json");
+  // ── 7. Seasons (partial) ────────────────────────────────────────────────────
+  console.log("Step 7: seasons.json");
   const seasons = await pool
     .request()
     .query("SELECT ID, Year, active FROM Seasons ORDER BY Year");
@@ -391,8 +500,8 @@ async function main() {
   saveIdMap();
   console.log(`  wrote ${seasonsList.length} seasons\n`);
 
-  // ── 7. Pilots ───────────────────────────────────────────────────────────────
-  console.log("Step 7: pilots.json + pilots/{uuid}.json");
+  // ── 8. Pilots ───────────────────────────────────────────────────────────────
+  console.log("Step 8: pilots.json + pilots/{uuid}.json");
   const pilotsResult = await pool.request().query(`
     SELECT
       p.ID, p.BHPA_Number, p.CoachType, p.UserID,
@@ -405,6 +514,7 @@ async function main() {
       p.PersonID,
       per.FirstName, per.LastName, per.FullName, per.PhoneNumber,
       mfr.Name AS MfrName,
+      mfr.WebsiteUrl AS MfrWebsiteUrl,
       u.Email AS UserEmail
     FROM Pilots p
     LEFT JOIN People per ON per.ID = p.PersonID
@@ -458,7 +568,11 @@ async function main() {
 
     const mfrId = r.MfrID ? mfrUuid.get(r.MfrID) : null;
     const wingManufacturer = mfrId
-      ? { id: mfrId, name: r.MfrName }
+      ? {
+          id: mfrId,
+          name: r.MfrName,
+          ...(normalizeWebsiteUrl(r.MfrWebsiteUrl) ? { websiteUrl: normalizeWebsiteUrl(r.MfrWebsiteUrl) } : {}),
+        }
       : undefined;
 
     const pilotDoc = {
@@ -516,8 +630,42 @@ async function main() {
   saveIdMap();
   console.log(`  wrote ${pilotsSummary.length} pilots\n`);
 
-  // ── 8. Rounds (with teams, pilot slots, flights) ────────────────────────────
-  console.log("Step 8: rounds.json + rounds/{uuid}.json");
+  // ── 7b. Pilot club history ───────────────────────────────────────────────────
+  console.log("Step 7b: pilots/{uuid}/club-history.json");
+  const pilotClubResult = await pool.request().query(`
+    SELECT pc.ID, pc.Pilot_ID, pc.Club_ID, pc.JoinedAt, pc.LeftAt
+    FROM PilotClub pc
+    ORDER BY pc.Pilot_ID, pc.ID
+  `);
+
+  const pilotsWithCurrentClub = pilotsResult.recordset
+    .map((r) => {
+      const pilotId = pilotUuid.get(r.ID);
+      if (!pilotId) return null;
+      const seasonClubs = pscBySqlPilotId.get(r.ID) ?? [];
+      const currentSeasonClub = [...seasonClubs].sort((a, b) => b.seasonYear - a.seasonYear)[0];
+      return { pilotId, currentSeasonClub };
+    })
+    .filter(Boolean);
+
+  const historyByPilot = buildPilotClubHistory(
+    pilotClubResult.recordset,
+    pilotUuid,
+    clubUuid,
+    clubsList,
+    pilotsWithCurrentClub,
+  );
+
+  let historyBlobCount = 0;
+  for (const [pilotId, memberships] of historyByPilot) {
+    await uploadPrivateBlob(`pilots/${pilotId}/club-history.json`, memberships);
+    historyBlobCount++;
+  }
+  saveIdMap();
+  console.log(`  wrote ${historyBlobCount} pilot club-history blobs (${pilotClubResult.recordset.length} legacy rows)\n`);
+
+  // ── 9. Rounds (with teams, pilot slots, flights) ────────────────────────────
+  console.log("Step 9: rounds.json + rounds/{uuid}.json");
 
   // Fetch all rounds
   const roundsResult = await pool.request().query(`
@@ -788,8 +936,8 @@ async function main() {
 
   const pilotNameMap = Object.fromEntries(pilotsSummary.map((p) => [p.id, p.name]));
 
-  // ── 9. Round briefs ─────────────────────────────────────────────────────────
-  console.log("Step 9: round-briefs/{uuid}.json");
+  // ── 10. Round briefs ────────────────────────────────────────────────────────
+  console.log("Step 10: round-briefs/{uuid}.json");
   const briefResult = await pool.request().query(`
     SELECT rb.ID, rb.RoundID, rb.SiteName, rb.BrieferName,
            rb.BrieferBHPA_CoachLevel, rb.BrieferBHPA_Number, rb.BrieferPhoneNumber,
@@ -863,8 +1011,29 @@ async function main() {
   saveIdMap();
   console.log(`  wrote ${briefCount} round briefs\n`);
 
-  // ── 10. Recompute seasons/{year}.json and results/{year}.json ───────────────
-  console.log("Step 10: recompute seasons/{year}.json + results/{year}.json");
+  // ── 9b. RoundClubPilot (count only — not migrated to blobs) ────────────────
+  //
+  // Decision: Option (b) — redundant / discard with audit trail.
+  // See docs/runbooks/round-club-pilot-decision.md for full rationale.
+  //
+  // RoundClubPilot is the pre-team-assignment registration queue: pilots who
+  // registered under a club but were not yet assigned to a specific team slot.
+  // Any promoted pilot already has a RoundTeamPilot row captured in Step 8.
+  // Surplus (never-promoted) pilots had no flights and did not affect scoring.
+  // All pilot safety data is migrated via pilots/{uuid}.json in Step 7.
+  //
+  // We count the rows for reconciliation audit and write no blobs.
+  console.log("Step 9b: RoundClubPilot (count only — not migrated)");
+  const rcpResult = await pool.request().query("SELECT COUNT(*) AS cnt FROM RoundClubPilots");
+  const rcpCount = Number(rcpResult.recordset[0]?.cnt ?? 0);
+  console.log(
+    `  RoundClubPilot: ${rcpCount} rows analyzed as redundant with RoundTeamPilot data — not migrated`
+  );
+  writeDiscardedCounts({ roundClubPilot: rcpCount });
+  console.log("");
+
+  // ── 11. Recompute seasons/{year}.json and results/{year}.json ───────────────
+  console.log("Step 11: recompute seasons/{year}.json + results/{year}.json");
 
   for (const season of seasonsList) {
     // Collect in-memory round docs for this season
