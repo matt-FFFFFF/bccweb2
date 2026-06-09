@@ -141,7 +141,7 @@ in `src/bcc-theme.css`.
 
 ## Testing — Critical Gotchas
 
-**Framework**: Vitest 4.1.2 (root devDep). Root [vitest.config.ts](file:///Volumes/code/bccweb2/vitest.config.ts) uses
+**Framework**: Vitest 4.1.8 (root devDep). Root [`vitest.config.ts`](vitest.config.ts) uses
 `test.projects` to cover `packages/{scoring,types}` and `apps/{api,web}`.
 
 **API tests** ([apps/api/vitest.config.ts](file:///Volumes/code/bccweb2/apps/api/vitest.config.ts)):
