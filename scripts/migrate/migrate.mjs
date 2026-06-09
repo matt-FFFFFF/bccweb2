@@ -187,6 +187,7 @@ async function main() {
   const roundUuid = new Map();     // SQL int ID → uuid
   const teamUuid = new Map();      // SQL int ID → uuid (RoundTeams table)
   const mfrUuid = new Map();       // SQL int ID → uuid
+  const mfrNameBySqlId = new Map(); // SQL int ID → manufacturer name
   const ratingUuid = new Map();    // SQL int ID → uuid
 
   // ── 1. config.json ──────────────────────────────────────────────────────────
@@ -216,6 +217,7 @@ async function main() {
   const manufacturersList = mfrs.recordset.map((r) => {
     const id = getOrCreateUuid("manufacturer", r.ID);
     mfrUuid.set(r.ID, id);
+    mfrNameBySqlId.set(r.ID, r.Name);
     return { id, legacyId: r.ID, name: r.Name };
   });
   await uploadPrivateBlob("manufacturers.json", manufacturersList);
@@ -566,7 +568,7 @@ async function main() {
               ...(place.HelmetColour ? { helmetColour: place.HelmetColour } : {}),
               ...(place.HarnessType ? { harnessType: place.HarnessType } : {}),
               ...(place.HarnessColour ? { harnessColour: place.HarnessColour } : {}),
-              ...(place.Manufacturer_ID ? { wingManufacturer: mfrUuid.get(place.Manufacturer_ID) ?? null } : {}),
+              ...(place.Manufacturer_ID ? { wingManufacturer: mfrNameBySqlId.get(place.Manufacturer_ID) ?? null } : {}),
               ...(place.WingModel ? { wingModel: place.WingModel } : {}),
               ...(place.WingColours ? { wingColours: place.WingColours } : {}),
               ...(place.EmergencyContactName ? { emergencyContactName: place.EmergencyContactName } : {}),
