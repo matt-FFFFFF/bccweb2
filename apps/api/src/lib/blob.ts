@@ -11,6 +11,21 @@ let _container: ContainerClient | null = null;
 let _privateContainer: ContainerClient | null = null;
 let _blobService: BlobServiceClient | null = null;
 
+interface LeaseRenewingOptions {
+  leaseDurationSec?: number;
+  renewIntervalMs?: number;
+}
+
+export class LeaseRenewalFailedError extends Error {
+  readonly cause: unknown;
+
+  constructor(path: string, cause: unknown) {
+    super(`Blob lease renewal failed for ${path}`);
+    this.name = "LeaseRenewalFailedError";
+    this.cause = cause;
+  }
+}
+
 function getBlobService(): BlobServiceClient {
   if (_blobService) return _blobService;
   const connectionString = process.env["BLOB_CONNECTION_STRING"];
@@ -158,6 +173,85 @@ export async function withPrivateLease<T>(
       // best-effort release; ignore errors here
     });
     throw err;
+  }
+}
+
+// ─── withLeaseRenewing ────────────────────────────────────────────────────────
+
+/**
+ * Acquire a renewable lease on a public blob. A background interval renews the
+ * lease while `fn` runs, then the lease is released best-effort in all cases.
+ */
+export async function withLeaseRenewing<T>(
+  path: string,
+  fn: (leaseId: string) => Promise<T>,
+  opts: LeaseRenewingOptions = {}
+): Promise<T> {
+  return withLeaseRenewingOnClient(path, getBlockBlobClient(path), fn, opts);
+}
+
+/**
+ * Acquire a renewable lease on a private blob. A background interval renews the
+ * lease while `fn` runs, then the lease is released best-effort in all cases.
+ */
+export async function withPrivateLeaseRenewing<T>(
+  path: string,
+  fn: (leaseId: string) => Promise<T>,
+  opts: LeaseRenewingOptions = {}
+): Promise<T> {
+  return withLeaseRenewingOnClient(path, getPrivateBlockBlobClient(path), fn, opts);
+}
+
+async function withLeaseRenewingOnClient<T>(
+  path: string,
+  client: BlockBlobClient,
+  fn: (leaseId: string) => Promise<T>,
+  opts: LeaseRenewingOptions
+): Promise<T> {
+  const leaseDurationSec = opts.leaseDurationSec ?? 30;
+  const renewIntervalMs = opts.renewIntervalMs ?? 15_000;
+
+  if (renewIntervalMs >= leaseDurationSec * 500) {
+    throw new Error("renewal interval too long");
+  }
+
+  const leaseClient = client.getBlobLeaseClient();
+  const response = await leaseClient.acquireLease(leaseDurationSec);
+  const leaseId = response.leaseId;
+  if (!leaseId) throw new Error("Failed to acquire blob lease: no leaseId returned");
+
+  console.log("[lease] acquired", { path, leaseId });
+
+  let attempt = 0;
+  let totalRenewals = 0;
+  let renewalError: unknown = null;
+  const handle = setInterval(async () => {
+    attempt += 1;
+    try {
+      await leaseClient.renewLease();
+      totalRenewals += 1;
+      console.log("[lease] renewed", { path, leaseId, attempt });
+    } catch (err) {
+      renewalError = err;
+      clearInterval(handle);
+    }
+  }, renewIntervalMs);
+
+  let fnError: unknown = null;
+  try {
+    return await fn(leaseId);
+  } catch (err) {
+    fnError = err;
+    throw err;
+  } finally {
+    clearInterval(handle);
+    await leaseClient.releaseLease().catch(() => {
+      // best-effort release; ignore errors here
+    });
+    console.log("[lease] released", { path, leaseId, totalRenewals });
+    if (renewalError && !fnError) {
+      throw new LeaseRenewalFailedError(path, renewalError);
+    }
   }
 }
 

@@ -32,14 +32,14 @@ import type {
 } from "@bccweb/types";
 import { normalizeStatus } from "@bccweb/types";
 import { scoreRound } from "@bccweb/scoring";
-import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob, withLease, withPrivateLease, getBlockBlobClient, getPrivateBlockBlobClient } from "../lib/blob.js";
+import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob, withLease, withPrivateLease, withPrivateLeaseRenewing, getBlockBlobClient, getPrivateBlockBlobClient } from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
 import { updateRoundsIndex, recomputeSeason } from "../lib/recompute.js";
-import { createPureTrackGroups } from "../lib/puretrack.js";
+import { createPureTrackGroups, type PureTrackRoundResult } from "../lib/puretrack.js";
 import { generateBriefPdf } from "../lib/pdf.js";
 import {
   sendEmail,
@@ -69,6 +69,15 @@ const DEFAULT_CONFIG: Config = {
     "EN D": 0.6,
     "EN D 2-liner": 0.5,
   },
+};
+
+type RoundWithBriefMetadata = Round & {
+  brief?: {
+    version?: number;
+    jsonPath?: string;
+    pdfPath?: string;
+    generatedAt?: string;
+  };
 };
 
 async function loadConfig(): Promise<Config> {
@@ -402,205 +411,142 @@ async function briefCompleteRound(
 
 // ─── POST /api/rounds/{id}/lock ───────────────────────────────────────────────
 
-/**
- * Best-effort post-lock async work:
- *  1. Create PureTrack groups → persist IDs back onto round blob
- *  2. Build RoundBrief document
- *  3. Generate PDF
- *  4. Upload brief JSON + PDF to blob storage
- *  5. Send ACS email with PDF attachment
- *
- * Errors are logged but never propagate — the lock response has already been returned.
- */
-async function postLockAsync(lockedRound: Round): Promise<void> {
-  const roundId = lockedRound.id;
-  const logPrefix = `[postLock:${roundId}]`;
+async function loadPilotPureTrackIds(round: Round): Promise<Map<string, number>> {
+  const pilotIds = round.teams.flatMap((t) =>
+    t.pilots
+      .filter((s) => s.status === "Filled" && s.pilotId)
+      .map((s) => s.pilotId!)
+  );
+  const uniquePilotIds = [...new Set(pilotIds)];
+  const pilotPureTrackIds = new Map<string, number>();
 
-  // ── 1. PureTrack groups ──────────────────────────────────────────────────
-  let updatedRound = lockedRound;
-  try {
-    // Collect pilot PureTrack IDs
-    const pilotIds = lockedRound.teams.flatMap((t) =>
-      t.pilots
-        .filter((s) => s.status === "Filled" && s.pilotId)
-        .map((s) => s.pilotId!)
-    );
-    const uniquePilotIds = [...new Set(pilotIds)];
-    const pilotPureTrackIds = new Map<string, number>();
+  await Promise.all(
+    uniquePilotIds.map(async (pilotId) => {
+      try {
+        const pilot = await readBlob<Pilot>(
+          getPrivateBlobClient(`pilots/${pilotId}.json`)
+        );
+        if (pilot.pureTrackId) pilotPureTrackIds.set(pilotId, pilot.pureTrackId);
+      } catch {
+        return;
+      }
+    })
+  );
 
-    await Promise.all(
-      uniquePilotIds.map(async (pilotId) => {
-        try {
-          const pilot = await readBlob<Pilot>(
-            getPrivateBlobClient(`pilots/${pilotId}.json`)
-          );
-          if (pilot.pureTrackId) {
-            pilotPureTrackIds.set(pilotId, pilot.pureTrackId);
-          }
-        } catch {
-          // skip missing pilots
-        }
-      })
-    );
+  return pilotPureTrackIds;
+}
 
-    const ptResult = await createPureTrackGroups(lockedRound, pilotPureTrackIds);
-    console.log(
-      `${logPrefix} PureTrack groups created: round=${ptResult.roundGroupId}, teams=${ptResult.teams.length}`
-    );
-
-    // Persist PureTrack IDs back onto the round blob (under lease)
-    const path = `rounds/${roundId}.json`;
-    try {
-      updatedRound = await withPrivateLease(path, async (leaseId) => {
-        const r = await readBlob<Round>(getPrivateBlobClient(path));
-        r.pureTrackGroupId = ptResult.roundGroupId;
-        r.pureTrackGroupName = ptResult.roundGroupName;
-        r.pureTrackGroupSlug = ptResult.roundGroupSlug;
-        for (const team of r.teams) {
-          const tr = ptResult.teams.find((t) => t.teamId === team.id);
-          if (tr) {
-            team.pureTrackGroupId = tr.groupId;
-            team.pureTrackGroupSlug = tr.groupSlug;
-          }
-        }
-        await writePrivateBlob(path, r, leaseId);
-        return r;
-      });
-    } catch (persistErr) {
-      console.error(`${logPrefix} Failed to persist PureTrack IDs:`, persistErr);
-      // updatedRound stays as lockedRound — brief will just lack PT slugs
+function applyPureTrackResult(round: Round, ptResult: PureTrackRoundResult): Round {
+  const updated = structuredClone(round) as Round;
+  updated.pureTrackGroupId = ptResult.roundGroupId;
+  updated.pureTrackGroupName = ptResult.roundGroupName;
+  updated.pureTrackGroupSlug = ptResult.roundGroupSlug;
+  for (const team of updated.teams) {
+    const tr = ptResult.teams.find((t) => t.teamId === team.id);
+    if (tr) {
+      team.pureTrackGroupId = tr.groupId;
+      team.pureTrackGroupSlug = tr.groupSlug;
     }
-  } catch (ptErr) {
-    console.error(`${logPrefix} PureTrack group creation failed:`, ptErr);
-    // Non-fatal — continue to brief generation
   }
+  return updated;
+}
 
-  // ── 2. Build RoundBrief document ─────────────────────────────────────────
-  let brief: RoundBrief;
+async function buildRoundBrief(round: Round): Promise<RoundBrief> {
+  let siteGuideUrl: string | undefined;
   try {
-    // Try to load full site data for guideUrl / contact info
-    let siteGuideUrl: string | undefined;
-    try {
-      const site = await readBlob<Site>(
-        getPrivateBlobClient(`sites/${updatedRound.site.id}.json`)
-      );
-      siteGuideUrl = site.guideUrl;
-    } catch {
-      // site details optional
-    }
-
-    // Build pilot name map from pilots index
-    const pilotsIndex = await readBlob<Array<{ id: string; name: string; bhpaNumber?: number; pureTrackId?: number }>>(
-      getBlobClient("pilots.json")
-    ).catch(() => [] as Array<{ id: string; name: string; bhpaNumber?: number; pureTrackId?: number }>);
-    const pilotNameMap = new Map(pilotsIndex.map((p) => [p.id, p]));
-
-    const briefTeams: BriefTeamEntry[] = updatedRound.teams
-      .filter((t) => t.pilots.some((s) => s.status === "Filled"))
-      .map((t) => ({
-        teamName: t.teamName,
-        clubName: t.club.name,
-        pureTrackGroupId: t.pureTrackGroupId,
-        pureTrackGroupSlug: t.pureTrackGroupSlug,
-        pilots: t.pilots
-          .filter((s) => s.status === "Filled" && s.pilotId && s.snapshot)
-          .map((s) => {
-            const pilotMeta = pilotNameMap.get(s.pilotId!);
-            return {
-              placeInTeam: s.placeInTeam,
-              pilotId: s.pilotId!,
-              name: pilotMeta?.name ?? s.pilotId!,
-              bhpaNumber: pilotMeta?.bhpaNumber,
-              pureTrackId: pilotMeta?.pureTrackId,
-              isScoring: s.isScoring,
-              snapshot: s.snapshot!,
-            };
-          }),
-      }));
-
-    brief = {
-      roundId,
-      generatedAt: new Date().toISOString(),
-      date: updatedRound.date,
-      siteName: updatedRound.site.name,
-      guideUrl: siteGuideUrl,
-      parkingW3W: updatedRound.site.parkingW3W,
-      briefingW3W: updatedRound.site.briefingW3W,
-      takeOffW3W: updatedRound.site.takeOffW3W,
-      briefingTime: updatedRound.briefingTime,
-      checkInByTime: updatedRound.checkInByTime,
-      landByTime: updatedRound.landByTime,
-      organisingClubName: updatedRound.organisingClub?.name,
-      pureTrackGroupName: updatedRound.pureTrackGroupName,
-      pureTrackGroupSlug: updatedRound.pureTrackGroupSlug,
-      teams: briefTeams,
-    };
-  } catch (briefBuildErr) {
-    console.error(`${logPrefix} Failed to build brief document:`, briefBuildErr);
-    return; // cannot continue without brief
-  }
-
-  // ── 3. Upload brief JSON ──────────────────────────────────────────────────
-  try {
-    await writePrivateBlob(`round-briefs/${roundId}.json`, brief);
-    console.log(`${logPrefix} Brief JSON uploaded`);
-  } catch (jsonErr) {
-    console.error(`${logPrefix} Failed to upload brief JSON:`, jsonErr);
-    // continue — attempt PDF anyway
-  }
-
-  // ── 4. Generate and upload PDF ────────────────────────────────────────────
-  let pdfBuffer: Buffer | null = null;
-  try {
-    pdfBuffer = await generateBriefPdf(brief);
-    console.log(`${logPrefix} PDF generated (${pdfBuffer.length} bytes)`);
-
-    const pdfBlobClient = getPrivateBlockBlobClient(`round-briefs/${roundId}.pdf`);
-    await pdfBlobClient.upload(pdfBuffer, pdfBuffer.length, {
-      blobHTTPHeaders: { blobContentType: "application/pdf" },
-      metadata: {
-        sitename: brief.siteName,
-        date: brief.date,
-      },
-    });
-    console.log(`${logPrefix} PDF uploaded`);
-  } catch (pdfErr) {
-    console.error(`${logPrefix} PDF generation/upload failed:`, pdfErr);
-    // non-fatal — fall through to email (without attachment if PDF failed)
-  }
-
-  // ── 5. Send email ─────────────────────────────────────────────────────────
-  try {
-    const recipients = getBriefRecipients();
-    if (recipients.length === 0) {
-      console.log(`${logPrefix} No brief email recipients configured — skipping`);
-      return;
-    }
-
-    const dateDisplay = new Date(brief.date + "T00:00:00Z").toLocaleDateString(
-      "en-GB",
-      { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }
+    const site = await readBlob<Site>(
+      getPrivateBlobClient(`sites/${round.site.id}.json`)
     );
-
-    await sendEmail({
-      to: recipients,
-      subject: `BCC Round Brief — ${brief.siteName} — ${dateDisplay}`,
-      html: briefHtmlBody(brief.siteName, dateDisplay),
-      text: briefPlainText(brief.siteName, dateDisplay),
-      attachments: pdfBuffer
-        ? [
-            {
-              name: `BCC-Brief-${brief.siteName.replace(/\s+/g, "-")}-${brief.date}.pdf`,
-              contentType: "application/pdf",
-              data: pdfBuffer,
-            },
-          ]
-        : undefined,
-    });
-    console.log(`${logPrefix} Brief email sent to ${recipients.join(", ")}`);
-  } catch (emailErr) {
-    console.error(`${logPrefix} Failed to send brief email:`, emailErr);
+    siteGuideUrl = site.guideUrl;
+  } catch {
+    siteGuideUrl = undefined;
   }
+
+  const pilotsIndex = await readBlob<Array<{ id: string; name: string; bhpaNumber?: number; pureTrackId?: number }>>(
+    getBlobClient("pilots.json")
+  ).catch(() => [] as Array<{ id: string; name: string; bhpaNumber?: number; pureTrackId?: number }>);
+  const pilotNameMap = new Map(pilotsIndex.map((p) => [p.id, p]));
+
+  const teams: BriefTeamEntry[] = round.teams
+    .filter((t) => t.pilots.some((s) => s.status === "Filled"))
+    .map((t) => ({
+      teamName: t.teamName,
+      clubName: t.club.name,
+      pureTrackGroupId: t.pureTrackGroupId,
+      pureTrackGroupSlug: t.pureTrackGroupSlug,
+      pilots: t.pilots
+        .filter((s) => s.status === "Filled" && s.pilotId && s.snapshot)
+        .map((s) => {
+          const pilotMeta = pilotNameMap.get(s.pilotId!);
+          return {
+            placeInTeam: s.placeInTeam,
+            pilotId: s.pilotId!,
+            name: pilotMeta?.name ?? s.pilotId!,
+            bhpaNumber: pilotMeta?.bhpaNumber,
+            pureTrackId: pilotMeta?.pureTrackId,
+            isScoring: s.isScoring,
+            snapshot: s.snapshot!,
+          };
+        }),
+    }));
+
+  return {
+    roundId: round.id,
+    generatedAt: new Date().toISOString(),
+    date: round.date,
+    siteName: round.site.name,
+    guideUrl: siteGuideUrl,
+    parkingW3W: round.site.parkingW3W,
+    briefingW3W: round.site.briefingW3W,
+    takeOffW3W: round.site.takeOffW3W,
+    briefingTime: round.briefingTime,
+    checkInByTime: round.checkInByTime,
+    landByTime: round.landByTime,
+    organisingClubName: round.organisingClub?.name,
+    pureTrackGroupName: round.pureTrackGroupName,
+    pureTrackGroupSlug: round.pureTrackGroupSlug,
+    teams,
+  };
+}
+
+async function uploadBriefArtifacts(brief: RoundBrief): Promise<Buffer> {
+  await writePrivateBlob(`round-briefs/${brief.roundId}.json`, brief);
+  const pdfBuffer = await generateBriefPdf(brief);
+  const pdfBlobClient = getPrivateBlockBlobClient(`round-briefs/${brief.roundId}.pdf`);
+  await pdfBlobClient.upload(pdfBuffer, pdfBuffer.length, {
+    blobHTTPHeaders: { blobContentType: "application/pdf" },
+    metadata: {
+      sitename: brief.siteName,
+      date: brief.date,
+    },
+  });
+  return pdfBuffer;
+}
+
+async function sendBriefIfConfigured(brief: RoundBrief, pdfBuffer: Buffer | null): Promise<void> {
+  const recipients = getBriefRecipients();
+  if (recipients.length === 0) return;
+
+  const dateDisplay = new Date(brief.date + "T00:00:00Z").toLocaleDateString(
+    "en-GB",
+    { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }
+  );
+
+  await sendEmail({
+    to: recipients,
+    subject: `BCC Round Brief — ${brief.siteName} — ${dateDisplay}`,
+    html: briefHtmlBody(brief.siteName, dateDisplay),
+    text: briefPlainText(brief.siteName, dateDisplay),
+    attachments: pdfBuffer
+      ? [
+          {
+            name: `BCC-Brief-${brief.siteName.replace(/\s+/g, "-")}-${brief.date}.pdf`,
+            contentType: "application/pdf",
+            data: pdfBuffer,
+          },
+        ]
+      : undefined,
+  });
 }
 
 /**
@@ -675,11 +621,50 @@ async function lockRound(
     })
   );
 
-  // Now apply under lease
+  let candidateRound = structuredClone(round) as Round;
+  candidateRound.status = "Locked";
+  candidateRound.isLocked = true;
+  for (const team of candidateRound.teams) {
+    for (const slot of team.pilots) {
+      if (slot.pilotId && snapshotMap.has(slot.pilotId)) {
+        slot.snapshot = snapshotMap.get(slot.pilotId)!;
+      }
+      slot.accountedFor = false;
+      slot.signToFly = false;
+    }
+  }
+
+  let ptResult: PureTrackRoundResult | null = null;
+  try {
+    const pilotPureTrackIds = await loadPilotPureTrackIds(candidateRound);
+    ptResult = await createPureTrackGroups(candidateRound, pilotPureTrackIds);
+    candidateRound = applyPureTrackResult(candidateRound, ptResult);
+    console.log(
+      `[lockRound:${id}] PureTrack groups created: round=${ptResult.roundGroupId}, teams=${ptResult.teams.length}`
+    );
+  } catch (ptErr) {
+    console.error(`[lockRound:${id}] PureTrack group creation failed:`, ptErr);
+  }
+
+  const briefPaths = {
+    jsonPath: `round-briefs/${id}.json`,
+    pdfPath: `round-briefs/${id}.pdf`,
+    generatedAt: undefined as string | undefined,
+  };
+  try {
+    const brief = await buildRoundBrief(candidateRound);
+    briefPaths.generatedAt = brief.generatedAt;
+    const pdfBuffer = await uploadBriefArtifacts(brief);
+    await sendBriefIfConfigured(brief, pdfBuffer);
+    console.log(`[lockRound:${id}] Brief artifacts generated and email processed`);
+  } catch (briefErr) {
+    console.error(`[lockRound:${id}] Brief artifact/email processing failed:`, briefErr);
+  }
+
   let updated: Round;
   try {
-    updated = await withPrivateLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getPrivateBlobClient(path));
+    updated = await withPrivateLeaseRenewing(path, async (leaseId) => {
+      const r = await readBlob<RoundWithBriefMetadata>(getPrivateBlobClient(path));
 
       if (r.status !== "BriefComplete") {
         const err = new Error("Round status changed concurrently");
@@ -690,7 +675,20 @@ async function lockRound(
       r.status = "Locked";
       r.isLocked = true;
 
+      if (ptResult) {
+        r.pureTrackGroupId = ptResult.roundGroupId;
+        r.pureTrackGroupName = ptResult.roundGroupName;
+        r.pureTrackGroupSlug = ptResult.roundGroupSlug;
+      }
+
       for (const team of r.teams) {
+        if (ptResult) {
+          const tr = ptResult.teams.find((t) => t.teamId === team.id);
+          if (tr) {
+            team.pureTrackGroupId = tr.groupId;
+            team.pureTrackGroupSlug = tr.groupSlug;
+          }
+        }
         for (const slot of team.pilots) {
           if (slot.pilotId && snapshotMap.has(slot.pilotId)) {
             slot.snapshot = snapshotMap.get(slot.pilotId)!;
@@ -699,6 +697,13 @@ async function lockRound(
           slot.signToFly = false;
         }
       }
+
+      r.brief = {
+        version: (r.brief?.version ?? 0) + 1,
+        jsonPath: briefPaths.jsonPath,
+        pdfPath: briefPaths.pdfPath,
+        generatedAt: briefPaths.generatedAt,
+      };
 
       await writePrivateBlob(path, r, leaseId);
       return r;
@@ -710,11 +715,6 @@ async function lockRound(
   }
 
   await updateRoundsIndex(updated);
-
-  // Fire post-lock async work (PureTrack + PDF + email) — best-effort, non-blocking
-  postLockAsync(updated).catch((err) => {
-    console.error(`[lockRound] postLockAsync(${updated.id}) threw unexpectedly:`, err);
-  });
 
   return { status: 200, jsonBody: updated };
 }
@@ -761,10 +761,31 @@ async function completeRound(
 
   const config = await loadConfig();
   const path = `rounds/${id}.json`;
+  let current: Round;
+
+  try {
+    current = await readBlob<Round>(getPrivateBlobClient(path));
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      return { status: 404, jsonBody: { error: "Round not found" } };
+    }
+    throw err;
+  }
+
+  if (current.status !== "Locked") {
+    return {
+      status: 409,
+      jsonBody: {
+        error: `Round must be Locked to complete (currently ${current.status})`,
+      },
+    };
+  }
+
+  const scoredSnapshot = scoreRound(current, config);
   let updated: Round;
 
   try {
-    updated = await withPrivateLease(path, async (leaseId) => {
+    updated = await withPrivateLeaseRenewing(path, async (leaseId) => {
       const r = await readBlob<Round>(getPrivateBlobClient(path));
 
       if (r.status !== "Locked") {
@@ -775,7 +796,7 @@ async function completeRound(
         throw err;
       }
 
-      const scored = scoreRound(r, config);
+      const scored = structuredClone(scoredSnapshot) as Round;
       scored.status = "Complete";
       scored.isLocked = false;
 
