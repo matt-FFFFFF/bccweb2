@@ -608,6 +608,11 @@ reconcile field population.
 ## Task 50 notes — Production dry-run orchestrator
 
 ## Task 48 notes — Post-deploy smoke gate
+
+## Task 52 notes — azurerm provider bump
+- `terraform init -upgrade -backend=false` could not resolve any `~> 5.0` release in this environment; the latest available stable major was `hashicorp/azurerm ~> 4.0`, which resolved to `v4.76.0`.
+- v4 flagged `enable_rbac_authorization` as deprecated on `azurerm_key_vault`; switched to `rbac_authorization_enabled = true` and kept the existing Key Vault/role-assignment wiring unchanged.
+- `azurerm_application_insights`, `azurerm_monitor_action_group`, `azurerm_monitor_metric_alert`, and `azurerm_monitor_scheduled_query_rules_alert_v2` all planned cleanly on v4 with no schema edits needed.
 - Poll interval chosen: 5s with a 120s ceiling (24 attempts) to balance fast feedback with transient Azure startup delays.
 - GitHub Actions variables (`vars.API_HOST`, `vars.WEB_HOST`) were chosen over secrets because these are environment routing values, not credentials.
 - Branch protection for the smoke check must be configured manually in GitHub repo settings; Terraform cannot enforce the required status check here.
@@ -876,3 +881,56 @@ reconcile field population.
 - `apps/web/src/main.tsx` calls `setupTelemetry()` BEFORE `createRoot(...)`
   for the same init-order reason as the API.
 - No new npm dep added to `apps/web/package.json`; no bundle-size change.
+
+## Task 47 notes — Monitor alerts in Terraform + runbook
+
+### Final alert design (6 rules + 1 action group, all routing to ag-bccweb-prod-ops)
+
+| # | Resource | Type | Severity | Window | Rationale |
+|---|---|---|---|---|---|
+| 1 | api_5xx_rate | scheduled_query_rules_alert_v2 | 1 | 5m | rate>1% AND errors>=5 (absolute floor stops near-zero traffic false positives) |
+| 2 | function_execution_failures | scheduled_query_rules_alert_v2 | 2 | 5m | requests.success==false count > 10 |
+| 3 | storage_server_errors | metric_alert | 1 | 5m / 1m freq | Transactions metric dim ResponseType IN [ServerBusyError, ServerOtherError] > 5 |
+| 4 | auth_lockout_spike | scheduled_query_rules_alert_v2 | 2 | 15m | traces where message has "[METRIC] auth.lockout.triggered" count > 5 |
+| 5 | lockround_p95_duration | scheduled_query_rules_alert_v2 | 2 | 30m | requests where name==lockRound; p95 > 30000ms (with n>=3 sample floor) |
+| 6 | recompute_marker_stale | scheduled_query_rules_alert_v2 | 2 | 15m | traces where message has "[METRIC] recompute.marker.stale" |
+
+### Metric vs log-query tradeoffs (decisions made)
+
+- **Why scheduled query for 5xx rate (not metric):** `Microsoft.Web/sites.Http5xx` and `Requests` are separate metrics with no ratio operator in `azurerm_monitor_metric_alert`. A multi-metric `criteria` block expects scalar comparisons, not ratios. Doing the rate in KQL is the only option that gives a true percentage rather than absolute count.
+- **Why scheduled query for function-failures (not metric):** `FunctionExecutionCount` does NOT expose a `Status` dimension at the platform-metric layer — the original task spec was inaccurate on this point. App Insights `requests.success == false` is the only reliable per-execution success/failure source.
+- **Why metric alert for storage (not log query):** `Microsoft.Storage/storageAccounts.Transactions` with the `ResponseType` dimension is a first-class platform metric. Going via Log Analytics would add latency and cost vs the direct metric path. `ServerBusyError` covers HTTP 503 throttling; `ServerOtherError` covers generic 5xx.
+- **Auth lockout via traces (not customEvents):** T16 emits `[METRIC] auth.lockout.triggered` via `console.warn`, which the AI Node.js auto-instrumentation surfaces in the `traces` table — NOT `customEvents`. (The plan brief said customEvents but that would require an explicit `trackEvent` call which T16 did not wire.)
+- **Recompute marker stale is forward-looking:** No code path currently emits `[METRIC] recompute.marker.stale`. The alert resource is in place so the emitter can ship later without an additional terraform apply. Documented as "will not fire until emitter ships" in the runbook so on-call doesn't worry about silence.
+
+### azurerm_monitor_scheduled_query_rules_alert_v2 schema gotchas (azurerm 3.117.1)
+
+- `action.action_groups` is a LIST of action-group IDs (not singular `action_group_id` as on `metric_alert`).
+- `criteria.failing_periods` is REQUIRED — omitting it fails plan.
+- `criteria.time_aggregation_method = "Count"` + `threshold = 0` + `operator = "GreaterThan"` is the canonical "fire when the KQL projects any rows" pattern. The KQL itself does the real filtering via `where ... > threshold` before `project`.
+- `skip_query_validation = true` lets plan succeed without Log Analytics workspace credentials at plan time (the workspace doesn't exist yet on first apply).
+- `workspace_alerts_storage_enabled = false` avoids requiring a workspace storage account.
+- KQL must be inside an HCL heredoc (`<<-KQL ... KQL`). `terraform fmt` preserves indentation correctly.
+
+### azurerm_monitor_metric_alert dimension syntax
+
+- `dimension { name = "ResponseType"; operator = "Include"; values = ["ServerBusyError", "ServerOtherError"] }` — `values` is a list, multiple values are OR'd together.
+- `frequency = "PT1M"` with `window_size = "PT5M"` evaluates every minute over a rolling 5-minute window (catches bursts faster than 5m/5m).
+
+### azurerm_monitor_action_group conditional receivers
+
+- `dynamic "webhook_receiver" { for_each = var.slack_webhook_url != "" ? [var.slack_webhook_url] : [] ... }` — the empty-list pattern is the idiomatic conditional-block approach in 3.x (cleaner than `count` because `count` isn't supported on nested blocks).
+- `short_name` is capped at 12 chars by the Azure API. Chose `bccops`.
+- `use_common_alert_schema = true` on both receivers so downstream tooling (Slack formatters, PagerDuty integrations) receives a consistent payload shape.
+
+### var.ops_email validation
+
+- Used `validation { condition = length(trimspace(var.ops_email)) > 0 && can(regex("^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", var.ops_email)) ... }`.
+- No default → deploys fail closed if the operator forgets to set it. Aligns with "alerts without a recipient are worse than no alerts" from the task brief.
+
+### Plan verification numbers
+
+- 6 alert rules + 1 action group, every alert references `azurerm_monitor_action_group.ops.id` via config-tree expression (confirmed via `jq '.configuration.root_module.resources[]'` — `change.after.action_groups` shows `after_unknown: true` because the action group's ID is itself known-after-apply).
+- Total plan delta: 27 to add, 0 to change, 0 to destroy.
+- Plan command: `terraform plan -out=plan.binary -var-file=terraform.tfvars.example` (no `-backend=false` needed; `terraform init -backend=false` first).
+- Evidence: `.omo/evidence/task-47-alerts.txt`.
