@@ -16,11 +16,6 @@ jobs:
         image: mcr.microsoft.com/azure-storage/azurite
         ports:
           - 10000:10000
-        options: >-
-          --health-cmd "nc -z localhost 10000"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 15
 
     env:
       BLOB_CONNECTION_STRING: >-
@@ -28,6 +23,19 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Wait for Azurite
+        run: |
+          for i in {1..30}; do
+            if curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:10000/devstoreaccount1?comp=list 2>/dev/null | grep -qE "^(200|403|400)$"; then
+              echo "Azurite ready after ${i} attempts"
+              exit 0
+            fi
+            echo "Attempt $i: Azurite not ready, sleeping 2s..."
+            sleep 2
+          done
+          echo "::error::Azurite failed to become ready after 60s"
+          exit 1
 
       - name: Set up mise
         uses: jdx/mise-action@v2
