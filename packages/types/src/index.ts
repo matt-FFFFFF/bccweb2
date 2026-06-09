@@ -446,6 +446,21 @@ export interface RoundBrief {
   organisingClubName?: string;
   pureTrackGroupName?: string;
   pureTrackGroupSlug?: string;
+  windSpeedDirection?: string;
+  directionOfFlight?: string;
+  expectedLandingArea?: string;
+  airspaceAndHazards?: string;
+  NOTAMs?: string;
+  BENO_LineDescription?: string;
+  briefersNotes?: string;
+  briefer?: {
+    name?: string;
+    bhpaCoachLevel?: string;
+    bhpaNumber?: string;
+    phoneNumber?: string;
+    emailAddress?: string;
+  };
+  imagePaths?: string[];
   teams: BriefTeamEntry[];
 }
 
