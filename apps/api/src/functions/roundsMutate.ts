@@ -552,6 +552,43 @@ async function uploadBriefArtifacts(brief: RoundBrief): Promise<Buffer> {
   return pdfBuffer;
 }
 
+async function readExistingBriefForLock(id: string): Promise<RoundBrief | null> {
+  try {
+    return await readBlob<RoundBrief>(
+      getPrivateBlobClient(`round-briefs/${id}.json`)
+    );
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) return null;
+    throw new HttpError(500, "INTERNAL");
+  }
+}
+
+async function mergeBriefForLock(
+  round: Round,
+  existing: RoundBrief | null
+): Promise<RoundBrief> {
+  const derived = await buildRoundBrief(round);
+  if (!existing) return derived;
+  // Preserve coordinator-authored narrative fields and version metadata while
+  // refreshing every derived field. Field list mirrors RoundBrief lines 471-485
+  // in packages/types/src/index.ts: any future narrative field added there must
+  // be added here too or it will be silently dropped on lock.
+  return {
+    ...derived,
+    windSpeedDirection: existing.windSpeedDirection,
+    directionOfFlight: existing.directionOfFlight,
+    expectedLandingArea: existing.expectedLandingArea,
+    airspaceAndHazards: existing.airspaceAndHazards,
+    NOTAMs: existing.NOTAMs,
+    BENO_LineDescription: existing.BENO_LineDescription,
+    briefersNotes: existing.briefersNotes,
+    briefer: existing.briefer,
+    imagePaths: existing.imagePaths,
+    version: existing.version,
+    versionHistory: existing.versionHistory,
+  };
+}
+
 async function sendBriefIfConfigured(brief: RoundBrief, pdfBuffer: Buffer | null): Promise<void> {
   const recipients = getBriefRecipients();
   if (recipients.length === 0) return;
@@ -685,7 +722,8 @@ async function lockRound(
     generatedAt: undefined as string | undefined,
   };
   try {
-    const brief = await buildRoundBrief(candidateRound);
+    const existing = await readExistingBriefForLock(id);
+    const brief = await mergeBriefForLock(candidateRound, existing);
     briefPaths.generatedAt = brief.generatedAt;
     const pdfBuffer = await uploadBriefArtifacts(brief);
     await sendBriefIfConfigured(brief, pdfBuffer);
