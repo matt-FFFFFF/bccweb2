@@ -283,6 +283,7 @@ async function updatePilot(
       pureTrackId: body.pureTrackId ?? existing.pureTrackId,
       pureTrackLink: body.pureTrackLink ?? existing.pureTrackLink,
     }),
+    profileUpdatedAt: new Date().toISOString(),
   };
 
   await writePrivateBlob(`pilots/${id}.json`, updated);

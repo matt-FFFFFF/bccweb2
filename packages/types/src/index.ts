@@ -55,6 +55,9 @@ export interface User {
   pilotId: string | null;
   clubId: string | null;
   createdAt: string; // ISO date string
+  acceptedTsCsAt?: string;
+  acceptedTsCsIp?: string | null;
+  acceptedTsCsVersion?: number;
 }
 
 /** email → user UUID */
@@ -66,6 +69,9 @@ export interface CallerIdentity {
   roles: UserRole[];
   pilotId: string | null;
   clubId: string | null;
+  tsCsAcceptanceRequired?: boolean;
+  firstLoginOfSeason?: boolean;
+  activeSeasonYear?: number;
 }
 
 // ─── Reference Entities ───────────────────────────────────────────────────────
@@ -232,6 +238,7 @@ export interface Pilot {
   wingColours?: string;
   person: Person;
   currentClub?: ClubRef;
+  profileUpdatedAt?: string;
   seasonClubs: PilotSeasonClub[];
   userId: string | null; // B2C oid, null until linked
   createdAt?: string;

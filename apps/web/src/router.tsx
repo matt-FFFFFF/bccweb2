@@ -9,6 +9,7 @@ import CreateRound from "./pages/rounds/CreateRound.js";
 import RoundManage from "./pages/rounds/RoundManage.js";
 import RoundBrief from "./pages/rounds/RoundBrief.js";
 import SignToFly from "./pages/rounds/SignToFly.js";
+import RegisterForRound from "./pages/rounds/RegisterForRound.js";
 import League from "./pages/results/League.js";
 import RoundResults from "./pages/results/RoundResults.js";
 import PilotsList from "./pages/pilots/PilotsList.js";
@@ -18,11 +19,13 @@ import Register from "./pages/auth/Register.js";
 import VerifyEmail from "./pages/auth/VerifyEmail.js";
 import ForgotPassword from "./pages/auth/ForgotPassword.js";
 import ResetPassword from "./pages/auth/ResetPassword.js";
+import Terms from "./pages/Terms.js";
 import AdminUsers from "./pages/admin/Users.js";
 import AdminClubs from "./pages/admin/Clubs.js";
 import AdminSites from "./pages/admin/Sites.js";
 import AdminConfig from "./pages/admin/Config.js";
 import MyClub from "./pages/club/MyClub.js";
+import FirstLoginOfSeasonGate from "./components/FirstLoginOfSeasonGate.js";
 import "./bcc-theme.css";
 
 function Nav() {
@@ -154,7 +157,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
-        <Nav />
+        <FirstLoginOfSeasonGate><Nav />
         <main className="bcc-main">
           <Routes>
           <Route path="/" element={<Home />} />
@@ -163,6 +166,7 @@ export default function App() {
           <Route path="/rounds" element={<RequireAuth><Page><RoundsList /></Page></RequireAuth>} />
           <Route path="/rounds/new" element={<RequireAuth><Page><CreateRound /></Page></RequireAuth>} />
           <Route path="/rounds/:id" element={<RequireAuth><Page><RoundDetail /></Page></RequireAuth>} />
+          <Route path="/rounds/:id/register" element={<RequireAuth><Page><RegisterForRound /></Page></RequireAuth>} />
           <Route path="/rounds/:id/manage" element={<RequireAuth><Page><RoundManage /></Page></RequireAuth>} />
           <Route path="/rounds/:id/brief" element={<RequireAuth><Page><RoundBrief /></Page></RequireAuth>} />
           <Route path="/rounds/:roundId/sign/:teamId/:place" element={<RequireAuth><Page><SignToFly /></Page></RequireAuth>} />
@@ -179,6 +183,7 @@ export default function App() {
           {/* Auth */}
           <Route path="/login" element={<Page><Login /></Page>} />
           <Route path="/register" element={<Page><Register /></Page>} />
+          <Route path="/terms" element={<Page><Terms /></Page>} />
           <Route path="/verify-email" element={<Page><VerifyEmail /></Page>} />
           <Route path="/forgot-password" element={<Page><ForgotPassword /></Page>} />
           <Route path="/reset-password" element={<Page><ResetPassword /></Page>} />
@@ -196,7 +201,7 @@ export default function App() {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
         </main>
-        <Footer />
+        <Footer /></FirstLoginOfSeasonGate>
       </AuthProvider>
     </BrowserRouter>
   );
