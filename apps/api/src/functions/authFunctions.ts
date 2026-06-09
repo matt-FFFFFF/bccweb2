@@ -16,12 +16,16 @@ import {
   HttpResponseInit,
   InvocationContext,
 } from "@azure/functions";
-import { randomUUID } from "crypto";
+import { createHash, randomBytes, randomUUID } from "crypto";
 import type { User } from "@bccweb/types";
 import { getPrivateBlobClient, readBlob, writePrivateBlob } from "../lib/blob.js";
 import { getOrCreateUser } from "../lib/auth.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 import {
   AuthCredential,
+  TokenAlreadyConsumedError,
+  TokenExpiredError,
+  TokenNotFoundError,
   signAccessToken,
   signRefreshToken,
   verifyRefreshToken,
@@ -48,12 +52,98 @@ function badRequest(message: string): HttpResponseInit {
   return { status: 400, jsonBody: { error: message } };
 }
 
+const REGISTER_ACCEPTED_BODY = {
+  status: "accepted",
+  message:
+    "If this email is not yet registered, you will receive a verification link shortly.",
+} as const;
+
+const REGISTER_ACCEPTED_RESPONSE: HttpResponseInit = {
+  status: 202,
+  jsonBody: REGISTER_ACCEPTED_BODY,
+};
+
+const VERIFICATION_TOKEN_REISSUE_WINDOW_MS = 60_000;
+
+interface VerificationState {
+  token: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+function hashEmailPrefix(email: string): string {
+  return createHash("sha256").update(email.toLowerCase()).digest("hex").slice(0, 8);
+}
+
+function verificationStatePath(userId: string): string {
+  return `auth/verification-state/${userId}.json`;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function ensureMinimumDuration(startedAtMs: number, minimumMs: number): Promise<void> {
+  const elapsed = Date.now() - startedAtMs;
+  if (elapsed < minimumMs) {
+    await sleep(minimumMs - elapsed);
+  }
+}
+
+async function storeVerificationToken(
+  userId: string,
+  rawToken: string,
+  ttlHours: number
+): Promise<VerificationState> {
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + ttlHours * 3_600_000).toISOString();
+  const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+  const tokenDoc: VerificationState = { token: rawToken, createdAt, expiresAt };
+
+  await writePrivateBlob(`auth/tokens/${tokenHash}.json`, {
+    userId,
+    type: "verify",
+    createdAt,
+    expiresAt,
+  });
+  await writePrivateBlob(verificationStatePath(userId), tokenDoc);
+  return tokenDoc;
+}
+
+async function createVerificationToken(userId: string, ttlHours: number): Promise<VerificationState> {
+  const rawToken = randomBytes(32).toString("hex");
+  return storeVerificationToken(userId, rawToken, ttlHours);
+}
+
+async function loadVerificationState(userId: string): Promise<VerificationState | null> {
+  try {
+    return await readBlob<VerificationState>(getPrivateBlobClient(verificationStatePath(userId)));
+  } catch {
+    return null;
+  }
+}
+
+async function sendVerificationEmail(email: string, token: string): Promise<void> {
+  const verifyUrl = `${getAppUrl()}/verify-email?token=${token}`;
+  try {
+    await sendEmail({
+      to: [email],
+      subject: "Verify your BCC account",
+      html: verificationEmailHtml(verifyUrl),
+      text: verificationEmailText(verifyUrl),
+    });
+  } catch (err) {
+    console.error("[auth/register] Failed to send verification email:", err);
+  }
+}
+
 // ─── POST /api/auth/register ──────────────────────────────────────────────────
 
 async function register(
   req: HttpRequest,
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
+  const startedAtMs = Date.now();
   let body: { email?: string; password?: string };
   try {
     body = (await req.json()) as typeof body;
@@ -69,50 +159,48 @@ async function register(
     return badRequest("Password must be at least 8 characters");
   }
 
-  // Reject if email already registered
-  const existing = await lookupUserByEmail(email);
-  if (existing) {
-    return {
-      status: 409,
-      jsonBody: { error: "An account with this email already exists" },
+  const emailLower = email.toLowerCase();
+  const emailHashPrefix = hashEmailPrefix(emailLower);
+  const existing = await lookupUserByEmail(emailLower);
+
+  let branchLabel = "new-email";
+
+  if (!existing) {
+    const userId = randomUUID();
+    const credential: AuthCredential = {
+      passwordHash: await hashPassword(password),
+      emailVerified: false,
+      createdAt: new Date().toISOString(),
     };
+    await writePrivateBlob(`auth/${userId}.json`, credential);
+    await getOrCreateUser(userId, emailLower);
+
+    const tokenDoc = await createVerificationToken(userId, 24);
+    await sendVerificationEmail(emailLower, tokenDoc.token);
+  } else {
+    let cred: AuthCredential | null = null;
+    try {
+      cred = await readBlob<AuthCredential>(getPrivateBlobClient(`auth/${existing}.json`));
+    } catch {
+      cred = null;
+    }
+
+    if (cred?.emailVerified) {
+      branchLabel = "existing-verified";
+    } else {
+      const state = await loadVerificationState(existing);
+      const now = Date.now();
+      const freshState = state && now - new Date(state.createdAt).getTime() < VERIFICATION_TOKEN_REISSUE_WINDOW_MS;
+
+      branchLabel = freshState ? "existing-unverified-reuse" : "existing-unverified-reissue";
+      const tokenDoc = freshState && state ? state : await createVerificationToken(existing, 24);
+      await sendVerificationEmail(emailLower, tokenDoc.token);
+    }
   }
 
-  const userId = randomUUID();
-
-  // Write auth credential blob
-  const credential: AuthCredential = {
-    passwordHash: await hashPassword(password),
-    emailVerified: false,
-    createdAt: new Date().toISOString(),
-  };
-  await writePrivateBlob(`auth/${userId}.json`, credential);
-
-  // Create user record (pilot auto-link + user-index update)
-  await getOrCreateUser(userId, email);
-
-  // Generate verification token (24h TTL) and send email
-  const token = await generateShortLivedToken(userId, "verify", 24);
-  const verifyUrl = `${getAppUrl()}/verify-email?token=${token}`;
-
-  try {
-    await sendEmail({
-      to: [email],
-      subject: "Verify your BCC account",
-      html: verificationEmailHtml(verifyUrl),
-      text: verificationEmailText(verifyUrl),
-    });
-  } catch (err) {
-    console.error("[auth/register] Failed to send verification email:", err);
-  }
-
-  return {
-    status: 201,
-    jsonBody: {
-      message:
-        "Registration successful. Please check your email to verify your account.",
-    },
-  };
+  console.log("[auth] register branch:", branchLabel, "for", emailHashPrefix);
+  await ensureMinimumDuration(startedAtMs, 100);
+  return REGISTER_ACCEPTED_RESPONSE;
 }
 
 // ─── GET /api/auth/verify ─────────────────────────────────────────────────────
@@ -124,9 +212,18 @@ async function verifyEmail(
   const token = req.query.get("token");
   if (!token) return badRequest("Missing token");
 
-  const result = await consumeShortLivedToken(token, "verify");
-  if ("error" in result) {
-    return { status: 400, jsonBody: { error: result.error } };
+  let result: { userId: string };
+  try {
+    result = await consumeShortLivedToken(token, "verify");
+  } catch (err: unknown) {
+    if (
+      err instanceof TokenNotFoundError ||
+      err instanceof TokenExpiredError ||
+      err instanceof TokenAlreadyConsumedError
+    ) {
+      throw new HttpError(400, "INVALID_TOKEN", "Invalid or expired token");
+    }
+    throw new HttpError(500, "INTERNAL");
   }
 
   const credPath = `auth/${result.userId}.json`;
@@ -134,7 +231,7 @@ async function verifyEmail(
   try {
     cred = await readBlob<AuthCredential>(getPrivateBlobClient(credPath));
   } catch {
-    return { status: 400, jsonBody: { error: "Invalid token" } };
+    throw new HttpError(400, "INVALID_TOKEN", "Invalid token");
   }
 
   cred.emailVerified = true;
@@ -367,9 +464,18 @@ async function resetPassword(
     return badRequest("Password must be at least 8 characters");
   }
 
-  const result = await consumeShortLivedToken(body.token, "reset");
-  if ("error" in result) {
-    return { status: 400, jsonBody: { error: result.error } };
+  let result: { userId: string };
+  try {
+    result = await consumeShortLivedToken(body.token, "reset");
+  } catch (err: unknown) {
+    if (
+      err instanceof TokenNotFoundError ||
+      err instanceof TokenExpiredError ||
+      err instanceof TokenAlreadyConsumedError
+    ) {
+      throw new HttpError(400, "INVALID_TOKEN", "Invalid or expired token");
+    }
+    throw new HttpError(500, "INTERNAL");
   }
 
   const credPath = `auth/${result.userId}.json`;
@@ -377,7 +483,7 @@ async function resetPassword(
   try {
     cred = await readBlob<AuthCredential>(getPrivateBlobClient(credPath));
   } catch {
-    return { status: 400, jsonBody: { error: "Invalid token" } };
+    throw new HttpError(400, "INVALID_TOKEN", "Invalid token");
   }
 
   cred.passwordHash = await hashPassword(body.newPassword);
@@ -395,47 +501,47 @@ app.http("authRegister", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "auth/register",
-  handler: register,
+  handler: withErrorHandler(register),
 });
 
 app.http("authVerifyEmail", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "auth/verify",
-  handler: verifyEmail,
+  handler: withErrorHandler(verifyEmail),
 });
 
 app.http("authResendVerification", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "auth/resend-verification",
-  handler: resendVerification,
+  handler: withErrorHandler(resendVerification),
 });
 
 app.http("authLogin", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "auth/login",
-  handler: login,
+  handler: withErrorHandler(login),
 });
 
 app.http("authRefresh", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "auth/refresh",
-  handler: refresh,
+  handler: withErrorHandler(refresh),
 });
 
 app.http("authForgotPassword", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "auth/forgot-password",
-  handler: forgotPassword,
+  handler: withErrorHandler(forgotPassword),
 });
 
 app.http("authResetPassword", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "auth/reset-password",
-  handler: resetPassword,
+  handler: withErrorHandler(resetPassword),
 });
