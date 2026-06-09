@@ -10,7 +10,7 @@ resource "azapi_resource" "storage" {
   body = {
     kind = "StorageV2"
     sku = {
-      name = "Standard_LRS"
+      name = "Standard_GRS"
     }
     properties = {
       # Required to allow container-level and blob-level public access
@@ -23,9 +23,30 @@ resource "azapi_resource" "storage" {
   response_export_values = ["name"]
 }
 
-# ─── Blob Service (CORS) ─────────────────────────────────────────────────────
+# ─── Management Lock ─────────────────────────────────────────────────────────
 #
-# Allow the React SPA (Static Web App) to read public blobs directly.
+# Prevents accidental deletion of the storage account. Must be removed via a
+# deliberate operator action before any destroy is attempted.
+
+resource "azapi_resource" "storage_lock" {
+  type      = "Microsoft.Authorization/locks@2020-05-01"
+  name      = "storage-nodelete"
+  parent_id = azapi_resource.storage.id
+
+  body = {
+    properties = {
+      level = "CanNotDelete"
+      notes = "Prevents accidental destroy; remove via deliberate operator action"
+    }
+  }
+
+  depends_on = [azapi_resource.storage]
+}
+
+# ─── Blob Service ────────────────────────────────────────────────────────────
+#
+# Versioning, change feed, and soft-delete protect against data loss.
+# CORS is locked to var.allowed_origins (no wildcard).
 
 resource "azapi_resource" "blob_service" {
   type      = "Microsoft.Storage/storageAccounts/blobServices@2023-05-01"
@@ -34,15 +55,26 @@ resource "azapi_resource" "blob_service" {
 
   body = {
     properties = {
-      isVersioningEnabled = false
+      isVersioningEnabled = true
+      changeFeed = {
+        enabled = true
+      }
+      deleteRetentionPolicy = {
+        enabled = true
+        days    = 30
+      }
+      containerDeleteRetentionPolicy = {
+        enabled = true
+        days    = 30
+      }
       cors = {
         corsRules = [
           {
-            allowedOrigins  = ["*"]
+            allowedOrigins  = var.allowed_origins
             allowedMethods  = ["GET", "HEAD", "OPTIONS"]
-            allowedHeaders  = ["*"]
+            allowedHeaders  = ["Content-Type", "Authorization", "x-ms-*", "If-Match", "If-None-Match"]
             exposedHeaders  = ["*"]
-            maxAgeInSeconds = 86400
+            maxAgeInSeconds = 3600
           }
         ]
       }

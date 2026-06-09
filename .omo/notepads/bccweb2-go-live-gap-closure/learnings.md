@@ -98,3 +98,26 @@
 - `--list` verification output: `[chromium-desktop] › smoke.spec.ts:4:5 › smoke: home page contains BCC branding` — config is valid.
 - Evidence saved to `.omo/evidence/task-5-e2e-list.txt`.
 - `.gitignore` extended with `playwright-report/`, `test-results/`, `tests/e2e/playwright-report/`, `tests/e2e/test-results/`.
+
+## Task 6 notes (IaC storage hardening)
+- IaC uses BOTH `azapi` (~> 2.8) AND `azurerm` (~> 3.0) providers — azurerm is used for
+  `azurerm_key_vault`, `azurerm_role_assignment`, and `data "azurerm_client_config" "current"`.
+  The AGENTS.md note "azapi is the right resource" is not fully accurate; check providers.tf first.
+- Management locks via azapi: `azapi_resource` with type `Microsoft.Authorization/locks@2020-05-01`,
+  `parent_id = <resource>.id`. This is equivalent to `azurerm_management_lock` but uses the azapi
+  provider that is already installed. No need to add a second provider block.
+- `terraform plan -backend=false` works without real Azure credentials because the azurerm data
+  source (`azurerm_client_config`) is resolved during plan using ambient CLI auth (az login).
+  The plan succeeded here because `az login` was previously run in this environment.
+- azapi v2 body in plan JSON: when body is an HCL object (not a JSON string), `terraform show -json`
+  renders it as a nested JSON object under `values.body`. No `fromjson` needed, but the jq script
+  handles both forms defensively: `if type == "string" then fromjson else . end`.
+- jq pattern for checking CORS origins across all rules (flatten nested arrays safely):
+  `[($bs_props.cors.corsRules // [])[] | (.allowedOrigins // [])[]] | index("*") != null`
+- `terraform.tfvars.example` must cover ALL variables with no default in any .tf file, not just
+  the ones you touched. Run `terraform plan` once to discover missing vars, then add them.
+- The `jwt_secret` variable declaration was removed from `variables.tf` at some point (now handled
+  via Key Vault reference in functions.tf) but leaving a stub in tfvars.example causes only a
+  WARNING, not an error — safe to leave for operator guidance.
+- Change feed (`changeFeed.enabled = true`) lives in the blob service body alongside versioning
+  and soft-delete; all four properties coexist in `Microsoft.Storage/storageAccounts/blobServices`.

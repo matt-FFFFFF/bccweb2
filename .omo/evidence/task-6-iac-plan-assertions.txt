@@ -1,0 +1,28 @@
+Task 6 — IaC Storage Hardening — Plan Assertions
+=================================================
+Date: 2026-06-09
+Branch: (working tree, pre-commit)
+Plan command: terraform plan -out=plan.binary -var-file=terraform.tfvars.example -var='allowed_origins=["https://example.com"]'
+Assertion command: terraform show -json plan.binary | jq -f ../scripts/iac-assertions.jq
+
+Results
+-------
+"PASS: blob versioning enabled"
+"PASS: blob soft-delete >= 30 days"
+"PASS: container soft-delete >= 30 days"
+"PASS: storage replication type is GRS"
+"PASS: CORS allowedOrigins does not contain wildcard"
+"PASS: management lock resource present (azapi_resource.storage_lock)"
+
+Summary: 6 PASS, 0 FAIL
+
+Plan summary
+------------
+Plan: 17 to add, 0 to change, 0 to destroy.
+
+Files changed
+-------------
+iac/storage.tf              - GRS, blob_service hardening (versioning/changeFeed/soft-delete/CORS), management lock
+iac/variables.tf            - added allowed_origins variable
+iac/terraform.tfvars.example - created with all required variable stubs
+scripts/iac-assertions.jq   - new jq filter with 6 assertions

@@ -10,10 +10,10 @@ variable "environment" {
   default     = "prod"
 }
 
-variable "jwt_secret" {
-  description = "HS256 signing secret for issued JWTs (min 32 chars, random)"
-  type        = string
-  sensitive   = true
+variable "allowed_origins" {
+  description = "Allowed CORS origins for the storage account blob service (no wildcards in production)"
+  type        = list(string)
+  default     = []
 }
 
 locals {

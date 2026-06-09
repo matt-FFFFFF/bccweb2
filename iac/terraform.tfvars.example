@@ -1,0 +1,31 @@
+# Copy to terraform.tfvars and fill in real values before applying.
+# Never commit terraform.tfvars — it contains secrets.
+#
+# Bootstrap order (first deploy):
+#   1. terraform apply
+#   2. scripts/iac/seed-secrets.sh   <- places jwt-secret into Key Vault
+#   3. Deploy the Function App package
+#
+# See iac/README.md for full details.
+
+# CORS: list of allowed origins for the storage blob service (no wildcards in prod)
+allowed_origins = [
+  "https://your-swa-host.azurestaticapps.net",
+  "http://localhost:5173",
+]
+
+# ACS Email
+acs_email_domain   = "mail.yourdomain.com"
+acs_sender_address = "noreply@mail.yourdomain.com"
+
+# Secrets (sensitive — prefer TF_VAR_* env vars in CI rather than storing here)
+round_brief_emails = "briefings@yourdomain.com"
+puretrack_api_key  = "change-me"
+puretrack_email    = "puretrack@yourdomain.com"
+puretrack_password = "change-me"
+
+# jwt_secret is NO LONGER a Terraform variable.
+# The Function App reads JWT_SECRET at runtime from Key Vault via its
+# system-assigned managed identity (@Microsoft.KeyVault reference).
+# After the first `terraform apply`, seed the secret out-of-band:
+#   scripts/iac/seed-secrets.sh
