@@ -25,6 +25,12 @@ puretrack_api_key  = "change-me"
 puretrack_email    = "puretrack@yourdomain.com"
 puretrack_password = "change-me"
 
+# Observability / alert routing (T47).
+# ops_email is REQUIRED — deploys fail closed if blank.
+# slack_webhook_url is optional; leave empty to skip the Slack receiver.
+ops_email         = "oncall@yourdomain.com"
+slack_webhook_url = ""
+
 # jwt_secret is NO LONGER a Terraform variable.
 # The Function App reads JWT_SECRET at runtime from Key Vault via its
 # system-assigned managed identity (@Microsoft.KeyVault reference).
