@@ -1,0 +1,44 @@
+{
+  "name": "synthetic-handcrafted-2025-09-14-pandy",
+  "notes": "Synthetic handcrafted fixture because real exported legacy rounds were unavailable. Expected values use score = round1(distance * wingFactor) and team score = round1(sum of scoring pilots), with exact league tie ranking checked.",
+  "input": {
+    "round": {
+      "id": "33333333-3333-4333-8333-333333333333",
+      "date": "2025-09-14",
+      "status": "Complete",
+      "isLocked": true,
+      "maxTeams": 8,
+      "minimumScore": 0,
+      "site": { "id": "33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa", "name": "Synthetic Pandy" },
+      "season": { "year": 2025 },
+      "teams": [
+        { "id": "99999999-0000-4000-8000-000000000001", "teamName": "Synthetic Golf A", "club": { "id": "99999999-1000-4000-8000-000000000001", "name": "Synthetic Golf" }, "score": 0, "pilots": [
+          { "placeInTeam": 1, "isScoring": true, "status": "Filled", "accountedFor": true, "signToFly": true, "noScore": false, "pilotPoints": 0, "pilotId": "99999999-2000-4000-8000-000000000001", "snapshot": { "wingClass": "EN B", "pilotRating": "Pilot", "phoneNumber": "", "wingManufacturer": "Synthetic", "medicalInfo": "", "emergencyContactName": "", "emergencyPhoneNumber": "" }, "flight": { "id": "99999999-3000-4000-8000-000000000001", "distance": 33.4, "scoringType": "XC", "score": 0, "wingFactor": 1, "isManualLog": false } },
+          { "placeInTeam": 2, "isScoring": true, "status": "Filled", "accountedFor": true, "signToFly": true, "noScore": false, "pilotPoints": 0, "pilotId": "99999999-2000-4000-8000-000000000002", "snapshot": { "wingClass": "EN C", "pilotRating": "Advanced Pilot", "phoneNumber": "", "wingManufacturer": "Synthetic", "medicalInfo": "", "emergencyContactName": "", "emergencyPhoneNumber": "" }, "flight": { "id": "99999999-3000-4000-8000-000000000002", "distance": 33.4, "scoringType": "XC", "score": 0, "wingFactor": 1, "isManualLog": false } },
+          { "placeInTeam": 3, "isScoring": true, "status": "Filled", "accountedFor": true, "signToFly": true, "noScore": false, "pilotPoints": 0, "pilotId": "99999999-2000-4000-8000-000000000003", "snapshot": { "wingClass": "EN D 2-liner", "pilotRating": "Advanced Pilot", "phoneNumber": "", "wingManufacturer": "Synthetic", "medicalInfo": "", "emergencyContactName": "", "emergencyPhoneNumber": "" }, "flight": { "id": "99999999-3000-4000-8000-000000000003", "distance": 33.4, "scoringType": "XC", "score": 0, "wingFactor": 1, "isManualLog": false } },
+          { "placeInTeam": 4, "isScoring": true, "status": "Filled", "accountedFor": true, "signToFly": true, "noScore": false, "pilotPoints": 0, "pilotId": "99999999-2000-4000-8000-000000000004", "snapshot": { "wingClass": "EN A", "pilotRating": "Pilot", "phoneNumber": "", "wingManufacturer": "Synthetic", "medicalInfo": "", "emergencyContactName": "", "emergencyPhoneNumber": "" }, "flight": null }
+        ] },
+        { "id": "88888888-0000-4000-8000-000000000001", "teamName": "Synthetic Hotel A", "club": { "id": "88888888-1000-4000-8000-000000000001", "name": "Synthetic Hotel" }, "score": 0, "pilots": [
+          { "placeInTeam": 1, "isScoring": true, "status": "Filled", "accountedFor": true, "signToFly": true, "noScore": false, "pilotPoints": 0, "pilotId": "88888888-2000-4000-8000-000000000001", "snapshot": { "wingClass": "EN A", "pilotRating": "Pilot", "phoneNumber": "", "wingManufacturer": "Synthetic", "medicalInfo": "", "emergencyContactName": "", "emergencyPhoneNumber": "" }, "flight": { "id": "88888888-3000-4000-8000-000000000001", "distance": 30.1, "scoringType": "XC", "score": 0, "wingFactor": 1, "isManualLog": false } },
+          { "placeInTeam": 2, "isScoring": true, "status": "Filled", "accountedFor": true, "signToFly": true, "noScore": false, "pilotPoints": 0, "pilotId": "88888888-2000-4000-8000-000000000002", "snapshot": { "wingClass": "EN B", "pilotRating": "Pilot", "phoneNumber": "", "wingManufacturer": "Synthetic", "medicalInfo": "", "emergencyContactName": "", "emergencyPhoneNumber": "" }, "flight": { "id": "88888888-3000-4000-8000-000000000002", "distance": 33.4, "scoringType": "XC", "score": 0, "wingFactor": 1, "isManualLog": false } },
+          { "placeInTeam": 3, "isScoring": true, "status": "Filled", "accountedFor": true, "signToFly": true, "noScore": false, "pilotPoints": 0, "pilotId": "88888888-2000-4000-8000-000000000003", "snapshot": { "wingClass": "EN C", "pilotRating": "Advanced Pilot", "phoneNumber": "", "wingManufacturer": "Synthetic", "medicalInfo": "", "emergencyContactName": "", "emergencyPhoneNumber": "" }, "flight": { "id": "88888888-3000-4000-8000-000000000003", "distance": 16.6, "scoringType": "XC", "score": 0, "wingFactor": 1, "isManualLog": false } }
+        ] },
+        { "id": "77777777-0000-4000-8000-000000000001", "teamName": "Synthetic India A", "club": { "id": "77777777-1000-4000-8000-000000000001", "name": "Synthetic India" }, "score": 0, "pilots": [
+          { "placeInTeam": 1, "isScoring": true, "status": "Filled", "accountedFor": true, "signToFly": true, "noScore": true, "pilotPoints": 0, "pilotId": "77777777-2000-4000-8000-000000000001", "snapshot": { "wingClass": "EN A", "pilotRating": "Pilot", "phoneNumber": "", "wingManufacturer": "Synthetic", "medicalInfo": "", "emergencyContactName": "", "emergencyPhoneNumber": "" }, "flight": { "id": "77777777-3000-4000-8000-000000000001", "distance": 100, "scoringType": "XC", "score": 0, "wingFactor": 1, "isManualLog": false } },
+          { "placeInTeam": 2, "isScoring": true, "status": "Filled", "accountedFor": true, "signToFly": true, "noScore": false, "pilotPoints": 0, "pilotId": "77777777-2000-4000-8000-000000000002", "snapshot": { "wingClass": "EN D", "pilotRating": "Advanced Pilot", "phoneNumber": "", "wingManufacturer": "Synthetic", "medicalInfo": "", "emergencyContactName": "", "emergencyPhoneNumber": "" }, "flight": { "id": "77777777-3000-4000-8000-000000000002", "distance": 66.6, "scoringType": "XC", "score": 0, "wingFactor": 1, "isManualLog": false } },
+          { "placeInTeam": 3, "isScoring": true, "status": "Filled", "accountedFor": true, "signToFly": true, "noScore": false, "pilotPoints": 0, "pilotId": "77777777-2000-4000-8000-000000000003", "snapshot": { "wingClass": "EN C 2-liner", "pilotRating": "Advanced Pilot", "phoneNumber": "", "wingManufacturer": "Synthetic", "medicalInfo": "", "emergencyContactName": "", "emergencyPhoneNumber": "" }, "flight": { "id": "77777777-3000-4000-8000-000000000003", "distance": 55.5, "scoringType": "XC", "score": 0, "wingFactor": 1, "isManualLog": false } }
+        ] }
+      ]
+    },
+    "config": { "maxTeamsInClub": 2, "maxPilotsInTeam": 12, "maxScoringPilotsInTeam": 6, "flightDateValidationEnabled": false, "wingFactors": { "EN A": 1, "EN B": 0.9, "EN C": 0.8, "EN C 2-liner": 0.7, "EN D": 0.6, "EN D 2-liner": 0.5 } }
+  },
+  "expected": {
+    "teamScores": [ { "teamId": "99999999-0000-4000-8000-000000000001", "score": 73.5 }, { "teamId": "88888888-0000-4000-8000-000000000001", "score": 73.5 }, { "teamId": "77777777-0000-4000-8000-000000000001", "score": 78.8 } ],
+    "pilotScores": [
+      { "pilotId": "99999999-2000-4000-8000-000000000001", "totalScore": 30.1 }, { "pilotId": "99999999-2000-4000-8000-000000000002", "totalScore": 26.7 }, { "pilotId": "99999999-2000-4000-8000-000000000003", "totalScore": 16.7 }, { "pilotId": "99999999-2000-4000-8000-000000000004", "totalScore": 0 },
+      { "pilotId": "88888888-2000-4000-8000-000000000001", "totalScore": 30.1 }, { "pilotId": "88888888-2000-4000-8000-000000000002", "totalScore": 30.1 }, { "pilotId": "88888888-2000-4000-8000-000000000003", "totalScore": 13.3 },
+      { "pilotId": "77777777-2000-4000-8000-000000000001", "totalScore": 0 }, { "pilotId": "77777777-2000-4000-8000-000000000002", "totalScore": 40 }, { "pilotId": "77777777-2000-4000-8000-000000000003", "totalScore": 38.8 }
+    ],
+    "leagueAfter": [ { "teamId": "77777777-0000-4000-8000-000000000001", "position": 1, "score": 78.8 }, { "teamId": "99999999-0000-4000-8000-000000000001", "position": 2, "score": 73.5 }, { "teamId": "88888888-0000-4000-8000-000000000001", "position": 2, "score": 73.5 } ]
+  }
+}
