@@ -8,6 +8,7 @@ import RoundDetail from "./pages/rounds/RoundDetail.js";
 import CreateRound from "./pages/rounds/CreateRound.js";
 import RoundManage from "./pages/rounds/RoundManage.js";
 import RoundBrief from "./pages/rounds/RoundBrief.js";
+import SignToFly from "./pages/rounds/SignToFly.js";
 import League from "./pages/results/League.js";
 import RoundResults from "./pages/results/RoundResults.js";
 import PilotsList from "./pages/pilots/PilotsList.js";
@@ -164,6 +165,7 @@ export default function App() {
           <Route path="/rounds/:id" element={<RequireAuth><Page><RoundDetail /></Page></RequireAuth>} />
           <Route path="/rounds/:id/manage" element={<RequireAuth><Page><RoundManage /></Page></RequireAuth>} />
           <Route path="/rounds/:id/brief" element={<RequireAuth><Page><RoundBrief /></Page></RequireAuth>} />
+          <Route path="/rounds/:roundId/sign/:teamId/:place" element={<RequireAuth><Page><SignToFly /></Page></RequireAuth>} />
 
           {/* Results / League — public */}
           <Route path="/results" element={<ResultsRedirect />} />

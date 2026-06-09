@@ -41,6 +41,7 @@ export default function RoundDetail() {
   const { identity } = useAuth();
 
   const [round, setRound] = useState<Round | null>(null);
+  const [brief, setBrief] = useState<any>(null); // Type is RoundBrief & { version?: number }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -55,11 +56,17 @@ export default function RoundDetail() {
     setError(null);
     setNotFound(false);
 
-    api
-      .get<Round>(`rounds/${id}`)
-      .then((data) => {
+    Promise.all([
+      api.get<Round>(`rounds/${id}`),
+      api.get<any>(`rounds/${id}/brief`).catch((err: unknown) => {
+        if (err instanceof ApiError && err.status === 404) return null;
+        throw err;
+      }),
+    ])
+      .then(([roundData, briefData]) => {
         if (!cancelled) {
-          setRound(data);
+          setRound(roundData);
+          setBrief(briefData);
           setLoading(false);
         }
       })
@@ -304,6 +311,41 @@ export default function RoundDetail() {
                                 >
                                   (NS)
                                 </span>
+                              )}
+                              {identity?.roles.includes("Pilot") && slot.pilotId === identity.pilotId && round.status === "BriefComplete" && (
+                                <div style={{ marginTop: "0.4rem" }}>
+                                  {!slot.signToFly ? (
+                                    <Link
+                                      to={`/rounds/${round.id}/sign/${team.id}/${slot.placeInTeam}`}
+                                      style={{
+                                        display: "inline-block",
+                                        padding: "0.25rem 0.5rem",
+                                        background: "#0066cc",
+                                        color: "white",
+                                        borderRadius: "0.2rem",
+                                        textDecoration: "none",
+                                        fontWeight: 600,
+                                        fontSize: "0.75rem",
+                                      }}
+                                    >
+                                      Sign to Fly
+                                    </Link>
+                                  ) : brief?.version ? (
+                                    <span
+                                      style={{
+                                        display: "inline-block",
+                                        padding: "0.15rem 0.4rem",
+                                        background: "#e9ecef",
+                                        color: "#555",
+                                        borderRadius: "0.2rem",
+                                        fontSize: "0.7rem",
+                                        fontWeight: 500,
+                                      }}
+                                    >
+                                      Signed for brief v{brief.version}
+                                    </span>
+                                  ) : null}
+                                </div>
                               )}
                             </td>
                             <td
