@@ -177,7 +177,6 @@ export async function makePilot(
   index.push({
     id,
     name: fullName,
-    email: overrides.email,
     clubId: overrides.clubId,
     rating: "Pilot",
   });

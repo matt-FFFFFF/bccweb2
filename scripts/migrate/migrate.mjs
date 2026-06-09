@@ -363,6 +363,7 @@ async function main() {
     }
   }
 
+  const pilotEmailIndex = {};
   const pilotsSummary = [];
   for (const r of pilotsResult.recordset) {
     const id = getOrCreateUuid("pilot", r.ID);
@@ -430,15 +431,17 @@ async function main() {
     pilotsSummary.push({
       id,
       legacyId: r.ID,
-      ...(r.BHPA_Number != null ? { bhpaNumber: r.BHPA_Number } : {}),
       name: fullName,
-      ...(r.UserEmail ? { email: r.UserEmail } : {}),
       clubId: currentSeasonClub?.clubId ?? null,
       rating: pilotRating,
-      userId: null,
     });
+
+    if (r.UserEmail) {
+      pilotEmailIndex[r.UserEmail.toLowerCase()] = id;
+    }
   }
   await uploadBlob("pilots.json", pilotsSummary);
+  await uploadPrivateBlob("pilot-email-index.json", pilotEmailIndex);
   saveIdMap();
   console.log(`  wrote ${pilotsSummary.length} pilots\n`);
 

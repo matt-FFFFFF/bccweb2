@@ -35,6 +35,7 @@ import {
   getCallerIdentity,
   unauthorizedResponse,
   forbiddenResponse,
+  updatePilotEmailIndex,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 
@@ -306,17 +307,12 @@ async function upsertPilotInIndex(
       if ((err as { statusCode?: number }).statusCode !== 404) throw err;
     }
 
-    const existing = index.find((p) => p.id === pilot.id);
     const entry: PilotSummary = {
-      ...(existing ?? {}),
       id: pilot.id,
       legacyId: pilot.legacyId,
-      bhpaNumber: pilot.bhpaNumber,
       name: pilot.person.fullName,
-      email: email ?? existing?.email,
       clubId: pilot.currentClub?.id,
       rating: pilot.pilotRating,
-      userId: pilot.userId,
     };
 
     const idx = index.findIndex((p) => p.id === pilot.id);
@@ -333,6 +329,10 @@ async function upsertPilotInIndex(
       conditions: { leaseId },
     });
   });
+
+  if (email) {
+    await updatePilotEmailIndex(email, pilot.id);
+  }
 }
 
 async function withLeaseRetry(

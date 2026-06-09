@@ -1,7 +1,7 @@
 import { HttpRequest } from "@azure/functions";
 import jwt from "jsonwebtoken";
-import type { CallerIdentity, User } from "@bccweb/types";
-import { getBlobClient, getPrivateBlobClient, readBlob, writePrivateBlob } from "./blob.js";
+import type { CallerIdentity, Pilot, PilotEmailIndex, User } from "@bccweb/types";
+import { getPrivateBlobClient, readBlob, writePrivateBlob } from "./blob.js";
 
 // ─── JWT validation ────────────────────────────────────────────────────────
 
@@ -46,25 +46,27 @@ export async function getOrCreateUser(
     const status = (err as { statusCode?: number }).statusCode;
     if (status !== 404) throw err;
 
-    // First login — auto-link via email match against pilot index
     let pilotId: string | null = null;
     let clubId: string | null = null;
 
     try {
-      const pilotIndex = await readBlob<
-        Array<{ id: string; email?: string; clubId?: string }>
-      >(getBlobClient("pilots.json"));
-
-      const match = pilotIndex.find(
-        (p) => p.email?.toLowerCase() === email.toLowerCase()
+      const emailIndex = await readBlob<PilotEmailIndex>(
+        getPrivateBlobClient("pilot-email-index.json")
       );
-
-      if (match) {
-        pilotId = match.id;
-        clubId = match.clubId ?? null;
+      const foundPilotId = emailIndex[email.toLowerCase()];
+      if (foundPilotId) {
+        pilotId = foundPilotId;
+        try {
+          const pilot = await readBlob<Pilot>(
+            getPrivateBlobClient(`pilots/${foundPilotId}.json`)
+          );
+          clubId = pilot.currentClub?.id ?? null;
+        } catch {
+          // ignore
+        }
       }
     } catch {
-      // pilots.json may not exist yet (pre-migration); treat as no match
+      // ignore
     }
 
     const newUser: User = {
@@ -96,6 +98,18 @@ async function updateUserIndex(email: string, userId: string): Promise<void> {
   }
 
   index[email.toLowerCase()] = userId;
+  await writePrivateBlob(indexPath, index);
+}
+
+export async function updatePilotEmailIndex(email: string, pilotId: string): Promise<void> {
+  const indexPath = "pilot-email-index.json";
+  let index: PilotEmailIndex = {};
+  try {
+    index = await readBlob<PilotEmailIndex>(getPrivateBlobClient(indexPath));
+  } catch {
+    // no-op
+  }
+  index[email.toLowerCase()] = pilotId;
   await writePrivateBlob(indexPath, index);
 }
 

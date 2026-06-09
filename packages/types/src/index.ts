@@ -200,13 +200,17 @@ export interface SeasonClub {
 export interface PilotSummary {
   id: string;
   legacyId?: number;
-  bhpaNumber?: number;
   name: string; // fullName for index lookups
-  email?: string;
   clubId?: string;
   rating?: PilotRatingValue;
-  userId?: string | null; // B2C oid once linked
 }
+
+/**
+ * Private blob `pilot-email-index.json` in the data-private container.
+ * Maps lowercase pilot email → pilotId. Used for auto-linking at registration.
+ * Never written to any public container.
+ */
+export type PilotEmailIndex = Record<string, string>;
 
 export interface Pilot {
   id: string;
