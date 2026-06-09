@@ -39,3 +39,28 @@ output "key_vault_name" {
   description = "Name of the Key Vault. Used by scripts/iac/seed-secrets.sh to set jwt-secret after first apply."
   value       = azurerm_key_vault.main.name
 }
+
+# ─── Application Insights ─────────────────────────────────────────────────────
+
+output "application_insights_name" {
+  description = "Name of the Application Insights component (used by T47 alert rules and ad-hoc KQL queries)."
+  value       = azurerm_application_insights.main.name
+}
+
+output "application_insights_resource_id" {
+  description = "Full Azure resource ID of the Application Insights component (alert action group scope)."
+  value       = azurerm_application_insights.main.id
+}
+
+output "log_analytics_workspace_id" {
+  description = "ID of the Log Analytics workspace backing Application Insights."
+  value       = azurerm_log_analytics_workspace.main.id
+}
+
+# Sensitive: used by scripts/iac/seed-secrets.sh to place the value into Key
+# Vault. Marked sensitive so it never appears in plan/apply diff output.
+output "application_insights_connection_string" {
+  description = "Connection string for the Application Insights component. Consumed only by seed-secrets.sh."
+  value       = azurerm_application_insights.main.connection_string
+  sensitive   = true
+}

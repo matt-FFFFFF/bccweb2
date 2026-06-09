@@ -51,6 +51,18 @@ resource "azapi_resource" "function_app" {
             # system-assigned managed identity. Never store the plaintext value here.
             # Seed the secret after first apply: scripts/iac/seed-secrets.sh
             { name = "JWT_SECRET", value = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.main.name};SecretName=jwt-secret)" },
+
+            # Application Insights wiring (T46).
+            # Connection string lives in Key Vault — seeded by scripts/iac/seed-secrets.sh.
+            # Auto-instrumentation (ApplicationInsightsAgent_EXTENSION_VERSION=~3) attaches
+            # the AI Node agent during cold start; APPINSIGHTS_PROFILERFEATURE_VERSION=1.0.0
+            # enables the always-on profiler. Server-side sampling is also set on the AI
+            # resource itself (sampling_percentage = 25 in insights.tf); the env var here
+            # is the SDK-side fallback used by manual track* calls in apps/api/src/lib/telemetry.ts.
+            { name = "APPLICATIONINSIGHTS_CONNECTION_STRING", value = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.main.name};SecretName=appinsights-connection-string)" },
+            { name = "ApplicationInsightsAgent_EXTENSION_VERSION", value = "~3" },
+            { name = "APPINSIGHTS_PROFILERFEATURE_VERSION", value = "1.0.0" },
+            { name = "APPINSIGHTS_SAMPLING_PERCENTAGE", value = "25" },
           ],
           local.acs_app_settings_list
         )

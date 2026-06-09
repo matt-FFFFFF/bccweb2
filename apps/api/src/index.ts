@@ -1,6 +1,14 @@
 // Entry point — registers all Azure Functions (v4 programming model).
 // Each function module registers itself via app.http() on import.
 
+import { setup as setupTelemetry } from "./lib/telemetry.js";
+
+// Initialise Application Insights with the PII-scrubbing telemetry processor
+// BEFORE any function module imports so the redactor is registered before the
+// first auto-collected request can be tracked. No-ops in local dev when
+// APPLICATIONINSIGHTS_CONNECTION_STRING is unset.
+setupTelemetry();
+
 import "./functions/health.js";
 import "./functions/me.js";
 

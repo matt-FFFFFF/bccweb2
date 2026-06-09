@@ -599,3 +599,122 @@ reconcile field population.
 - `puretrack.ts` lib had a local `interface PureTrackGroup { id: number; name: string; slug: string }`
   for the PureTrack API response. Renamed to `PureTrackApiGroup` to avoid conflict with the new
   `PureTrackGroup` entity exported from `@bccweb/types`
+
+## Task 46 notes — Application Insights wiring + PII-redacting telemetry processor
+
+### Connection-string seed mechanism (mirrors T7 jwt-secret pattern)
+- The AI connection string is exposed as a **sensitive** Terraform output
+  (`application_insights_connection_string`). It still lives in state (the
+  resource owns it), but `sensitive = true` keeps it out of plan/apply diff
+  output and CI logs.
+- `scripts/iac/seed-secrets.sh` is the bridge: it reads the sensitive output
+  via `terraform output -raw` and writes the value to Key Vault as
+  `appinsights-connection-string`. No `azurerm_key_vault_secret` resource is
+  ever created, so the plaintext value is never written into state by a
+  separate secret resource (the only place it appears is on
+  `azurerm_application_insights.main.connection_string`, which is unavoidable
+  — every consumer needs it to ingest).
+- The Function App reads it at runtime via the standard
+  `@Microsoft.KeyVault(VaultName=...;SecretName=appinsights-connection-string)`
+  reference syntax in app_settings, resolved through its system-assigned
+  managed identity (same identity that already reads `jwt-secret`).
+
+### Sampling decision
+- Two layers configured:
+  1. **Server-side (AI resource)**: `sampling_percentage = 25` in
+     `iac/insights.tf`. This caps ingestion cost at the Azure side and
+     applies to ALL telemetry, including auto-collected requests.
+  2. **SDK fallback (Function App)**: `APPINSIGHTS_SAMPLING_PERCENTAGE=25`
+     env var, used by manual `track*` calls before they reach the ingest
+     endpoint.
+- Exceptions / failed requests: the v2 SDK's default `addTelemetryProcessor`
+  pipeline runs BEFORE sampling, so the redactor scrubs every envelope
+  regardless of sample fate. Real-incident triage data preservation will be
+  handled in T47 by setting an `excludedTypes = ExceptionData` adaptive
+  sampling override on the AI resource — kept out of T46 to keep blast
+  radius small.
+
+### applicationinsights SDK version quirk — pinned to v2, NOT v3
+- The task spec uses v2 APIs: chainable `setup(...).setAutoCollectRequests(...).start()`
+  and `client.addTelemetryProcessor(...)` with envelope `process()` callbacks.
+- I first installed `applicationinsights@^3` and discovered the v3 shim
+  silently deprecates `addTelemetryProcessor` to a no-op that only logs
+  `addTelemetryProcessor is not supported in ApplicationInsights any
+  longer.` v3 is built on `@azure/monitor-opentelemetry` and expects OTel
+  `SpanProcessor` registration via `useAzureMonitor({ spanProcessors })`.
+- Pinned to `applicationinsights@^2.9.0` (`apps/api/package.json`). v2.x is
+  still maintained for "classic" customers and is what the Azure Functions
+  Node v4 host expects when `ApplicationInsightsAgent_EXTENSION_VERSION=~3`
+  attaches at runtime. Migrating to v3 is a separate, much larger piece of
+  work (would also require rewriting the redactor as an OTel SpanProcessor)
+  and is intentionally deferred.
+- `_telemetryProcessors` is on `TelemetryClient` itself (private field), NOT
+  on `client.config` as the task spec hinted. The test asserts
+  `(client as unknown as { _telemetryProcessors: unknown[] })._telemetryProcessors.length === 1`.
+
+### TS type-shim between TelemetryEnvelope and EnvelopeTelemetry
+- v2's `addTelemetryProcessor` signature expects `(envelope: Contracts.EnvelopeTelemetry, ctx?: { [name: string]: any }) => boolean`.
+  Our redactor uses a structural `TelemetryEnvelope` interface (minimal,
+  SDK-agnostic, deliberately reusable for the browser SDK port). The two
+  types are structurally compatible but TS's structural-typing inference
+  trips on `data: DataTelemetry` (which has named fields) vs
+  `data: { [key: string]: unknown; baseData?: ... }` (open index sig).
+- Resolved with a wrapper closure that casts at the boundary in
+  `apps/api/src/lib/telemetry.ts` — single `as unknown as TelemetryEnvelope`
+  cast in one place, contained to the SDK-adapter layer. The redactor's
+  public surface stays SDK-agnostic.
+
+### Init-order invariant
+- `setupTelemetry()` MUST run BEFORE the `./functions/*.js` imports in
+  `apps/api/src/index.ts`. Once any function module registers via
+  `app.http(...)` and the AI agent attaches its auto-collectors, the first
+  inbound request envelope can fire before a later-registered processor
+  sees it.
+- Added a multi-line comment in `index.ts` flagging this — without it a
+  future contributor could reorder imports (alphabetisation, lint
+  auto-fix) and silently leak PII with no test/type signal.
+- `setup()` is idempotent — guarded by a module-local `initialised` flag —
+  to survive vitest's parallel `import` graph and any defensive double-call
+  from the Functions host. The "is idempotent" test confirms only one
+  processor is registered after two `setup()` calls.
+
+### Local-dev no-op contract
+- `setup()` reads `APPLICATIONINSIGHTS_CONNECTION_STRING`. If absent or
+  whitespace-only, it logs ONE warning (`[telemetry] APPLICATIONINSIGHTS_CONNECTION_STRING not set — telemetry disabled (local-dev mode)`)
+  and returns. No SDK init, no auto-collector attachment, no network call,
+  no startup blockage.
+- `apps/api/local.settings.json` is unchanged by this task — the absence of
+  the env var IS the local-dev signal. Documented in `iac/insights.tf` and
+  in this notepad.
+
+### Test pattern for envelope inspection
+- Replaced `client.channel.send` with an in-memory capture sink AFTER
+  `setup()` runs. The v2 SDK still executes the full processor pipeline
+  before invoking `channel.send`, so the captured envelope reflects exactly
+  what would have been transmitted.
+- Asserted PII absence two ways: (a) field-level lookup (`props["email"] === "***"`)
+  and (b) full-envelope `JSON.stringify(envelope)` substring search for the
+  raw PII values — the substring check catches accidental leaks into adjacent
+  fields (`tags`, `customMeasurements`, etc.) that field-level asserts would
+  miss.
+
+### SPA RUM include/defer decision — DEFERRED with stub
+- The task spec explicitly allows: *"if size concern, defer SPA RUM to a
+  follow-up and STUB the import — document choice in learnings."*
+- `@microsoft/applicationinsights-web` is ~50KB gzipped. The current SPA
+  gzipped bundle is 102.90KB; adding RUM would push it to ~150KB. With no
+  concrete RUM use case in scope for T46/T47 (alerts in T47 fire off
+  API-side metrics only), the cost/benefit did not justify the bundle
+  bloat for go-live.
+- `apps/web/src/lib/telemetry.ts` is a self-contained stub: it ports
+  `redactObject` + `PII_FIELDS` to TS as a no-runtime-dep utility (kept in
+  sync with `apps/api/src/lib/telemetryRedactor.ts` — same dual-maintenance
+  note as the existing `scripts/lib/pii.mjs` ↔ telemetryRedactor.ts pair),
+  reads `VITE_APP_INSIGHTS_CONNECTION_STRING`, and if present logs a single
+  info line saying RUM is stubbed. When RUM is enabled (Wave 8+), the only
+  change required is to swap the `console.info` for an
+  `ApplicationInsights` init that registers a `addTelemetryInitializer`
+  wrapping every envelope through `redactObject`.
+- `apps/web/src/main.tsx` calls `setupTelemetry()` BEFORE `createRoot(...)`
+  for the same init-order reason as the API.
+- No new npm dep added to `apps/web/package.json`; no bundle-size change.
