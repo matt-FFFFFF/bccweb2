@@ -11,19 +11,17 @@ jobs:
     name: PII Leak Detection
     runs-on: ubuntu-latest
 
-    services:
-      azurite:
-        image: mcr.microsoft.com/azure-storage/azurite
-        command: azurite --skipApiVersionCheck
-        ports:
-          - 10000:10000
-
     env:
       BLOB_CONNECTION_STRING: >-
         DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Start Azurite
+        run: |
+          docker rm -f azurite >/dev/null 2>&1 || true
+          docker run -d --name azurite -p 10000:10000 mcr.microsoft.com/azure-storage/azurite azurite --skipApiVersionCheck
 
       - name: Wait for Azurite
         run: |
