@@ -18,6 +18,11 @@ import type { RoundBrief } from "@bccweb/types";
 // ─── Handlebars helpers ───────────────────────────────────────────────────────
 
 Handlebars.registerHelper("or", (a: unknown, b: unknown) => a || b);
+Handlebars.registerHelper("default", (value: unknown) => {
+  if (typeof value === "string" && value.trim().length > 0) return value;
+  if (value != null && typeof value !== "string") return value;
+  return "Not provided";
+});
 Handlebars.registerHelper("formatDate", (iso: string) => {
   if (!iso) return "";
   return new Date(iso + "T00:00:00Z").toLocaleDateString("en-GB", {
@@ -62,6 +67,16 @@ const TEMPLATE_SRC = `<!DOCTYPE html>
   }
   .info-item label { font-weight: bold; color: #555; display: block; font-size: 8pt; }
   .info-item a { color: #1a4fa0; text-decoration: none; }
+  .safety-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+    gap: 0.45rem 0.9rem;
+    font-size: 9pt;
+  }
+  .safety-item { border: 1px solid #e0e5ef; border-radius: 3px; padding: 0.35rem 0.45rem; page-break-inside: avoid; }
+  .safety-item label { font-weight: bold; color: #555; display: block; font-size: 8pt; margin-bottom: 0.15rem; }
+  .safety-value { white-space: pre-wrap; }
+  .brief-images { color: #555; font-size: 8.5pt; margin-top: 0.5rem; }
   .team-block { margin-bottom: 1.2rem; page-break-inside: avoid; }
   .team-header {
     display: flex;
@@ -151,6 +166,27 @@ const TEMPLATE_SRC = `<!DOCTYPE html>
   {{/if}}
 </div>
 
+<h2>Safety Briefing</h2>
+<div class="safety-grid">
+  <div class="safety-item"><label>Wind Speed &amp; Direction</label><div class="safety-value">{{default windSpeedDirection}}</div></div>
+  <div class="safety-item"><label>Direction of Flight</label><div class="safety-value">{{default directionOfFlight}}</div></div>
+  <div class="safety-item"><label>Expected Landing Area</label><div class="safety-value">{{default expectedLandingArea}}</div></div>
+  <div class="safety-item"><label>Airspace &amp; Hazards</label><div class="safety-value">{{default airspaceAndHazards}}</div></div>
+  <div class="safety-item"><label>NOTAMs</label><div class="safety-value">{{default NOTAMs}}</div></div>
+  <div class="safety-item"><label>BENO Line Description</label><div class="safety-value">{{default BENO_LineDescription}}</div></div>
+  <div class="safety-item"><label>Briefer's Notes</label><div class="safety-value">{{default briefersNotes}}</div></div>
+</div>
+<div class="info-grid" style="margin-top: 0.65rem;">
+  <div class="info-item"><label>Briefer</label>{{default briefer.name}}</div>
+  <div class="info-item"><label>BHPA Coach Level</label>{{default briefer.bhpaCoachLevel}}</div>
+  <div class="info-item"><label>BHPA Number</label>{{default briefer.bhpaNumber}}</div>
+  <div class="info-item"><label>Phone</label>{{default briefer.phoneNumber}}</div>
+  <div class="info-item"><label>Email</label>{{default briefer.emailAddress}}</div>
+</div>
+{{#if imagePaths.length}}
+<p class="brief-images">See briefing images: {{imagePaths.length}}</p>
+{{/if}}
+
 <h2>Teams &amp; Pilots</h2>
 
 {{#each teams}}
@@ -214,6 +250,15 @@ const TEMPLATE_SRC = `<!DOCTYPE html>
 
 const compiledTemplate = Handlebars.compile(TEMPLATE_SRC);
 
+export function renderBriefPdfHtml(brief: RoundBrief): string {
+  return compiledTemplate({
+    ...brief,
+    generatedAt: new Date(brief.generatedAt).toLocaleString("en-GB", {
+      timeZone: "Europe/London",
+    }),
+  });
+}
+
 // ─── PDF generation ───────────────────────────────────────────────────────────
 
 /**
@@ -222,12 +267,7 @@ const compiledTemplate = Handlebars.compile(TEMPLATE_SRC);
  * CHROMIUM_EXECUTABLE_PATH for local macOS development.
  */
 export async function generateBriefPdf(brief: RoundBrief): Promise<Buffer> {
-  const html = compiledTemplate({
-    ...brief,
-    generatedAt: new Date(brief.generatedAt).toLocaleString("en-GB", {
-      timeZone: "Europe/London",
-    }),
-  });
+  const html = renderBriefPdfHtml(brief);
 
   // Resolve executable path
   const executablePath =
