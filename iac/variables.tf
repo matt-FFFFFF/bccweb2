@@ -42,6 +42,48 @@ variable "slack_webhook_url" {
   default     = ""
 }
 
+# ─── DNS / Production hostname (T51) ──────────────────────────────────────────
+#
+# `production_hostname` is the public-facing host the SPA will live at after
+# DNS cutover (e.g. "bcc.flyparagliding.org.uk"). It is the LEFT-HAND SIDE of
+# the CNAME that points at the SWA default hostname.
+#
+# `dns_zone_name` controls whether Terraform manages the CNAME or whether the
+# operator creates it manually at their domain registrar:
+#   - dns_zone_name = ""           → manual operator step (default). The SWA
+#     default hostname is exposed via the `production_hostname_target` output
+#     so the operator can paste it into their registrar.
+#   - dns_zone_name = "example.com" → Terraform creates an azurerm_dns_cname
+#     record in the matching Azure DNS zone (which must already exist and live
+#     in the same subscription).
+#
+# The CNAME is intentionally a SCAFFOLD only — flipping live traffic is an
+# operator action during the scheduled cutover window. See
+# docs/runbooks/dns-cutover.md for the TTL strategy and runbook steps.
+
+variable "production_hostname" {
+  description = "Public-facing host the SPA serves traffic on after DNS cutover (e.g. 'bcc.flyparagliding.org.uk'). Becomes the LHS of the CNAME pointing at the SWA default hostname. Leave empty if cutover is not yet scheduled."
+  type        = string
+  default     = ""
+
+  validation {
+    condition     = var.production_hostname == "" || can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$", var.production_hostname))
+    error_message = "var.production_hostname must be empty or a lowercase DNS-valid hostname (letters/digits/hyphens, dots between labels)."
+  }
+}
+
+variable "dns_zone_name" {
+  description = "Name of an Azure DNS zone (e.g. 'flyparagliding.org.uk') that Terraform should manage. When set, an azurerm_dns_cname_record is created mapping var.production_hostname → SWA default hostname. When empty (default), the operator must create the CNAME manually at their registrar — see docs/runbooks/dns-cutover.md."
+  type        = string
+  default     = ""
+}
+
+variable "dns_zone_resource_group_name" {
+  description = "Resource group containing var.dns_zone_name when DNS is hosted in Azure. Ignored when dns_zone_name is empty. Defaults to the same resource group as the rest of the bccweb stack."
+  type        = string
+  default     = ""
+}
+
 locals {
   prefix = "bccweb-${var.environment}"
   tags = {

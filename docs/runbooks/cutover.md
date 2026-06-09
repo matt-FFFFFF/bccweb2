@@ -79,12 +79,12 @@ Capture screenshots of these three successful journeys and save them to `.omo/ev
 
 DNS cutover moves public traffic from the legacy hostname to the new bccweb2 Azure Static Web App and ACS email domain. This phase requires access to the domain registrar and Azure Portal.
 
-1. **ACS Email Domain**: Execute the DNS verification in the registrar using the records provided by `terraform output acs_domain_verification_records`. Confirm verification in the Azure Portal under the Communication Services resource.
-2. **CNAME Update**: Update the primary CNAME record (e.g., `bcc.flyparagliding.org.uk`) to point to the SWA hostname (e.g., `random-name-123.azurestaticapps.net`).
-3. **TTL Verification**: Use `dig` to confirm the records have propagated:
-   ```bash
-   dig bcc.flyparagliding.org.uk CNAME
-   ```
+The detailed runbook (TTL strategy, SPF/DKIM/DMARC verification, manual-vs-Terraform CNAME path, validation script, rollback) lives at `docs/runbooks/dns-cutover.md`. The short version:
+
+1. **ACS Email Domain**: Execute the DNS verification in the registrar using the records provided by `terraform output acs_email_domain_verification_records` (SPF, DKIM, DKIM2 and DMARC, broken out by type). Publish DMARC with `p=none` for first cutover — tighten after one clean week. Confirm verification in the Azure Portal under the Communication Services resource.
+2. **CNAME Update**: Update the primary CNAME record (e.g. `bcc.flyparagliding.org.uk`) to point at `terraform output -raw production_hostname_target` (the stable, cert-bound SWA default hostname). If `var.dns_zone_name` is set, Terraform owns this record via `iac/dns.tf`; otherwise the operator does this at the registrar.
+3. **TTL Strategy**: 24h before cutover lower TTL to 300s; flip target at 300s; raise back to 3600s 24h after stable traffic. See `docs/runbooks/dns-cutover.md` for the full schedule.
+4. **Validation**: run `PROD_HOST=... SWA_HOST=... API_HOST=... ACS_EMAIL_DOMAIN=... bash scripts/iac/validate-dns.sh` and capture the output to `.omo/evidence/task-51-dns.txt`.
 
 Monitor the SWA metrics for the first 15 minutes. Ensure the `2xx` count increases and `4xx`/`5xx` counts remain at baseline. If the CNAME update results in a SSL/TLS handshake error, verify that the SWA custom domain has successfully validated the certificate.
 
@@ -118,7 +118,7 @@ Formal sign-off for decommissioning is required from the project owner (Matt Whi
 | Storage hardening (versioning, soft-delete, GRS, mgmt lock) | - | - | `.omo/evidence/task-6-iac-plan-assertions.txt` | pending |
 | JWT_SECRET + ACS in Key Vault | - | - | `.omo/evidence/task-7-kv-ref-in-plan.txt` | pending |
 | Migration idempotency + reconciliation | - | - | `.omo/evidence/task-8-idempotent-dryrun.txt` + `task-43-migration-smoke.txt` | pending |
-| ACS email domain DNS verification | - | - | TBD by T51 | pending |
+| ACS email domain DNS verification | - | - | `.omo/evidence/task-51-dns.txt` + `.omo/evidence/task-51-mail-score.txt` (see `docs/runbooks/dns-cutover.md`) | pending |
 | Application Insights + alert rules | - | - | TBD by T46+T47 | pending |
 | Post-deploy smoke gate in CI | - | - | TBD by T48 | pending |
 | Auth integration suite + round lifecycle suite green | - | - | `.omo/evidence/task-41-auth-suite.txt` + `task-42-lifecycle-suite.txt` | pending |

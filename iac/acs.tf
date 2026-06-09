@@ -93,6 +93,36 @@ resource "azapi_resource" "acs_email_domain" {
   response_export_values = ["properties.verificationRecords"]
 }
 
+# ─── Verification-record decomposition (T51) ─────────────────────────────────
+#
+# Azure ACS returns `properties.verificationRecords` as an object with keys
+# Domain (ownership TXT), SPF (TXT), DKIM (CNAME), DKIM2 (CNAME) and DMARC
+# (TXT). The operator must paste each record at their DNS registrar before the
+# Azure portal will mark the domain Verified.
+#
+# DMARC policy guidance (T51): the suggested DMARC TXT value returned by Azure
+# is a starter record. For first deployment publish it with `p=none` so a
+# misconfigured SPF/DKIM does NOT cause mail to be silently dropped. After at
+# least one full week of clean delivery + monitored DMARC aggregate reports,
+# tighten to `p=quarantine` and eventually `p=reject`.
+
+locals {
+  acs_verification_records = try(
+    azapi_resource.acs_email_domain.output.properties.verificationRecords,
+    {}
+  )
+
+  acs_dns_records_for_operator = {
+    domain_ownership = try(local.acs_verification_records.Domain, null)
+    spf              = try(local.acs_verification_records.SPF, null)
+    dkim             = try(local.acs_verification_records.DKIM, null)
+    dkim2            = try(local.acs_verification_records.DKIM2, null)
+    dmarc            = try(local.acs_verification_records.DMARC, null)
+  }
+
+  acs_dmarc_recommended_value = "v=DMARC1; p=none; rua=mailto:${var.acs_sender_address}; ruf=mailto:${var.acs_sender_address}; pct=100; adkim=s; aspf=s"
+}
+
 # ─── ACS Base Resource ────────────────────────────────────────────────────────
 #
 # The email domain is linked via the `linkedDomains` property, replacing

@@ -31,6 +31,22 @@ puretrack_password = "change-me"
 ops_email         = "oncall@yourdomain.com"
 slack_webhook_url = ""
 
+# DNS / production hostname (T51).
+# production_hostname is the public host the SPA serves traffic on after cutover.
+# dns_zone_name controls who owns the CNAME:
+#   ""              → operator creates the CNAME manually at their registrar.
+#                     The SWA default hostname is published via the
+#                     `production_hostname_target` terraform output.
+#   "example.com"   → Terraform creates an azurerm_dns_cname_record in the
+#                     matching Azure DNS zone. Set dns_zone_resource_group_name
+#                     if the zone lives in a different RG to the rest of the
+#                     stack (defaults to the bccweb resource group).
+# See docs/runbooks/dns-cutover.md for the TTL strategy (300s 24h before, 3600s
+# 24h after stable) and the manual operator runbook.
+production_hostname          = ""
+dns_zone_name                = ""
+dns_zone_resource_group_name = ""
+
 # jwt_secret is NO LONGER a Terraform variable.
 # The Function App reads JWT_SECRET at runtime from Key Vault via its
 # system-assigned managed identity (@Microsoft.KeyVault reference).
