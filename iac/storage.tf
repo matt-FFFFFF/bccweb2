@@ -134,3 +134,43 @@ locals {
   storage_account_name              = azapi_resource.storage.name
   storage_primary_connection_string = "DefaultEndpointsProtocol=https;AccountName=${local.storage_account_name};AccountKey=${local.storage_primary_key};EndpointSuffix=core.windows.net"
 }
+
+# ─── Blob Lifecycle Management Policy ────────────────────────────────────────
+#
+# GC short-lived auth token blobs from data-private after 7 days.
+# Prevents accumulation of expired tokens that were never consumed.
+
+resource "azapi_resource" "storage_lifecycle" {
+  type      = "Microsoft.Storage/storageAccounts/managementPolicies@2023-01-01"
+  name      = "default"
+  parent_id = azapi_resource.storage.id
+
+  body = {
+    properties = {
+      policy = {
+        rules = [
+          {
+            name    = "gc-auth-tokens"
+            enabled = true
+            type    = "Lifecycle"
+            definition = {
+              filters = {
+                blobTypes   = ["blockBlob"]
+                prefixMatch = ["data-private/auth/tokens/"]
+              }
+              actions = {
+                baseBlob = {
+                  delete = {
+                    daysAfterModificationGreaterThan = 7
+                  }
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+
+  depends_on = [azapi_resource.blob_service, azapi_resource.storage_container_data_private]
+}

@@ -49,7 +49,7 @@ import {
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function badRequest(message: string): HttpResponseInit {
-  return { status: 400, jsonBody: { error: message } };
+  throw new HttpError(400, "INVALID_BODY", message);
 }
 
 const REGISTER_ACCEPTED_BODY = {

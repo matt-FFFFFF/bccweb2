@@ -22,6 +22,33 @@ export interface AuthToken {
   userId: string;
   type: "verify" | "reset";
   expiresAt: string;
+  consumed?: true;
+}
+
+// ─── Token error classes ──────────────────────────────────────────────────────
+
+export class TokenNotFoundError extends Error {
+  readonly code = "TOKEN_NOT_FOUND" as const;
+  constructor() {
+    super("Token not found");
+    this.name = "TokenNotFoundError";
+  }
+}
+
+export class TokenExpiredError extends Error {
+  readonly code = "TOKEN_EXPIRED" as const;
+  constructor() {
+    super("Token has expired");
+    this.name = "TokenExpiredError";
+  }
+}
+
+export class TokenAlreadyConsumedError extends Error {
+  readonly code = "TOKEN_ALREADY_CONSUMED" as const;
+  constructor() {
+    super("Token has already been consumed");
+    this.name = "TokenAlreadyConsumedError";
+  }
 }
 
 // ─── JWT ──────────────────────────────────────────────────────────────────────
@@ -77,10 +104,6 @@ export async function verifyPassword(
 
 // ─── Short-lived tokens ───────────────────────────────────────────────────────
 
-/**
- * Generate a random hex token, store its SHA-256 hash in blob, and return
- * the raw token for inclusion in an email link.
- */
 export async function generateShortLivedToken(
   userId: string,
   type: "verify" | "reset",
@@ -97,37 +120,58 @@ export async function generateShortLivedToken(
   return raw;
 }
 
-/**
- * Consume a raw token: validate type + expiry, delete on first use,
- * and return the associated userId.
- */
 export async function consumeShortLivedToken(
   raw: string,
   expectedType: "verify" | "reset"
-): Promise<{ userId: string } | { error: string }> {
+): Promise<{ userId: string }> {
   const hash = crypto.createHash("sha256").update(raw).digest("hex");
   const blobPath = `auth/tokens/${hash}.json`;
+  const blockBlobClient = getPrivateBlockBlobClient(blobPath);
 
   let tokenDoc: AuthToken;
+  let etag: string;
+
   try {
-    tokenDoc = await readBlob<AuthToken>(getPrivateBlobClient(blobPath));
+    const response = await blockBlobClient.download();
+    etag = response.etag!;
+    const chunks: Buffer[] = [];
+    for await (const chunk of response.readableStreamBody!) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+    }
+    tokenDoc = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as AuthToken;
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { error: "Invalid or expired token" };
+      throw new TokenNotFoundError();
     }
-    throw err;
+    throw new Error(`Failed to read token blob auth/tokens/${hash}.json: ${String(err)}`);
   }
 
-  if (tokenDoc.type !== expectedType) return { error: "Invalid token type" };
+  if (tokenDoc.consumed) {
+    console.warn("[METRIC] auth.token.reused", { tokenHash: hash });
+    throw new TokenAlreadyConsumedError();
+  }
+
+  if (tokenDoc.type !== expectedType) {
+    throw new TokenNotFoundError();
+  }
+
   if (new Date(tokenDoc.expiresAt) < new Date()) {
-    return { error: "Token has expired" };
+    throw new TokenExpiredError();
   }
 
-  // Delete on first use (best-effort)
+  const consumedDoc: AuthToken = { ...tokenDoc, consumed: true };
+  const body = JSON.stringify(consumedDoc, null, 2);
   try {
-    await getPrivateBlockBlobClient(blobPath).delete();
-  } catch {
-    // Ignore — the expiry check is the real guard
+    await blockBlobClient.upload(body, Buffer.byteLength(body), {
+      blobHTTPHeaders: { blobContentType: "application/json" },
+      conditions: { ifMatch: etag },
+    });
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 412) {
+      console.warn("[METRIC] auth.token.reused", { tokenHash: hash });
+      throw new TokenAlreadyConsumedError();
+    }
+    throw new Error(`Failed to consume token blob auth/tokens/${hash}.json: ${String(err)}`);
   }
 
   return { userId: tokenDoc.userId };
