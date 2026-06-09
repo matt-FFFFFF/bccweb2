@@ -20,6 +20,7 @@ import type {
   PilotSummary,
   ClubSummary,
   ScoringType,
+  Signature,
 } from "@bccweb/types";
 import { useBlob } from "../../hooks/useBlob.js";
 import { useAuth } from "../../hooks/useAuth.js";
@@ -61,6 +62,11 @@ function PilotName({
       {found.name}
     </Link>
   );
+}
+
+function pilotDisplayName(pilotId: string | null, index: PilotSummary[] | null): string {
+  if (!pilotId) return "Empty";
+  return index?.find((p) => p.id === pilotId)?.name ?? pilotId;
 }
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
@@ -506,6 +512,7 @@ function PilotRow({
   slot,
   pilots,
   status,
+  canOverrideSign,
   onChanged,
 }: {
   roundId: string;
@@ -513,11 +520,17 @@ function PilotRow({
   slot: PilotSlot;
   pilots: PilotSummary[] | null;
   status: RoundStatus;
+  canOverrideSign: boolean;
   onChanged: () => void;
 }) {
   const [showFlightForm, setShowFlightForm] = useState(false);
   const [editingFlight, setEditingFlight] = useState(false);
   const [actionErr, setActionErr] = useState<string | null>(null);
+  const [actionOk, setActionOk] = useState<string | null>(null);
+  const [overrideOpen, setOverrideOpen] = useState(false);
+  const [overrideReason, setOverrideReason] = useState("");
+  const [overrideErr, setOverrideErr] = useState<string | null>(null);
+  const [overrideBusy, setOverrideBusy] = useState(false);
 
   const isLocked = status === "Locked";
   const isComplete = status === "Complete";
@@ -558,6 +571,32 @@ function PilotRow({
       onChanged();
     } catch (ex) {
       setActionErr(ex instanceof Error ? ex.message : "Failed");
+    }
+  }
+
+  async function submitOverride(e: React.FormEvent) {
+    e.preventDefault();
+    if (!slot.pilotId || overrideReason.trim().length < 20) return;
+    setOverrideBusy(true);
+    setOverrideErr(null);
+    setActionOk(null);
+    try {
+      await api.post<Signature>(
+        `rounds/${roundId}/teams/${team.id}/pilots/${slot.placeInTeam}/sign-override`,
+        { reason: overrideReason, onBehalfOfPilotId: slot.pilotId }
+      );
+      setOverrideOpen(false);
+      setOverrideReason("");
+      setActionOk("Override signature recorded.");
+      onChanged();
+    } catch (ex) {
+      if (ex instanceof ApiError && ex.code === "INVALID_REASON") {
+        setOverrideErr(ex.detail ?? ex.message);
+      } else {
+        setOverrideErr(ex instanceof Error ? ex.message : "Failed to record override signature");
+      }
+    } finally {
+      setOverrideBusy(false);
     }
   }
 
@@ -690,6 +729,15 @@ function PilotRow({
           </>
         )}
 
+        {canOverrideSign && status === "BriefComplete" && slot.status === "Filled" && slot.pilotId && (
+          <button
+            style={{ ...btnStyle("#5f3b00", "#fff3cd"), padding: "0.2rem 0.5rem" }}
+            onClick={() => { setOverrideOpen(true); setOverrideErr(null); }}
+          >
+            Override Sign
+          </button>
+        )}
+
         {/* Remove pilot */}
         {!isLocked && !isComplete && slot.status === "Filled" && (
           <button
@@ -701,7 +749,61 @@ function PilotRow({
         )}
       </div>
 
+      {actionOk && <Banner msg={actionOk} ok />}
       {actionErr && <Banner msg={actionErr} />}
+
+      {overrideOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby={`override-title-${team.id}-${slot.placeInTeam}`}
+          style={{
+            marginTop: "0.75rem",
+            padding: "0.85rem",
+            border: "1px solid #f0c36d",
+            borderRadius: "0.5rem",
+            background: "#fffaf0",
+          }}
+        >
+          <h3 id={`override-title-${team.id}-${slot.placeInTeam}`} style={{ margin: "0 0 0.5rem", fontSize: "1rem" }}>
+            Override Sign: {pilotDisplayName(slot.pilotId, pilots)}
+          </h3>
+          <p style={{ margin: "0 0 0.5rem", color: "#664d03", fontSize: "0.85rem" }}>
+            {team.teamName}, place {slot.placeInTeam}. This will record a coord-override signature on the immutable ledger. The pilot's own sign-to-fly remains preferred; this is for documented exceptions only.
+          </p>
+          <form onSubmit={(e) => { void submitOverride(e); }}>
+            <label style={{ display: "block", fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>
+              Reason (minimum 20 characters)
+            </label>
+            <textarea
+              required
+              minLength={20}
+              rows={4}
+              style={{ ...inputStyle, width: "100%", resize: "vertical" }}
+              value={overrideReason}
+              onChange={(e) => setOverrideReason(e.target.value)}
+            />
+            {overrideErr && <Banner msg={overrideErr} />}
+            <div style={{ display: "flex", gap: "0.5rem", marginTop: "0.5rem" }}>
+              <button
+                type="submit"
+                disabled={overrideBusy || overrideReason.trim().length < 20}
+                style={btnStyle("#fff", overrideBusy || overrideReason.trim().length < 20 ? "#6c757d" : "#8a5a00")}
+              >
+                {overrideBusy ? "Recording…" : "Submit Override"}
+              </button>
+              <button
+                type="button"
+                disabled={overrideBusy}
+                style={btnStyle("#333", "#e9ecef")}
+                onClick={() => setOverrideOpen(false)}
+              >
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
 
       {/* Inline flight forms */}
       {showFlightForm && !slot.flight && (
@@ -734,12 +836,14 @@ function TeamCard({
   team,
   pilots,
   status,
+  canOverrideSign,
   onChanged,
 }: {
   roundId: string;
   team: Team;
   pilots: PilotSummary[] | null;
   status: RoundStatus;
+  canOverrideSign: boolean;
   onChanged: () => void;
 }) {
   const [showAddPilot, setShowAddPilot] = useState(false);
@@ -817,6 +921,7 @@ function TeamCard({
             slot={slot}
             pilots={pilots}
             status={status}
+            canOverrideSign={canOverrideSign}
             onChanged={onChanged}
           />
         ))}
@@ -1083,6 +1188,10 @@ export default function RoundManage() {
 
   const r = round;
   const workflowActions = WORKFLOW[r.status] ?? [];
+  const canOverrideSign = r.status === "BriefComplete" && (
+    identity.roles.includes("Admin") ||
+    (identity.roles.includes("RoundsCoord") && identity.clubId !== null && identity.clubId === r.organisingClub?.id)
+  );
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
@@ -1196,6 +1305,7 @@ export default function RoundManage() {
               team={team}
               pilots={pilotsIndex}
               status={r.status}
+              canOverrideSign={canOverrideSign}
               onChanged={() => { void loadRound(); }}
             />
           ))}

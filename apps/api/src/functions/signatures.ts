@@ -14,14 +14,19 @@ import {
 } from "../lib/blob.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
-import { computeBriefHash } from "../lib/signTofly/briefVersion.js";
 import { getActiveWording } from "../lib/signTofly/wording.js";
 import {
+  buildSignaturePayload,
+  extractIp,
   getLatestSignature,
   listSignaturesForRound,
+  overrideSignaturePath,
   readSignature,
+  signaturePath,
   writeSignature,
+  writeSignatureToPath,
 } from "../lib/signTofly/ledger.js";
+import { appendAuditLine } from "../lib/signTofly/auditLog.js";
 
 type RoundBriefWithVersion = RoundBrief & { version?: number };
 
@@ -74,7 +79,7 @@ async function signOwnSlot(
     return { status: 200, jsonBody: existing };
   }
 
-  const sig: Signature = {
+  const sig = buildSignaturePayload({
     id: randomUUID(),
     roundId,
     teamId,
@@ -82,17 +87,105 @@ async function signOwnSlot(
     pilotId: caller.pilotId,
     userId: caller.userId,
     signedAt: new Date().toISOString(),
-    briefVersion,
-    briefHash: computeBriefHash(brief),
-    wordingVersion: wording.version,
-    wordingHash: wording.hash,
-    ip: extractIp(req),
-    userAgent: req.headers.get("user-agent") ?? null,
+    brief,
+    wording,
+    req,
     source: "pilot-self",
-  };
+  });
 
   await writeSignature(sig);
   await reflectCurrentSignature(roundId, teamId, placeNum, briefVersion);
+  return { status: 201, jsonBody: sig };
+}
+
+async function overrideSlotSignature(
+  req: HttpRequest,
+  _ctx: InvocationContext,
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const { roundId, teamId, place } = req.params as {
+    roundId?: string;
+    teamId?: string;
+    place?: string;
+  };
+  if (!roundId || !teamId || !place) {
+    throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
+  }
+  const placeNum = Number(place);
+  if (!Number.isInteger(placeNum)) {
+    throw new HttpError(400, "INVALID_PLACE", "place must be a number");
+  }
+
+  const body = await req.json() as { reason?: unknown; onBehalfOfPilotId?: unknown };
+  const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+  if (reason.length < 20) {
+    throw new HttpError(400, "INVALID_REASON", "Reason must be at least 20 characters");
+  }
+  const onBehalfOfPilotId = typeof body.onBehalfOfPilotId === "string"
+    ? body.onBehalfOfPilotId
+    : "";
+
+  const round = await readRound(roundId);
+  const isAdmin = caller.roles.includes("Admin");
+  const isScopedCoord = caller.roles.includes("RoundsCoord") &&
+    caller.clubId !== null &&
+    round.organisingClub?.id === caller.clubId;
+  if (!isAdmin && !isScopedCoord) {
+    throw new HttpError(403, "FORBIDDEN");
+  }
+
+  const slot = findSlot(round, teamId, placeNum);
+  if (!slot) throw new HttpError(404, "NOT_FOUND", "Pilot slot not found");
+  if (slot.pilotId !== onBehalfOfPilotId) {
+    throw new HttpError(400, "PILOT_MISMATCH", "onBehalfOfPilotId does not match the slot's assigned pilot");
+  }
+  if (round.status !== "BriefComplete") {
+    throw new HttpError(409, "INVALID_STATE", `Round status is ${round.status}`);
+  }
+  if (slot.status !== "Filled") {
+    throw new HttpError(409, "SLOT_EMPTY");
+  }
+
+  const [wording, brief] = await Promise.all([
+    getActiveWording(),
+    readRoundBrief(roundId),
+  ]);
+  const briefVersion = brief.version ?? 1;
+  const existing = await readSignature(roundId, teamId, placeNum, briefVersion);
+  const sig = buildSignaturePayload({
+    id: randomUUID(),
+    roundId,
+    teamId,
+    place: placeNum,
+    pilotId: onBehalfOfPilotId,
+    userId: caller.userId,
+    signedAt: new Date().toISOString(),
+    brief,
+    wording,
+    req,
+    source: "coord-override",
+    overrideBy: caller.userId,
+    overrideReason: reason,
+  });
+
+  const path = overrideSignaturePath(roundId, teamId, placeNum, briefVersion, randomUUID().slice(0, 8));
+  await writeSignatureToPath(sig, path);
+  await appendAuditLine("sign-override", {
+    ...sig,
+    audit: {
+      whenAdded: sig.signedAt,
+      signaturePath: path,
+      originalSignaturePathIfAny: existing
+        ? signaturePath(roundId, teamId, placeNum, briefVersion)
+        : null,
+      originalSignatureSourceIfAny: existing?.source ?? null,
+      pilotAndCoordSigned: Boolean(existing && existing.source !== "coord-override"),
+    },
+  });
+  await reflectCurrentSignature(roundId, teamId, placeNum, briefVersion);
+
   return { status: 201, jsonBody: sig };
 }
 
@@ -122,12 +215,6 @@ async function getRoundSignatures(
     ((a.briefVersion ?? 0) - (b.briefVersion ?? 0)),
   );
   return { status: 200, jsonBody: signatures };
-}
-
-export function extractIp(req: HttpRequest): string | null {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0]?.trim() ?? null;
-  return req.headers.get("x-azure-clientip") ?? null;
 }
 
 async function readRound(roundId: string): Promise<Round> {
@@ -192,4 +279,11 @@ app.http("getRoundSignatures", {
   authLevel: "anonymous",
   route: "rounds/{roundId}/signatures",
   handler: withErrorHandler(getRoundSignatures),
+});
+
+app.http("overrideSlotSignature", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "rounds/{roundId}/teams/{teamId}/pilots/{place}/sign-override",
+  handler: withErrorHandler(overrideSlotSignature),
 });

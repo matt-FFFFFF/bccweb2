@@ -1,10 +1,12 @@
-import type { Signature } from "@bccweb/types";
+import type { HttpRequest } from "@azure/functions";
+import type { RoundBrief, Signature, SignToFlyWording } from "@bccweb/types";
 import { BlobServiceClient, ContainerClient } from "@azure/storage-blob";
 import {
   getPrivateBlobClient,
   getPrivateBlockBlobClient,
   readBlob,
 } from "../blob.js";
+import { computeBriefHash } from "./briefVersion.js";
 
 let privateContainer: ContainerClient | null = null;
 
@@ -15,6 +17,16 @@ export function signaturePath(
   briefVersion: number,
 ): string {
   return `${latestSignaturePathPattern(roundId, teamId, place)}v${briefVersion}.json`;
+}
+
+export function overrideSignaturePath(
+  roundId: string,
+  teamId: string,
+  place: number,
+  briefVersion: number,
+  randomShort: string,
+): string {
+  return `${latestSignaturePathPattern(roundId, teamId, place)}v${briefVersion}-override-${randomShort}.json`;
 }
 
 export function legacySignaturePath(
@@ -81,9 +93,11 @@ export async function getLatestSignature(
 }
 
 export async function writeSignature(sig: Signature): Promise<void> {
-  const path = sig.briefVersion === null
-    ? legacySignaturePath(sig.roundId, sig.teamId, sig.place)
-    : signaturePath(sig.roundId, sig.teamId, sig.place, sig.briefVersion);
+  const path = signatureWritePath(sig);
+  await writeSignatureToPath(sig, path);
+}
+
+export async function writeSignatureToPath(sig: Signature, path: string): Promise<void> {
   const content = JSON.stringify(sig, null, 2);
 
   try {
@@ -97,8 +111,55 @@ export async function writeSignature(sig: Signature): Promise<void> {
   }
 }
 
+export function buildSignaturePayload(opts: {
+  id: string;
+  roundId: string;
+  teamId: string;
+  place: number;
+  pilotId: string;
+  userId: string;
+  signedAt: string;
+  brief: RoundBrief & { version?: number };
+  wording: SignToFlyWording;
+  req: HttpRequest;
+  source: Signature["source"];
+  overrideBy?: string;
+  overrideReason?: string;
+}): Signature {
+  return {
+    id: opts.id,
+    roundId: opts.roundId,
+    teamId: opts.teamId,
+    place: opts.place,
+    pilotId: opts.pilotId,
+    userId: opts.userId,
+    signedAt: opts.signedAt,
+    briefVersion: opts.brief.version ?? 1,
+    briefHash: computeBriefHash(opts.brief),
+    wordingVersion: opts.wording.version,
+    wordingHash: opts.wording.hash,
+    ip: extractIp(opts.req),
+    userAgent: opts.req.headers.get("user-agent") ?? null,
+    source: opts.source,
+    ...(opts.overrideBy ? { overrideBy: opts.overrideBy } : {}),
+    ...(opts.overrideReason ? { overrideReason: opts.overrideReason } : {}),
+  };
+}
+
+export function extractIp(req: HttpRequest): string | null {
+  const xff = req.headers.get("x-forwarded-for");
+  if (xff) return xff.split(",")[0]?.trim() ?? null;
+  return req.headers.get("x-azure-clientip") ?? null;
+}
+
+function signatureWritePath(sig: Signature): string {
+  return sig.briefVersion === null
+    ? legacySignaturePath(sig.roundId, sig.teamId, sig.place)
+    : signaturePath(sig.roundId, sig.teamId, sig.place, sig.briefVersion);
+}
+
 function briefVersionFromPath(path: string): number | null {
-  const match = /-v(\d+)\.json$/.exec(path);
+  const match = /-v(\d+)(?:-override-[^.]+)?\.json$/.exec(path);
   if (!match) return null;
   return Number(match[1]);
 }
