@@ -193,3 +193,8 @@
   WARNING, not an error — safe to leave for operator guidance.
 - Change feed (`changeFeed.enabled = true`) lives in the blob service body alongside versioning
   and soft-delete; all four properties coexist in `Microsoft.Storage/storageAccounts/blobServices`.
+
+## Task 14 notes (CORS lockdown)
+- Final blob CORS rule should be: `allowedMethods = ["GET", "HEAD", "OPTIONS"]`, `allowedHeaders = ["Content-Type", "Authorization", "x-ms-version", "x-ms-date", "x-ms-blob-type", "If-Match", "If-None-Match", "If-Modified-Since", "Range"]`, `exposedHeaders = ["x-ms-request-id", "x-ms-version", "Content-Length", "Content-Type", "ETag", "Last-Modified"]`, `maxAgeInSeconds = 3600`.
+- `allowed_origins` must stay default-empty in `variables.tf`; operators supply explicit SPA origins via tfvars to fail closed.
+- azapi plan JSON for `body` can be object-shaped; jq checks should flatten `cors.corsRules` defensively before asserting origins/methods/headers.

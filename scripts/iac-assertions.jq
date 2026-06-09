@@ -1,5 +1,5 @@
 # Run as: terraform show -json plan.binary | jq -f scripts/iac-assertions.jq
-# Emits "PASS: <label>" or "FAIL: <reason>" for each of 6 assertions.
+# Emits "PASS: <label>" or "FAIL: <reason>" for each of 8 assertions.
 # Caller should grep for FAIL to determine overall success.
 
 .planned_values.root_module.resources as $resources |
@@ -47,13 +47,27 @@
 
 # 5. CORS allowedOrigins does not contain "*"
 ([($bs_props.cors.corsRules // [])[] | (.allowedOrigins // [])[]] |
- if index("*") != null
- then "FAIL: CORS allowedOrigins contains wildcard \"*\""
- else "PASS: CORS allowedOrigins does not contain wildcard"
- end),
+  if index("*") != null
+  then "FAIL: CORS allowedOrigins contains wildcard \"*\""
+  else "PASS: CORS allowedOrigins does not contain wildcard"
+  end),
 
-# 6. Management lock present
+# 6. CORS allowedMethods are read-only for browser access
+([($bs_props.cors.corsRules // [])[] | (.allowedMethods // [])[]] |
+  if (index("PUT") != null) or (index("POST") != null) or (index("DELETE") != null)
+  then "FAIL: CORS allowedMethods includes write verbs"
+  else "PASS: CORS allowedMethods are read-only"
+  end),
+
+# 7. CORS allowedHeaders does not include wildcard
+([($bs_props.cors.corsRules // [])[] | (.allowedHeaders // [])[]] |
+  if index("*") != null
+  then "FAIL: CORS allowedHeaders contains wildcard \"*\""
+  else "PASS: CORS allowedHeaders does not contain wildcard"
+  end),
+
+# 8. Management lock present
 (if $lock != null
- then "PASS: management lock resource present (azapi_resource.storage_lock)"
- else "FAIL: management lock resource not found in plan"
- end)
+  then "PASS: management lock resource present (azapi_resource.storage_lock)"
+  else "FAIL: management lock resource not found in plan"
+  end)
