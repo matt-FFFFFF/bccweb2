@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
+import type { ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import type { Pilot, CoachType, PilotRatingValue, WingClass } from "@bccweb/types";
+import type { Pilot, PilotClubMembership, CoachType, PilotRatingValue, WingClass, ManufacturerRef } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
 import { api, ApiError } from "../../lib/api.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
@@ -42,9 +43,31 @@ function Banner({ msg, ok }: { msg: string; ok?: boolean }) {
   );
 }
 
+function safeExternalUrl(value?: string): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function ManufacturerLink({ manufacturer, model }: { manufacturer: ManufacturerRef; model?: string }) {
+  const url = safeExternalUrl(manufacturer.websiteUrl);
+  const label = `${manufacturer.name}${model ? ` ${model}` : ""}`;
+  return url ? (
+    <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: "#0066cc" }}>
+      {label}
+    </a>
+  ) : (
+    <>{label}</>
+  );
+}
+
 // ─── Display row ──────────────────────────────────────────────────────────────
 
-function Row({ label, value }: { label: string; value?: string | number | null }) {
+function Row({ label, value }: { label: string; value?: ReactNode }) {
   if (!value && value !== 0) return null;
   return (
     <tr style={{ borderBottom: "1px solid #f0f0f0" }}>
@@ -247,6 +270,7 @@ export default function PilotProfile() {
   const [refresh, setRefresh] = useState(0);
 
   const [pilot, setPilot] = useState<Pilot | null>(null);
+  const [clubHistory, setClubHistory] = useState<PilotClubMembership[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -277,6 +301,22 @@ export default function PilotProfile() {
           setLoading(false);
         }
       });
+
+    api
+      .get<PilotClubMembership[]>(`pilots/${id}/club-history`)
+      .then((data) => {
+        if (!cancelled) setClubHistory(data);
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) {
+          if (err instanceof ApiError && err.status === 404) {
+            setClubHistory([]);
+          } else {
+            setClubHistory(null);
+          }
+        }
+      });
+
     return () => {
       cancelled = true;
     };
@@ -330,9 +370,11 @@ export default function PilotProfile() {
           <Row
             label="Wing"
             value={
-              pilot.wingManufacturer
-                ? `${pilot.wingManufacturer.name}${pilot.wingModel ? ` ${pilot.wingModel}` : ""}`
-                : pilot.wingModel
+              pilot.wingManufacturer ? (
+                <ManufacturerLink manufacturer={pilot.wingManufacturer} model={pilot.wingModel} />
+              ) : (
+                pilot.wingModel
+              )
             }
           />
           <Row label="Wing Colours" value={pilot.wingColours} />
@@ -355,6 +397,24 @@ export default function PilotProfile() {
           </a>
         </div>
       )}
+
+      <section style={{ marginTop: "1.5rem" }}>
+        <h2 style={{ fontSize: "1rem", marginBottom: "0.5rem" }}>Club History</h2>
+        {clubHistory && clubHistory.length > 0 ? (
+          <table style={{ borderCollapse: "collapse", fontSize: "0.85rem" }}>
+            <tbody>
+              {clubHistory.map((m) => (
+                <tr key={`${m.clubId}-${m.joinedAt}`} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                  <td style={{ padding: "0.3rem 0.6rem", color: "#888" }}>{m.clubName}</td>
+                  <td style={{ padding: "0.3rem 0.6rem" }}>{m.source}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <p style={{ color: "#888" }}>No club history recorded.</p>
+        )}
+      </section>
 
       {/* Season clubs */}
       {pilot.seasonClubs.length > 0 && (

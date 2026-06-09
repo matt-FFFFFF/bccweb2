@@ -64,6 +64,33 @@ function PilotName({
   );
 }
 
+function safeExternalUrl(value?: string): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function ManufacturerName({ manufacturer, model }: { manufacturer?: { name: string; websiteUrl?: string }; model?: string }) {
+  if (!manufacturer) return <>{model ?? ""}</>;
+  const url = safeExternalUrl(manufacturer.websiteUrl);
+  if (!url) return <>{manufacturer.name}{model ? ` ${model}` : ""}</>;
+  return (
+    <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: "#0066cc" }}>
+      {manufacturer.name}
+      {model ? ` ${model}` : ""}
+    </a>
+  );
+}
+
+function wingManufacturerLabel(manufacturer?: { name: string; websiteUrl?: string }, model?: string) {
+  if (!manufacturer) return model ?? "";
+  return <ManufacturerName manufacturer={manufacturer} model={model} />;
+}
+
 function pilotDisplayName(pilotId: string | null, index: PilotSummary[] | null): string {
   if (!pilotId) return "Empty";
   return index?.find((p) => p.id === pilotId)?.name ?? pilotId;

@@ -12,7 +12,7 @@
 
 import { useState, useEffect } from "react";
 import { Link, useParams } from "react-router-dom";
-import type { RoundBrief as RoundBriefType, BriefTeamEntry, BriefPilotEntry } from "@bccweb/types";
+import type { RoundBrief as RoundBriefType, BriefTeamEntry, BriefPilotEntry, ManufacturerRef } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
 import { ApiError } from "../../lib/api.js";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
@@ -37,6 +37,29 @@ function w3wUrl(w3w?: string) {
 
 function displayValue(value?: string) {
   return value?.trim() ? value : "Not provided";
+}
+
+function safeExternalUrl(value?: string): string | null {
+  if (!value) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
+  } catch {
+    return null;
+  }
+}
+
+function ManufacturerLink({ manufacturer, model }: { manufacturer?: ManufacturerRef; model?: string }) {
+  if (!manufacturer) return <>{model ?? "—"}</>;
+  const url = safeExternalUrl(manufacturer.websiteUrl);
+  const label = `${manufacturer.name}${model ? ` ${model}` : ""}`;
+  return url ? (
+    <a href={url} target="_blank" rel="noopener noreferrer" style={{ color: "#1a4fa0" }}>
+      {label}
+    </a>
+  ) : (
+    <>{label}</>
+  );
 }
 
 const safetyFields: Array<{ label: string; value: (brief: RoundBriefType) => string | undefined }> = [
@@ -120,7 +143,7 @@ function PilotTable({ pilots }: { pilots: BriefPilotEntry[] }) {
               <td style={tdStyle}>{p.snapshot.pilotRating}</td>
               <td style={tdStyle}>{p.snapshot.wingClass}</td>
               <td style={tdStyle}>
-                {[p.snapshot.wingManufacturer, p.snapshot.wingModel].filter(Boolean).join(" ") || "—"}
+                <ManufacturerLink manufacturer={p.wingManufacturer} model={p.snapshot.wingModel} />
               </td>
               <td style={tdStyle}>{p.snapshot.wingColours ?? "—"}</td>
               <td style={tdStyle}>{p.snapshot.helmetColour ?? "—"}</td>
