@@ -48,7 +48,7 @@ describe("auth register enumeration neutralization", () => {
     const email = `new-${Date.now()}@example.com`;
     const req = makeRequest({
       method: "POST",
-      body: { email, password: "TestPass123!" },
+      body: { email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 },
     });
 
     const res = await entry!.handler(req as never, { log: () => undefined } as never);
@@ -67,7 +67,7 @@ describe("auth register enumeration neutralization", () => {
 
     const req = makeRequest({
       method: "POST",
-      body: { email: user.email, password: "TestPass123!" },
+      body: { email: user.email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 },
     });
 
     const res = await entry!.handler(req as never, { log: () => undefined } as never);
@@ -86,7 +86,7 @@ describe("auth register enumeration neutralization", () => {
 
     const req = makeRequest({
       method: "POST",
-      body: { email: user.email, password: "TestPass123!" },
+      body: { email: user.email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 },
     });
 
     const res = await entry!.handler(req as never, { log: () => undefined } as never);
@@ -109,19 +109,19 @@ describe("auth register enumeration neutralization", () => {
 
     responses.push(
       (await entry!.handler(
-        makeRequest({ method: "POST", body: { email: newEmail, password: "TestPass123!" } }) as never,
+        makeRequest({ method: "POST", body: { email: newEmail, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 } }) as never,
         { log: () => undefined } as never,
       )).jsonBody,
     );
     responses.push(
       (await entry!.handler(
-        makeRequest({ method: "POST", body: { email: unverifiedUser.email, password: "TestPass123!" } }) as never,
+        makeRequest({ method: "POST", body: { email: unverifiedUser.email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 } }) as never,
         { log: () => undefined } as never,
       )).jsonBody,
     );
     responses.push(
       (await entry!.handler(
-        makeRequest({ method: "POST", body: { email: verifiedUser.email, password: "TestPass123!" } }) as never,
+        makeRequest({ method: "POST", body: { email: verifiedUser.email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 } }) as never,
         { log: () => undefined } as never,
       )).jsonBody,
     );

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
 import { api } from "../../lib/api.js";
+import { TS_CS_VERSION } from "../../lib/terms.js";
 
 const inputStyle: React.CSSProperties = {
   padding: "0.4rem 0.6rem",
@@ -27,7 +28,8 @@ export default function Register() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [acceptTsCs, setAcceptTsCs] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [done, setDone] = useState(false);
 
@@ -41,15 +43,20 @@ export default function Register() {
       setError("Password must be at least 8 characters.");
       return;
     }
-    setBusy(true);
+    setSubmitting(true);
     setError(null);
     try {
-      await api.post("auth/register", { email, password });
+      await api.post("auth/register", {
+        email,
+        password,
+        acceptTsCs: true,
+        acceptedTsCsVersion: TS_CS_VERSION,
+      });
       setDone(true);
     } catch (ex) {
       setError(ex instanceof Error ? ex.message : "Registration failed");
     } finally {
-      setBusy(false);
+      setSubmitting(false);
     }
   }
 
@@ -73,10 +80,11 @@ export default function Register() {
 
       <form onSubmit={(e) => { void handleSubmit(e); }} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
         <div>
-          <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem", color: "#555" }}>
+          <label htmlFor="register-email" style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem", color: "#555" }}>
             Email address
           </label>
           <input
+            id="register-email"
             type="email"
             required
             autoComplete="username"
@@ -86,10 +94,11 @@ export default function Register() {
           />
         </div>
         <div>
-          <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem", color: "#555" }}>
+          <label htmlFor="register-password" style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem", color: "#555" }}>
             Password <span style={{ color: "#888", fontWeight: 400 }}>(min. 8 characters)</span>
           </label>
           <input
+            id="register-password"
             type="password"
             required
             minLength={8}
@@ -100,10 +109,11 @@ export default function Register() {
           />
         </div>
         <div>
-          <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem", color: "#555" }}>
+          <label htmlFor="register-confirm" style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem", color: "#555" }}>
             Confirm password
           </label>
           <input
+            id="register-confirm"
             type="password"
             required
             autoComplete="new-password"
@@ -119,8 +129,22 @@ export default function Register() {
           </div>
         )}
 
-        <button type="submit" disabled={busy} style={{ ...btnStyle, background: busy ? "#6c757d" : "#0066cc" }}>
-          {busy ? "Creating account…" : "Create account"}
+        <div>
+          <label style={{ display: "flex", alignItems: "flex-start", gap: "0.5rem", fontSize: "0.85rem", color: "#333" }}>
+            <input
+              type="checkbox"
+              checked={acceptTsCs}
+              onChange={(e) => setAcceptTsCs(e.target.checked)}
+              style={{ marginTop: "0.2rem" }}
+            />
+            <span>
+              I have read and accept the <a href="/terms" target="_blank" rel="noreferrer" style={{ color: "#0066cc" }}>[Terms &amp; Conditions]</a>
+            </span>
+          </label>
+        </div>
+
+        <button type="submit" disabled={!acceptTsCs || submitting || !email || !password} style={{ ...btnStyle, background: (!acceptTsCs || submitting || !email || !password) ? "#6c757d" : "#0066cc" }}>
+          {submitting ? "Creating account…" : "Create account"}
         </button>
       </form>
 

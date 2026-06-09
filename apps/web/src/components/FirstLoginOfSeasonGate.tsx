@@ -44,7 +44,7 @@ export default function FirstLoginOfSeasonGate({ children }: { children: React.R
     helmetColour: "",
     harnessType: "",
     harnessColour: "",
-    wingClass: "Other" as WingClass,
+    wingClass: "Other" as WingClass | "Other",
     wingModel: "",
     wingColours: "",
     currentClubId: "",

@@ -21,6 +21,8 @@ import type { User } from "@bccweb/types";
 import { getPrivateBlobClient, readBlob, writePrivateBlob } from "../lib/blob.js";
 import { getOrCreateUser } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { extractIp } from "../lib/signTofly/ledger.js";
+import { TS_CS_VERSION } from "../lib/termsConstants.js";
 import {
   AuthCredential,
   TokenAlreadyConsumedError,
@@ -151,14 +153,17 @@ async function register(
 ): Promise<HttpResponseInit> {
   rateLimit(req, { endpoint: "register", capacity: 3, refillPerMin: 3 });
   const startedAtMs = Date.now();
-  let body: { email?: string; password?: string };
+  let body: { email?: string; password?: string; acceptTsCs?: boolean; acceptedTsCsVersion?: number };
   try {
     body = (await req.json()) as typeof body;
   } catch {
     return badRequest("Invalid JSON");
   }
 
-  const { email, password } = body;
+  const { email, password, acceptTsCs, acceptedTsCsVersion } = body;
+  if (acceptTsCs !== true || typeof acceptedTsCsVersion !== "number") {
+    throw new HttpError(400, "TS_CS_NOT_ACCEPTED", "Terms & Conditions must be accepted before registration.");
+  }
   if (!email || !EMAIL_REGEX.test(email)) {
     return badRequest("Invalid email address");
   }
@@ -180,7 +185,14 @@ async function register(
       createdAt: new Date().toISOString(),
     };
     await writePrivateBlob(`auth/${userId}.json`, credential);
-    await getOrCreateUser(userId, emailLower);
+    const user = await getOrCreateUser(userId, emailLower);
+    const acceptedAt = new Date().toISOString();
+    await writePrivateBlob(`users/${userId}.json`, {
+      ...user,
+      acceptedTsCsAt: acceptedAt,
+      acceptedTsCsIp: extractIp(req),
+      acceptedTsCsVersion,
+    });
 
     const tokenDoc = await createVerificationToken(userId, 24);
     await sendVerificationEmail(emailLower, tokenDoc.token);

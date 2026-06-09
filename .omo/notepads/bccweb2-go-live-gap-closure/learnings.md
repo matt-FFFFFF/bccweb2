@@ -386,3 +386,30 @@ services:
 - Legacy coordinator toggle decision: removed the old `PUT /api/rounds/{id}/teams/{teamId}/pilots/{place}/sign-to-fly` registration and handler from `teams.ts` rather than returning 410, because direct coordinator mutation is a legal hazard.
 - Task 19/20 caller note: existing SPA callers of `/sign-to-fly` will break intentionally until the pilot self-sign UI and audited coordinator override endpoint are wired.
 - Legacy migration writes `source: "legacy-migrated"` signatures to `signatures/{roundId}/{teamId}-{place}-vlegacy.json` with `signedAt`, `ip`, `userAgent`, `briefVersion`, `briefHash`, `wordingVersion`, and `wordingHash` all literal null; Signature.id uses `getOrCreateUuid("signature", "<roundId>-<teamId>-<place>")`.
+
+## Task 20 notes — Coordinator override with audited reason
+- Audit log mechanism: used Azure Append Blob via `getAppendBlobClient()`, `create(ifNoneMatch: "*")`, then `appendBlock()` to `data-private/audit/sign-override-YYYY-MM-DD.jsonl`; no leased block-blob fallback needed.
+- Extracted T18 signature construction into `buildSignaturePayload()` in `apps/api/src/lib/signTofly/ledger.ts` and moved `extractIp()` there so pilot-self and coordinator override share brief hash, wording hash, IP, and user-agent logic.
+- Override signatures always write to `signatures/{roundId}/{teamId}-{place}-v{briefVersion}-override-{randomShort}.json`, so coordinator overrides never overwrite pilot-self records or each other. Audit lines include `originalSignaturePathIfAny` and `pilotAndCoordSigned` when a canonical pilot-self signature already existed.
+
+## Task 25 notes — TsCs gate on registration
+- Shared legal version constant mirrored in both apps/api/src/lib/termsConstants.ts and apps/web/src/lib/terms.ts; bump both together whenever the displayed text changes.
+- Terms text source for the web page was the legacy file at /Volumes/code/BCCWEB/BCCWeb/Views/Home/Terms_Conditions.cshtml.
+- Register now carries acceptTsCs + acceptedTsCsVersion, and /api/me exposes tsCsAcceptanceRequired for later re-acceptance gating.
+
+### Task 19 - Sign to Fly Pilot UI
+- Sanitization Config: Used `DOMPurify.sanitize` with `ALLOWED_TAGS: ["p", "strong", "em", "ul", "ol", "li", "br", "h2", "h3", "span"]` and `ALLOWED_ATTR: []` to safely render the HTML wording provided by the Admin.
+- Router Quirks: Re-used the existing `RequireAuth` wrapper inside the React Router `<Routes>` component to ensure the pilot sign page is completely protected.
+- Deprecated Calls Handled: Found callers of the deprecated `PUT /sign-to-fly` endpoint in `apps/web/src/pages/rounds/RoundManage.tsx` (`toggleField("sign-to-fly", slot.signToFly)`). Did NOT remove this as modifying `RoundManage.tsx` was explicitly forbidden by constraints (reserved for Task 20). Task 20 needs to replace these toggles with the new override modal flow.
+
+## Task 26 notes — Pilot self-serve round registration
+- Double-booking algorithm: `POST /rounds/{id}/register-self` reads public `rounds.json`, filters to same `seasonYear`, non-`Cancelled`, and ISO local dates within ±1 day of the target round date before reading candidate private round blobs and checking filled pilot slots. Local-date comparison currently slices `yyyy-MM-dd` and uses UTC day numbers; this avoids browser/server timezone drift for date-only strings but does not model venue-specific timezone/DST if future data stores full datetimes.
+- Auto-allocate decision: if the pilot has no `seasonClubs` association for the round's season, the endpoint allocates them to the round organising club and updates `currentClub`; if they already have a different season club, reassignment only happens when private `config.json` includes `autoAllocatePilotsToRoundClub: true`, otherwise it returns `409 NOT_IN_CLUB_FOR_SEASON`.
+- RoundDetail coordination with T19: kept T19's per-slot Sign-to-Fly CTA intact and added a separate registration action panel above round info. Unregister is only shown for Proposed/Confirmed unsigned slots; signed slots show the coordinator-contact note instead.
+
+### Task 29: First-login-of-season profile update flow
+- Added `firstLoginOfSeason` and `activeSeasonYear` to `/api/me`.
+- Added `profileUpdatedAt` to Pilot type.
+- Updated `PUT /api/pilots/{id}` to automatically stamp `profileUpdatedAt`.
+- Created `<FirstLoginOfSeasonGate>` that intercepts all router navigations (except whitelisted routes) if `firstLoginOfSeason` is true. Used an overlay CSS-based navigation blocker.
+- Found out that T25 and T26 had concurrent changes in `me.ts` and `roundRegistration.ts` which required minor patch coordination. Preserved `tsCsAcceptanceRequired` from T25 in `me.ts`.
