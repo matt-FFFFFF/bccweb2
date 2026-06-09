@@ -518,3 +518,40 @@ Evidence placeholder: `.omo/evidence/task-32-roundclubpilot-count.txt`
 `"src/__tests__/**/*.test.ts"` in `apps/api/vitest.config.ts`. No config change needed.
 Tests are pure fs contract tests (no SQL, no Azurite) — verify state file shape and
 reconcile field population.
+
+## Task 33 notes — PilotClub history preservation
+
+### Blob path layout
+- Private blob: `pilots/{pilotUuid}/club-history.json`
+- Content: `PilotClubMembership[]` — one entry per legacy PilotClub row, or one
+  synthetic "current" entry for active pilots with no legacy rows.
+- Container: `data-private` (never written to public `data` container)
+- API path: `GET /api/pilots/{id}/club-history`
+- Auth: Admin reads any; Pilot reads only their own (403 for other pilots, RoundsCoord).
+
+### Legacy joinedAt/leftAt handling
+- SQL columns `JoinedAt`/`LeftAt` may be null in the legacy database — not all pilot
+  club transitions were timestamped at entry time.
+- Rule: if the SQL value is null, store `null` in the blob — NEVER fabricate a date.
+- A null `joinedAt` or `leftAt` is semantically different from "unknown": it means the
+  event date was genuinely not recorded and is displayed as "—" in the UI.
+- `source:"legacy"` entries come from the SQL PilotClub table.
+- `source:"current"` entries are synthesised for pilots who have a `currentSeasonClub`
+  but no legacy PilotClub rows; both timestamps are explicitly null.
+
+### Pure logic extraction pattern
+- `scripts/migrate/pilot-club-history-logic.mjs` contains `buildPilotClubHistory()` with
+  no external imports (no `mssql`, no `@azure/storage-blob`). This allows the function to
+  be imported from TypeScript API tests without pulling in the SQL client.
+- Declaration file: `scripts/migrate/pilot-club-history-logic.d.mts` (NodeNext `.mts`
+  extension required for correct declaration resolution alongside a `.mjs` source).
+- `migrate.mjs` imports from this module via a regular ES import and uses it in step 7b.
+
+### Web component pattern
+- `PilotProfile.tsx` fetches club history inside the existing pilot `useEffect` (same
+  cancellation token, same deps `[id, refresh]`) — avoids a second round-trip and keeps
+  timing predictable.
+- History section renders unconditionally once the pilot loads (auth is enforced by the
+  API: unauthenticated calls to `/club-history` return 403, so the section gracefully
+  shows an empty state rather than crashing).
+- `source` badge uses subtle colour-coding: grey for "legacy", green for "current".

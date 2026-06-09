@@ -17,6 +17,7 @@ import { randomUUID } from "crypto";
 import type {
   Pilot,
   PilotSummary,
+  PilotClubMembership,
   WingClass,
   CoachType,
   PilotRatingValue,
@@ -373,6 +374,36 @@ async function ensurePilotsIndexBlob(): Promise<void> {
   }
 }
 
+// ─── GET /api/pilots/{id}/club-history ───────────────────────────────────────
+
+async function getPilotClubHistory(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const id = req.params["id"];
+  if (!id) throw new HttpError(400, "MISSING_PILOT_ID", "Missing pilot id");
+
+  const isAdmin = caller.roles.includes("Admin");
+  const isSelf = caller.pilotId === id;
+
+  if (!isAdmin && !isSelf) return forbiddenResponse();
+
+  try {
+    const history = await readBlob<PilotClubMembership[]>(
+      getPrivateBlobClient(`pilots/${id}/club-history.json`)
+    );
+    return { status: 200, jsonBody: history };
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "No club history found for this pilot");
+    }
+    throw new HttpError(500, "INTERNAL");
+  }
+}
+
 // ─── Registration ─────────────────────────────────────────────────────────────
 
 app.http("getPilots", {
@@ -401,4 +432,11 @@ app.http("updatePilot", {
   authLevel: "anonymous",
   route: "pilots/{id}",
   handler: withErrorHandler(updatePilot),
+});
+
+app.http("getPilotClubHistory", {
+  methods: ["GET"],
+  authLevel: "anonymous",
+  route: "pilots/{id}/club-history",
+  handler: withErrorHandler(getPilotClubHistory),
 });
