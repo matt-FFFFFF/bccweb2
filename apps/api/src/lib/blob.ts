@@ -105,20 +105,25 @@ export async function writeBlob<T>(
 /**
  * Write a JSON blob to the private container, overwriting any existing content.
  * Optionally pass a leaseId to write under an active blob lease.
+ *
+ * Pass `options.ifNoneMatch = "*"` to perform an atomic create-only write —
+ * Azure returns HTTP 412 (PreconditionFailed) if the blob already exists, which
+ * the caller can catch and treat as a no-op (don't overwrite).
  */
 export async function writePrivateBlob<T>(
   path: string,
   data: T,
-  leaseId?: string
+  leaseId?: string,
+  options?: { ifNoneMatch?: string }
 ): Promise<void> {
   const client = getPrivateBlockBlobClient(path);
   const content = JSON.stringify(data, null, 2);
-  const options = leaseId
-    ? { conditions: { leaseId } }
-    : undefined;
+  const conditions: { leaseId?: string; ifNoneMatch?: string } = {};
+  if (leaseId) conditions.leaseId = leaseId;
+  if (options?.ifNoneMatch) conditions.ifNoneMatch = options.ifNoneMatch;
   await client.upload(content, Buffer.byteLength(content), {
     blobHTTPHeaders: { blobContentType: "application/json" },
-    conditions: options?.conditions,
+    conditions: Object.keys(conditions).length > 0 ? conditions : undefined,
   });
 }
 

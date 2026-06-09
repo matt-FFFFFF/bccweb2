@@ -388,8 +388,25 @@ async function confirmRound(
 
   const result = await transition(req, id, ["Proposed"], "Confirmed");
   if ("status" in result && "jsonBody" in result) return result as HttpResponseInit;
-  await updateRoundsIndex(result as Round);
-  return { status: 200, jsonBody: result };
+  const updated = result as Round;
+  await updateRoundsIndex(updated);
+
+  // Best-effort: write a skeleton brief blob so the brief-edit UI is usable.
+  // `if-none-match: "*"` is atomic create-or-skip — never clobbers an existing
+  // brief blob (Azure returns HTTP 412, which we treat as a no-op here).
+  try {
+    const brief = await buildRoundBrief(updated);
+    await writePrivateBlob(
+      `round-briefs/${updated.id}.json`,
+      brief,
+      undefined,
+      { ifNoneMatch: "*" }
+    );
+  } catch (briefErr) {
+    console.warn(`[confirmRound:${updated.id}] Skeleton brief creation skipped:`, briefErr);
+  }
+
+  return { status: 200, jsonBody: updated };
 }
 
 // ─── POST /api/rounds/{id}/brief-complete ─────────────────────────────────────
