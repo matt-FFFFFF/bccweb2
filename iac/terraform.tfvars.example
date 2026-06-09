@@ -8,9 +8,10 @@
 #
 # See iac/README.md for full details.
 
-# CORS: list of allowed origins for the storage blob service (no wildcards in prod)
+# CORS: explicit SPA origins only; browser reads must be limited to prod/staging/localhost.
 allowed_origins = [
-  "https://your-swa-host.azurestaticapps.net",
+  "https://your-prod-swa.azurestaticapps.net",
+  "https://your-staging-swa.azurestaticapps.net",
   "http://localhost:5173",
 ]
 

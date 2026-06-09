@@ -72,8 +72,8 @@ resource "azapi_resource" "blob_service" {
           {
             allowedOrigins  = var.allowed_origins
             allowedMethods  = ["GET", "HEAD", "OPTIONS"]
-            allowedHeaders  = ["Content-Type", "Authorization", "x-ms-*", "If-Match", "If-None-Match"]
-            exposedHeaders  = ["*"]
+            allowedHeaders  = ["Content-Type", "Authorization", "x-ms-version", "x-ms-date", "x-ms-blob-type", "If-Match", "If-None-Match", "If-Modified-Since", "Range"]
+            exposedHeaders  = ["x-ms-request-id", "x-ms-version", "Content-Length", "Content-Type", "ETag", "Last-Modified"]
             maxAgeInSeconds = 3600
           }
         ]

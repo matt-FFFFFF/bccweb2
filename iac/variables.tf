@@ -11,7 +11,7 @@ variable "environment" {
 }
 
 variable "allowed_origins" {
-  description = "Allowed CORS origins for the storage account blob service (no wildcards in production)"
+  description = "Allowed CORS origins for the storage account blob service; defaults to none so deploys fail closed unless tfvars supplies explicit SPA origins"
   type        = list(string)
   default     = []
 }
