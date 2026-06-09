@@ -107,6 +107,6 @@ export async function invoke(
     );
   }
   // Pass a minimal InvocationContext stub
-  const ctx = { log: console.log, functionName: handlerName };
+  const ctx = { log: console.log, warn: console.warn, error: console.error, functionName: handlerName };
   return entry.handler(req as never, ctx as never) as Promise<HttpResponseInit>;
 }

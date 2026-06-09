@@ -13,6 +13,7 @@
 
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { readDiscardedCounts } from "./discarded-counts.mjs";
 
 const STATE_DIR = ".migration-state";
 const MAP_PATH = join(STATE_DIR, "id-map.json");
@@ -72,10 +73,15 @@ if (malformed.length > 0) {
   });
 }
 
+// Read discarded entity counts (entities analyzed but not migrated to blobs).
+// Written by migrate.mjs Step 9b for RoundClubPilot and any future discarded types.
+const discarded = readDiscardedCounts(STATE_DIR) ?? {};
+
 const report = {
   generatedAt: new Date().toISOString(),
   totalEntries: allUuids.length,
   perEntity,
+  discarded,
   anomalies,
 };
 
@@ -89,6 +95,12 @@ console.log(`Total entries: ${report.totalEntries}`);
 console.log("Per entity:");
 for (const [entity, info] of Object.entries(perEntity)) {
   console.log(`  ${entity}: ${info.count}`);
+}
+if (Object.keys(discarded).length > 0) {
+  console.log("Discarded (counted but not migrated):");
+  for (const [entity, count] of Object.entries(discarded)) {
+    console.log(`  ${entity}: ${count} rows`);
+  }
 }
 if (anomalies.length > 0) {
   console.warn(`Anomalies detected: ${anomalies.length}`);
