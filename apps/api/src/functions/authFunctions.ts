@@ -37,6 +37,12 @@ import {
   getAppUrl,
 } from "../lib/authHelpers.js";
 import {
+  checkAccountLockout,
+  rateLimit,
+  recordLoginFailure,
+  recordLoginSuccess,
+} from "../lib/rateLimit.js";
+import {
   sendEmail,
   verificationEmailHtml,
   verificationEmailText,
@@ -143,6 +149,7 @@ async function register(
   req: HttpRequest,
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
+  rateLimit(req, { endpoint: "register", capacity: 3, refillPerMin: 3 });
   const startedAtMs = Date.now();
   let body: { email?: string; password?: string };
   try {
@@ -209,6 +216,7 @@ async function verifyEmail(
   req: HttpRequest,
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
+  rateLimit(req, { endpoint: "verify-email", capacity: 10, refillPerMin: 10 });
   const token = req.query.get("token");
   if (!token) return badRequest("Missing token");
 
@@ -249,6 +257,7 @@ async function resendVerification(
   req: HttpRequest,
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
+  rateLimit(req, { endpoint: "resend-verification", capacity: 3, refillPerMin: 3 });
   let body: { email?: string };
   try {
     body = (await req.json()) as typeof body;
@@ -310,6 +319,8 @@ async function login(
   req: HttpRequest,
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
+  rateLimit(req, { endpoint: "login", capacity: 10, refillPerMin: 10 });
+
   let body: { email?: string; password?: string };
   try {
     body = (await req.json()) as typeof body;
@@ -330,6 +341,9 @@ async function login(
   const userId = await lookupUserByEmail(email);
   if (!userId) return invalidCreds;
 
+  // Check lockout before password verification — throws 423 if active
+  await checkAccountLockout(userId);
+
   let cred: AuthCredential;
   try {
     cred = await readBlob<AuthCredential>(
@@ -340,7 +354,10 @@ async function login(
   }
 
   const passwordOk = await verifyPassword(password, cred.passwordHash);
-  if (!passwordOk) return invalidCreds;
+  if (!passwordOk) {
+    await recordLoginFailure(userId);
+    return invalidCreds;
+  }
 
   if (!cred.emailVerified) {
     return {
@@ -353,6 +370,7 @@ async function login(
     };
   }
 
+  await recordLoginSuccess(userId);
   const accessToken = signAccessToken(userId, email);
   const refreshToken = signRefreshToken(userId);
 
@@ -368,6 +386,7 @@ async function refresh(
   req: HttpRequest,
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
+  rateLimit(req, { endpoint: "refresh", capacity: 30, refillPerMin: 30 });
   let body: { refreshToken?: string };
   try {
     body = (await req.json()) as typeof body;
@@ -402,6 +421,7 @@ async function forgotPassword(
   req: HttpRequest,
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
+  rateLimit(req, { endpoint: "forgot-password", capacity: 3, refillPerMin: 3 });
   let body: { email?: string };
   try {
     body = (await req.json()) as typeof body;
@@ -452,6 +472,7 @@ async function resetPassword(
   req: HttpRequest,
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
+  rateLimit(req, { endpoint: "reset-password", capacity: 5, refillPerMin: 5 });
   let body: { token?: string; newPassword?: string };
   try {
     body = (await req.json()) as typeof body;

@@ -1,13 +1,17 @@
 import type { HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 
 export class HttpError extends Error {
+  public headers?: Record<string, string>;
+
   constructor(
     public status: number,
     public code: string,
-    public detail?: string
+    public detail?: string,
+    headers?: Record<string, string>
   ) {
     super(detail ?? code);
     this.name = "HttpError";
+    if (headers) this.headers = headers;
   }
 }
 
@@ -85,6 +89,7 @@ export function withErrorHandler(handler: HttpHandler): HttpHandler {
       if (err instanceof HttpError) {
         return {
           status: err.status,
+          ...(err.headers ? { headers: err.headers } : {}),
           jsonBody: {
             error: shortErrorMessage(err.status),
             code: err.code,

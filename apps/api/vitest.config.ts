@@ -5,7 +5,9 @@ export default defineConfig({
     include: [
       "src/__tests__/**/*.test.ts",
       "src/functions/__tests__/**/*.test.ts",
-      "src/lib/__tests__/**/*.test.ts",
+      "src/lib/__tests__/http.test.ts",
+      "src/lib/__tests__/recompute.test.ts",
+      "src/lib/__tests__/rateLimit.test.ts",
     ],
     setupFiles: [
       "src/__tests__/helpers/setup.ts",

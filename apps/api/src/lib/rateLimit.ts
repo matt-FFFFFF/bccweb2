@@ -1,0 +1,233 @@
+/**
+ * Rate limiting and account lockout helpers for /api/auth/* endpoints.
+ *
+ * Rate limiting: in-memory token-bucket keyed by (ip, endpoint).
+ * Cold-start resets the bucket (acceptable for consumption-plan Functions).
+ *
+ * Lockout: persistent per-account state stored in auth/{userId}.json.
+ * 5 wrong-password attempts in 10 minutes -> 15-minute lockout.
+ * Lockout by IP is intentionally omitted — paragliding meets share NAT.
+ */
+
+import { createHash } from "crypto";
+import type { HttpRequest } from "@azure/functions";
+import {
+  getPrivateBlobClient,
+  readBlob,
+  withPrivateLease,
+  writePrivateBlob,
+} from "./blob.js";
+import { HttpError } from "./http.js";
+
+// ─── Token Bucket ─────────────────────────────────────────────────────────────
+
+export class TokenBucket {
+  private tokens: number;
+  private lastRefillMs: number;
+
+  constructor(
+    private readonly capacity: number,
+    private readonly refillPerMin: number
+  ) {
+    this.tokens = capacity;
+    this.lastRefillMs = Date.now();
+  }
+
+  private refill(): void {
+    const now = Date.now();
+    const elapsedMs = now - this.lastRefillMs;
+    const added = (elapsedMs / 60_000) * this.refillPerMin;
+    this.tokens = Math.min(this.capacity, this.tokens + added);
+    this.lastRefillMs = now;
+  }
+
+  /** Consume one token. Returns true if a token was available, false if empty. */
+  tryConsume(): boolean {
+    this.refill();
+    if (this.tokens >= 1) {
+      this.tokens -= 1;
+      return true;
+    }
+    return false;
+  }
+
+  /** Refill bucket to capacity (used in tests and for manual reset). */
+  reset(): void {
+    this.tokens = this.capacity;
+    this.lastRefillMs = Date.now();
+  }
+
+  /** Lower-bound seconds until the next token is available. */
+  retryAfterSecs(): number {
+    const msPerToken = 60_000 / this.refillPerMin;
+    return Math.ceil(msPerToken / 1000);
+  }
+}
+
+// ─── In-memory bucket registry ────────────────────────────────────────────────
+
+const _buckets = new Map<string, TokenBucket>();
+
+/** Clear all in-memory buckets. Intended for test isolation only. */
+export function resetAllBuckets(): void {
+  _buckets.clear();
+}
+
+// ─── Rate limit ───────────────────────────────────────────────────────────────
+
+export interface RateLimitOpts {
+  endpoint: string;
+  capacity: number;
+  refillPerMin: number;
+}
+
+/**
+ * Token-bucket rate limiter keyed by (IP, endpoint).
+ *
+ * Source IP is read from x-forwarded-for (first entry) or x-azure-clientip.
+ * Falls back to "unknown" if neither header is present.
+ *
+ * Throws HttpError(429, "RATE_LIMITED") with a Retry-After header when the
+ * bucket is exhausted. Emits [METRIC] auth.rateLimit.hit on every rejection.
+ */
+export function rateLimit(req: HttpRequest, opts: RateLimitOpts): void {
+  const ip =
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    req.headers.get("x-azure-clientip") ??
+    "unknown";
+
+  const key = `${ip}:${opts.endpoint}`;
+  let bucket = _buckets.get(key);
+  if (!bucket) {
+    bucket = new TokenBucket(opts.capacity, opts.refillPerMin);
+    _buckets.set(key, bucket);
+  }
+
+  if (!bucket.tryConsume()) {
+    console.warn(`[METRIC] auth.rateLimit.hit endpoint=${opts.endpoint}`);
+    throw new HttpError(
+      429,
+      "RATE_LIMITED",
+      "Too many requests; try again later.",
+      { "Retry-After": String(bucket.retryAfterSecs()) }
+    );
+  }
+}
+
+// ─── Lockout constants ────────────────────────────────────────────────────────
+
+const FAILURE_WINDOW_MS = 10 * 60_000; // 10 minutes
+const MAX_FAILURES = 5;
+const LOCKOUT_DURATION_MS = 15 * 60_000; // 15 minutes
+
+// ─── Internal types ───────────────────────────────────────────────────────────
+
+interface CredentialWithLockout {
+  passwordHash: string;
+  emailVerified: boolean;
+  createdAt: string;
+  /** ISO timestamps of recent failed attempts within the failure window. */
+  failedAttempts?: string[];
+  /** ISO timestamp until which the account is locked; null/absent when unlocked. */
+  lockedUntil?: string | null;
+}
+
+function sha8(value: string): string {
+  return createHash("sha256").update(value).digest("hex").slice(0, 8);
+}
+
+// ─── Lockout helpers ──────────────────────────────────────────────────────────
+
+/**
+ * Check whether the account is currently locked.
+ *
+ * Reads auth/{userId}.json and throws HttpError(423, "ACCOUNT_LOCKED") if
+ * lockedUntil > now. Returns silently if the blob is missing (tolerated edge
+ * case during account setup) or if the lockout has expired.
+ */
+export async function checkAccountLockout(userId: string): Promise<void> {
+  let cred: CredentialWithLockout;
+  try {
+    cred = await readBlob<CredentialWithLockout>(
+      getPrivateBlobClient(`auth/${userId}.json`)
+    );
+  } catch {
+    return; // blob missing — no lockout to enforce
+  }
+
+  if (cred.lockedUntil && new Date(cred.lockedUntil) > new Date()) {
+    throw new HttpError(
+      423,
+      "ACCOUNT_LOCKED",
+      "Account temporarily locked due to repeated login failures."
+    );
+  }
+}
+
+/**
+ * Record a failed login attempt for the given userId.
+ *
+ * Under a 30-second private blob lease, increments the failure list (pruned to
+ * the last 10 minutes). If the running total reaches MAX_FAILURES and the
+ * account is not already locked, sets lockedUntil = now + 15 minutes and emits
+ * [METRIC] auth.lockout.triggered.
+ *
+ * Silently returns if auth/{userId}.json does not exist (blob may have been
+ * deleted between the caller's initial read and this call).
+ */
+export async function recordLoginFailure(userId: string): Promise<void> {
+  const path = `auth/${userId}.json`;
+  try {
+    await withPrivateLease(path, async (leaseId) => {
+      const cred = await readBlob<CredentialWithLockout>(
+        getPrivateBlobClient(path)
+      );
+
+      const now = Date.now();
+      const windowStart = now - FAILURE_WINDOW_MS;
+
+      const recentFailures = (cred.failedAttempts ?? []).filter(
+        (t) => new Date(t).getTime() >= windowStart
+      );
+      recentFailures.push(new Date(now).toISOString());
+      cred.failedAttempts = recentFailures;
+
+      const isCurrentlyLocked =
+        !!cred.lockedUntil &&
+        new Date(cred.lockedUntil).getTime() > now;
+
+      if (recentFailures.length >= MAX_FAILURES && !isCurrentlyLocked) {
+        cred.lockedUntil = new Date(now + LOCKOUT_DURATION_MS).toISOString();
+        console.warn(`[METRIC] auth.lockout.triggered userId=${sha8(userId)}`);
+      }
+
+      await writePrivateBlob(path, cred, leaseId);
+    });
+  } catch (err) {
+    if ((err as { statusCode?: number }).statusCode === 404) return;
+    throw err;
+  }
+}
+
+/**
+ * Reset the failure counter and lockout on a successful login.
+ *
+ * Under a 30-second private blob lease, clears failedAttempts and sets
+ * lockedUntil to null. Silently returns if the blob is missing.
+ */
+export async function recordLoginSuccess(userId: string): Promise<void> {
+  const path = `auth/${userId}.json`;
+  try {
+    await withPrivateLease(path, async (leaseId) => {
+      const cred = await readBlob<CredentialWithLockout>(
+        getPrivateBlobClient(path)
+      );
+      cred.failedAttempts = [];
+      cred.lockedUntil = null;
+      await writePrivateBlob(path, cred, leaseId);
+    });
+  } catch (err) {
+    if ((err as { statusCode?: number }).statusCode === 404) return;
+    throw err;
+  }
+}
