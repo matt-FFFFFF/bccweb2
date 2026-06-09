@@ -170,6 +170,30 @@ export function briefImagePath(roundId, imageNumber = 1) {
   return `round-briefs/${roundId}/image-${imageNumber}.png`;
 }
 
+export function legacySignaturePath(roundId, teamId, place) {
+  return `signatures/${roundId}/${teamId}-${place}-vlegacy.json`;
+}
+
+export function legacyMigratedSignature({ roundId, teamId, place, pilotId, stableKey, legacyId }) {
+  return {
+    id: getOrCreateUuid("signature", stableKey ?? `${roundId}-${teamId}-${place}`),
+    roundId,
+    teamId,
+    place,
+    pilotId,
+    userId: null,
+    signedAt: null,
+    briefVersion: null,
+    briefHash: null,
+    wordingVersion: null,
+    wordingHash: null,
+    ip: null,
+    userAgent: null,
+    source: "legacy-migrated",
+    ...(legacyId != null ? { legacyId } : {}),
+  };
+}
+
 // ─── Enum mappings ────────────────────────────────────────────────────────────
 
 const COACH_TYPE_MAP = {
@@ -595,6 +619,8 @@ async function main() {
 
       const places = (rtpByRoundTeam.get(rt.ID) ?? []).sort((a, b) => a.PlaceInTeam - b.PlaceInTeam);
 
+      const legacySignatures = [];
+
       const pilots = places.map((place) => {
         const pilotSqlId = place.Pilot_ID ?? null;
         const pilotId = pilotSqlId ? pilotUuid.get(pilotSqlId) : null;
@@ -644,6 +670,17 @@ async function main() {
             }
           : null;
 
+        if (hasPilot && !!place.SignToFly && pilotId) {
+          legacySignatures.push(legacyMigratedSignature({
+            roundId: id,
+            teamId: rtId,
+            place: place.PlaceInTeam,
+            pilotId,
+            stableKey: `${id}-${rtId}-${place.PlaceInTeam}`,
+            legacyId: place.RoundTeamPilot_ID,
+          }));
+        }
+
         return {
           placeInTeam: place.PlaceInTeam,
           isScoring: !!place.IsScoring,
@@ -666,8 +703,15 @@ async function main() {
         ...(rt.PureTrackGroup_ID ? { pureTrackGroupId: rt.PureTrackGroup_ID } : {}),
         ...(rt.PureTrackGroupSlug ? { pureTrackGroupSlug: rt.PureTrackGroupSlug } : {}),
         pilots,
+        __legacySignatures: legacySignatures,
       };
     });
+
+    const signaturesToWrite = [];
+    for (const team of teams) {
+      signaturesToWrite.push(...team.__legacySignatures);
+      delete team.__legacySignatures;
+    }
 
     const status = mapStatus(r.StatusDesc);
 
@@ -703,6 +747,13 @@ async function main() {
     };
 
     await uploadPrivateBlob(`rounds/${id}.json`, roundDoc);
+
+    for (const signature of signaturesToWrite) {
+      await uploadPrivateBlob(
+        legacySignaturePath(signature.roundId, signature.teamId, signature.place),
+        signature,
+      );
+    }
 
     // Apply scoring for completed rounds
     if (status === "Complete") {

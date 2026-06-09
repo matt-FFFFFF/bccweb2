@@ -6,7 +6,6 @@
  * POST   /api/rounds/{id}/teams/{teamId}/pilots                   — add pilot to team
  * DELETE /api/rounds/{id}/teams/{teamId}/pilots/{place}           — remove pilot slot
  * PUT    /api/rounds/{id}/teams/{teamId}/pilots/{place}/accounted  — toggle accounted-for
- * PUT    /api/rounds/{id}/teams/{teamId}/pilots/{place}/sign-to-fly — toggle sign-to-fly
  */
 
 import {
@@ -300,46 +299,6 @@ async function updateAccounted(
   return { status: 200, jsonBody: result };
 }
 
-// ─── PUT /api/rounds/{id}/teams/{teamId}/pilots/{place}/sign-to-fly ───────────
-
-async function updateSignToFly(
-  req: HttpRequest,
-  _ctx: InvocationContext
-): Promise<HttpResponseInit> {
-  const caller = await getCallerIdentity(req);
-  if (!caller) return unauthorizedResponse();
-  if (!isCoord(caller.roles)) return forbiddenResponse();
-
-  const { id, teamId, place } = req.params as {
-    id?: string;
-    teamId?: string;
-    place?: string;
-  };
-  if (!id || !teamId || !place) {
-    throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
-  }
-
-  const body = (await req.json()) as { signToFly?: boolean };
-  if (typeof body.signToFly !== "boolean") {
-    throw new HttpError(400, "INVALID_BODY", "signToFly (boolean) is required");
-  }
-
-  const placeNum = parseInt(place, 10);
-
-  const result = await mutateLocked(id, (r) => {
-    const team = r.teams.find((t) => t.id === teamId);
-    if (!team) return "Team not found";
-
-    const slot = team.pilots.find((s) => s.placeInTeam === placeNum);
-    if (!slot) return "Pilot slot not found";
-
-    slot.signToFly = body.signToFly!;
-  });
-
-  if (typeof (result as HttpResponseInit).status === "number") return result as HttpResponseInit;
-  return { status: 200, jsonBody: result };
-}
-
 // ─── Registration ─────────────────────────────────────────────────────────────
 
 app.http("addTeam", {
@@ -375,11 +334,4 @@ app.http("updateAccounted", {
   authLevel: "anonymous",
   route: "rounds/{id}/teams/{teamId}/pilots/{place}/accounted",
   handler: withErrorHandler(updateAccounted),
-});
-
-app.http("updateSignToFly", {
-  methods: ["PUT"],
-  authLevel: "anonymous",
-  route: "rounds/{id}/teams/{teamId}/pilots/{place}/sign-to-fly",
-  handler: withErrorHandler(updateSignToFly),
 });

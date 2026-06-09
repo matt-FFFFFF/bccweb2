@@ -380,3 +380,9 @@ services:
 ### wingClass in PilotSnapshot (rounds/{id}.json — private)
 - `PilotSnapshot` embeds `wingClass` in the private round blob at lock time. This is acceptable: it's private, it's the scoring class, and it's the historical record of what the pilot flew.
 - The public-facing equivalent in `RoundResult` is also `wingClass` — same decision applies (scoring category, not PII).
+
+## Task 18 notes — Immutable Sign-to-Fly signature ledger
+- Idempotency mechanism: the POST endpoint reads `readSignature(roundId, teamId, place, briefVersion)` first and returns the existing record with 200 for same-version re-signs. `writeSignature()` still uses `ifNoneMatch: "*"` as the storage-level overwrite guard and treats already-exists as a no-op, but endpoint idempotency does not rely on that exception path.
+- Legacy coordinator toggle decision: removed the old `PUT /api/rounds/{id}/teams/{teamId}/pilots/{place}/sign-to-fly` registration and handler from `teams.ts` rather than returning 410, because direct coordinator mutation is a legal hazard.
+- Task 19/20 caller note: existing SPA callers of `/sign-to-fly` will break intentionally until the pilot self-sign UI and audited coordinator override endpoint are wired.
+- Legacy migration writes `source: "legacy-migrated"` signatures to `signatures/{roundId}/{teamId}-{place}-vlegacy.json` with `signedAt`, `ip`, `userAgent`, `briefVersion`, `briefHash`, `wordingVersion`, and `wordingHash` all literal null; Signature.id uses `getOrCreateUuid("signature", "<roundId>-<teamId>-<place>")`.

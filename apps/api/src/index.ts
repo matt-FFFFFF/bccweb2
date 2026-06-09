@@ -24,6 +24,7 @@ import "./functions/puretrack.js";
 // Phase 5 — Auth + User Management
 import "./functions/authFunctions.js";
 import "./functions/adminWording.js";
+import "./functions/signatures.js";
 
 // Club Teams
 import "./functions/clubTeams.js";
