@@ -18,7 +18,7 @@ resource "azurerm_key_vault" "main" {
   resource_group_name        = azapi_resource.resource_group.name
   sku_name                   = "standard"
   tenant_id                  = data.azurerm_client_config.current.tenant_id
-  enable_rbac_authorization  = true
+  rbac_authorization_enabled = true
   soft_delete_retention_days = 30
   purge_protection_enabled   = true
 
