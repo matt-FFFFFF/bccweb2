@@ -42,10 +42,8 @@ export default function PilotsList() {
   if (!pilots || pilots.length === 0) return <p>No pilots found.</p>;
 
   const filtered = search.trim()
-    ? pilots.filter(
-        (p) =>
-          p.name.toLowerCase().includes(search.toLowerCase()) ||
-          String(p.bhpaNumber ?? "").includes(search)
+    ? pilots.filter((p) =>
+        p.name.toLowerCase().includes(search.toLowerCase())
       )
     : pilots;
 
@@ -56,7 +54,7 @@ export default function PilotsList() {
       <div style={{ marginBottom: "1rem" }}>
         <input
           type="search"
-          placeholder="Search by name or BHPA number…"
+          placeholder="Search by name…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{
@@ -79,7 +77,6 @@ export default function PilotsList() {
         <thead>
           <tr style={{ borderBottom: "2px solid #dee2e6" }}>
             <th style={{ textAlign: "left", padding: "0.4rem 0.5rem" }}>Name</th>
-            <th style={{ textAlign: "left", padding: "0.4rem 0.5rem" }}>BHPA No</th>
             <th style={{ textAlign: "left", padding: "0.4rem 0.5rem" }}>Club</th>
             <th style={{ textAlign: "left", padding: "0.4rem 0.5rem" }}>Rating</th>
           </tr>
@@ -94,9 +91,6 @@ export default function PilotsList() {
                 >
                   {p.name}
                 </Link>
-              </td>
-              <td style={{ padding: "0.5rem 0.5rem", color: "#555", fontFamily: "monospace" }}>
-                {p.bhpaNumber ?? "—"}
               </td>
               <td style={{ padding: "0.5rem 0.5rem", color: "#555" }}>
                 {p.clubId ? p.clubId : "—"}
