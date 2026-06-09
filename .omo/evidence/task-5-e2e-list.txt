@@ -1,0 +1,3 @@
+Listing tests:
+  [chromium-desktop] › smoke.spec.ts:4:5 › smoke: home page contains BCC branding
+Total: 1 test in 1 file

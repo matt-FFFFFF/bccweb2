@@ -1,0 +1,74 @@
+# E2E Tests (Playwright)
+
+Browser-level smoke and integration tests against the running dev stack.
+
+## One-shot browser install
+
+```sh
+bunx playwright install --with-deps chromium
+```
+
+If `--with-deps` requires sudo (Linux CI), use the plain form instead:
+
+```sh
+bunx playwright install chromium
+```
+
+## Start the dev stack
+
+Start Azurite (Azure Storage emulator):
+
+```sh
+docker compose up -d azurite
+```
+
+Start the API (Azure Functions) in the background:
+
+```sh
+bun --filter '@bccweb/api' run start &
+```
+
+Start the web dev server in the background:
+
+```sh
+bun --filter '@bccweb/web' run dev &
+```
+
+Wait until the API health endpoint responds before running tests:
+
+```sh
+until curl -sf http://localhost:7071/api/health; do sleep 2; done
+```
+
+The web dev server defaults to `http://localhost:5173`. Override via:
+
+```sh
+export E2E_BASE_URL=http://localhost:5173
+```
+
+## Run tests
+
+```sh
+bun run e2e
+```
+
+This runs `playwright test --config tests/e2e/playwright.config.ts`.
+
+## Cleanup
+
+```sh
+pkill -f 'func start'
+pkill -f 'vite'
+docker compose down
+```
+
+## Evidence
+
+- Screenshots are written to `.omo/evidence/` during test runs.
+- HTML report is written to `tests/e2e/playwright-report/` (gitignored).
+
+## Notes
+
+- Only `chromium-desktop` project is configured (Chromium / Desktop Chrome).
+- The `webServer` block is intentionally absent — the dev stack is started manually before running tests.
+- Wave 6 (Task 45) will add full sign-to-fly journey tests once the feature is complete.

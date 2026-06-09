@@ -21,3 +21,9 @@ local.settings.json
 *.tfvars
 *.tfvars.json
 
+# Playwright
+playwright-report/
+test-results/
+tests/e2e/playwright-report/
+tests/e2e/test-results/
+
