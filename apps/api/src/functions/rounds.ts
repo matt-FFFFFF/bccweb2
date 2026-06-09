@@ -10,6 +10,7 @@ import {
   getCallerIdentity,
   unauthorizedResponse,
 } from "../lib/auth.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 
 // ─── GET /api/rounds ──────────────────────────────────────────────────────────
 
@@ -28,7 +29,7 @@ async function getRounds(
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 200, jsonBody: [] };
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 }
 
@@ -42,16 +43,16 @@ async function getRoundById(
   if (!caller) return unauthorizedResponse();
 
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   try {
     const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
     return { status: 200, jsonBody: round };
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Round not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 }
 
@@ -61,12 +62,12 @@ app.http("getRounds", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "rounds",
-  handler: getRounds,
+  handler: withErrorHandler(getRounds),
 });
 
 app.http("getRoundById", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "rounds/{id}",
-  handler: getRoundById,
+  handler: withErrorHandler(getRoundById),
 });

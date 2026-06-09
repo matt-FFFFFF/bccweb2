@@ -25,6 +25,7 @@ import {
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -56,7 +57,7 @@ async function getClubTeams(
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 200, jsonBody: [] };
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   const clubId = req.query.get("clubId");
@@ -84,17 +85,17 @@ async function createClubTeam(
   try {
     body = (await req.json()) as typeof body;
   } catch {
-    return { status: 400, jsonBody: { error: "Invalid JSON" } };
+    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
   if (!body.clubId?.trim()) {
-    return { status: 400, jsonBody: { error: "clubId is required" } };
+    throw new HttpError(400, "INVALID_BODY", "clubId is required");
   }
   if (!body.teamName?.trim()) {
-    return { status: 400, jsonBody: { error: "teamName is required" } };
+    throw new HttpError(400, "INVALID_BODY", "teamName is required");
   }
   if (!body.seasonYear || isNaN(body.seasonYear)) {
-    return { status: 400, jsonBody: { error: "seasonYear is required" } };
+    throw new HttpError(400, "INVALID_BODY", "seasonYear is required");
   }
 
   if (!canManageClub(caller.roles, caller.clubId, body.clubId)) {
@@ -108,9 +109,9 @@ async function createClubTeam(
     clubName = club.name;
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 400, jsonBody: { error: "Club not found" } };
+      throw new HttpError(400, "INVALID_BODY", "Club not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   // Guard: duplicate team name for same club+season
@@ -161,16 +162,16 @@ async function updateClubTeam(
   if (!isAdminOrCoord(caller.roles)) return forbiddenResponse();
 
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing club team id" } };
+  if (!id) throw new HttpError(400, "MISSING_CLUB_TEAM_ID", "Missing club team id");
 
   let existing: ClubTeam;
   try {
     existing = await readBlob<ClubTeam>(getPrivateBlobClient(`club-teams/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Club team not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Club team not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   if (!canManageClub(caller.roles, caller.clubId, existing.clubId)) {
@@ -181,11 +182,11 @@ async function updateClubTeam(
   try {
     body = (await req.json()) as typeof body;
   } catch {
-    return { status: 400, jsonBody: { error: "Invalid JSON" } };
+    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
   if (!body.teamName?.trim()) {
-    return { status: 400, jsonBody: { error: "teamName is required" } };
+    throw new HttpError(400, "INVALID_BODY", "teamName is required");
   }
 
   // Guard: duplicate name for same club+season (excluding self)
@@ -232,16 +233,16 @@ async function deleteClubTeam(
   if (!isAdminOrCoord(caller.roles)) return forbiddenResponse();
 
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing club team id" } };
+  if (!id) throw new HttpError(400, "MISSING_CLUB_TEAM_ID", "Missing club team id");
 
   let existing: ClubTeam;
   try {
     existing = await readBlob<ClubTeam>(getPrivateBlobClient(`club-teams/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Club team not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Club team not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   if (!canManageClub(caller.roles, caller.clubId, existing.clubId)) {
@@ -307,26 +308,26 @@ app.http("getClubTeams", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "club-teams",
-  handler: getClubTeams,
+  handler: withErrorHandler(getClubTeams),
 });
 
 app.http("createClubTeam", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "club-teams",
-  handler: createClubTeam,
+  handler: withErrorHandler(createClubTeam),
 });
 
 app.http("updateClubTeam", {
   methods: ["PUT"],
   authLevel: "anonymous",
   route: "club-teams/{id}",
-  handler: updateClubTeam,
+  handler: withErrorHandler(updateClubTeam),
 });
 
 app.http("deleteClubTeam", {
   methods: ["DELETE"],
   authLevel: "anonymous",
   route: "club-teams/{id}",
-  handler: deleteClubTeam,
+  handler: withErrorHandler(deleteClubTeam),
 });

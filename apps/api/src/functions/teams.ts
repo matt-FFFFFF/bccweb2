@@ -23,6 +23,7 @@ import {
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 
@@ -49,16 +50,16 @@ async function mutateLocked(
       if (err) {
         const e = new Error(err);
         (e as { isValidation?: boolean }).isValidation = true;
-        throw e;
+        throw new HttpError(500, "INTERNAL");
       }
       await writePrivateBlob(path, r, leaseId);
       return r;
     });
   } catch (e: unknown) {
     const err = e as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (err.isValidation) return { status: 409, jsonBody: { error: err.message } };
-    if (err.statusCode === 404) return { status: 404, jsonBody: { error: "Round not found" } };
-    throw e;
+    if (err.isValidation) throw new HttpError(409, "CONFLICT", err.message);
+    if (err.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
+    throw new HttpError(500, "INTERNAL");
   }
 }
 
@@ -73,11 +74,11 @@ async function addTeam(
   if (!isCoord(caller.roles)) return forbiddenResponse();
 
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   const body = (await req.json()) as { clubId?: string; teamName?: string };
   if (!body.clubId || !body.teamName?.trim()) {
-    return { status: 400, jsonBody: { error: "clubId and teamName are required" } };
+    throw new HttpError(400, "INVALID_BODY", "clubId and teamName are required");
   }
 
   // Load club name
@@ -89,9 +90,9 @@ async function addTeam(
     clubName = club.name;
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 400, jsonBody: { error: "Club not found" } };
+      throw new HttpError(400, "INVALID_BODY", "Club not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   const newTeam: Team = {
@@ -133,7 +134,7 @@ async function removeTeam(
 
   const { id, teamId } = req.params as { id?: string; teamId?: string };
   if (!id || !teamId) {
-    return { status: 400, jsonBody: { error: "Missing round or team id" } };
+    throw new HttpError(400, "MISSING_IDS", "Missing round or team id");
   }
 
   const result = await mutateLocked(id, (r) => {
@@ -159,7 +160,7 @@ async function addPilot(
 
   const { id, teamId } = req.params as { id?: string; teamId?: string };
   if (!id || !teamId) {
-    return { status: 400, jsonBody: { error: "Missing round or team id" } };
+    throw new HttpError(400, "MISSING_IDS", "Missing round or team id");
   }
 
   const body = (await req.json()) as {
@@ -167,7 +168,7 @@ async function addPilot(
     isScoring?: boolean;
   };
   if (!body.pilotId) {
-    return { status: 400, jsonBody: { error: "pilotId is required" } };
+    throw new HttpError(400, "INVALID_BODY", "pilotId is required");
   }
 
   // Verify pilot exists
@@ -175,9 +176,9 @@ async function addPilot(
     await readBlob(getPrivateBlobClient(`pilots/${body.pilotId}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 400, jsonBody: { error: "Pilot not found" } };
+      throw new HttpError(400, "INVALID_BODY", "Pilot not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   const result = await mutateLocked(id, (r) => {
@@ -235,12 +236,12 @@ async function removePilot(
     place?: string;
   };
   if (!id || !teamId || !place) {
-    return { status: 400, jsonBody: { error: "Missing round, team, or place" } };
+    throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
   }
 
   const placeNum = parseInt(place, 10);
   if (isNaN(placeNum)) {
-    return { status: 400, jsonBody: { error: "place must be a number" } };
+    throw new HttpError(400, "INVALID_BODY", "place must be a number");
   }
 
   const result = await mutateLocked(id, (r) => {
@@ -275,12 +276,12 @@ async function updateAccounted(
     place?: string;
   };
   if (!id || !teamId || !place) {
-    return { status: 400, jsonBody: { error: "Missing round, team, or place" } };
+    throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
   }
 
   const body = (await req.json()) as { accountedFor?: boolean };
   if (typeof body.accountedFor !== "boolean") {
-    return { status: 400, jsonBody: { error: "accountedFor (boolean) is required" } };
+    throw new HttpError(400, "INVALID_BODY", "accountedFor (boolean) is required");
   }
 
   const placeNum = parseInt(place, 10);
@@ -315,12 +316,12 @@ async function updateSignToFly(
     place?: string;
   };
   if (!id || !teamId || !place) {
-    return { status: 400, jsonBody: { error: "Missing round, team, or place" } };
+    throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
   }
 
   const body = (await req.json()) as { signToFly?: boolean };
   if (typeof body.signToFly !== "boolean") {
-    return { status: 400, jsonBody: { error: "signToFly (boolean) is required" } };
+    throw new HttpError(400, "INVALID_BODY", "signToFly (boolean) is required");
   }
 
   const placeNum = parseInt(place, 10);
@@ -345,40 +346,40 @@ app.http("addTeam", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "rounds/{id}/teams",
-  handler: addTeam,
+  handler: withErrorHandler(addTeam),
 });
 
 app.http("removeTeam", {
   methods: ["DELETE"],
   authLevel: "anonymous",
   route: "rounds/{id}/teams/{teamId}",
-  handler: removeTeam,
+  handler: withErrorHandler(removeTeam),
 });
 
 app.http("addPilot", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "rounds/{id}/teams/{teamId}/pilots",
-  handler: addPilot,
+  handler: withErrorHandler(addPilot),
 });
 
 app.http("removePilot", {
   methods: ["DELETE"],
   authLevel: "anonymous",
   route: "rounds/{id}/teams/{teamId}/pilots/{place}",
-  handler: removePilot,
+  handler: withErrorHandler(removePilot),
 });
 
 app.http("updateAccounted", {
   methods: ["PUT"],
   authLevel: "anonymous",
   route: "rounds/{id}/teams/{teamId}/pilots/{place}/accounted",
-  handler: updateAccounted,
+  handler: withErrorHandler(updateAccounted),
 });
 
 app.http("updateSignToFly", {
   methods: ["PUT"],
   authLevel: "anonymous",
   route: "rounds/{id}/teams/{teamId}/pilots/{place}/sign-to-fly",
-  handler: updateSignToFly,
+  handler: withErrorHandler(updateSignToFly),
 });

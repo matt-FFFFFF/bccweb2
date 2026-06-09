@@ -38,6 +38,7 @@ import {
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 import { updateRoundsIndex, recomputeSeason } from "../lib/recompute.js";
 import { createPureTrackGroups, type PureTrackRoundResult } from "../lib/puretrack.js";
 import { generateBriefPdf } from "../lib/pdf.js";
@@ -113,13 +114,10 @@ async function createRound(
 
   const { date, siteId, seasonYear } = body;
   if (!date || !siteId || !seasonYear) {
-    return {
-      status: 400,
-      jsonBody: { error: "date, siteId, and seasonYear are required" },
-    };
+    throw new HttpError(400, "INVALID_BODY", "date, siteId, and seasonYear are required");
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return { status: 400, jsonBody: { error: "date must be yyyy-MM-dd" } };
+    throw new HttpError(400, "INVALID_DATE", "date must be yyyy-MM-dd");
   }
 
   // Load site
@@ -128,9 +126,9 @@ async function createRound(
     site = await readBlob<Site>(getPrivateBlobClient(`sites/${siteId}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 400, jsonBody: { error: "Site not found" } };
+      throw new HttpError(400, "INVALID_BODY", "Site not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   // Load season (must exist)
@@ -141,9 +139,9 @@ async function createRound(
     );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 400, jsonBody: { error: "Season not found" } };
+      throw new HttpError(400, "INVALID_BODY", "Season not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   // Optionally load organising club
@@ -233,7 +231,7 @@ async function updateRound(
   if (!isCoord(caller.roles)) return forbiddenResponse();
 
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   const body = (await req.json()) as {
     date?: string;
@@ -257,7 +255,7 @@ async function updateRound(
       if (r.isLocked) {
         const err = new Error("Round is locked — unlock before editing");
         (err as { isValidation?: boolean }).isValidation = true;
-        throw err;
+        throw new HttpError(500, "INTERNAL");
       }
 
       if (body.date) r.date = body.date;
@@ -275,7 +273,7 @@ async function updateRound(
           const message = (err as { message?: string }).message ?? "Unknown status";
           const validation = new Error(message);
           (validation as { isValidation?: boolean }).isValidation = true;
-          throw validation;
+          throw new HttpError(500, "INTERNAL");
         }
       }
 
@@ -289,7 +287,7 @@ async function updateRound(
         } catch {
           const err = new Error("Site not found");
           (err as { isValidation?: boolean }).isValidation = true;
-          throw err;
+          throw new HttpError(500, "INTERNAL");
         }
         r.site = {
           id: site.id,
@@ -326,9 +324,9 @@ async function updateRound(
         },
       };
     }
-    if (e.isValidation) return { status: 409, jsonBody: { error: e.message } };
-    if (e.statusCode === 404) return { status: 404, jsonBody: { error: "Round not found" } };
-    throw err;
+    if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
+    if (e.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
+    throw new HttpError(500, "INTERNAL");
   }
 
   await updateRoundsIndex(updated);
@@ -360,7 +358,7 @@ async function transition(
           `Expected status ${allowedFrom.join(" or ")}, got ${r.status}`
         );
         (err as { isValidation?: boolean }).isValidation = true;
-        throw err;
+        throw new HttpError(500, "INTERNAL");
       }
 
       r.status = to;
@@ -371,9 +369,9 @@ async function transition(
     });
   } catch (err: unknown) {
     const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (e.isValidation) return { status: 409, jsonBody: { error: e.message } };
-    if (e.statusCode === 404) return { status: 404, jsonBody: { error: "Round not found" } };
-    throw err;
+    if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
+    if (e.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
+    throw new HttpError(500, "INTERNAL");
   }
 
   return updated;
@@ -386,7 +384,7 @@ async function confirmRound(
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   const result = await transition(req, id, ["Proposed"], "Confirmed");
   if ("status" in result && "jsonBody" in result) return result as HttpResponseInit;
@@ -401,7 +399,7 @@ async function briefCompleteRound(
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   const result = await transition(req, id, ["Confirmed"], "BriefComplete");
   if ("status" in result && "jsonBody" in result) return result as HttpResponseInit;
@@ -560,7 +558,7 @@ async function lockRound(
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
@@ -574,9 +572,9 @@ async function lockRound(
     round = await readBlob<Round>(getPrivateBlobClient(path));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Round not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   if (round.status !== "BriefComplete") {
@@ -669,7 +667,7 @@ async function lockRound(
       if (r.status !== "BriefComplete") {
         const err = new Error("Round status changed concurrently");
         (err as { isValidation?: boolean }).isValidation = true;
-        throw err;
+        throw new HttpError(500, "INTERNAL");
       }
 
       r.status = "Locked";
@@ -710,8 +708,8 @@ async function lockRound(
     });
   } catch (err: unknown) {
     const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (e.isValidation) return { status: 409, jsonBody: { error: e.message } };
-    throw err;
+    if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
+    throw new HttpError(500, "INTERNAL");
   }
 
   await updateRoundsIndex(updated);
@@ -724,7 +722,7 @@ async function unlockRound(
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   const result = await transition(req, id, ["Locked"], "Confirmed", async (r) => {
     r.isLocked = false;
@@ -753,7 +751,7 @@ async function completeRound(
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
@@ -767,9 +765,9 @@ async function completeRound(
     current = await readBlob<Round>(getPrivateBlobClient(path));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Round not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   if (current.status !== "Locked") {
@@ -793,7 +791,7 @@ async function completeRound(
           `Round must be Locked to complete (currently ${r.status})`
         );
         (err as { isValidation?: boolean }).isValidation = true;
-        throw err;
+        throw new HttpError(500, "INTERNAL");
       }
 
       const scored = structuredClone(scoredSnapshot) as Round;
@@ -805,9 +803,9 @@ async function completeRound(
     });
   } catch (err: unknown) {
     const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (e.isValidation) return { status: 409, jsonBody: { error: e.message } };
-    if (e.statusCode === 404) return { status: 404, jsonBody: { error: "Round not found" } };
-    throw err;
+    if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
+    if (e.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
+    throw new HttpError(500, "INTERNAL");
   }
 
   // Update index first so public data is immediately correct
@@ -831,7 +829,7 @@ async function updateNarrative(
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
@@ -839,7 +837,7 @@ async function updateNarrative(
 
   const body = (await req.json()) as { narrative?: string };
   if (body.narrative === undefined) {
-    return { status: 400, jsonBody: { error: "narrative is required" } };
+    throw new HttpError(400, "INVALID_BODY", "narrative is required");
   }
 
   const path = `rounds/${id}.json`;
@@ -854,9 +852,9 @@ async function updateNarrative(
     });
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Round not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   return { status: 200, jsonBody: updated };
@@ -868,54 +866,54 @@ app.http("createRound", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "rounds",
-  handler: createRound,
+  handler: withErrorHandler(createRound),
 });
 
 app.http("updateRound", {
   methods: ["PUT"],
   authLevel: "anonymous",
   route: "rounds/{id}",
-  handler: updateRound,
+  handler: withErrorHandler(updateRound),
 });
 
 app.http("confirmRound", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "rounds/{id}/confirm",
-  handler: confirmRound,
+  handler: withErrorHandler(confirmRound),
 });
 
 app.http("briefCompleteRound", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "rounds/{id}/brief-complete",
-  handler: briefCompleteRound,
+  handler: withErrorHandler(briefCompleteRound),
 });
 
 app.http("lockRound", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "rounds/{id}/lock",
-  handler: lockRound,
+  handler: withErrorHandler(lockRound),
 });
 
 app.http("unlockRound", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "rounds/{id}/unlock",
-  handler: unlockRound,
+  handler: withErrorHandler(unlockRound),
 });
 
 app.http("completeRound", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "rounds/{id}/complete",
-  handler: completeRound,
+  handler: withErrorHandler(completeRound),
 });
 
 app.http("updateNarrative", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "rounds/{id}/narrative",
-  handler: updateNarrative,
+  handler: withErrorHandler(updateNarrative),
 });

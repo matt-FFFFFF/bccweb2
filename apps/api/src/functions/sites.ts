@@ -20,6 +20,7 @@ import {
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 
 // ─── GET /api/sites ───────────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ async function getSites(
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 200, jsonBody: [] };
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 }
 
@@ -64,14 +65,14 @@ async function createSite(
   try {
     body = (await req.json()) as CreateSiteBody;
   } catch {
-    return { status: 400, jsonBody: { error: "Invalid JSON" } };
+    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
   if (!body.name?.trim()) {
-    return { status: 400, jsonBody: { error: "name is required" } };
+    throw new HttpError(400, "INVALID_BODY", "name is required");
   }
   if (!body.clubId) {
-    return { status: 400, jsonBody: { error: "clubId is required" } };
+    throw new HttpError(400, "INVALID_BODY", "clubId is required");
   }
 
   const id = randomUUID();
@@ -109,23 +110,23 @@ async function updateSite(
   if (!caller.roles.includes("Admin")) return forbiddenResponse();
 
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing site id" } };
+  if (!id) throw new HttpError(400, "MISSING_SITE_ID", "Missing site id");
 
   let existing: Site;
   try {
     existing = await readBlob<Site>(getPrivateBlobClient(`sites/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Site not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Site not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   let body: Partial<Site>;
   try {
     body = (await req.json()) as Partial<Site>;
   } catch {
-    return { status: 400, jsonBody: { error: "Invalid JSON" } };
+    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
   const updated: Site = {
@@ -179,19 +180,19 @@ app.http("getSites", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "sites",
-  handler: getSites,
+  handler: withErrorHandler(getSites),
 });
 
 app.http("createSite", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "sites",
-  handler: createSite,
+  handler: withErrorHandler(createSite),
 });
 
 app.http("updateSite", {
   methods: ["PUT"],
   authLevel: "anonymous",
   route: "sites/{id}",
-  handler: updateSite,
+  handler: withErrorHandler(updateSite),
 });

@@ -1,5 +1,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
+import { withErrorHandler } from "../lib/http.js";
 
 async function meHandler(
   req: HttpRequest,
@@ -21,5 +22,5 @@ app.http("me", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "me",
-  handler: meHandler,
+  handler: withErrorHandler(meHandler),
 });

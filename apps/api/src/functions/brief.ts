@@ -13,6 +13,7 @@ import {
 } from "@azure/functions";
 import type { RoundBrief } from "@bccweb/types";
 import { getPrivateBlobClient, readBlob } from "../lib/blob.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 
 // ─── GET /api/rounds/{id}/brief ───────────────────────────────────────────────
 
@@ -21,7 +22,7 @@ async function getRoundBrief(
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   let brief: RoundBrief;
   try {
@@ -38,7 +39,7 @@ async function getRoundBrief(
         },
       };
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   return { status: 200, jsonBody: brief };
@@ -51,7 +52,7 @@ async function getRoundBriefPdf(
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   const blobClient = getPrivateBlobClient(`round-briefs/${id}.pdf`);
 
@@ -68,7 +69,7 @@ async function getRoundBriefPdf(
         },
       };
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   // Read the stream into a buffer and return as binary response
@@ -105,12 +106,12 @@ app.http("getRoundBrief", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "rounds/{id}/brief",
-  handler: getRoundBrief,
+  handler: withErrorHandler(getRoundBrief),
 });
 
 app.http("getRoundBriefPdf", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "rounds/{id}/brief/pdf",
-  handler: getRoundBriefPdf,
+  handler: withErrorHandler(getRoundBriefPdf),
 });

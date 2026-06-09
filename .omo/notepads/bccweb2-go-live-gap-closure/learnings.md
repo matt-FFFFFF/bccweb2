@@ -194,7 +194,64 @@
 - Change feed (`changeFeed.enabled = true`) lives in the blob service body alongside versioning
   and soft-delete; all four properties coexist in `Microsoft.Storage/storageAccounts/blobServices`.
 
+## Task 10 notes — Lease renewal helper and round long-op extraction
+- Added `withLeaseRenewing` / `withPrivateLeaseRenewing` in `apps/api/src/lib/blob.ts`; default lease duration is 30s and default renew cadence is 15s, with a guard rejecting intervals at or above half the lease duration.
+- Azurite supports `renewLease()`, `releaseLease()`, and `breakLease(0)` well enough for integration tests; after a force-break, the renewal interval records the failure and the helper surfaces `LeaseRenewalFailedError` after the in-flight callback settles.
+- `lockRound` now performs PureTrack group creation, brief JSON/PDF generation/upload, and ACS email sending before acquiring the final round write lease. The lease is only used for status/isLocked, pilot accounted/sign-to-fly reset, PureTrack ID persistence, and brief path/version metadata.
+- `completeRound` now computes `scoreRound()` from a pre-read snapshot outside the lease, then reacquires and validates the round is still Locked before persisting the Complete scored snapshot under a renewing lease.
+
 ## Task 14 notes (CORS lockdown)
 - Final blob CORS rule should be: `allowedMethods = ["GET", "HEAD", "OPTIONS"]`, `allowedHeaders = ["Content-Type", "Authorization", "x-ms-version", "x-ms-date", "x-ms-blob-type", "If-Match", "If-None-Match", "If-Modified-Since", "Range"]`, `exposedHeaders = ["x-ms-request-id", "x-ms-version", "Content-Length", "Content-Type", "ETag", "Last-Modified"]`, `maxAgeInSeconds = 3600`.
 - `allowed_origins` must stay default-empty in `variables.tf`; operators supply explicit SPA origins via tfvars to fail closed.
 - azapi plan JSON for `body` can be object-shaped; jq checks should flatten `cors.corsRules` defensively before asserting origins/methods/headers.
+
+## Task 15 notes (register enumeration neutralization)
+- Chose a 60s verification resend window keyed on the stored verification token `createdAt`: reuse the same token inside the window, regenerate after 60s.
+- Reasoning: keeps retries idempotent for double-clicks while limiting resend abuse and preserving the constant 202 response.
+
+## Task 12 notes — structured HTTP errors
+- Canonical error code table used:
+  - 400 -> BAD_REQUEST / INVALID_BODY / INVALID_JSON / INVALID_DATE / INVALID_YEAR / INVALID_STATUS / INVALID_TOKEN / MISSING_* / INVALID_BODY
+  - 401 -> UNAUTHORIZED / INVALID_TOKEN
+  - 403 -> FORBIDDEN
+  - 404 -> NOT_FOUND
+  - 409 -> CONFLICT
+  - 429 -> RATE_LIMITED
+  - 502 -> PURETRACK_UPSTREAM_ERROR
+  - 500 -> INTERNAL / RECOMPUTE_FAILED
+- Tricky conversions:
+  - `authFunctions.ts` still has nuanced verification/reset flows and silent-success branches; wrapper preserved success responses and standardized only explicit error paths.
+  - `roundsMutate.ts`, `teams.ts`, and `flights.ts` had validation-error throw patterns embedded in lease helpers; converted those to `HttpError` so the wrapper can shape all failure payloads consistently.
+  - `puretrack.ts` upstream failures now throw `HttpError(502, PURETRACK_UPSTREAM_ERROR, ...)` instead of returning raw upstream text.
+
+
+## Task 9 notes — Atomic token consume via ETag + lifecycle TTL GC
+
+### Lifecycle resource shape
+- Type: `Microsoft.Storage/storageAccounts/managementPolicies@2023-01-01`
+- Name: `default` (singleton per storage account)
+- parent_id: the storage account resource ID (NOT the blob service)
+- prefixMatch format: `"{container}/{blob-prefix}"` — includes the container name
+  e.g. `"data-private/auth/tokens/"` targets auth/tokens/ blobs in data-private
+- daysAfterModificationGreaterThan applies to last blob modification time
+  (consumed-marker upload resets the clock, so consumed tokens GC 7 days after consumption)
+- depends_on blob_service and the private container to avoid ordering races
+
+### ETag conditional: delete vs conditional-write
+- Task spec said "conditional DELETE via deleteIfExists(ifMatch)" but this creates
+  a 404-after-delete problem: after the first consumer deletes the blob, the second
+  consumer's download() returns 404 → TokenNotFoundError (indistinguishable from
+  "token never issued").
+- Fix: conditional UPLOAD of a `consumed: true` marker instead of delete. This way:
+  - Second sequential consume reads consumed:true → TokenAlreadyConsumedError (correct)
+  - Concurrent: 9 of 10 get HTTP 412 on upload (ETag mismatch) → TokenAlreadyConsumedError
+  - Expired token: blob untouched, lifecycle GC handles cleanup as before
+  - Missing token: download 404 → TokenNotFoundError (correct)
+- The `consumed?: true` field is added to AuthToken interface in authHelpers.ts
+- Lifecycle GC still fires: consumed blobs are modified (not deleted), GC timer = 7d after last modification
+
+### Azurite behavior
+- No soft-delete by default; deleted blobs are truly gone
+- Conditional upload with ifMatch ETag works correctly: 412 on stale ETag
+- All 10 concurrent upload calls in the concurrency test got 9x HTTP 412 as expected
+- [METRIC] auth.token.reused console.warn logged for each 412

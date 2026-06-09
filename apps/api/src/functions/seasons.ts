@@ -6,6 +6,7 @@ import {
 } from "@azure/functions";
 import type { SeasonSummary, Season, SeasonResults } from "@bccweb/types";
 import { getBlobClient, readBlob } from "../lib/blob.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 
 // ─── GET /api/seasons ─────────────────────────────────────────────────────────
 
@@ -23,7 +24,7 @@ async function getSeasons(
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 200, jsonBody: [] };
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 }
 
@@ -35,7 +36,7 @@ async function getSeasonByYear(
 ): Promise<HttpResponseInit> {
   const year = req.params["year"];
   if (!year || !/^\d{4}$/.test(year)) {
-    return { status: 400, jsonBody: { error: "Invalid year" } };
+    throw new HttpError(400, "INVALID_YEAR", "Invalid year");
   }
 
   try {
@@ -45,9 +46,9 @@ async function getSeasonByYear(
     return { status: 200, jsonBody: season };
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Season not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Season not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 }
 
@@ -59,7 +60,7 @@ async function getSeasonResults(
 ): Promise<HttpResponseInit> {
   const year = req.params["year"];
   if (!year || !/^\d{4}$/.test(year)) {
-    return { status: 400, jsonBody: { error: "Invalid year" } };
+    throw new HttpError(400, "INVALID_YEAR", "Invalid year");
   }
 
   try {
@@ -71,7 +72,7 @@ async function getSeasonResults(
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 200, jsonBody: [] };
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 }
 
@@ -81,19 +82,19 @@ app.http("getSeasons", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "seasons",
-  handler: getSeasons,
+  handler: withErrorHandler(getSeasons),
 });
 
 app.http("getSeasonByYear", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "seasons/{year}",
-  handler: getSeasonByYear,
+  handler: withErrorHandler(getSeasonByYear),
 });
 
 app.http("getSeasonResults", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "seasons/{year}/results",
-  handler: getSeasonResults,
+  handler: withErrorHandler(getSeasonResults),
 });

@@ -22,6 +22,7 @@ import {
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 import {
   createPureTrackGroups,
   PureTrackRoundResult,
@@ -40,7 +41,7 @@ async function createPureTrackGroupsHandler(
   if (!isCoord(caller.roles)) return forbiddenResponse();
 
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   // Load round
   let round: Round;
@@ -48,9 +49,9 @@ async function createPureTrackGroupsHandler(
     round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Round not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   if (round.status !== "Locked" && round.status !== "Complete") {
@@ -93,10 +94,7 @@ async function createPureTrackGroupsHandler(
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : String(err);
     console.error(`[puretrack] createPureTrackGroups failed for round ${id}:`, err);
-    return {
-      status: 502,
-      jsonBody: { error: `PureTrack API error: ${msg}` },
-    };
+    throw new HttpError(502, "PURETRACK_UPSTREAM_ERROR", msg);
   }
 
   // Persist group IDs back onto the round blob (under lease)
@@ -130,5 +128,5 @@ app.http("createPureTrackGroups", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "rounds/{id}/puretrack/create-groups",
-  handler: createPureTrackGroupsHandler,
+  handler: withErrorHandler(createPureTrackGroupsHandler),
 });

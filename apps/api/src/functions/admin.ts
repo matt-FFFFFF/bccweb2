@@ -21,6 +21,7 @@ import {
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 import { recomputeSeason, updateRoundsIndex } from "../lib/recompute.js";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
@@ -44,16 +45,16 @@ async function recomputeRound(
   if (!isAdmin(caller.roles)) return forbiddenResponse();
 
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   let round: Round;
   try {
     round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Round not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   // Refresh the round's index entry
@@ -63,13 +64,7 @@ async function recomputeRound(
   try {
     await recomputeSeason(round.season.year);
   } catch (err: unknown) {
-    return {
-      status: 500,
-      jsonBody: {
-        error: `Failed to recompute season ${round.season.year}`,
-        detail: String(err),
-      },
-    };
+    throw new HttpError(500, "RECOMPUTE_FAILED");
   }
 
   return {
@@ -110,7 +105,7 @@ async function getConfig(
       };
       return { status: 200, jsonBody: defaults };
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 }
 
@@ -205,13 +200,13 @@ async function setUserRoles(
   if (!isAdmin(caller.roles)) return forbiddenResponse();
 
   const userId = req.params["userId"];
-  if (!userId) return { status: 400, jsonBody: { error: "Missing userId" } };
+  if (!userId) throw new HttpError(400, "MISSING_USER_ID", "Missing userId");
 
   let body: { roles?: UserRole[]; pilotId?: string | null; clubId?: string | null };
   try {
     body = (await req.json()) as typeof body;
   } catch {
-    return { status: 400, jsonBody: { error: "Invalid JSON" } };
+    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
   let user: User;
@@ -219,9 +214,9 @@ async function setUserRoles(
     user = await readBlob<User>(getPrivateBlobClient(`users/${userId}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "User not found" } };
+      throw new HttpError(404, "NOT_FOUND", "User not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   const updated: User = {
@@ -241,33 +236,33 @@ app.http("recomputeRound", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "manage/rounds/{id}/recompute",
-  handler: recomputeRound,
+  handler: withErrorHandler(recomputeRound),
 });
 
 app.http("getConfig", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "manage/config",
-  handler: getConfig,
+  handler: withErrorHandler(getConfig),
 });
 
 app.http("updateConfig", {
   methods: ["PUT"],
   authLevel: "anonymous",
   route: "manage/config",
-  handler: updateConfig,
+  handler: withErrorHandler(updateConfig),
 });
 
 app.http("listUsers", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "manage/users",
-  handler: listUsers,
+  handler: withErrorHandler(listUsers),
 });
 
 app.http("setUserRoles", {
   methods: ["PUT"],
   authLevel: "anonymous",
   route: "manage/users/{userId}/roles",
-  handler: setUserRoles,
+  handler: withErrorHandler(setUserRoles),
 });

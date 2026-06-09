@@ -20,6 +20,7 @@ import {
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -45,16 +46,16 @@ async function mutateLocked(
       if (err) {
         const e = new Error(err);
         (e as { isValidation?: boolean }).isValidation = true;
-        throw e;
+        throw new HttpError(500, "INTERNAL");
       }
       await writePrivateBlob(path, r, leaseId);
       return r;
     });
   } catch (e: unknown) {
     const err = e as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (err.isValidation) return { status: 409, jsonBody: { error: err.message } };
-    if (err.statusCode === 404) return { status: 404, jsonBody: { error: "Round not found" } };
-    throw e;
+    if (err.isValidation) throw new HttpError(409, "CONFLICT", err.message);
+    if (err.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
+    throw new HttpError(500, "INTERNAL");
   }
 }
 
@@ -96,7 +97,7 @@ async function logFlight(
   if (!caller) return unauthorizedResponse();
 
   const roundId = req.params["id"];
-  if (!roundId) return { status: 400, jsonBody: { error: "Missing round id" } };
+  if (!roundId) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   const body = (await req.json()) as {
     pilotId?: string;
@@ -118,10 +119,10 @@ async function logFlight(
   };
 
   if (!body.pilotId) {
-    return { status: 400, jsonBody: { error: "pilotId is required" } };
+    throw new HttpError(400, "INVALID_BODY", "pilotId is required");
   }
   if (body.distance == null || body.distance < 0) {
-    return { status: 400, jsonBody: { error: "distance (km, >= 0) is required" } };
+    throw new HttpError(400, "INVALID_BODY", "distance (km, >= 0) is required");
   }
 
   // Auth: Pilot can only log for themselves; Coord/Admin can log for anyone
@@ -182,7 +183,7 @@ async function updateFlight(
     flightId?: string;
   };
   if (!roundId || !flightId) {
-    return { status: 400, jsonBody: { error: "Missing round or flight id" } };
+    throw new HttpError(400, "MISSING_IDS", "Missing round or flight id");
   }
 
   const body = (await req.json()) as Partial<Omit<Flight, "id" | "score" | "wingFactor">>;
@@ -192,13 +193,13 @@ async function updateFlight(
   try {
     const r = await readBlob<Round>(getPrivateBlobClient(`rounds/${roundId}.json`));
     const slot = findSlotByFlight(r, flightId);
-    if (!slot) return { status: 404, jsonBody: { error: "Flight not found" } };
+    if (!slot) throw new HttpError(404, "NOT_FOUND", "Flight not found");
     ownerPilotId = slot.pilotId;
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Round not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   // Auth: Pilot can only update their own flight; Coord/Admin can update any
@@ -258,7 +259,7 @@ async function deleteFlight(
     flightId?: string;
   };
   if (!roundId || !flightId) {
-    return { status: 400, jsonBody: { error: "Missing round or flight id" } };
+    throw new HttpError(400, "MISSING_IDS", "Missing round or flight id");
   }
 
   const result = await mutateLocked(roundId, (r) => {
@@ -284,19 +285,19 @@ app.http("logFlight", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "rounds/{id}/flights",
-  handler: logFlight,
+  handler: withErrorHandler(logFlight),
 });
 
 app.http("updateFlight", {
   methods: ["PUT"],
   authLevel: "anonymous",
   route: "rounds/{id}/flights/{flightId}",
-  handler: updateFlight,
+  handler: withErrorHandler(updateFlight),
 });
 
 app.http("deleteFlight", {
   methods: ["DELETE"],
   authLevel: "anonymous",
   route: "rounds/{id}/flights/{flightId}",
-  handler: deleteFlight,
+  handler: withErrorHandler(deleteFlight),
 });

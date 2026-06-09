@@ -20,6 +20,7 @@ import {
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 
 // ─── GET /api/clubs ───────────────────────────────────────────────────────────
 
@@ -35,7 +36,7 @@ async function getClubs(
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 200, jsonBody: [] };
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 }
 
@@ -53,11 +54,11 @@ async function createClub(
   try {
     body = (await req.json()) as typeof body;
   } catch {
-    return { status: 400, jsonBody: { error: "Invalid JSON" } };
+    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
   if (!body.name?.trim()) {
-    return { status: 400, jsonBody: { error: "name is required" } };
+    throw new HttpError(400, "INVALID_BODY", "name is required");
   }
 
   const id = randomUUID();
@@ -85,23 +86,23 @@ async function updateClub(
   if (!caller.roles.includes("Admin")) return forbiddenResponse();
 
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing club id" } };
+  if (!id) throw new HttpError(400, "MISSING_CLUB_ID", "Missing club id");
 
   let existing: Club;
   try {
     existing = await readBlob<Club>(getPrivateBlobClient(`clubs/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Club not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Club not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   let body: Partial<Club>;
   try {
     body = (await req.json()) as Partial<Club>;
   } catch {
-    return { status: 400, jsonBody: { error: "Invalid JSON" } };
+    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
   const updated: Club = {
@@ -145,19 +146,19 @@ app.http("getClubs", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "clubs",
-  handler: getClubs,
+  handler: withErrorHandler(getClubs),
 });
 
 app.http("createClub", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "clubs",
-  handler: createClub,
+  handler: withErrorHandler(createClub),
 });
 
 app.http("updateClub", {
   methods: ["PUT"],
   authLevel: "anonymous",
   route: "clubs/{id}",
-  handler: updateClub,
+  handler: withErrorHandler(updateClub),
 });

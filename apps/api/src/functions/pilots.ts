@@ -29,6 +29,7 @@ import {
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 
 // ─── GET /api/pilots ──────────────────────────────────────────────────────────
 
@@ -59,7 +60,7 @@ async function getPilots(
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 200, jsonBody: [] };
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 }
 
@@ -73,7 +74,7 @@ async function getPilotById(
   if (!caller) return unauthorizedResponse();
 
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing pilot id" } };
+  if (!id) throw new HttpError(400, "MISSING_PILOT_ID", "Missing pilot id");
 
   const isAdmin = caller.roles.includes("Admin");
   const isCoord = caller.roles.includes("RoundsCoord");
@@ -93,9 +94,9 @@ async function getPilotById(
     return { status: 200, jsonBody: pilot };
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Pilot not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Pilot not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 }
 
@@ -136,11 +137,11 @@ async function createPilot(
   try {
     body = (await req.json()) as CreatePilotBody;
   } catch {
-    return { status: 400, jsonBody: { error: "Invalid JSON" } };
+    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
   if (!body.firstName?.trim() || !body.lastName?.trim()) {
-    return { status: 400, jsonBody: { error: "firstName and lastName are required" } };
+    throw new HttpError(400, "INVALID_BODY", "firstName and lastName are required");
   }
 
   const id = randomUUID();
@@ -215,7 +216,7 @@ async function updatePilot(
   if (!caller) return unauthorizedResponse();
 
   const id = req.params["id"];
-  if (!id) return { status: 400, jsonBody: { error: "Missing pilot id" } };
+  if (!id) throw new HttpError(400, "MISSING_PILOT_ID", "Missing pilot id");
 
   const isAdmin = caller.roles.includes("Admin");
   const isSelf = caller.pilotId === id;
@@ -227,16 +228,16 @@ async function updatePilot(
     existing = await readBlob<Pilot>(getPrivateBlobClient(`pilots/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return { status: 404, jsonBody: { error: "Pilot not found" } };
+      throw new HttpError(404, "NOT_FOUND", "Pilot not found");
     }
-    throw err;
+    throw new HttpError(500, "INTERNAL");
   }
 
   let body: UpdatePilotBody;
   try {
     body = (await req.json()) as UpdatePilotBody;
   } catch {
-    return { status: 400, jsonBody: { error: "Invalid JSON" } };
+    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
   // Build updated pilot — common fields (both Admin and self)
@@ -325,26 +326,26 @@ app.http("getPilots", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "pilots",
-  handler: getPilots,
+  handler: withErrorHandler(getPilots),
 });
 
 app.http("getPilotById", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "pilots/{id}",
-  handler: getPilotById,
+  handler: withErrorHandler(getPilotById),
 });
 
 app.http("createPilot", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "pilots",
-  handler: createPilot,
+  handler: withErrorHandler(createPilot),
 });
 
 app.http("updatePilot", {
   methods: ["PUT"],
   authLevel: "anonymous",
   route: "pilots/{id}",
-  handler: updatePilot,
+  handler: withErrorHandler(updatePilot),
 });

@@ -1,4 +1,5 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
+import { withErrorHandler } from "../lib/http.js";
 
 async function healthHandler(
   _req: HttpRequest,
@@ -14,5 +15,5 @@ app.http("health", {
   methods: ["GET"],
   authLevel: "anonymous",
   route: "health",
-  handler: healthHandler,
+  handler: withErrorHandler(healthHandler),
 });
