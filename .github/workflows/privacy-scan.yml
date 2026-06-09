@@ -11,23 +11,30 @@ jobs:
     name: PII Leak Detection
     runs-on: ubuntu-latest
 
-    services:
-      azurite:
-        image: mcr.microsoft.com/azure-storage/azurite
-        ports:
-          - 10000:10000
-        options: >-
-          --health-cmd "nc -z localhost 10000"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 15
-
     env:
       BLOB_CONNECTION_STRING: >-
         DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Start Azurite
+        run: |
+          docker rm -f azurite >/dev/null 2>&1 || true
+          docker run -d --name azurite -p 10000:10000 mcr.microsoft.com/azure-storage/azurite azurite --blobHost 0.0.0.0 --skipApiVersionCheck
+
+      - name: Wait for Azurite
+        run: |
+          for i in {1..30}; do
+            if curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:10000/devstoreaccount1?comp=list 2>/dev/null | grep -qE "^(200|403|400)$"; then
+              echo "Azurite ready after ${i} attempts"
+              exit 0
+            fi
+            echo "Attempt $i: Azurite not ready, sleeping 2s..."
+            sleep 2
+          done
+          echo "::error::Azurite failed to become ready after 60s"
+          exit 1
 
       - name: Set up mise
         uses: jdx/mise-action@v2
