@@ -238,27 +238,48 @@ export async function createPureTrackGroups(
   round: Round,
   /** Map from pilotId → pureTrackId (only filled pilots with a PureTrack ID) */
   pilotPureTrackIds: Map<string, number>
-): Promise<PureTrackRoundResult> {
+): Promise<PureTrackRoundResult | null> {
+  // 2. Create per-team groups and collect pilot IDs for each
+  const teamResults: PureTrackRoundResult["teams"] = [];
+  const allPureTrackIds: number[] = [];
+  const teamImports: Array<{ team: Team; pureTrackIds: number[] }> = [];
+
+  for (const team of round.teams) {
+    const filledPilots = team.pilots.filter((s) => s.status === "Filled" && s.pilotId);
+    const teamPureTrackIds: number[] = [];
+
+    for (const slot of filledPilots) {
+      const pureTrackId = pilotPureTrackIds.get(slot.pilotId!);
+      if (pureTrackId == null || pureTrackId === 0) {
+        console.warn("[METRIC] puretrack.skip pilot lacks pureTrackId", { pilotId: slot.pilotId });
+        continue;
+      }
+      teamPureTrackIds.push(pureTrackId);
+    }
+
+    if (filledPilots.length === 0) continue; // skip empty teams
+
+    if (teamPureTrackIds.length > 0) {
+      teamImports.push({ team, pureTrackIds: teamPureTrackIds });
+    }
+
+    for (const id of teamPureTrackIds) {
+      if (!allPureTrackIds.includes(id)) allPureTrackIds.push(id);
+    }
+  }
+
+  if (allPureTrackIds.length === 0) {
+    console.warn("[METRIC] puretrack.skip pilot lacks pureTrackId", { roundId: round.id });
+    return null;
+  }
+
   const session = await authenticate();
 
   // 1. Create round-level group
   const gName = roundGroupName(round.site.name, round.date);
   const roundGroup = await createGroup(session, gName);
 
-  // 2. Create per-team groups and collect pilot IDs for each
-  const teamResults: PureTrackRoundResult["teams"] = [];
-  const allPureTrackIds: number[] = [];
-
-  for (const team of round.teams) {
-    const filledPilots = team.pilots.filter(
-      (s) => s.status === "Filled" && s.pilotId
-    );
-    const teamPureTrackIds = filledPilots
-      .map((s) => pilotPureTrackIds.get(s.pilotId!))
-      .filter((id): id is number => id !== undefined);
-
-    if (filledPilots.length === 0) continue; // skip empty teams
-
+  for (const { team, pureTrackIds } of teamImports) {
     const tName = teamGroupName(round.date, team.teamName);
     // Add small delay between group creations to avoid rate-limit burst (mirrors existing app)
     await new Promise((r) => setTimeout(r, 100));
@@ -270,20 +291,11 @@ export async function createPureTrackGroups(
       groupSlug: teamGroup.slug,
     });
 
-    // Import pilots into team group
-    if (teamPureTrackIds.length > 0) {
-      await importPilots(session, teamGroup.id, teamPureTrackIds);
-    }
-
-    for (const id of teamPureTrackIds) {
-      if (!allPureTrackIds.includes(id)) allPureTrackIds.push(id);
-    }
+    await importPilots(session, teamGroup.id, pureTrackIds);
   }
 
   // 3. Import all pilots into the round group
-  if (allPureTrackIds.length > 0) {
-    await importPilots(session, roundGroup.id, allPureTrackIds);
-  }
+  await importPilots(session, roundGroup.id, allPureTrackIds);
 
   return {
     roundGroupId: roundGroup.id,

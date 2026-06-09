@@ -581,7 +581,7 @@ async function main() {
       ...(r.BHPA_Number != null ? { bhpaNumber: r.BHPA_Number } : {}),
       coachType,
       pilotRating,
-      ...(r.PureTrackID ? { pureTrackId: r.PureTrackID } : {}),
+      ...(r.PureTrackID != null ? { pureTrackId: r.PureTrackID } : {}),
       ...(r.PureTrackLink ? { pureTrackLink: r.PureTrackLink } : {}),
       ...(r.HelmetColour ? { helmetColour: r.HelmetColour } : {}),
       ...(r.HarnessType ? { harnessType: r.HarnessType } : {}),

@@ -439,6 +439,7 @@ export interface BriefPilotEntry {
   name: string;
   bhpaNumber?: number;
   pureTrackId?: number;
+  wingManufacturer?: ManufacturerRef;
   isScoring: boolean;
   snapshot: PilotSnapshot; // always set (brief generated at lock time)
 }

@@ -424,7 +424,7 @@ async function loadPilotPureTrackIds(round: Round): Promise<Map<string, number>>
         const pilot = await readBlob<Pilot>(
           getPrivateBlobClient(`pilots/${pilotId}.json`)
         );
-        if (pilot.pureTrackId) pilotPureTrackIds.set(pilotId, pilot.pureTrackId);
+        if (pilot.pureTrackId != null) pilotPureTrackIds.set(pilotId, pilot.pureTrackId);
       } catch {
         return;
       }
@@ -465,28 +465,42 @@ async function buildRoundBrief(round: Round): Promise<RoundBrief> {
   ).catch(() => [] as Array<{ id: string; name: string; bhpaNumber?: number; pureTrackId?: number }>);
   const pilotNameMap = new Map(pilotsIndex.map((p) => [p.id, p]));
 
-  const teams: BriefTeamEntry[] = round.teams
-    .filter((t) => t.pilots.some((s) => s.status === "Filled"))
-    .map((t) => ({
-      teamName: t.teamName,
-      clubName: t.club.name,
-      pureTrackGroupId: t.pureTrackGroupId,
-      pureTrackGroupSlug: t.pureTrackGroupSlug,
-      pilots: t.pilots
-        .filter((s) => s.status === "Filled" && s.pilotId && s.snapshot)
-        .map((s) => {
-          const pilotMeta = pilotNameMap.get(s.pilotId!);
-          return {
-            placeInTeam: s.placeInTeam,
-            pilotId: s.pilotId!,
-            name: pilotMeta?.name ?? s.pilotId!,
-            bhpaNumber: pilotMeta?.bhpaNumber,
-            pureTrackId: pilotMeta?.pureTrackId,
-            isScoring: s.isScoring,
-            snapshot: s.snapshot!,
-          };
-        }),
-    }));
+  const teams: BriefTeamEntry[] = await Promise.all(
+    round.teams
+      .filter((t) => t.pilots.some((s) => s.status === "Filled"))
+      .map(async (t) => ({
+        teamName: t.teamName,
+        clubName: t.club.name,
+        pureTrackGroupId: t.pureTrackGroupId,
+        pureTrackGroupSlug: t.pureTrackGroupSlug,
+        pilots: await Promise.all(
+          t.pilots
+            .filter((s) => s.status === "Filled" && s.pilotId && s.snapshot)
+            .map(async (s) => {
+              const pilotMeta = pilotNameMap.get(s.pilotId!);
+              let wingManufacturer;
+              try {
+                const pilotDoc = await readBlob<Pilot>(
+                  getPrivateBlobClient(`pilots/${s.pilotId!}.json`)
+                );
+                wingManufacturer = pilotDoc.wingManufacturer;
+              } catch {
+                wingManufacturer = undefined;
+              }
+              return {
+                placeInTeam: s.placeInTeam,
+                pilotId: s.pilotId!,
+                name: pilotMeta?.name ?? s.pilotId!,
+                bhpaNumber: pilotMeta?.bhpaNumber,
+                pureTrackId: pilotMeta?.pureTrackId,
+                ...(wingManufacturer ? { wingManufacturer } : {}),
+                isScoring: s.isScoring,
+                snapshot: s.snapshot!,
+              };
+            })
+        ),
+      }))
+  );
 
   return {
     roundId: round.id,
@@ -636,9 +650,13 @@ async function lockRound(
   try {
     const pilotPureTrackIds = await loadPilotPureTrackIds(candidateRound);
     ptResult = await createPureTrackGroups(candidateRound, pilotPureTrackIds);
-    candidateRound = applyPureTrackResult(candidateRound, ptResult);
+    if (ptResult) {
+      candidateRound = applyPureTrackResult(candidateRound, ptResult);
+    }
     console.log(
-      `[lockRound:${id}] PureTrack groups created: round=${ptResult.roundGroupId}, teams=${ptResult.teams.length}`
+      ptResult
+        ? `[lockRound:${id}] PureTrack groups created: round=${ptResult.roundGroupId}, teams=${ptResult.teams.length}`
+        : `[lockRound:${id}] PureTrack skipped: no pilots with pureTrackId`
     );
   } catch (ptErr) {
     console.error(`[lockRound:${id}] PureTrack group creation failed:`, ptErr);

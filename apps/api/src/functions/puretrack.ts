@@ -78,7 +78,7 @@ async function createPureTrackGroupsHandler(
         const pilot = await readBlob<Pilot>(
           getPrivateBlobClient(`pilots/${pilotId}.json`)
         );
-        if (pilot.pureTrackId) {
+        if (pilot.pureTrackId != null) {
           pilotPureTrackIds.set(pilotId, pilot.pureTrackId);
         }
       } catch {
@@ -88,7 +88,7 @@ async function createPureTrackGroupsHandler(
   );
 
   // Create groups
-  let result: PureTrackRoundResult;
+  let result: PureTrackRoundResult | null;
   try {
     result = await createPureTrackGroups(round, pilotPureTrackIds);
   } catch (err: unknown) {
@@ -99,6 +99,9 @@ async function createPureTrackGroupsHandler(
 
   // Persist group IDs back onto the round blob (under lease)
   const path = `rounds/${id}.json`;
+  if (!result) {
+    return { status: 200, jsonBody: null };
+  }
   try {
     await withPrivateLease(path, async (leaseId) => {
       const r = await readBlob<Round>(getPrivateBlobClient(path));
