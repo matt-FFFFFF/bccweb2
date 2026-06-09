@@ -44,9 +44,11 @@ export default function RoundDetail() {
   const [brief, setBrief] = useState<any>(null); // Type is RoundBrief & { version?: number }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
+  const [actionError, setActionError] = useState<Error | null>(null);
+  const [unregistering, setUnregistering] = useState(false);
   const [notFound, setNotFound] = useState(false);
 
-  useEffect(() => {
+  const loadRound = () => {
     if (!id) {
       setLoading(false);
       return;
@@ -81,6 +83,10 @@ export default function RoundDetail() {
     return () => {
       cancelled = true;
     };
+  };
+
+  useEffect(() => {
+    return loadRound();
   }, [id]);
 
   const { data: pilotsIndex } = useBlob<PilotSummary[]>("pilots.json");
@@ -89,10 +95,41 @@ export default function RoundDetail() {
     identity?.roles.includes("RoundsCoord") ||
     identity?.roles.includes("Admin");
 
+  const isPilot = identity?.roles.includes("Pilot") && !!identity.pilotId;
+
+  async function unregisterSelf() {
+    if (!round) return;
+    const confirmed = window.confirm("Unregister from this round?");
+    if (!confirmed) return;
+
+    setUnregistering(true);
+    setActionError(null);
+    try {
+      await api.post(`rounds/${round.id}/unregister-self`, {});
+      loadRound();
+    } catch (err) {
+      setActionError(err as Error);
+    } finally {
+      setUnregistering(false);
+    }
+  }
+
   if (loading) return <LoadingSpinner message="Loading round…" />;
   if (notFound) return <p>Round not found.</p>;
   if (error) return <ErrorMessage error={error} title="Could not load round" />;
   if (!round) return null;
+
+  const registrationOpen = round.status === "Proposed" || round.status === "Confirmed";
+  const pilotSlot = isPilot
+    ? round.teams.flatMap((team) => team.pilots.map((slot) => ({ team, slot })))
+        .find(({ slot }) => slot.status === "Filled" && slot.pilotId === identity?.pilotId)
+    : undefined;
+  const eligibleTeams = isPilot
+    ? round.teams.filter((team) => !identity?.clubId || team.club.id === identity.clubId)
+    : [];
+  const canRegister = isPilot && registrationOpen && !pilotSlot && eligibleTeams.length > 0;
+  const canUnregister = isPilot && registrationOpen && pilotSlot && !pilotSlot.slot.signToFly;
+  const signedSlot = isPilot && pilotSlot?.slot.signToFly;
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
@@ -141,6 +178,39 @@ export default function RoundDetail() {
           </Link>
         )}
       </div>
+
+      {actionError && <ErrorMessage error={actionError} title="Could not update registration" />}
+
+      {isPilot && (
+        <section style={{ marginBottom: "1.5rem", padding: "1rem", border: "1px solid #dee2e6", borderRadius: "0.5rem", background: "#f8f9fa" }}>
+          {canRegister && (
+            <Link
+              to={`/rounds/${round.id}/register`}
+              style={{ display: "inline-block", padding: "0.55rem 0.85rem", background: "#0066cc", color: "white", borderRadius: "0.3rem", textDecoration: "none", fontWeight: 700 }}
+            >
+              Register for this round
+            </Link>
+          )}
+          {canUnregister && (
+            <button
+              type="button"
+              onClick={unregisterSelf}
+              disabled={unregistering}
+              style={{ padding: "0.55rem 0.85rem", background: "#842029", color: "white", border: 0, borderRadius: "0.3rem", fontWeight: 700, cursor: unregistering ? "wait" : "pointer" }}
+            >
+              {unregistering ? "Unregistering…" : "Unregister from this round"}
+            </button>
+          )}
+          {signedSlot && (
+            <p style={{ margin: 0, color: "#555", fontWeight: 600 }}>
+              You have signed — contact a coordinator to be removed.
+            </p>
+          )}
+          {isPilot && !canRegister && !canUnregister && !signedSlot && registrationOpen && pilotSlot && (
+            <p style={{ margin: 0, color: "#555" }}>You are registered for this round.</p>
+          )}
+        </section>
+      )}
 
       {/* ── Round Info ── */}
       <section

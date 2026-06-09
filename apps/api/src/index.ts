@@ -25,6 +25,7 @@ import "./functions/puretrack.js";
 import "./functions/authFunctions.js";
 import "./functions/adminWording.js";
 import "./functions/signatures.js";
+import "./functions/roundRegistration.js";
 
 // Club Teams
 import "./functions/clubTeams.js";
