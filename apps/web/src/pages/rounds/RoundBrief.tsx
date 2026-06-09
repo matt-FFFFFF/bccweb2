@@ -35,6 +35,20 @@ function w3wUrl(w3w?: string) {
   return `https://what3words.com/${clean}`;
 }
 
+function displayValue(value?: string) {
+  return value?.trim() ? value : "Not provided";
+}
+
+const safetyFields: Array<{ label: string; value: (brief: RoundBriefType) => string | undefined }> = [
+  { label: "Wind Speed & Direction", value: (brief) => brief.windSpeedDirection },
+  { label: "Direction of Flight", value: (brief) => brief.directionOfFlight },
+  { label: "Expected Landing Area", value: (brief) => brief.expectedLandingArea },
+  { label: "Airspace & Hazards", value: (brief) => brief.airspaceAndHazards },
+  { label: "NOTAMs", value: (brief) => brief.NOTAMs },
+  { label: "BENO Line Description", value: (brief) => brief.BENO_LineDescription },
+  { label: "Briefer's Notes", value: (brief) => brief.briefersNotes },
+];
+
 function W3WLink({ value, label }: { value?: string; label: string }) {
   if (!value) return null;
   const url = w3wUrl(value);
@@ -181,6 +195,103 @@ function TeamSection({ team }: { team: BriefTeamEntry }) {
   );
 }
 
+function SafetyBriefingSection({
+  brief,
+  imageUrls,
+}: {
+  brief: RoundBriefType;
+  imageUrls: string[];
+}) {
+  const fieldStyle: React.CSSProperties = {
+    padding: "0.65rem",
+    border: "1px solid #e3e8f2",
+    borderRadius: "0.35rem",
+    background: "#fff",
+  };
+  const labelStyle: React.CSSProperties = {
+    display: "block",
+    marginBottom: "0.25rem",
+    color: "#555",
+    fontSize: "0.8rem",
+    fontWeight: 700,
+  };
+  const valueStyle: React.CSSProperties = {
+    whiteSpace: "pre-wrap",
+    color: "#222",
+    fontSize: "0.92rem",
+  };
+
+  return (
+    <section
+      style={{
+        marginBottom: "1.5rem",
+        padding: "1rem",
+        border: "1px solid #dee2e6",
+        borderRadius: "0.5rem",
+        background: "#fbfcff",
+      }}
+    >
+      <h2 style={{ fontSize: "1rem", margin: "0 0 0.75rem", color: "#1a4fa0" }}>
+        Safety Briefing
+      </h2>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fit, minmax(240px, 1fr))",
+          gap: "0.75rem",
+        }}
+      >
+        {safetyFields.map((field) => (
+          <div key={field.label} style={fieldStyle}>
+            <span style={labelStyle}>{field.label}</span>
+            <span style={valueStyle}>{displayValue(field.value(brief))}</span>
+          </div>
+        ))}
+      </div>
+
+      <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.6rem", color: "#1a4fa0" }}>
+        Briefer Contact
+      </h3>
+      <div
+        style={{
+          display: "grid",
+          gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))",
+          gap: "0.5rem 1rem",
+        }}
+      >
+        <div><span style={labelStyle}>Name</span>{displayValue(brief.briefer?.name)}</div>
+        <div><span style={labelStyle}>BHPA Coach Level</span>{displayValue(brief.briefer?.bhpaCoachLevel)}</div>
+        <div><span style={labelStyle}>BHPA Number</span>{displayValue(brief.briefer?.bhpaNumber)}</div>
+        <div><span style={labelStyle}>Phone</span>{displayValue(brief.briefer?.phoneNumber)}</div>
+        <div><span style={labelStyle}>Email</span>{displayValue(brief.briefer?.emailAddress)}</div>
+      </div>
+
+      {brief.imagePaths && brief.imagePaths.length > 0 && (
+        <div style={{ marginTop: "1rem" }}>
+          <h3 style={{ fontSize: "0.95rem", margin: "0 0 0.6rem", color: "#1a4fa0" }}>
+            Briefing Images
+          </h3>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
+            {brief.imagePaths.map((path, index) => (
+              <div key={path} style={{ width: 220 }}>
+                {imageUrls[index] ? (
+                  <img
+                    src={imageUrls[index]}
+                    alt={`Briefing image ${index + 1}`}
+                    style={{ width: "100%", height: "auto", borderRadius: "0.35rem", border: "1px solid #dee2e6" }}
+                  />
+                ) : (
+                  <span style={{ color: "#666", fontSize: "0.85rem" }}>Image unavailable</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+}
+
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function RoundBrief() {
@@ -192,6 +303,7 @@ export default function RoundBrief() {
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
 
   useEffect(() => {
     if (!id) return;
@@ -219,6 +331,42 @@ export default function RoundBrief() {
       })
       .finally(() => setLoading(false));
   }, [id]);
+
+  useEffect(() => {
+    if (!id || !brief?.imagePaths?.length) {
+      setImageUrls([]);
+      return;
+    }
+
+    let cancelled = false;
+    const objectUrls: string[] = [];
+    const accessToken = localStorage.getItem("bcc_access_token");
+    const headers: Record<string, string> = {};
+    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
+
+    Promise.all(
+      brief.imagePaths.map(async (_path, index) => {
+        const res = await fetch(`/api/rounds/${id}/brief/images/${index + 1}`, { headers });
+        if (!res.ok) return "";
+        const url = URL.createObjectURL(await res.blob());
+        objectUrls.push(url);
+        return url;
+      })
+    ).then((urls) => {
+      if (cancelled) {
+        urls.forEach((url) => { if (url) URL.revokeObjectURL(url); });
+        return;
+      }
+      setImageUrls(urls);
+    }).catch(() => {
+      if (!cancelled) setImageUrls([]);
+    });
+
+    return () => {
+      cancelled = true;
+      objectUrls.forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, [id, brief]);
 
   async function downloadPdf() {
     if (!id) return;
@@ -414,6 +562,8 @@ export default function RoundBrief() {
           <W3WLink value={brief.takeOffW3W} label="Take-off" />
         </div>
       </section>
+
+      <SafetyBriefingSection brief={brief} imageUrls={imageUrls} />
 
       {/* Teams */}
       <section>
