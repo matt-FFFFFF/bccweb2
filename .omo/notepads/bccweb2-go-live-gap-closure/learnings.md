@@ -600,6 +600,164 @@ reconcile field population.
   for the PureTrack API response. Renamed to `PureTrackApiGroup` to avoid conflict with the new
   `PureTrackGroup` entity exported from `@bccweb/types`
 
+## Task 45 notes — Sign-to-Fly E2E journey
+- Mock mechanism chosen for the committed spec: Playwright route interception for `/api/*` and `/blob/*`, so the journey can run without real ACS or PureTrack credentials and without modifying production API/web code. Registration/verification is mocked as an ACS email interception equivalent by returning the verification success path for `/api/auth/verify`.
+- Dev-stack helper pattern: `tests/e2e/_setup/dev-stack.ts` starts `docker compose up -d azurite azurite-init`, then API via `bun --filter @bccweb/api run start` with `MOCK_ACS=1` and `MOCK_PURETRACK=1`, then web via `bun --filter @bccweb/web run dev`; it waits for `/api/health` and the Vite base URL before returning a cleanup handle.
+- Wait strategy: prefer role/text locators with `await expect(...).toBeVisible({ timeout: 5000 })`; use direct API/blob assertions only for invisible ledger invariants such as invalidated `slot.signToFly`, preserved signatures, `source=coord-override`, and league recompute.
+
+## Task 50 notes — Production dry-run orchestrator
+
+## Task 48 notes — Post-deploy smoke gate
+- Poll interval chosen: 5s with a 120s ceiling (24 attempts) to balance fast feedback with transient Azure startup delays.
+- GitHub Actions variables (`vars.API_HOST`, `vars.WEB_HOST`) were chosen over secrets because these are environment routing values, not credentials.
+- Branch protection for the smoke check must be configured manually in GitHub repo settings; Terraform cannot enforce the required status check here.
+- BACPAC restore approach: `dry-run-against-prod.sh` treats `BACPAC_PATH` as optional. If provided and `sqlpackage` is installed, it requires `BACPAC_TARGET_CONN` and imports the BACPAC there, then runs the dry-run against that restored database. If `sqlpackage` is unavailable, the script fails with an explicit manual-restore instruction rather than silently continuing against the wrong SQL source.
+- Env-var guard rationale: `PROD_DRY_RUN_CONFIRM=YES` is required before any SQL or blob client is created, matching the Task 8 double-lock style. The dry-run still passes `PRODUCTION_CONFIRM=YES` to `migrate.mjs` because `--force-production` is intentionally retained for production-source validation, but `BLOB_CONNECTION_STRING` is always set from `STAGING_BLOB_CONN` so the orchestrator never writes to production blobs.
+- Reconciliation fallback: when `PROD_BLOB_CONN` and `az` are available, the script records a production public-blob path/count snapshot. Without `az`, it falls back to expected counts parsed from `.migration-state/prod-dryrun-stdout.txt`, keeping canned-fixture and offline validation deterministic.
+- Flakiness observed: no browser run was possible unless a web dev server is reachable on `E2E_BASE_URL`/5173; the spec still lists cleanly with Playwright config and captures screenshots when executed against a running web server.
+
+## Task 44 notes — Scoring regression fixtures
+- Real historical legacy round exports were not available in this workspace, so Task 44 fixtures are explicitly named `synthetic-handcrafted-*` and each JSON file carries a `notes` field stating the formula used for expected values.
+- Fixtures preserve only competition data needed by `scoreRound()` / `computeLeague()`: wing class, distance, `isScoring`, `noScore`, place ranking, scoring type, and first-XC/PB-style flags. Pilot ids are synthetic UUID-shaped values; no real names, email, phone, medical, emergency-contact, BHPA, IP, or user-agent data is present.
+- Rounding gotcha: individual pilot scores are rounded to 1 decimal before team aggregation (`round1(distance * wingFactor)`), then team totals are rounded to 1 decimal again after summing the top `maxScoringPilotsInTeam` scoring slots. Regression assertions use `< 0.05` for pilots and `< 0.1` for teams/league scores; league rank remains exact.
+- `computeLeague()` returns entries keyed by `clubId|teamName`, not `team.id`; regression tests map back to fixture team ids via the scored round's club/teamName pair before asserting expected league positions.
+
+## Task 42 notes — Round lifecycle integration suite
+- Lifecycle tests use real Azurite blobs and registered Function handlers (`createRound`, `confirmRound`, `briefCompleteRound`, `signOwnSlot`, `lockRound`, `completeRound`, `updateRoundBrief`, `overrideSlotSignature`) rather than spawning an HTTP server. Each scenario seeds unique UUIDs and an isolated high-number season year to avoid cross-test contamination in shared public indexes.
+- PureTrack is mocked at `../../lib/puretrack.js` with a controllable `createPureTrackGroups` vi.fn. The failure-path strategy is to reject that mock before `lockRound`; because T39 group blob writes live inside the real PureTrack implementation, this proves lock continues without creating any `puretrack-groups/` blob in the integration path.
+- ACS/PDF are mocked in the lifecycle file rather than relying only on global setup because lock imports `briefHtmlBody` and `briefPlainText` as well as `sendEmail`/`getBriefRecipients`; the suite exposes all four exports and toggles recipients per test.
+- Recompute crash strategy: spy on `BlobClient.prototype.beginCopyFromURL` and throw only for the first `seasons/{year}.json` final copy. This leaves the `.tmp` uploaded by `swapJsonBlob`, keeps the prior final season blob intact, and lets a rerun with restored spy succeed.
+- T10 lease quirk: `withLeaseRenewingOnClient` rejects the default 15s renewal interval for Azurite's 30s lease because the guard uses `leaseDurationSec * 500`; tests partially mock `withLeaseRenewing`/`withPrivateLeaseRenewing` to keep production behavior but pass `renewIntervalMs: 1000` unless the caller overrides it.
+- `completeRound` scoring requires private `config.json`; seed helpers write a minimal all-ones `wingFactors` config so `scoreRound()` can score locked-round snapshots deterministically.
+
+## Task 41 notes — Auth flow integration suite
+
+### Email mock extension pattern
+- Existing `vi.mock("../../lib/email.js", ...)` in `apps/api/src/__tests__/helpers/setup.ts` returns
+  `sendEmail: vi.fn().mockResolvedValue(undefined)` — calls were already recorded by Vitest's
+  internal `mock.calls` array, just never surfaced as a named helper.
+- Additive change: after the vi.mock factory, added a static `import { sendEmail } from "../../lib/email.js"`
+  and exported `getSentEmails()` (reads `vi.mocked(sendEmail).mock.calls`) and `clearSentEmails()`
+  (delegates to `mockClear()`). vi.mock is hoisted ABOVE static imports by Vitest, so import order
+  doesn't matter for correctness — but added a brief comment to deter future "fix the import order"
+  refactors that would break the mock binding.
+- Did NOT touch the existing `vi.mock(...)` body. All prior tests using `vi.mocked(sendEmail).mockClear()`
+  keep working identically.
+
+### Fake-timer pattern for lockout scenario
+- `vi.useFakeTimers({ toFake: ["Date"] })` faked only Date — leaves `setTimeout` real. This was
+  critical because `register` runs `await ensureMinimumDuration(startedAtMs, 100)` which calls
+  `await sleep(ms)` (setTimeout). Faking all timers would deadlock the sleep; faking only Date lets
+  the 100ms constant-time pad run as a real wait while clock arithmetic stays controllable.
+- For lockout time-travel (5 wrong → 423 → advance 16min → correct succeeds): set `baseTime`,
+  exhaust failures, assert 423, then `vi.setSystemTime(base + 16*60_000)` and `resetAllBuckets()`
+  before the final attempt. Buckets are in-memory and key off `Date.now()` for refill — faking Date
+  fools the refill math, so explicit reset is required to clear the per-IP bucket state.
+- `vi.useRealTimers()` in `afterEach` to avoid polluting subsequent tests in the same file.
+
+### Test isolation patterns that mattered
+- Used a per-test unique IP via a `uniqueIp()` helper (`198.51.<a>.<b>`) for `x-forwarded-for` so
+  the in-memory TokenBucket registry never shares state between tests OR with the sibling
+  `authRegister.test.ts`/`registerTsCs.test.ts` (which run in the same file ordering).
+- Combined with `resetAllBuckets()` in `beforeEach`. Belt-and-braces; either alone is enough.
+- Used `randomUUID()` in all generated emails to keep `user-index.json` writes append-only and
+  never collide.
+
+### Token blob seeding for negative paths
+- Verify expired: write `auth/tokens/{sha256(token)}.json` directly with `expiresAt` in the past.
+  Handler download() returns the doc with `expiresAt < now()` → `TokenExpiredError` → 400 INVALID_TOKEN.
+  Asserted the blob is NOT mutated (no `consumed: true` written) since lifecycle TTL handles GC.
+- Stale verification state for >60s resend: write `auth/verification-state/{userId}.json` with
+  `createdAt = Date.now() - 70_000`. Register's `loadVerificationState` sees `now - createdAt > 60s`
+  → reissue branch. Asserted the resulting state file's `token` differs from the seeded stale value.
+- Reset double-consume parallel: `Promise.all` of two reset-password calls with the SAME token.
+  T9 atomic ETag flow guarantees exactly one wins (200) and the other gets 412 → TokenAlreadyConsumedError
+  → 400 INVALID_TOKEN. Asserted sorted statuses === [200, 400] and the 400 carries code INVALID_TOKEN.
+
+### auth.token.reused metric not emitted on login
+- Confirmed by spying console.warn and asserting NO call argument string-includes "auth.token.reused"
+  during a wrong-password login. Login flow does not touch short-lived tokens, so the metric must
+  never fire — verifies the two counters are correctly distinct.
+
+### Test scoreboard
+- 14 scenarios, all green on first run. 3.93s wall-clock. Build clean.
+- T42's pre-existing failures in `roundLifecycle.integration.test.ts` are unrelated (reproduced
+  with my setup.ts edit reverted via `git stash push -- apps/api/src/__tests__/helpers/setup.ts`).
+
+## Task 43 notes — Migration smoke test against canned fixture
+
+### Fixture format chosen
+- Plain `.sql` files (NOT a BACPAC) at `scripts/migrate/fixtures/canned/`:
+  - `schema.sql` — CREATE TABLE for every legacy table the migration queries
+    (Statuses, Manufacturers, PilotRatings, Clubs, Sites, Seasons, Frequencies,
+    SeasonClubs, SeasonClubFrequency, People, AspNetUsers, Pilots,
+    PilotSeasonClubs, PilotClub, Teams, Rounds, RoundTeams, RoundTeamPilots,
+    RoundTeamPlaces, Flights, RoundBriefs, RoundClubPilots).
+  - `seed.sql` — 2–3 rows per entity, fully synthetic (`Synthetic Alpha`,
+    `alpha@example.test`, `+44-1632-960xxx` UK-reserved phone block). One
+    Complete round + one Confirmed round (no teams) so the fixture exercises
+    both the scoring/league path and the "no flights" path.
+  - README documents the rationale (BACPAC requires SqlPackage which is not
+    consistently available on arm64; .sql files diff cleanly in PR review).
+
+### testcontainers vs Docker-cli approach
+- Chose **direct `docker` CLI via `child_process`** — no new npm dependency.
+  testcontainers would have added `@testcontainers/mssqlserver` + transitive
+  deps for one ephemeral container in one test file.
+- Image: `mcr.microsoft.com/azure-sql-edge:latest` (arm64-compatible — the
+  official `mcr.microsoft.com/mssql/server` image is amd64-only and refuses
+  to start on Apple Silicon). Azure SQL Edge speaks TDS, so `mssql` connects
+  unmodified. Cold start ~30–45s on M-series; test polls connection with a
+  120s deadline.
+- Container started with `-p 0:1433` to avoid host port collisions; resolved
+  to the **container network IP** via `docker inspect` because the published
+  host-port mapping is unreliable under Apple's `container` runtime (the
+  socktainer shim's port forwarding can drop TDS connections immediately
+  after handshake — observed `ECONNRESET` on every connect via 127.0.0.1).
+
+### Local Docker daemon on this dev box
+- This Mac uses Apple's `container` CLI + `socktainer` (docker-compat shim)
+  instead of Docker Desktop. Required two manual steps once:
+  `container system start` then `nohup socktainer --no-check-compatibility &`
+  (the bundled socktainer was built against container 0.12.0; runtime here is
+  0.12.3 — the compat-check refuses to start without the flag). This only
+  affects local dev — CI runners ship a normal Docker daemon.
+
+### Isolation strategy
+- Per-run unique Azurite container names (`smoke-public-<8hex>` /
+  `smoke-private-<8hex>`) so the test never touches dev `data`/`data-private`.
+  Containers are created in `before` and best-effort deleted in `after`.
+- Migration + reconcile run with `cwd = mkdtempSync(...)` so id-map.json
+  and reconciliation-report.json live in a per-run tmpdir, never polluting
+  the repo's `.migration-state/`.
+
+### Tricky migration ordering observed
+- `season-clubs/{year}/{clubId}.json` are **private** (detail); only the
+  yearly `season-clubs/{year}/index.json` is **public**. I initially asserted
+  6 private `season-clubs/` blobs expecting both detail + index; correct is 3.
+- `pilots/` prefix in the private container counts BOTH `pilots/{uuid}.json`
+  (pilot detail, T21-stripped) AND `pilots/{uuid}/club-history.json` (T33).
+  The smoke test partitions them with two regexes to count each independently.
+- Legacy-migrated signatures (T18) are written **only** for places with
+  `SignToFly=1` AND a non-null pilot — fixture seeds 3 places filled but only
+  2 with SignToFly=1, so expect 2 `signatures/` blobs (not 3).
+- Apple `container` runtime + socktainer published-port mapping is broken
+  for TDS; always resolve to container IP from `docker inspect` for any
+  test that needs TCP into a SQL Server container.
+
+## Task 49 notes — Cutover runbook
+- Created docs/runbooks/cutover.md with 12 substantive sections covering the end-to-end migration lifecycle.
+- Rollback window confirmed as 7 days per Decision #7.
+- Sign-off matrix includes 11 specific blockers with evidence paths cross-referenced for Tasks 1-45.
+- Prerequisites identified:
+  - T51 (ACS DNS verification) must complete before DNS cutover phase.
+  - T46+T47 (App Insights/Alerts) must complete before "Application Insights + alert rules" sign-off.
+  - T48 (CI smoke gate) must complete before "Post-deploy smoke gate in CI" sign-off.
+  - T50 (Production dry-run) must complete before final sign-off.
+- Rollback plan uses concrete az storage blob copy start commands leveraging the versioning feature from T6.
+- DNS verification requires dig check of CNAME propagation.
+- Maintenance window communication templates provided.
+
 ## Task 46 notes — Application Insights wiring + PII-redacting telemetry processor
 
 ### Connection-string seed mechanism (mirrors T7 jwt-secret pattern)
@@ -701,11 +859,11 @@ reconcile field population.
 ### SPA RUM include/defer decision — DEFERRED with stub
 - The task spec explicitly allows: *"if size concern, defer SPA RUM to a
   follow-up and STUB the import — document choice in learnings."*
-- `@microsoft/applicationinsights-web` is ~50KB gzipped. The current SPA
-  gzipped bundle is 102.90KB; adding RUM would push it to ~150KB. With no
-  concrete RUM use case in scope for T46/T47 (alerts in T47 fire off
-  API-side metrics only), the cost/benefit did not justify the bundle
-  bloat for go-live.
+- `@microsoft/applicationinsights-web` is ~50KB gzipped (verified via the
+  npm registry pages). The current SPA gzipped bundle is 102.90KB; adding
+  RUM would push it to ~150KB. With no concrete RUM use case in scope for
+  T46/T47 (alerts in T47 fire off API-side metrics only), the cost/benefit
+  did not justify the bundle bloat for go-live.
 - `apps/web/src/lib/telemetry.ts` is a self-contained stub: it ports
   `redactObject` + `PII_FIELDS` to TS as a no-runtime-dep utility (kept in
   sync with `apps/api/src/lib/telemetryRedactor.ts` — same dual-maintenance
