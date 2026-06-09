@@ -216,7 +216,7 @@ async function withLeaseRenewingOnClient<T>(
   const leaseDurationSec = opts.leaseDurationSec ?? 30;
   const renewIntervalMs = opts.renewIntervalMs ?? 15_000;
 
-  if (renewIntervalMs >= leaseDurationSec * 500) {
+  if (renewIntervalMs > leaseDurationSec * 500) {
     throw new Error("renewal interval too long");
   }
 
