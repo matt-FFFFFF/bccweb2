@@ -340,6 +340,15 @@ export default function RoundDetail() {
                       <span style={{ marginLeft: "0.5rem", color: "#888", fontSize: "0.85em" }}>
                         {team.club.name}
                       </span>
+                      {team.captainPilotId && (
+                        <div style={{ fontSize: "0.78rem", color: "#555", marginTop: "0.2rem" }}>
+                          Captain:{" "}
+                          <strong>
+                            {pilotsIndex?.find((p) => p.id === team.captainPilotId)?.name
+                              ?? team.captainPilotId}
+                          </strong>
+                        </div>
+                      )}
                     </div>
                     {team.score > 0 && (
                       <span style={{ fontWeight: 700, color: "#0a3622" }}>

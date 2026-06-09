@@ -23,6 +23,7 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { recomputeTeamCaptain } from "../lib/teamCaptain.js";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 
@@ -183,8 +184,9 @@ async function addPilot(
   const result = await mutateLocked(id, (r) => {
     if (r.isLocked) return "Round is locked";
 
-    const team = r.teams.find((t) => t.id === teamId);
-    if (!team) return "Team not found";
+    const teamIdx = r.teams.findIndex((t) => t.id === teamId);
+    if (teamIdx === -1) return "Team not found";
+    const team = r.teams[teamIdx];
 
     // Pilot may not be registered more than once in the same round
     const alreadyRegistered = r.teams.some((t) =>
@@ -213,6 +215,7 @@ async function addPilot(
     };
 
     team.pilots.push(slot);
+    r.teams[teamIdx] = recomputeTeamCaptain(team);
   });
 
   if (typeof (result as HttpResponseInit).status === "number") return result as HttpResponseInit;
@@ -246,13 +249,15 @@ async function removePilot(
   const result = await mutateLocked(id, (r) => {
     if (r.isLocked) return "Round is locked";
 
-    const team = r.teams.find((t) => t.id === teamId);
-    if (!team) return "Team not found";
+    const teamIdx = r.teams.findIndex((t) => t.id === teamId);
+    if (teamIdx === -1) return "Team not found";
+    const team = r.teams[teamIdx];
 
     const idx = team.pilots.findIndex((s) => s.placeInTeam === placeNum);
     if (idx === -1) return "Pilot slot not found";
 
     team.pilots.splice(idx, 1);
+    r.teams[teamIdx] = recomputeTeamCaptain(team);
   });
 
   if (typeof (result as HttpResponseInit).status === "number") return result as HttpResponseInit;

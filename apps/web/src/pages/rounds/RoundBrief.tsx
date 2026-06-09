@@ -151,6 +151,8 @@ function PilotTable({ pilots }: { pilots: BriefPilotEntry[] }) {
 // ─── Team section ─────────────────────────────────────────────────────────────
 
 function TeamSection({ team }: { team: BriefTeamEntry }) {
+  const captain = team.pilots.find((p) => p.placeInTeam === 1);
+
   return (
     <div style={{ marginBottom: "1.5rem" }}>
       <div
@@ -169,6 +171,11 @@ function TeamSection({ team }: { team: BriefTeamEntry }) {
           <span style={{ marginLeft: "0.5rem", color: "#555", fontSize: "0.85rem" }}>
             — {team.clubName}
           </span>
+          {captain && (
+            <span style={{ marginLeft: "0.75rem", fontSize: "0.8rem", color: "#444" }}>
+              Captain: <strong>{captain.name}</strong>
+            </span>
+          )}
         </div>
         {team.pureTrackGroupSlug && (
           <a

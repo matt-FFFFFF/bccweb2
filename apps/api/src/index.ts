@@ -29,3 +29,6 @@ import "./functions/roundRegistration.js";
 
 // Club Teams
 import "./functions/clubTeams.js";
+
+// Phase 6 — Captain management
+import "./functions/teamsCaptain.js";

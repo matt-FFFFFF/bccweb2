@@ -413,3 +413,55 @@ services:
 - Updated `PUT /api/pilots/{id}` to automatically stamp `profileUpdatedAt`.
 - Created `<FirstLoginOfSeasonGate>` that intercepts all router navigations (except whitelisted routes) if `firstLoginOfSeason` is true. Used an overlay CSS-based navigation blocker.
 - Found out that T25 and T26 had concurrent changes in `me.ts` and `roundRegistration.ts` which required minor patch coordination. Preserved `tsCsAcceptanceRequired` from T25 in `me.ts`.
+
+## Task 27 notes — Team captain auto-assign + manual reassign
+
+### Factor-out approach chosen
+- Created `apps/api/src/lib/teamCaptain.ts` with a single pure exported function
+  `recomputeTeamCaptain(team: Team): Team`. Returns a new object (spread), no side effects.
+- Called from both `addPilot` and `removePilot` mutation closures inside `teams.ts`.
+- This is the T26 integration point: T26's register-self handler can import and call
+  `recomputeTeamCaptain` from the same module without duplicating the logic.
+- The function is NOT called from `addTeam` or `removeTeam` (no pilots involved).
+
+### Captain auto-assign rules (enforced in recomputeTeamCaptain)
+- Place 1 filled AND captainPilotId == null → set captainPilotId = place1.pilotId
+- Place 1 filled AND captainPilotId != null → no change (operator override preserved)
+- Place 1 empty → captainPilotId = nextLowestFilledSlot.pilotId ?? null (always reassigns)
+- Corollary: removing a non-place-1 slot while place 1 is still filled → no change
+  because the function finds place 1 occupied with a non-null captain and short-circuits.
+
+### Endpoint pattern (teamsCaptain.ts)
+- Separate file keeps teams.ts clean; registered in index.ts under "Phase 6".
+- `withPrivateLease` used directly (no mutateLocked abstraction) so the return value from
+  the lease callback is cleanly typed — avoids the `Round | HttpResponseInit` union that
+  mutateLocked uses.
+- Validation order: auth → coord-scope → team existence → pilot-in-team.
+
+### RoundManage.tsx integration (T20 overlap)
+- T20 added the Override Sign modal inside `PilotRow` — no structural overlap with
+  the captain UI which lives in `TeamCard`'s header section.
+- Added `ChangeCaptainSelect` component before `TeamCard` in source order; added
+  `canManageCaptain: boolean` prop to `TeamCard` matching `canOverrideSign` pattern.
+- `canManageCaptain` mirrors the API's auth rule: Admin OR (RoundsCoord AND clubId matches
+  round.organisingClub.id). If round has no organisingClub, coord cannot manage captain —
+  consistent with endpoint behavior.
+- When `canManageCaptain` is false (e.g. read-only coord viewing another club's round),
+  a read-only "Captain: {name}" line is shown instead of the dropdown.
+
+### RoundBrief.tsx — approximate captain display
+- `BriefTeamEntry` (packages/types) has no `captainPilotId` field (MUST NOT touch packages/).
+- Brief shows captain inferred from place-1 pilot (`placeInTeam === 1`). This is the default
+  auto-assigned captain and correct in the common case. Manual overrides won't be reflected
+  in the brief view — acceptable approximation documented here for future reference.
+  (If T26+ needs accurate captain in the brief, `captainPilotId` should be added to
+  `BriefTeamEntry` and brief generation updated in brief.ts.)
+
+### Test patterns
+- `teamCaptain.test.ts` — pure unit tests, no Azurite needed, isolated from build deps.
+  Added to vitest.config.ts `include` array (not covered by the glob patterns in use).
+- `teamsCaptain.test.ts` — integration tests using existing seed helpers (makeUser,
+  makeRound, makePilot, readPrivateJson). Pattern matches existing signatures.test.ts.
+- Teams.ts `addPilot`/`removePilot` now use `findIndex` + array slot replacement rather
+  than mutating the found team reference directly, which is necessary since
+  `recomputeTeamCaptain` returns a new object.

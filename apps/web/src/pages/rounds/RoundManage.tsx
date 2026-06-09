@@ -831,12 +831,72 @@ function PilotRow({
 
 // ─── Team card ────────────────────────────────────────────────────────────────
 
+function ChangeCaptainSelect({
+  roundId,
+  team,
+  pilots,
+  onChanged,
+}: {
+  roundId: string;
+  team: Team;
+  pilots: PilotSummary[] | null;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const filledPilots = team.pilots
+    .filter((s) => s.status === "Filled" && s.pilotId !== null)
+    .sort((a, b) => a.placeInTeam - b.placeInTeam);
+
+  async function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
+    const newPilotId = e.target.value || null;
+    setBusy(true);
+    setErr(null);
+    try {
+      await api.put(`rounds/${roundId}/teams/${team.id}/captain`, {
+        pilotId: newPilotId,
+      });
+      onChanged();
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Failed to update captain");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginTop: "0.25rem" }}>
+      <label style={{ fontSize: "0.75rem", color: "#555", whiteSpace: "nowrap" }}>
+        Captain:
+      </label>
+      <select
+        style={{ ...inputStyle, fontSize: "0.78rem", padding: "0.2rem 0.35rem" }}
+        value={team.captainPilotId ?? ""}
+        disabled={busy}
+        onChange={(e) => { void handleChange(e); }}
+      >
+        <option value="">— none —</option>
+        {filledPilots.map((s) => (
+          <option key={s.pilotId} value={s.pilotId!}>
+            {pilotDisplayName(s.pilotId, pilots)}
+          </option>
+        ))}
+      </select>
+      {err && (
+        <span style={{ fontSize: "0.75rem", color: "#721c24" }}>{err}</span>
+      )}
+    </div>
+  );
+}
+
 function TeamCard({
   roundId,
   team,
   pilots,
   status,
   canOverrideSign,
+  canManageCaptain,
   onChanged,
 }: {
   roundId: string;
@@ -844,6 +904,7 @@ function TeamCard({
   pilots: PilotSummary[] | null;
   status: RoundStatus;
   canOverrideSign: boolean;
+  canManageCaptain: boolean;
   onChanged: () => void;
 }) {
   const [showAddPilot, setShowAddPilot] = useState(false);
@@ -891,6 +952,23 @@ function TeamCard({
           <span style={{ marginLeft: "0.5rem", color: "#888", fontSize: "0.85em" }}>
             {team.club.name}
           </span>
+          {canManageCaptain ? (
+            <ChangeCaptainSelect
+              roundId={roundId}
+              team={team}
+              pilots={pilots}
+              onChanged={onChanged}
+            />
+          ) : (
+            <div style={{ fontSize: "0.78rem", color: "#555", marginTop: "0.2rem" }}>
+              Captain:{" "}
+              <strong>
+                {team.captainPilotId
+                  ? pilotDisplayName(team.captainPilotId, pilots)
+                  : "—"}
+              </strong>
+            </div>
+          )}
         </div>
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
           {team.score > 0 && (
@@ -1192,6 +1270,11 @@ export default function RoundManage() {
     identity.roles.includes("Admin") ||
     (identity.roles.includes("RoundsCoord") && identity.clubId !== null && identity.clubId === r.organisingClub?.id)
   );
+  const canManageCaptain =
+    identity.roles.includes("Admin") ||
+    (identity.roles.includes("RoundsCoord") &&
+      identity.clubId !== null &&
+      identity.clubId === r.organisingClub?.id);
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
@@ -1306,6 +1389,7 @@ export default function RoundManage() {
               pilots={pilotsIndex}
               status={r.status}
               canOverrideSign={canOverrideSign}
+              canManageCaptain={canManageCaptain}
               onChanged={() => { void loadRound(); }}
             />
           ))}
