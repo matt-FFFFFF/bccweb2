@@ -28,6 +28,10 @@ resource "azapi_resource" "function_app" {
   location  = azapi_resource.resource_group.location
   tags      = local.tags
 
+  identity {
+    type = "SystemAssigned"
+  }
+
   body = {
     kind = "functionapp,linux"
     properties = {
@@ -43,7 +47,10 @@ resource "azapi_resource" "function_app" {
             { name = "BLOB_CONNECTION_STRING", value = local.storage_primary_connection_string },
             { name = "BLOB_CONTAINER_NAME", value = azapi_resource.storage_container_data.name },
             { name = "BLOB_PRIVATE_CONTAINER_NAME", value = azapi_resource.storage_container_data_private.name },
-            { name = "JWT_SECRET", value = var.jwt_secret },
+            # JWT_SECRET is read at runtime from Key Vault via the Function App's
+            # system-assigned managed identity. Never store the plaintext value here.
+            # Seed the secret after first apply: scripts/iac/seed-secrets.sh
+            { name = "JWT_SECRET", value = "@Microsoft.KeyVault(VaultName=${azurerm_key_vault.main.name};SecretName=jwt-secret)" },
           ],
           local.acs_app_settings_list
         )

@@ -1,0 +1,23 @@
+{
+  "IsEncrypted": false,
+  "Values": {
+    "AzureWebJobsStorage": "UseDevelopmentStorage=true",
+    "FUNCTIONS_WORKER_RUNTIME": "node",
+    "FUNCTIONS_NODE_BLOCK_ON_ENTRY_POINT_ERROR": "true",
+    "BLOB_CONNECTION_STRING": "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IkvFpEgBm+Nwj4gEWH9A3RoLOHKvPVZLqGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;",
+    "BLOB_CONTAINER_NAME": "data",
+    "BLOB_PRIVATE_CONTAINER_NAME": "data-private",
+    "JWT_SECRET": "dev-secret-minimum-32-characters-long",
+    "ACS_CONNECTION_STRING": "",
+    "ACS_SENDER_ADDRESS": "noreply@localhost",
+    "ROUND_BRIEF_EMAILS": "dev@localhost",
+    "PURETRACK_API_KEY": "dev",
+    "PURETRACK_EMAIL": "dev@localhost",
+    "PURETRACK_PASSWORD": "dev"
+  },
+  "Host": {
+    "LocalHttpPort": 7071,
+    "CORS": "http://localhost:5173",
+    "CORSCredentials": true
+  }
+}

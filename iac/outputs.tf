@@ -34,3 +34,8 @@ output "acs_domain_verification_records" {
     verification_records = azapi_resource.acs_email_domain.output.properties.verificationRecords
   }
 }
+
+output "key_vault_name" {
+  description = "Name of the Key Vault. Used by scripts/iac/seed-secrets.sh to set jwt-secret after first apply."
+  value       = azurerm_key_vault.main.name
+}

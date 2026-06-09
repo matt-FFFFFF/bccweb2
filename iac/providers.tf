@@ -6,6 +6,10 @@ terraform {
       source  = "Azure/azapi"
       version = "~> 2.8"
     }
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.0"
+    }
   }
 
   # Uncomment and configure once a backend storage account exists:
@@ -18,3 +22,7 @@ terraform {
 }
 
 provider "azapi" {}
+
+provider "azurerm" {
+  features {}
+}
