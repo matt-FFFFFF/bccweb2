@@ -101,7 +101,7 @@ At the end of the 7 days, if no critical "Rollback" level incidents are open, th
 
 ## Decommission
 
-Decommissioning involves the permanent removal of legacy infrastructure and the formal closure of the migration project. This occurs only after the 7-day rollback window has elapsed without incident.
+Decommissioning involves the permanent removal of legacy infrastructure and the formal closure of the migration project. This occurs only after the 7-day rollback window has elapsed without incident. See `docs/runbooks/decommission.md` for the full post-window decommission plan.
 
 1. **Legacy App Shutdown**: Stop the IIS site or App Service hosting the legacy .NET application.
 2. **Database Archive**: Perform a final backup of the legacy SQL database and move the `.bak` file to long-term cold storage (e.g., Azure Archive Tier).

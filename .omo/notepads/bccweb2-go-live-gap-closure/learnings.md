@@ -934,3 +934,118 @@ reconcile field population.
 - Total plan delta: 27 to add, 0 to change, 0 to destroy.
 - Plan command: `terraform plan -out=plan.binary -var-file=terraform.tfvars.example` (no `-backend=false` needed; `terraform init -backend=false` first).
 - Evidence: `.omo/evidence/task-47-alerts.txt`.
+
+## Task 51 notes — ACS DNS verification + production CNAME scaffolding
+
+### DNS-managed-by approach (chosen: dual-mode, default = manual)
+- `var.dns_zone_name` (default `""`) acts as a flag for "DNS is hosted in Azure".
+  When non-empty AND `var.production_hostname` non-empty, `local.manage_dns_in_azure`
+  flips true and `azurerm_dns_cname_record.production[0]` is created via `count = ... ? 1 : 0`.
+- When `dns_zone_name == ""` (the default and likely real-world path for
+  flyparagliding.org.uk which is at a third-party registrar), the resource is
+  not created. The SWA default hostname is still exposed as a stable terraform
+  output (`production_hostname_target`) so the operator can paste it at the
+  registrar. The runbook `docs/runbooks/dns-cutover.md` documents the manual
+  procedure.
+- Added `production_dns_managed_by_terraform` boolean output so the operator
+  can pipe a single `terraform output` call into a shell conditional in the
+  runbook script ("if true skip the manual step").
+- `var.dns_zone_resource_group_name` (optional) defaults to the bccweb RG via
+  `local.dns_zone_resource_group`; covers the common case of the DNS zone
+  living in a separate `dns-` RG.
+
+### CNAME record-name derivation
+- Azure DNS expects the record name RELATIVE to the zone (e.g. `app`, not
+  `app.example.com`). Used `trimsuffix(replace(var.production_hostname,
+  ".${var.dns_zone_name}", ""), ".")` to derive the relative label. For an
+  apex CNAME (`var.production_hostname == var.dns_zone_name`) this would
+  return an empty string; Azure rejects apex CNAMEs anyway (use ALIAS for
+  apex), so this is acceptable. Verified in plan: `app.example.com` in zone
+  `example.com` → record name `app`.
+
+### Verification-record output shape (from ACS API)
+- `azapi_resource.acs_email_domain` already had `response_export_values =
+  ["properties.verificationRecords"]`. The returned object has keys: `Domain`
+  (TXT for ownership), `SPF` (TXT), `DKIM` (CNAME at
+  `selector1-azurecomm-prod-net._domainkey.<domain>`), `DKIM2` (CNAME at
+  `selector2-...`), `DMARC` (TXT at `_dmarc.<domain>`). Each value is
+  `{ type, name, value, ttl }`.
+- Built `local.acs_dns_records_for_operator` as a flat object with each
+  record by lowercase key, using `try(..., null)` so the locals don't fail
+  during early plan when the resource hasn't been provisioned.
+- The original `acs_domain_verification_records` output is preserved
+  (back-compat). The new `acs_email_domain_verification_records` output
+  exposes the broken-out shape + a recommended DMARC policy value.
+
+### DMARC `p=none` policy (non-negotiable per task spec)
+- Azure returns a DMARC starter record but its `value` field is a generic
+  template. We compose a project-specific starter at plan time:
+  `v=DMARC1; p=none; rua=mailto:${var.acs_sender_address}; ruf=...; pct=100;
+  adkim=s; aspf=s`. The TTL strategy assumes operator publishes this
+  verbatim for week 0, then tightens to `p=quarantine` then `p=reject`
+  weekly per the runbook table.
+- The `dmarc_recommended_policy_value` output is the operator's
+  copy-paste-ready value; the Azure-returned DMARC record (in `dmarc.value`)
+  is preserved separately so they can compare.
+
+### TTL strategy
+- Hard-coded `ttl = 3600` on the Terraform-managed CNAME (steady-state value).
+- Lower-TTL phase (300s, 24h before cutover) is operator-driven via either:
+  - `az network dns record-set cname update --ttl 300 ...` (Azure-managed
+    path), then `terraform apply` again 24h after stable to reset to 3600.
+  - Registrar UI knob (manual path).
+- Rationale: keeping the lower TTL in Terraform would race with the operator's
+  scheduled change windows. The runbook describes both paths and the
+  schedule table.
+
+### Plan verification numbers
+- Manual DNS path (`dns_zone_name=""`): 27 to add, 0 CNAME resources,
+  `production_dns_managed_by_terraform = false`.
+- Azure-managed path (`-var='dns_zone_name=example.com'
+  -var='production_hostname=app.example.com'`): 28 to add, 1 CNAME at
+  `azurerm_dns_cname_record.production[0]` (name=`app`, zone=`example.com`,
+  ttl=3600, record=known-after-apply), `production_dns_managed_by_terraform
+  = true`.
+- Both plans saved as `iac/plan.binary` (manual) and `iac/plan-azure-dns.binary`
+  (Azure-managed) for inspection. Evidence: `.omo/evidence/task-51-dns.txt`.
+
+### validate-dns.sh contract
+- Env vars: `PROD_HOST` (required), `SWA_HOST` (required), `API_HOST`
+  (required), `ACS_EMAIL_DOMAIN` (required unless `CHECK_ACS_DNS=0`).
+- Tool deps: `dig`, `curl`, `jq` (jq only required if step 3 reached).
+- Step 2 accepts both `HTTP/2 200`, `HTTP/2.0 200`, `HTTP/1.1 200 OK`,
+  `HTTP/1.1 200` — Azure Front Door fronting the SWA negotiates HTTP/2 but
+  the script must still pass if a corporate proxy downgrades to HTTP/1.1.
+- Step 4 checks SPF apex TXT, DKIM CNAME at the selector1- subdomain only
+  (selector2 is optional second key), DMARC TXT at `_dmarc.`. Each is
+  `dig +short | tr -d '"' | grep -i ...` — `dig +short` already strips
+  zone-level decoration; `tr -d '"'` removes the quoting that resolvers add
+  to TXT values; `grep -i` for case-insensitivity (`v=DMARC1` and `v=dmarc1`
+  are both legal at the protocol level).
+- Mail-score validation (mail-tester ≥ 9/10) is deferred to the live
+  cutover window per task spec; stub at `.omo/evidence/task-51-mail-score.txt`.
+
+### Files touched
+- iac/acs.tf — added decomposition locals (verification records by type,
+  DMARC recommended value).
+- iac/dns.tf — NEW. Conditional azurerm_dns_cname_record + locals for
+  manage_dns_in_azure / dns_zone_resource_group / relative record name.
+- iac/variables.tf — added production_hostname (with regex validation),
+  dns_zone_name, dns_zone_resource_group_name.
+- iac/outputs.tf — added acs_email_domain_verification_records,
+  production_hostname_target, production_dns_managed_by_terraform.
+- iac/terraform.tfvars.example — added the three new vars with comments
+  pointing at the runbook.
+- scripts/iac/validate-dns.sh — NEW, chmod +x, `bash -n` clean.
+- docs/runbooks/dns-cutover.md — NEW. Full TTL schedule, ACS verification
+  procedure, Terraform-vs-manual CNAME paths, validation, rollback.
+- docs/runbooks/cutover.md — DNS section condensed and pointed at the new
+  detailed runbook; sign-off matrix evidence path updated.
+
+## Task 52 notes — Legacy decommission plan + rollback window
+- Rollback window duration: 7 days (as per User Decision #7).
+- Legacy read-only strategy: The legacy app remains live at `legacy.bcc.org.uk` but is set to read-only (either via SQL permissions or internal toggle). This guarantees that a 5-minute DNS revert (TTL 300s) suffers zero data loss because no new data was written to the legacy system.
+- SQL Backup Retention: 1 year minimum chosen to align with the typical 1-season competition cycle, ensuring historical records are available through the next full year of operations.
+- Infrastructure Destroy: NEVER use a blanket `terraform destroy`. The runbook mandates explicit `-target` flags for each legacy resource (`azurerm_linux_web_app`, `azurerm_mssql_database`, etc.) to prevent accidental collateral damage to bccweb2 or shared resources (Key Vault, DNS Zone).
+- `_current` Symlink: Documented as a SEPARATE deliberate manual step after infrastructure destroy. This is the final "mechanical" gate that prevents the old application from being easily restarted even if the binary files persist on disk.
+- Sign-off Matrix: Mandatory table included for project owner (Matt White) and operator sign-off, ensuring every step (monitoring, backup, destroy, symlink, retention) is formally verified.
