@@ -465,3 +465,51 @@ services:
 - Teams.ts `addPilot`/`removePilot` now use `findIndex` + array slot replacement rather
   than mutating the found team reference directly, which is necessary since
   `recomputeTeamCaptain` returns a new object.
+
+## Task 31 notes — SeasonClub + Frequency restoration
+- Public `season-clubs/{year}/index.json` shape is `SeasonClubIndexEntry[]`: `{ id, seasonYear, clubId, clubName, numTeams, frequencyId?, frequencyLabel?, acceptedTsCs, acceptedTsCsAt? }`. It intentionally omits `acceptedTsCsBy` to keep person names/user IDs out of the public index.
+- Private SeasonClub documents remain at `season-clubs/{year}/{clubId}.json` and carry the full `SeasonClub`, including annual T&C acceptance metadata and optional embedded `Frequency`.
+- Serialized registration/update/delete uses private sentinel lease `season-clubs/{year}/index.json.lock`, then writes the private SeasonClub, generated `club-teams/{year}/{clubId}/team-N.json` blobs, `club-teams.json`, and the public SeasonClub index.
+- Auto-team naming follows legacy `{ClubName} A`, `{ClubName} B`, ...; stable ids use the same deterministic key shape as migration: `season-club:${year}-${clubId}` and `club-team:${year}-${clubId}-team-${n}`.
+- Migration ordering: SeasonClub/Frequency ingestion now runs after Clubs and before Sites/Seasons/Pilots/Rounds, because it needs migrated club UUIDs and can query legacy `Seasons` directly for year lookup.
+- Legacy assumptions: Frequency table labels may be stored under `Label`, `Name`, `Description`, `Frequency`, or `Title`; SeasonClub numTeams may be `NumTeams`, `NumberOfTeams`, or `NoTeams`; legacy T&C acceptance is assumed true with date from an available accepted/created timestamp else null; `acceptedTsCsBy` is null.
+
+### Task 30: Brief edit UI & versioning
+- We stored `versionHistory[]` directly on the brief JSON blob itself, rather than in a sibling `.jsonl` file. This means a single GET of the brief fetches the audit trace, which is simple and sufficient given the low edit velocity (few versions per round).
+- Image uploads use `multipart/form-data`. The `fetch` API doesn't need (and in fact breaks if you explicitly set) `Content-Type: application/json` because `FormData` relies on the browser to set the boundary. Bypassing the `api.post` wrapper was necessary here to avoid hardcoded JSON headers. 
+
+## Task 32 notes — RoundClubPilot resolution decision
+
+### Decision: Option (b) — redundant / discard with audit trail
+
+RoundClubPilot is the legacy pre-team-assignment registration queue. Pilots register under a
+club for a round via this path before a coordinator assigns them to a team slot. Post-promotion,
+the RoundClubPilot record is superseded by RoundTeamPilot (already captured in Step 8).
+Surplus (never-promoted) pilots had no flights and did not affect scoring.
+
+### Rationale summary
+- Mutually exclusive with RoundTeamPilot path (controller redirects away when team slot available)
+- No FK to RoundTeam/RoundTeamPlace — completely outside the team structure
+- All pilot safety data (emergency contacts, medical, equipment) already in pilots/{uuid}.json (Step 7)
+- New app model is team-centric; no "non-team participant" concept in Round type
+- Adding Option (a) would need new types, new API endpoint, new UI, new PII scanner rules — disproportionate
+- Task default: Option (b)
+
+### Implementation pattern: discarded-counts.mjs
+- New helper module `scripts/migrate/discarded-counts.mjs` with `writeDiscardedCounts(counts, stateDir?)` and `readDiscardedCounts(stateDir?)`.
+- `stateDir` parameter defaults to `.migration-state` but can be overridden in tests — avoids touching real state dir during unit tests.
+- Atomic write via tmp-rename (matches id-map.mjs pattern).
+- `reconcile.mjs` reads discarded-counts.json and includes `report.discarded` field with entity → count.
+- Console output: "Discarded (counted but not migrated): roundClubPilot: N rows"
+
+### Actual row count
+Not available at development time (no live SQL access). Will be emitted by `migrate.mjs`
+Step 9b on production run and captured in `.migration-state/discarded-counts.json` and
+the reconciliation report `discarded.roundClubPilot` field.
+Evidence placeholder: `.omo/evidence/task-32-roundclubpilot-count.txt`
+
+### Test location
+`apps/api/src/__tests__/migrate-roundclubpilot.test.ts` — picked up by existing glob
+`"src/__tests__/**/*.test.ts"` in `apps/api/vitest.config.ts`. No config change needed.
+Tests are pure fs contract tests (no SQL, no Azurite) — verify state file shape and
+reconcile field population.

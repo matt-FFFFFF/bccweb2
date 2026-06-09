@@ -92,6 +92,7 @@ export interface SiteRef {
 export interface ManufacturerRef {
   id: string;
   name: string;
+  websiteUrl?: string;
 }
 
 // ─── Club ─────────────────────────────────────────────────────────────────────
@@ -155,6 +156,7 @@ export interface Manufacturer {
   id: string;
   legacyId?: number;
   name: string;
+  websiteUrl?: string;
 }
 
 // ─── Pilot Rating ─────────────────────────────────────────────────────────────
@@ -162,6 +164,18 @@ export interface Manufacturer {
 export interface PilotRating {
   id: string;
   description: PilotRatingValue;
+  legacyId?: number;
+}
+
+// ─── Pilot Club Membership ────────────────────────────────────────────────────
+
+export interface PilotClubMembership {
+  pilotId: string;
+  clubId: string;
+  clubName: string;
+  joinedAt?: string | null;
+  leftAt?: string | null;
+  source: "legacy" | "current";
   legacyId?: number;
 }
 
@@ -468,6 +482,8 @@ export interface RoundBrief {
     emailAddress?: string;
   };
   imagePaths?: string[];
+  version?: number;
+  versionHistory?: BriefVersion[];
   teams: BriefTeamEntry[];
 }
 

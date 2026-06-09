@@ -8,6 +8,7 @@ import RoundDetail from "./pages/rounds/RoundDetail.js";
 import CreateRound from "./pages/rounds/CreateRound.js";
 import RoundManage from "./pages/rounds/RoundManage.js";
 import RoundBrief from "./pages/rounds/RoundBrief.js";
+import RoundBriefEdit from "./pages/rounds/RoundBriefEdit.js";
 import SignToFly from "./pages/rounds/SignToFly.js";
 import RegisterForRound from "./pages/rounds/RegisterForRound.js";
 import League from "./pages/results/League.js";
@@ -22,6 +23,8 @@ import ResetPassword from "./pages/auth/ResetPassword.js";
 import Terms from "./pages/Terms.js";
 import AdminUsers from "./pages/admin/Users.js";
 import AdminClubs from "./pages/admin/Clubs.js";
+import SeasonClubs from "./pages/admin/SeasonClubs.js";
+import Frequencies from "./pages/admin/Frequencies.js";
 import AdminSites from "./pages/admin/Sites.js";
 import AdminConfig from "./pages/admin/Config.js";
 import MyClub from "./pages/club/MyClub.js";
@@ -72,6 +75,9 @@ function Nav() {
             </NavLink>
             <NavLink to="/admin/clubs" className={({ isActive }) => isActive ? "active" : ""}>
               Clubs
+            </NavLink>
+            <NavLink to="/admin/frequencies" className={({ isActive }) => isActive ? "active" : ""}>
+              Frequencies
             </NavLink>
             <NavLink to="/admin/sites" className={({ isActive }) => isActive ? "active" : ""}>
               Sites
@@ -169,6 +175,7 @@ export default function App() {
           <Route path="/rounds/:id/register" element={<RequireAuth><Page><RegisterForRound /></Page></RequireAuth>} />
           <Route path="/rounds/:id/manage" element={<RequireAuth><Page><RoundManage /></Page></RequireAuth>} />
           <Route path="/rounds/:id/brief" element={<RequireAuth><Page><RoundBrief /></Page></RequireAuth>} />
+          <Route path="/rounds/:id/brief/edit" element={<RequireAuth><Page><RoundBriefEdit /></Page></RequireAuth>} />
           <Route path="/rounds/:roundId/sign/:teamId/:place" element={<RequireAuth><Page><SignToFly /></Page></RequireAuth>} />
 
           {/* Results / League — public */}
@@ -191,6 +198,8 @@ export default function App() {
           {/* Admin */}
           <Route path="/admin/users" element={<RequireAuth><Page><AdminUsers /></Page></RequireAuth>} />
           <Route path="/admin/clubs" element={<RequireAuth><Page><AdminClubs /></Page></RequireAuth>} />
+          <Route path="/admin/seasons/:year/clubs" element={<RequireAuth><Page><SeasonClubs /></Page></RequireAuth>} />
+          <Route path="/admin/frequencies" element={<RequireAuth><Page><Frequencies /></Page></RequireAuth>} />
           <Route path="/admin/sites" element={<RequireAuth><Page><AdminSites /></Page></RequireAuth>} />
           <Route path="/admin/config" element={<RequireAuth><Page><AdminConfig /></Page></RequireAuth>} />
 

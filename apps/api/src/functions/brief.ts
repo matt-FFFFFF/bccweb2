@@ -13,9 +13,20 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { RoundBrief } from "@bccweb/types";
-import { getPrivateBlobClient, readBlob } from "../lib/blob.js";
+import {
+  getPrivateBlobClient,
+  readBlob,
+  writePrivateBlob,
+  withPrivateLeaseRenewing,
+  getPrivateBlockBlobClient,
+} from "../lib/blob.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { computeBriefHash } from "../lib/signTofly/briefVersion.js";
+import { invalidatePriorSignToFlyFlags } from "../lib/signTofly/invalidate.js";
+import { listSignaturesForRound } from "../lib/signTofly/ledger.js";
+import { generateBriefPdf } from "../lib/pdf.js";
+import type { Round, BriefVersion } from "@bccweb/types";
 
 function contentTypeForPath(path: string): string {
   const lower = path.toLowerCase();
@@ -195,4 +206,254 @@ app.http("getRoundBriefImage", {
   authLevel: "anonymous",
   route: "rounds/{id}/brief/images/{n}",
   handler: withErrorHandler(getRoundBriefImage),
+});
+
+// ─── PUT /api/rounds/{id}/brief ───────────────────────────────────────────────
+
+async function updateRoundBrief(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const id = req.params["id"];
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
+
+  // Auth: Admin OR RoundsCoord scoped to the round's club
+  if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
+    throw new HttpError(403, "FORBIDDEN");
+  }
+
+  const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`)).catch((e) => {
+    if ((e as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
+    }
+    throw e;
+  });
+
+  if (!caller.roles.includes("Admin") && caller.roles.includes("RoundsCoord") && caller.clubId !== round.organisingClub?.id) {
+    throw new HttpError(403, "FORBIDDEN");
+  }
+
+  if (round.status === "Locked" || round.status === "Complete") {
+    throw new HttpError(409, "BRIEF_LOCKED", "Round is locked or complete.");
+  }
+
+  const body = (await req.json()) as RoundBrief;
+  const isDryRun = req.query.get("dryRun") === "true";
+  
+  let materialChanged = false;
+  let invalidatedSignatureCount = 0;
+  let savedBrief: RoundBrief = body;
+
+  const result = await withPrivateLeaseRenewing(`round-briefs/${id}.json`, async (leaseId) => {
+    const existing = await readBrief(id);
+    if (!existing) throw new HttpError(404, "NOT_FOUND", "Brief not found");
+
+    const prevHash = computeBriefHash(existing);
+    const nextHash = computeBriefHash(body);
+
+    if (prevHash === nextHash) {
+      // Cosmetic
+      body.version = existing.version ?? 1;
+      body.versionHistory = existing.versionHistory;
+      
+      if (!isDryRun) {
+        await writePrivateBlob(`round-briefs/${id}.json`, body, leaseId);
+      }
+      return { brief: body, materialChanged: false, invalidatedSignatureCount: 0 };
+    }
+
+    // Material change
+    const nextVersion = (existing.version ?? 1) + 1;
+    const now = new Date().toISOString();
+    
+    body.version = nextVersion;
+    body.versionHistory = existing.versionHistory ?? [];
+    body.versionHistory.push({
+      version: existing.version ?? 1,
+      hash: prevHash,
+      createdAt: existing.generatedAt || now,
+      createdBy: "legacy",
+      supersededAt: now
+    });
+
+    if (!isDryRun) {
+      await writePrivateBlob(`round-briefs/${id}.json`, body, leaseId);
+    }
+
+    const signatures = await listSignaturesForRound(id);
+    const mockRound = JSON.parse(JSON.stringify(round)) as Round;
+    const updatedRound = invalidatePriorSignToFlyFlags(mockRound, body, signatures);
+
+    let count = 0;
+    for (const t1 of round.teams) {
+      for (const p1 of t1.pilots) {
+        const t2 = updatedRound.teams.find((t) => t.id === t1.id);
+        const p2 = t2?.pilots.find((p) => p.placeInTeam === p1.placeInTeam);
+        if (p1.signToFly === true && p2?.signToFly === false) {
+          count++;
+        }
+      }
+    }
+
+    if (!isDryRun && count > 0) {
+      await withPrivateLeaseRenewing(`rounds/${id}.json`, async (roundLease) => {
+        await writePrivateBlob(`rounds/${id}.json`, updatedRound, roundLease);
+      });
+    }
+
+    return { brief: body, materialChanged: true, invalidatedSignatureCount: count };
+  });
+
+  if (!isDryRun) {
+    // Generate PDF outside lease
+    try {
+      const pdfBuffer = await generateBriefPdf(result.brief);
+      const pdfClient = getPrivateBlockBlobClient(`round-briefs/${id}.pdf`);
+      await pdfClient.upload(pdfBuffer, pdfBuffer.length, {
+        blobHTTPHeaders: { blobContentType: "application/pdf" },
+      });
+    } catch (e) {
+      _ctx.warn("Failed to generate PDF on brief edit", e);
+    }
+  }
+
+  return { status: 200, jsonBody: result };
+}
+
+// ─── POST /api/rounds/{id}/brief/images ───────────────────────────────────────
+
+async function uploadBriefImage(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const id = req.params["id"];
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID");
+
+  const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`)).catch((e) => {
+    if ((e as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
+    }
+    throw e;
+  });
+
+  if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
+    throw new HttpError(403, "FORBIDDEN");
+  }
+  if (!caller.roles.includes("Admin") && caller.roles.includes("RoundsCoord") && caller.clubId !== round.organisingClub?.id) {
+    throw new HttpError(403, "FORBIDDEN");
+  }
+  if (round.status === "Locked" || round.status === "Complete") {
+    throw new HttpError(409, "BRIEF_LOCKED", "Round is locked or complete.");
+  }
+
+  const formData = await req.formData();
+  const file = formData.get("file") as File | null;
+  if (!file) throw new HttpError(400, "BAD_REQUEST", "Missing file");
+  
+  if (file.size > 5 * 1024 * 1024) {
+    throw new HttpError(413, "PAYLOAD_TOO_LARGE", "Max 5MB");
+  }
+
+  if (!["image/jpeg", "image/png"].includes(file.type)) {
+    throw new HttpError(415, "UNSUPPORTED_MEDIA_TYPE", "Only JPEG/PNG");
+  }
+
+  const buffer = Buffer.from(await file.arrayBuffer());
+  const brief = await readBrief(id);
+  if (!brief) throw new HttpError(404, "NOT_FOUND", "Brief not found");
+
+  const nextN = (brief.imagePaths?.length || 0) + 1;
+  const ext = file.type === "image/png" ? "png" : "jpg";
+  const imagePath = `round-briefs/${id}/image-${nextN}.${ext}`;
+
+  const imageClient = getPrivateBlockBlobClient(imagePath);
+  await imageClient.upload(buffer, buffer.length, {
+    blobHTTPHeaders: { blobContentType: file.type },
+  });
+
+  let savedPath = "";
+  await withPrivateLeaseRenewing(`round-briefs/${id}.json`, async (leaseId) => {
+    const existing = await readBrief(id);
+    if (!existing) throw new HttpError(404, "NOT_FOUND");
+    existing.imagePaths = existing.imagePaths || [];
+    existing.imagePaths.push(imagePath);
+    savedPath = imagePath;
+    await writePrivateBlob(`round-briefs/${id}.json`, existing, leaseId);
+  });
+
+  return { status: 200, jsonBody: { path: savedPath } };
+}
+
+// ─── DELETE /api/rounds/{id}/brief/images/{index} ───────────────────────────
+
+async function deleteBriefImage(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const id = req.params["id"];
+  const n = Number(req.params["index"]);
+  if (!id || !n) throw new HttpError(400, "BAD_REQUEST");
+
+  const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`)).catch((e) => {
+    if ((e as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
+    }
+    throw e;
+  });
+
+  if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
+    throw new HttpError(403, "FORBIDDEN");
+  }
+  if (!caller.roles.includes("Admin") && caller.roles.includes("RoundsCoord") && caller.clubId !== round.organisingClub?.id) {
+    throw new HttpError(403, "FORBIDDEN");
+  }
+  if (round.status === "Locked" || round.status === "Complete") {
+    throw new HttpError(409, "BRIEF_LOCKED", "Round is locked or complete.");
+  }
+
+  await withPrivateLeaseRenewing(`round-briefs/${id}.json`, async (leaseId) => {
+    const existing = await readBrief(id);
+    if (!existing || !existing.imagePaths || !existing.imagePaths[n - 1]) {
+      throw new HttpError(404, "NOT_FOUND", "Image not found");
+    }
+
+    const imagePath = existing.imagePaths[n - 1];
+    existing.imagePaths.splice(n - 1, 1);
+    await writePrivateBlob(`round-briefs/${id}.json`, existing, leaseId);
+
+    const imageClient = getPrivateBlockBlobClient(imagePath);
+    await imageClient.deleteIfExists();
+  });
+
+  return { status: 204 };
+}
+
+app.http("updateRoundBrief", {
+  methods: ["PUT"],
+  authLevel: "anonymous",
+  route: "rounds/{id}/brief",
+  handler: withErrorHandler(updateRoundBrief),
+});
+
+app.http("uploadBriefImage", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "rounds/{id}/brief/images",
+  handler: withErrorHandler(uploadBriefImage),
+});
+
+app.http("deleteBriefImage", {
+  methods: ["DELETE"],
+  authLevel: "anonymous",
+  route: "rounds/{id}/brief/images/{index}",
+  handler: withErrorHandler(deleteBriefImage),
 });
