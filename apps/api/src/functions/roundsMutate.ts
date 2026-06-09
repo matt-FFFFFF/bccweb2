@@ -30,6 +30,7 @@ import type {
   RoundBrief,
   BriefTeamEntry,
 } from "@bccweb/types";
+import { normalizeStatus } from "@bccweb/types";
 import { scoreRound } from "@bccweb/scoring";
 import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob, withLease, withPrivateLease, getBlockBlobClient, getPrivateBlockBlobClient } from "../lib/blob.js";
 import {
@@ -98,6 +99,7 @@ async function createRound(
     briefingTime?: string;
     landByTime?: string;
     checkInByTime?: string;
+    status?: string;
   };
 
   const { date, siteId, seasonYear } = body;
@@ -149,10 +151,24 @@ async function createRound(
   }
 
   const id = randomUUID();
+  let roundStatus: RoundStatus;
+  try {
+    roundStatus = body.status === undefined ? "Proposed" : normalizeStatus(body.status);
+  } catch (err: unknown) {
+    const message = (err as { message?: string }).message ?? "Unknown status";
+    return {
+      status: 400,
+      jsonBody: {
+        error: "Invalid status",
+        code: "INVALID_STATUS",
+        detail: message,
+      },
+    };
+  }
   const round: Round = {
     id,
     date,
-    status: "Proposed",
+    status: roundStatus,
     isLocked: false,
     maxTeams: body.maxTeams ?? 8,
     minimumScore: body.minimumScore ?? 0,
@@ -219,6 +235,7 @@ async function updateRound(
     briefingTime?: string;
     landByTime?: string;
     checkInByTime?: string;
+    status?: string;
   };
 
   const path = `rounds/${id}.json`;
@@ -241,6 +258,17 @@ async function updateRound(
       if (body.landByTime !== undefined) r.landByTime = body.landByTime;
       if (body.checkInByTime !== undefined)
         r.checkInByTime = body.checkInByTime;
+
+      if (body.status !== undefined) {
+        try {
+          r.status = normalizeStatus(body.status);
+        } catch (err: unknown) {
+          const message = (err as { message?: string }).message ?? "Unknown status";
+          const validation = new Error(message);
+          (validation as { isValidation?: boolean }).isValidation = true;
+          throw validation;
+        }
+      }
 
       // Update site if changed
       if (body.siteId && body.siteId !== r.site.id) {
@@ -279,6 +307,16 @@ async function updateRound(
     });
   } catch (err: unknown) {
     const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
+    if (e.message?.startsWith("Unknown status: ")) {
+      return {
+        status: 400,
+        jsonBody: {
+          error: "Invalid status",
+          code: "INVALID_STATUS",
+          detail: e.message,
+        },
+      };
+    }
     if (e.isValidation) return { status: 409, jsonBody: { error: e.message } };
     if (e.statusCode === 404) return { status: 404, jsonBody: { error: "Round not found" } };
     throw err;

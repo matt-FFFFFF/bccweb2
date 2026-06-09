@@ -1,1 +1,1 @@
-export default ["packages/scoring", "apps/api"];
+export default ["packages/scoring", "packages/types", "apps/api", "apps/web"];

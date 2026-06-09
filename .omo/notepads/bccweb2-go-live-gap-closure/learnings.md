@@ -15,6 +15,10 @@
 - Bespoke HS256 JWT (env JWT_SECRET); roles: Admin / RoundsCoord (scoped via clubId) / Pilot
 - Vitest 4.1.2 already at root; workspace mode
 
+## Task 4 web vitest notes
+- Alias strategy: vitest.config.ts resolves `@bccweb/types` directly to `packages/types/src` so source-only type edits are picked up without rebuilding dist
+- Home smoke test assertion: `Advance British Club Challenge (BCC)`
+
 ## Test infrastructure ALREADY scaffolded in baseline
 - `vitest.workspace.ts` = `["packages/scoring", "apps/api"]`
 - `apps/api/vitest.config.ts` exists (sequence.concurrent=false, 15s testTimeout)
@@ -64,6 +68,12 @@
 - Never strip the data container's public-read access
 - Never use emojis in code unless explicitly requested
 - Never write to .omo notepad files via Write (append-only); use `cat >> file <<EOF` or Edit-append
+
+## Task 2 — Round status normalization
+- Added canonical normalizeStatus() in packages/types/src/status.ts and re-exported it from packages/types/src/index.ts.
+- Mirrored the helper in scripts/lib/status.mjs and delegated scripts/migrate/migrate.mjs mapStatus() to it while preserving behavior.
+- Wired normalizeStatus() into apps/api/src/functions/roundsMutate.ts for create/update round writes; invalid inputs now return 400 INVALID_STATUS.
+- Added packages/types Vitest setup plus status normalization tests; verified packages/types build, packages/types test, and packages/scoring test all pass.
 
 ## Task 3 notes
 - Health smoke test uses the registry from `apps/api/src/__tests__/helpers/setup.ts` by importing `../functions/health.js` and calling `getRegisteredHandler("health")`.

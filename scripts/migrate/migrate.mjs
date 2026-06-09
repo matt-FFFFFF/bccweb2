@@ -30,6 +30,7 @@
 import sql from "mssql";
 import { BlobServiceClient } from "@azure/storage-blob";
 import { v4 as uuidv4 } from "uuid";
+import { normalizeStatus } from "../lib/status.mjs";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -94,14 +95,10 @@ const COACH_TYPE_MAP = {
 // Round statuses used in new app: Proposed | Confirmed | BriefComplete | Locked | Complete | Cancelled
 function mapStatus(description) {
   if (!description) return "Proposed";
-  const d = description.trim();
-  switch (d.toLowerCase()) {
-    case "brief complete":
-    case "briefcomplete":   return "BriefComplete";
-    case "submitted":       return "Proposed";    // treat draft-submitted as Proposed
-    case "verified":        return "Confirmed";   // verified ≈ confirmed
-    case "deleted":         return "Cancelled";   // deleted rounds → Cancelled
-    default:                return d;             // Proposed | Confirmed | Locked | Complete | Cancelled
+  try {
+    return normalizeStatus(description);
+  } catch {
+    return description.trim();
   }
 }
 
