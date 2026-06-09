@@ -23,7 +23,14 @@ import type {
   ManufacturerRef,
   ClubRef,
 } from "@bccweb/types";
-import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob } from "../lib/blob.js";
+import {
+  getBlobClient,
+  getBlockBlobClient,
+  getPrivateBlobClient,
+  readBlob,
+  writePrivateBlob,
+  withLease,
+} from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -289,35 +296,80 @@ async function upsertPilotInIndex(
   pilot: Pilot,
   email?: string
 ): Promise<void> {
-  let index: PilotSummary[] = [];
-  try {
-    index = await readBlob<PilotSummary[]>(getBlobClient("pilots.json"));
-  } catch {
-    // index may not exist yet
+  await ensurePilotsIndexBlob();
+
+  await withLeaseRetry("pilots.json", async (leaseId) => {
+    let index: PilotSummary[] = [];
+    try {
+      index = await readBlob<PilotSummary[]>(getBlobClient("pilots.json"));
+    } catch (err: unknown) {
+      if ((err as { statusCode?: number }).statusCode !== 404) throw err;
+    }
+
+    const existing = index.find((p) => p.id === pilot.id);
+    const entry: PilotSummary = {
+      ...(existing ?? {}),
+      id: pilot.id,
+      legacyId: pilot.legacyId,
+      bhpaNumber: pilot.bhpaNumber,
+      name: pilot.person.fullName,
+      email: email ?? existing?.email,
+      clubId: pilot.currentClub?.id,
+      rating: pilot.pilotRating,
+      userId: pilot.userId,
+    };
+
+    const idx = index.findIndex((p) => p.id === pilot.id);
+    if (idx >= 0) {
+      index[idx] = entry;
+    } else {
+      index.push(entry);
+    }
+
+    index.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    const content = JSON.stringify(index, null, 2);
+    await getBlockBlobClient("pilots.json").uploadData(Buffer.from(content), {
+      blobHTTPHeaders: { blobContentType: "application/json" },
+      conditions: { leaseId },
+    });
+  });
+}
+
+async function withLeaseRetry(
+  path: string,
+  fn: (leaseId: string) => Promise<void>
+): Promise<void> {
+  const maxAttempts = 20;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await withLease(path, fn);
+      return;
+    } catch (err: unknown) {
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      if (statusCode !== 409 && statusCode !== 412) throw err;
+      if (attempt === maxAttempts) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
+    }
   }
+}
 
-  const existing = index.find((p) => p.id === pilot.id);
-  const entry: PilotSummary = {
-    ...(existing ?? {}),
-    id: pilot.id,
-    legacyId: pilot.legacyId,
-    bhpaNumber: pilot.bhpaNumber,
-    name: pilot.person.fullName,
-    email: email ?? existing?.email,
-    clubId: pilot.currentClub?.id,
-    rating: pilot.pilotRating,
-    userId: pilot.userId,
-  };
-
-  const idx = index.findIndex((p) => p.id === pilot.id);
-  if (idx >= 0) {
-    index[idx] = entry;
-  } else {
-    index.push(entry);
+async function ensurePilotsIndexBlob(): Promise<void> {
+  const client = getBlockBlobClient("pilots.json");
+  const maxAttempts = 10;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await client.uploadData(Buffer.from("[]"), {
+        blobHTTPHeaders: { blobContentType: "application/json" },
+        conditions: { ifNoneMatch: "*" },
+      });
+      return;
+    } catch (err: unknown) {
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      if (statusCode === 409) return;
+      if (statusCode !== 412 || attempt === maxAttempts) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
+    }
   }
-
-  index.sort((a, b) => a.name.localeCompare(b.name));
-  await writeBlob("pilots.json", index);
 }
 
 // ─── Registration ─────────────────────────────────────────────────────────────

@@ -6,14 +6,21 @@ import type {
   RoundResult,
   WingClass,
 } from "@bccweb/types";
+import { normalizeStatus } from "@bccweb/types";
 import { computeLeague } from "@bccweb/scoring";
 import {
   getBlobClient,
+  getBlockBlobClient,
   getPrivateBlobClient,
   readBlob,
   writeBlob,
   withLease,
+  withLeaseRenewing,
 } from "./blob.js";
+
+const STALE_RECOMPUTE_MARKER_MS = 5 * 60 * 1000;
+
+const recomputeInFlight = new Map<number, Promise<void>>();
 
 // ─── updateRoundsIndex ────────────────────────────────────────────────────────
 
@@ -74,6 +81,17 @@ export async function updateRoundsIndex(round: Round): Promise<void> {
  * endpoint to recover from partial failures.
  */
 export async function recomputeSeason(seasonYear: number): Promise<void> {
+  const existing = recomputeInFlight.get(seasonYear);
+  if (existing) return existing;
+
+  const promise = recomputeSeasonUncached(seasonYear).finally(() => {
+    recomputeInFlight.delete(seasonYear);
+  });
+  recomputeInFlight.set(seasonYear, promise);
+  return promise;
+}
+
+async function recomputeSeasonUncached(seasonYear: number): Promise<void> {
   const seasonPath = `seasons/${seasonYear}.json`;
   const season = await readBlob<Season>(getBlobClient(seasonPath));
 
@@ -83,11 +101,14 @@ export async function recomputeSeason(seasonYear: number): Promise<void> {
       readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`)).catch(() => null)
     )
   );
-  const rounds = maybeRounds.filter((r): r is Round => r !== null);
+  const rounds = maybeRounds
+    .filter((r): r is Round => r !== null)
+    .map(normalizeRoundForRecompute)
+    .sort(compareRounds);
 
   // Compute league table
-  const leagueTable = computeLeague(rounds);
-  await writeBlob(seasonPath, { ...season, leagueTable });
+  const leagueTable = stableLeagueTable(computeLeague(rounds));
+  const seasonPayload: Season = stableSeason({ ...season, leagueTable });
 
   // Load pilot index for name resolution in results
   let pilotNameMap: Record<string, string> = {};
@@ -101,8 +122,22 @@ export async function recomputeSeason(seasonYear: number): Promise<void> {
   }
 
   // Compute and persist per-round results
-  const results = buildSeasonResults(rounds, pilotNameMap);
-  await writeBlob(`results/${seasonYear}.json`, results);
+  const results = stableSeasonResults(buildSeasonResults(rounds, pilotNameMap));
+  const roundsIndex = await buildRoundsIndex();
+
+  await ensureRecomputeLockBlob(seasonYear);
+  await withLeaseRenewing(`seasons/${seasonYear}.json.lock`, async () => {
+    await createRecomputeMarker(seasonYear);
+    try {
+      await swapJsonBlob(seasonPath, seasonPayload);
+      await swapJsonBlob(`results/${seasonYear}.json`, results);
+      await swapJsonBlob("rounds.json", roundsIndex);
+    } finally {
+      await deleteRecomputeMarker(seasonYear);
+    }
+  }, {
+    renewIntervalMs: 10_000,
+  });
 }
 
 // ─── buildSeasonResults ───────────────────────────────────────────────────────
@@ -113,19 +148,30 @@ function buildSeasonResults(
 ): SeasonResults {
   const completeRounds = rounds
     .filter((r) => r.status === "Complete")
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    .sort(compareRounds);
 
   return completeRounds.map((round): RoundResult => {
-    const teamResults = round.teams
-      .sort((a, b) => b.score - a.score)
+    const teamResults = [...round.teams]
+      .sort(
+        (a, b) =>
+          b.score - a.score ||
+          a.club.id.localeCompare(b.club.id) ||
+          a.teamName.localeCompare(b.teamName) ||
+          a.id.localeCompare(b.id)
+      )
       .map((team, i) => ({
         rank: i + 1,
         teamName: team.teamName,
         clubName: team.club.name,
         score: team.score,
-        pilots: team.pilots
+        pilots: [...team.pilots]
           .filter((p) => p.flight != null && p.snapshot != null)
-          .sort((a, b) => b.pilotPoints - a.pilotPoints)
+          .sort(
+            (a, b) =>
+              b.pilotPoints - a.pilotPoints ||
+              (a.pilotId ?? "").localeCompare(b.pilotId ?? "") ||
+              a.placeInTeam - b.placeInTeam
+          )
           .map((slot) => ({
             pilotName: slot.pilotId
               ? (pilotNameMap[slot.pilotId] ?? slot.pilotId)
@@ -143,4 +189,188 @@ function buildSeasonResults(
       teamResults,
     };
   });
+}
+
+function normalizeRoundForRecompute(round: Round): Round {
+  const copy = structuredClone(round) as Round;
+  copy.status = normalizeStatus(copy.status);
+  copy.teams = [...copy.teams].sort(
+    (a, b) =>
+      a.club.id.localeCompare(b.club.id) ||
+      a.teamName.localeCompare(b.teamName) ||
+      a.id.localeCompare(b.id)
+  );
+  for (const team of copy.teams) {
+    team.pilots = [...team.pilots].sort(
+      (a, b) =>
+        a.placeInTeam - b.placeInTeam ||
+        (a.pilotId ?? "").localeCompare(b.pilotId ?? "")
+    );
+  }
+  return copy;
+}
+
+async function buildRoundsIndex(): Promise<RoundSummary[]> {
+  let existing: RoundSummary[] = [];
+  try {
+    existing = await readBlob<RoundSummary[]>(getBlobClient("rounds.json"));
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode !== 404) throw err;
+  }
+
+  const loaded = await Promise.all(
+    existing.map((summary) =>
+      readBlob<Round>(getPrivateBlobClient(`rounds/${summary.id}.json`)).catch(() => null)
+    )
+  );
+
+  return loaded
+    .map((round, index): RoundSummary => {
+      if (!round) return normalizeRoundSummary(existing[index]);
+      const normalized = normalizeRoundForRecompute(round);
+      return {
+        id: normalized.id,
+        legacyId: normalized.legacyId,
+        date: normalized.date,
+        siteId: normalized.site.id,
+        siteName: normalized.site.name,
+        status: normalized.status,
+        seasonYear: normalized.season.year,
+      };
+    })
+    .sort(compareRoundSummaries);
+}
+
+function normalizeRoundSummary(summary: RoundSummary): RoundSummary {
+  return {
+    ...summary,
+    status: normalizeStatus(summary.status),
+  };
+}
+
+async function ensureRecomputeLockBlob(seasonYear: number): Promise<void> {
+  const client = getBlockBlobClient(`seasons/${seasonYear}.json.lock`);
+  const content = Buffer.from(stableStringify({ purpose: "recompute-lock" }));
+  await client.uploadData(content, {
+    blobHTTPHeaders: { blobContentType: "application/json" },
+    conditions: { ifNoneMatch: "*" },
+  }).catch((err: unknown) => {
+    if ((err as { statusCode?: number }).statusCode !== 409) throw err;
+  });
+}
+
+async function createRecomputeMarker(seasonYear: number): Promise<void> {
+  const path = `seasons/${seasonYear}.recompute.lock`;
+  const client = getBlockBlobClient(path);
+  const now = new Date().toISOString();
+
+  try {
+    const properties = await client.getProperties();
+    const startedAt = properties.metadata?.["startedAt"];
+    if (startedAt) {
+      const ageMs = Date.now() - Date.parse(startedAt);
+      if (Number.isFinite(ageMs) && ageMs > STALE_RECOMPUTE_MARKER_MS) {
+        console.warn("[recomputeSeason] taking over stale recompute marker", {
+          path,
+          startedAt,
+          ageMs,
+        });
+      }
+    }
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode !== 404) throw err;
+  }
+
+  await client.uploadData(Buffer.alloc(0), {
+    metadata: { startedAt: now },
+    conditions: { ifNoneMatch: "*" },
+  }).catch(async (err: unknown) => {
+    if ((err as { statusCode?: number }).statusCode !== 409) throw err;
+    await client.setMetadata({ startedAt: now });
+  });
+}
+
+async function deleteRecomputeMarker(seasonYear: number): Promise<void> {
+  await getBlobClient(`seasons/${seasonYear}.recompute.lock`).deleteIfExists();
+}
+
+async function swapJsonBlob(path: string, payload: unknown): Promise<void> {
+  const bytes = Buffer.from(stableStringify(payload));
+  const tmpPath = `${path}.tmp`;
+  const tmp = getBlockBlobClient(tmpPath);
+  const finalBlob = getBlobClient(path);
+
+  await tmp.uploadData(bytes, {
+    blobHTTPHeaders: { blobContentType: "application/json" },
+  });
+
+  try {
+    const poller = await finalBlob.beginCopyFromURL(tmp.url, { intervalInMs: 100 });
+    await poller.pollUntilDone();
+  } catch (err) {
+    // Leave .tmp for forensics if the final copy/swap fails.
+    throw err;
+  }
+
+  await tmp.deleteIfExists();
+}
+
+function stableSeason(season: Season): Season {
+  return {
+    ...season,
+    rounds: [...season.rounds].sort(),
+    leagueTable: stableLeagueTable(season.leagueTable),
+  };
+}
+
+function stableLeagueTable(entries: Season["leagueTable"]): Season["leagueTable"] {
+  return [...entries]
+    .map((entry) => ({
+      ...entry,
+      roundScores: sortRecord(entry.roundScores),
+    }))
+    .sort(
+      (a, b) =>
+        a.rank - b.rank ||
+        b.totalScore - a.totalScore ||
+        a.clubId.localeCompare(b.clubId) ||
+        a.teamName.localeCompare(b.teamName)
+    );
+}
+
+function stableSeasonResults(results: SeasonResults): SeasonResults {
+  return [...results].sort(
+    (a, b) =>
+      a.date.localeCompare(b.date) ||
+      a.roundId.localeCompare(b.roundId)
+  );
+}
+
+function compareRounds(a: Round, b: Round): number {
+  return a.date.localeCompare(b.date) || a.id.localeCompare(b.id);
+}
+
+function compareRoundSummaries(a: RoundSummary, b: RoundSummary): number {
+  return a.date.localeCompare(b.date) || a.id.localeCompare(b.id);
+}
+
+function sortRecord<T>(record: Record<string, T>): Record<string, T> {
+  return Object.fromEntries(
+    Object.entries(record).sort(([a], [b]) => a.localeCompare(b))
+  );
+}
+
+function stableStringify(value: unknown): string {
+  return `${JSON.stringify(sortObjectKeys(value), null, 2)}\n`;
+}
+
+function sortObjectKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(sortObjectKeys);
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>)
+      .filter(([, child]) => child !== undefined)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, child]) => [key, sortObjectKeys(child)])
+  );
 }

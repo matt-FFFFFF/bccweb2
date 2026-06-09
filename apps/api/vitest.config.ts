@@ -2,7 +2,11 @@ import { defineConfig } from "vitest/config";
 
 export default defineConfig({
   test: {
-    include: ["src/__tests__/**/*.test.ts"],
+    include: [
+      "src/__tests__/**/*.test.ts",
+      "src/functions/__tests__/**/*.test.ts",
+      "src/lib/__tests__/**/*.test.ts",
+    ],
     setupFiles: [
       "src/__tests__/helpers/setup.ts",
       "src/__tests__/helpers/azurite.ts",
@@ -12,5 +16,6 @@ export default defineConfig({
     sequence: {
       concurrent: false,
     },
+    fileParallelism: false,
   },
 });
