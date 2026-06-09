@@ -1,0 +1,8 @@
+Verified: manufacturer website URL migration and rendering
+Commands:
+- npm run test --workspace=@bccweb/api
+- npm run test --workspace=@bccweb/web
+- npm run build --workspace=@bccweb/api
+- npm run build --workspace=@bccweb/web
+- npm run build --workspace=@bccweb/types
+Result: PASS

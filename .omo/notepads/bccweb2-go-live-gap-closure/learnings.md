@@ -414,6 +414,11 @@ services:
 - Created `<FirstLoginOfSeasonGate>` that intercepts all router navigations (except whitelisted routes) if `firstLoginOfSeason` is true. Used an overlay CSS-based navigation blocker.
 - Found out that T25 and T26 had concurrent changes in `me.ts` and `roundRegistration.ts` which required minor patch coordination. Preserved `tsCsAcceptanceRequired` from T25 in `me.ts`.
 
+## Task 34 notes — Manufacturer URL + PureTrack skip handling
+- URL rendering: use `new URL(...)` and allow only `http:` / `https:` before rendering an external anchor with `target="_blank" rel="noopener noreferrer"`.
+- Migration normalization: trim `WebsiteUrl`; blank/whitespace values become `undefined`.
+- PureTrack skip semantics: keep `pureTrackId === 0` as a stored legacy value, but skip it during group creation with `[METRIC] puretrack.skip pilot lacks pureTrackId` instead of throwing.
+
 ## Task 27 notes — Team captain auto-assign + manual reassign
 
 ### Factor-out approach chosen
