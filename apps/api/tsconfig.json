@@ -10,5 +10,6 @@
     { "path": "../../packages/types" },
     { "path": "../../packages/scoring" }
   ],
-  "include": ["src", "*.ts"]
+  "include": ["src", "*.ts"],
+  "exclude": ["src/**/__tests__/**", "src/**/*.test.ts", "**/*.test.ts"]
 }
