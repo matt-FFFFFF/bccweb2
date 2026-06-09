@@ -80,6 +80,78 @@
 - Minimal invocation worked with `makeRequest({ method: "GET" })` plus a plain `{ log, functionName }` context stub; no live Functions host was needed.
 - Health handler currently returns `{ status: 200, jsonBody: { status: "ok", timestamp } }`, so the test only asserts the stable `status` field.
 
+## Task 7 notes — JWT_SECRET → Key Vault
+- Added `hashicorp/azurerm ~> 3.0` provider alongside existing `Azure/azapi ~> 2.8`; azurerm v3.117.1 was already cached in `.terraform/`. No `subscription_id` required in provider block for 3.x (auto-discovers from `az login` context or `ARM_SUBSCRIPTION_ID` env var).
+- Key Vault reference syntax chosen: `@Microsoft.KeyVault(VaultName=<name>;SecretName=<secret>)` — the VaultName+SecretName form (not SecretUri form). Both are supported by the Azure Functions runtime; VaultName form is easier to read and does not hard-code the vault hostname.
+- The Function App's system-assigned managed identity is exposed via `azapi_resource.function_app.identity[0].principal_id` — azapi 2.x treats `identity {}` as a first-class computed block, no need to add `"identity"` to `response_export_values`.
+- `azurerm_role_assignment` auto-generates the UUID name if omitted — no `random` provider needed.
+- NO `azurerm_key_vault_secret` resource for `jwt-secret` — confirmed by `terraform show -json plan.binary | jq '... | length'` returning `0`.
+- `terraform plan` shows JWT_SECRET value as `@Microsoft.KeyVault(VaultName=kv-bccweb-prod;SecretName=jwt-secret)` — evidence at `.omo/evidence/task-7-kv-ref-in-plan.txt`.
+- Seed script (`scripts/iac/seed-secrets.sh`) uses `az keyvault secret show ... 2>/dev/null | grep -q .` for idempotent existence check before writing; generates secret via `openssl rand -base64 64 | tr -d '\n'`.
+- ACS connection string left TF-managed for now (Wave 7 deepens); seed script has a placeholder block for it.
+- Key Vault name `kv-bccweb-prod` (13 chars) — within 24-char limit, starts with letter, alphanumeric+hyphens only.
+
+## Task 8 Wave 1 notes — Idempotent UUIDs, resume, dry-run, production guard
+
+### Entity keys used in id-map (key format: "${entity}:${sqlId}")
+| entity      | SQL table        | sqlId field     | notes |
+|-------------|------------------|-----------------|-------|
+| manufacturer| Manufacturers    | r.ID            | stable int PK |
+| rating      | PilotRatings     | r.ID            | stable int PK |
+| club        | Clubs            | r.ID            | stable int PK |
+| site        | Sites            | r.ID            | stable int PK |
+| season      | Seasons          | r.ID            | stable int PK |
+| pilot       | Pilots           | r.ID            | stable int PK |
+| person      | People           | r.PersonID ?? r.ID | PersonID FK; fall back to pilot.ID if null (orphaned record) |
+| roundTeam   | RoundTeams       | rt.ID           | stable int PK |
+| round       | Rounds           | r.ID            | stable int PK |
+| flight      | Flights          | flight.ID       | stable int PK |
+
+### uuidv4() call sites replaced (10 total)
+- Lines 159, 173, 185, 208, 246, 305, 348, 447, 463, 511 in original migrate.mjs
+- All replaced with `getOrCreateUuid('<entity>', <sqlId>)`
+- In-memory Maps (clubUuid, siteUuid, etc.) still populated for cross-reference lookups
+
+### Entities with no UUID generated (not in id-map)
+- `config.json` — singleton, no SQL row ID
+- `pilot-ratings.json` (index blob) — just the list; each rating has its own UUID via `rating:ID`
+- `round-briefs/{roundId}.json` — keyed by round UUID, no separate brief UUID; legacyId=rb.ID persisted in doc
+- Pilot slots (RoundTeamPlaces) — embedded in round doc as anonymous objects; no top-level UUID. Future tasks (17/18) may need `pilotSlot` entity if they require stable slot IDs.
+
+### person UUID synthesis
+- `r.PersonID` is the stable FK to People table (1:1 with Pilot)
+- If `PersonID` is null (orphaned pilot record with no People row), falls back to pilot's own SQL ID
+- Key becomes `person:${r.PersonID ?? r.ID}` — safe and deterministic either way
+
+### Production guard placement
+- Guard runs as absolute first statement in `main()`, before console.log, before sql.connect()
+- Regex `/Server=tcp:.*bcc-prod/i` — case-insensitive, matches any hostname containing "bcc-prod"
+- Double lock: requires BOTH `--force-production` CLI flag AND `PRODUCTION_CONFIRM=YES` env var
+
+### DRY_RUN behavior
+- Honored via `--dry-run` CLI flag OR `DRY_RUN=1` env var
+- In dry-run: no blobs written, but id-map IS still persisted (UUIDs assigned and saved)
+- This means repeated dry-runs also produce stable UUIDs
+
+### Resume mode
+- `--resume` flag: before each blob upload, downloads existing blob and compares SHA-256 hash
+- If hash matches, upload is skipped with `[RESUME] skip <path> (unchanged)`
+- BlobNotFound error during resume check is caught and treated as "proceed with upload"
+
+### Log masking extended
+- Original: `Password=[^;]+`
+- Added: `AccountKey=[^;]+`, `SharedAccessSignature=[^?&"'\s]+`, `Authorization:\s*\S+`
+- All case-insensitive via `/gi` flag
+
+### Atomic write pattern
+- id-map: write to `.migration-state/id-map.json.tmp` then `renameSync` to final path
+- reconcile report: same pattern with `.migration-state/reconciliation-report.json.tmp`
+- `renameSync` is atomic on same filesystem — crash-safe
+
+### .migration-state/ retention
+- Added to `.gitignore` — operators manage retention manually (per MUST NOT DO)
+- Directory created on demand by `ensureLoaded()` and `saveIdMap()`
+
 ## Task 1 Wave 1 notes
 - Added new exported types in `packages/types/src/index.ts`: `Signature`, `BriefVersion`, `SignToFlyWording`, `SeasonClub`, `Frequency`.
 - Extended existing entities without changing their existing field order: `Team` now includes `captainPilotId`; `Round`, `Pilot`, `Club`, and `Site` now carry audit fields; `Season`, `ClubTeam`, and `PilotRating` now include `legacyId` where it was missing.

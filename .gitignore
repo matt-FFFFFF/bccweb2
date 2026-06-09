@@ -13,6 +13,9 @@ local.settings.json
 # Migration database backups
 *.bacpac
 
+# Migration state (id-map, reconciliation reports) — operator-managed retention
+.migration-state/
+
 # Terraform
 .terraform
 .terraform.lock.hcl

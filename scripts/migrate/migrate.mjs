@@ -7,12 +7,17 @@
  * Usage:
  *   SQL_CONNECTION_STRING="Server=...;Database=...;User Id=...;Password=...;Encrypt=true;" \
  *   BLOB_CONNECTION_STRING="DefaultEndpointsProtocol=https;AccountName=...;AccountKey=...;EndpointSuffix=core.windows.net" \
- *   node scripts/migrate/migrate.mjs
+ *   node scripts/migrate/migrate.mjs [--dry-run] [--resume] [--force-production]
  *
  * For local dev against Azurite:
  *   SQL_CONNECTION_STRING="..." \
  *   BLOB_CONNECTION_STRING="UseDevelopmentStorage=true" \
- *   node scripts/migrate/migrate.mjs
+ *   DRY_RUN=1 node scripts/migrate/migrate.mjs
+ *
+ * Flags:
+ *   --dry-run          No blobs written; id-map.json still persisted (also: DRY_RUN=1 env)
+ *   --resume           Skip blobs whose SHA-256 content hash is unchanged vs stored blob
+ *   --force-production Required (along with PRODUCTION_CONFIRM=YES env) to write to bcc-prod
  *
  * Migration order (respects FK dependencies):
  *   1. config.json
@@ -27,18 +32,25 @@
  *  10. Recompute seasons/{year}.json (league) + results/{year}.json
  */
 
+import { createHash } from "node:crypto";
 import sql from "mssql";
 import { BlobServiceClient } from "@azure/storage-blob";
-import { v4 as uuidv4 } from "uuid";
+import { getOrCreateUuid, saveIdMap } from "./id-map.mjs";
 import { normalizeStatus } from "../lib/status.mjs";
 
-// ─── Config ──────────────────────────────────────────────────────────────────
+// ─── CLI flags ────────────────────────────────────────────────────────────────
+
+const argv = process.argv.slice(2);
+const DRY_RUN = argv.includes("--dry-run") || process.env.DRY_RUN === "1";
+const RESUME = argv.includes("--resume");
+const FORCE_PRODUCTION = argv.includes("--force-production");
+
+// ─── Config ───────────────────────────────────────────────────────────────────
 
 const SQL_CS = process.env.SQL_CONNECTION_STRING;
 const BLOB_CS = process.env.BLOB_CONNECTION_STRING;
 const CONTAINER = process.env.BLOB_CONTAINER ?? "data";
 const PRIVATE_CONTAINER = process.env.BLOB_PRIVATE_CONTAINER ?? "data-private";
-const DRY_RUN = process.env.DRY_RUN === "1";
 
 if (!SQL_CS) {
   console.error("Missing SQL_CONNECTION_STRING env var");
@@ -49,7 +61,17 @@ if (!BLOB_CS) {
   process.exit(1);
 }
 
-// ─── Blob helpers ────────────────────────────────────────────────────────────
+// ─── Log masking ─────────────────────────────────────────────────────────────
+
+function maskConnectionString(s) {
+  return s
+    .replace(/Password=[^;]+/gi, "Password=***")
+    .replace(/AccountKey=[^;]+/gi, "AccountKey=***")
+    .replace(/SharedAccessSignature=[^?&"'\s]+/gi, "SharedAccessSignature=***")
+    .replace(/Authorization:\s*\S+/gi, "Authorization:***");
+}
+
+// ─── Blob helpers ─────────────────────────────────────────────────────────────
 
 const blobService = BlobServiceClient.fromConnectionString(BLOB_CS);
 const containerClient = blobService.getContainerClient(CONTAINER);
@@ -62,6 +84,19 @@ async function uploadBlob(path, obj) {
     return;
   }
   const client = containerClient.getBlockBlobClient(path);
+  if (RESUME) {
+    try {
+      const buf = await client.downloadToBuffer();
+      const existingHash = createHash("sha256").update(buf).digest("hex");
+      const newHash = createHash("sha256").update(json, "utf8").digest("hex");
+      if (existingHash === newHash) {
+        console.log(`  [RESUME] skip ${path} (unchanged)`);
+        return;
+      }
+    } catch {
+      // blob does not exist yet — proceed with upload
+    }
+  }
   await client.upload(json, Buffer.byteLength(json), {
     blobHTTPHeaders: { blobContentType: "application/json" },
   });
@@ -74,12 +109,25 @@ async function uploadPrivateBlob(path, obj) {
     return;
   }
   const client = privateContainerClient.getBlockBlobClient(path);
+  if (RESUME) {
+    try {
+      const buf = await client.downloadToBuffer();
+      const existingHash = createHash("sha256").update(buf).digest("hex");
+      const newHash = createHash("sha256").update(json, "utf8").digest("hex");
+      if (existingHash === newHash) {
+        console.log(`  [RESUME] skip ${path} (unchanged)`);
+        return;
+      }
+    } catch {
+      // blob does not exist yet — proceed with upload
+    }
+  }
   await client.upload(json, Buffer.byteLength(json), {
     blobHTTPHeaders: { blobContentType: "application/json" },
   });
 }
 
-// ─── Enum mappings ───────────────────────────────────────────────────────────
+// ─── Enum mappings ────────────────────────────────────────────────────────────
 
 const COACH_TYPE_MAP = {
   0: "None",
@@ -107,31 +155,41 @@ function mapSiteStatus(description) {
   return description.trim() === "Active" ? "Active" : "Inactive";
 }
 
-// ─── Main ────────────────────────────────────────────────────────────────────
+// ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
+  // Production guard — must be the very first check before any SQL connection attempt
+  if (/Server=tcp:.*bcc-prod/i.test(SQL_CS)) {
+    if (!(FORCE_PRODUCTION && process.env.PRODUCTION_CONFIRM === "YES")) {
+      console.error("refusing to run against production without --force-production");
+      process.exit(1);
+    }
+    console.warn("*** PRODUCTION RUN CONFIRMED — writing to bcc-prod ***");
+  }
+
   console.log("BCCWeb SQL → Blob Migration");
-  console.log(`  SQL: ${SQL_CS.replace(/Password=[^;]+/, "Password=***")}`);
+  console.log(`  SQL: ${maskConnectionString(SQL_CS)}`);
   console.log(`  Blob container (public):  ${CONTAINER}`);
   console.log(`  Blob container (private): ${PRIVATE_CONTAINER}`);
   if (DRY_RUN) console.log("  DRY RUN — no blobs will be written");
+  if (RESUME) console.log("  RESUME mode — unchanged blobs will be skipped");
   console.log("");
 
   // Connect to SQL
   const pool = await sql.connect(SQL_CS);
   console.log("Connected to SQL Server\n");
 
-  // ID → UUID maps (populated as we migrate each entity)
+  // ID → UUID maps (populated as we migrate each entity; used for cross-references)
   const clubUuid = new Map();      // SQL int ID → uuid
   const siteUuid = new Map();      // SQL int ID → uuid
   const seasonUuid = new Map();    // SQL int ID → uuid
   const pilotUuid = new Map();     // SQL int ID → uuid
   const roundUuid = new Map();     // SQL int ID → uuid
-  const teamUuid = new Map();      // SQL int ID → uuid (Team table)
+  const teamUuid = new Map();      // SQL int ID → uuid (RoundTeams table)
   const mfrUuid = new Map();       // SQL int ID → uuid
   const ratingUuid = new Map();    // SQL int ID → uuid
 
-  // ── 1. config.json ─────────────────────────────────────────────────────────
+  // ── 1. config.json ──────────────────────────────────────────────────────────
   console.log("Step 1: config.json");
   // Config is stored in web.config AppSettings in the original app.
   // We write sensible defaults; the admin can update via admin UI post-migration.
@@ -152,11 +210,11 @@ async function main() {
   await uploadPrivateBlob("config.json", config);
   console.log("  wrote config.json → private\n");
 
-  // ── 2. Manufacturers ───────────────────────────────────────────────────────
+  // ── 2. Manufacturers ────────────────────────────────────────────────────────
   console.log("Step 2: manufacturers.json");
   const mfrs = await pool.request().query("SELECT ID, Name FROM Manufacturers ORDER BY Name");
   const manufacturersList = mfrs.recordset.map((r) => {
-    const id = uuidv4();
+    const id = getOrCreateUuid("manufacturer", r.ID);
     mfrUuid.set(r.ID, id);
     return { id, legacyId: r.ID, name: r.Name };
   });
@@ -164,25 +222,27 @@ async function main() {
   for (const m of manufacturersList) {
     await uploadPrivateBlob(`manufacturers/${m.id}.json`, m);
   }
+  saveIdMap();
   console.log(`  wrote ${manufacturersList.length} manufacturers\n`);
 
-  // ── 3. Pilot ratings ───────────────────────────────────────────────────────
+  // ── 3. Pilot ratings ────────────────────────────────────────────────────────
   console.log("Step 3: pilot-ratings.json");
   const ratings = await pool.request().query("SELECT ID, Description FROM PilotRatings ORDER BY ID");
   const ratingsList = ratings.recordset.map((r) => {
-    const id = uuidv4();
+    const id = getOrCreateUuid("rating", r.ID);
     ratingUuid.set(r.ID, id);
     return { id, legacyId: r.ID, description: r.Description };
   });
   await uploadPrivateBlob("pilot-ratings.json", ratingsList);
+  saveIdMap();
   console.log(`  wrote ${ratingsList.length} pilot ratings\n`);
 
-  // ── 4. Clubs ───────────────────────────────────────────────────────────────
+  // ── 4. Clubs ────────────────────────────────────────────────────────────────
   console.log("Step 4: clubs.json + clubs/{uuid}.json");
   const clubs = await pool.request().query("SELECT ID, Name FROM Clubs ORDER BY Name");
   const clubsList = [];
   for (const r of clubs.recordset) {
-    const id = uuidv4();
+    const id = getOrCreateUuid("club", r.ID);
     clubUuid.set(r.ID, id);
     clubsList.push({ id, legacyId: r.ID, name: r.Name, sites: [], teams: [] });
   }
@@ -190,9 +250,10 @@ async function main() {
   for (const c of clubsList) {
     await uploadPrivateBlob(`clubs/${c.id}.json`, c);
   }
+  saveIdMap();
   console.log(`  wrote ${clubsList.length} clubs\n`);
 
-  // ── 5. Sites ───────────────────────────────────────────────────────────────
+  // ── 5. Sites ────────────────────────────────────────────────────────────────
   console.log("Step 5: sites.json + sites/{uuid}.json");
   const sites = await pool
     .request()
@@ -205,7 +266,7 @@ async function main() {
     `);
   const sitesList = [];
   for (const r of sites.recordset) {
-    const id = uuidv4();
+    const id = getOrCreateUuid("site", r.ID);
     siteUuid.set(r.ID, id);
     const clubId = r.Club_ID ? clubUuid.get(r.Club_ID) : null;
     const site = {
@@ -234,16 +295,17 @@ async function main() {
   for (const c of clubsList) {
     await uploadPrivateBlob(`clubs/${c.id}.json`, c);
   }
+  saveIdMap();
   console.log(`  wrote ${sitesList.length} sites\n`);
 
-  // ── 6. Seasons (partial) ───────────────────────────────────────────────────
+  // ── 6. Seasons (partial) ────────────────────────────────────────────────────
   console.log("Step 6: seasons.json");
   const seasons = await pool
     .request()
     .query("SELECT ID, Year, active FROM Seasons ORDER BY Year");
   const seasonsList = [];
   for (const r of seasons.recordset) {
-    const id = uuidv4();
+    const id = getOrCreateUuid("season", r.ID);
     seasonUuid.set(r.ID, id);
     seasonsList.push({
       id,
@@ -255,9 +317,10 @@ async function main() {
     });
   }
   await uploadBlob("seasons.json", seasonsList.map(({ id, year, active }) => ({ id, year, active })));
+  saveIdMap();
   console.log(`  wrote ${seasonsList.length} seasons\n`);
 
-  // ── 7. Pilots ──────────────────────────────────────────────────────────────
+  // ── 7. Pilots ───────────────────────────────────────────────────────────────
   console.log("Step 7: pilots.json + pilots/{uuid}.json");
   const pilotsResult = await pool.request().query(`
     SELECT
@@ -302,7 +365,7 @@ async function main() {
 
   const pilotsSummary = [];
   for (const r of pilotsResult.recordset) {
-    const id = uuidv4();
+    const id = getOrCreateUuid("pilot", r.ID);
     pilotUuid.set(r.ID, id);
 
     const seasonClubs = pscBySqlPilotId.get(r.ID) ?? [];
@@ -345,7 +408,9 @@ async function main() {
       ...(r.WingModel ? { wingModel: r.WingModel } : {}),
       ...(r.WingColours ? { wingColours: r.WingColours } : {}),
       person: {
-        id: uuidv4(),
+        // PersonID is the stable FK to the People table; fall back to pilot SQL ID
+        // in the unlikely event PersonID is null (orphaned pilot record).
+        id: getOrCreateUuid("person", r.PersonID ?? r.ID),
         firstName,
         lastName,
         fullName,
@@ -374,9 +439,10 @@ async function main() {
     });
   }
   await uploadBlob("pilots.json", pilotsSummary);
+  saveIdMap();
   console.log(`  wrote ${pilotsSummary.length} pilots\n`);
 
-  // ── 8. Rounds (with teams, pilot slots, flights) ───────────────────────────
+  // ── 8. Rounds (with teams, pilot slots, flights) ────────────────────────────
   console.log("Step 8: rounds.json + rounds/{uuid}.json");
 
   // Fetch all rounds
@@ -436,15 +502,15 @@ async function main() {
   `);
 
   // Index structures for fast lookups
-  const rtByRound = new Map();       // RoundID → RoundTeam[]
-  const rtpByRoundTeam = new Map();  // RoundTeam.ID → RoundTeamPlace[]
-  const flightByPlace = new Map();   // RoundTeamPlace.ID → Flight
+  const rtByRound = new Map();          // RoundID → RoundTeam[]
+  const rtpByRoundTeam = new Map();     // RoundTeam.ID → RoundTeamPlace[]
+  const flightByPlace = new Map();      // RoundTeamPlace.ID → Flight
   const flightByRoundPilot = new Map(); // `${roundId}:${pilotSqlId}` → Flight
 
   for (const r of rtResult.recordset) {
     if (!rtByRound.has(r.RoundID)) rtByRound.set(r.RoundID, []);
     rtByRound.get(r.RoundID).push(r);
-    teamUuid.set(r.ID, uuidv4());
+    teamUuid.set(r.ID, getOrCreateUuid("roundTeam", r.ID));
   }
   for (const r of rtpResult.recordset) {
     if (!rtpByRoundTeam.has(r.RoundTeam_ID)) rtpByRoundTeam.set(r.RoundTeam_ID, []);
@@ -460,7 +526,7 @@ async function main() {
   const roundDocs = new Map();
 
   for (const r of roundsResult.recordset) {
-    const id = uuidv4();
+    const id = getOrCreateUuid("round", r.ID);
     roundUuid.set(r.ID, id);
 
     const siteId = r.SiteID ? siteUuid.get(r.SiteID) : null;
@@ -508,7 +574,7 @@ async function main() {
 
         const flightDoc = flight
           ? {
-              id: uuidv4(),
+              id: getOrCreateUuid("flight", flight.ID),
               distance: Number(flight.Distance) || 0,
               url: flight.url ?? null,
               dateTime: flight.DateTime ? new Date(flight.DateTime).toISOString() : null,
@@ -616,9 +682,10 @@ async function main() {
   }
 
   await uploadBlob("rounds.json", roundsSummary);
+  saveIdMap();
   console.log(`  wrote ${roundsSummary.length} rounds\n`);
 
-  // ── 9. Round briefs ────────────────────────────────────────────────────────
+  // ── 9. Round briefs ─────────────────────────────────────────────────────────
   console.log("Step 9: round-briefs/{uuid}.json");
   const briefResult = await pool.request().query(`
     SELECT rb.ID, rb.RoundID, rb.SiteName, rb.BrieferName,
@@ -636,6 +703,7 @@ async function main() {
     if (!roundId) continue;
     const brief = {
       roundId,
+      legacyId: r.ID,
       generatedAt: new Date().toISOString(),
       data: {
         siteName: r.SiteName,
@@ -663,9 +731,10 @@ async function main() {
     await uploadPrivateBlob(`round-briefs/${roundId}.json`, brief);
     briefCount++;
   }
+  saveIdMap();
   console.log(`  wrote ${briefCount} round briefs\n`);
 
-  // ── 10. Recompute seasons/{year}.json and results/{year}.json ──────────────
+  // ── 10. Recompute seasons/{year}.json and results/{year}.json ───────────────
   console.log("Step 10: recompute seasons/{year}.json + results/{year}.json");
 
   for (const season of seasonsList) {
@@ -696,6 +765,7 @@ async function main() {
   }
 
   await pool.close();
+  saveIdMap();
   console.log("\nMigration complete.");
 }
 

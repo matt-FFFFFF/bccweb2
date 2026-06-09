@@ -1,0 +1,19 @@
+Task 8 — Production Guard Evidence
+====================================
+
+Command:
+  SQL_CONNECTION_STRING="Server=tcp:bcc-prod.database.windows.net,1433;Database=BCC;User Id=u;Password=p;" \
+  BLOB_CONNECTION_STRING="UseDevelopmentStorage=true" \
+  node scripts/migrate/migrate.mjs
+
+Output:
+  refusing to run against production without --force-production
+
+Exit code: 1
+
+Verification:
+- Guard fires BEFORE any SQL connection attempt (first action in main())
+- Regex: /Server=tcp:.*bcc-prod/i matches the connection string
+- Guard message is the exact literal: "refusing to run against production without --force-production"
+- To bypass requires BOTH --force-production CLI flag AND PRODUCTION_CONFIRM=YES env var
+- Date: 2026-06-09
