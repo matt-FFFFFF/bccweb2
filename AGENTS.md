@@ -209,9 +209,3 @@ Runbooks in `docs/runbooks/`: `alerts`, `cutover`, `decommission`,
 
 Migration scripts in `scripts/migrate/` (legacy .NET → blob) maintain state under
 `.migration-state/` (gitignored). `scripts/admin/anonymize-pilot.mjs` for GDPR erasure.
-
-## Plans
-
-Working specs / open work tracked in `.opencode/plans/`:
-`rewrite-plan.md`, `private-blob-split.md`, `test-implementation.md`. Read
-before starting work in those areas.

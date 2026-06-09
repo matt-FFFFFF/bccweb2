@@ -142,7 +142,6 @@ round/club/pilot decision matrix.
 - [apps/api/README.md](apps/api/README.md) — API test prerequisites
 - [iac/README.md](iac/README.md) — Terraform bootstrap, secret rotation
 - [tests/e2e/README.md](tests/e2e/README.md) — Playwright setup
-- [`.opencode/plans/`](.opencode/plans/) — in-flight work specs
 
 ## License
 
