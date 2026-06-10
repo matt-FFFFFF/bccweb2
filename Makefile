@@ -18,7 +18,9 @@
 
 .PHONY: all install build build-types build-scoring build-api build-web \
         typecheck test dev dev-api dev-web \
-        docker-up docker-down clean
+        docker-up docker-down clean \
+        seed seed-rounds wipe-fixtures \
+        loadtest-prepare loadtest-register loadtest-transition loadtest-sign loadtest-cleanup loadtest
 
 # ─── Default ──────────────────────────────────────────────────────────────────
 
@@ -76,6 +78,49 @@ docker-up:
 
 docker-down:
 	docker compose down
+
+# ─── Fixtures and load test ───────────────────────────────────────────────────
+# seed              — seed 500 pilots / 50 clubs / 100 club-teams + season / sites / config
+# seed-rounds       — seed 4 dev-browsing rounds (Proposed/Confirmed/BriefComplete/Locked)
+# wipe-fixtures     — surgical wipe of all fixture entities by manifest
+# loadtest-prepare  — create load-test round + 50 teams + confirm (writes tests/load/.prepared-round.json)
+# loadtest-register — k6 register-self phase (500 VUs); logs in .omo/evidence/k6-logs/
+# loadtest-transition — POST brief-complete on the prepared round
+# loadtest-sign     — k6 sign phase; logs in .omo/evidence/k6-logs/
+# loadtest-cleanup  — delete load-test round + signatures, keep fixtures
+# loadtest          — chains prepare → register → transition → sign → cleanup
+# All loadtest-* targets honour BCC_API_BASE_URL (default http://localhost:7071)
+# and ADMIN_PASSWORD env vars for dual local/Azure operation.
+
+seed:
+	node scripts/seed-fixtures.mjs
+
+seed-rounds:
+	node scripts/seed-rounds.mjs
+
+wipe-fixtures:
+	node scripts/wipe-fixtures.mjs
+
+loadtest-prepare:
+	node scripts/prepare-loadtest.mjs
+
+loadtest-register:
+	@mkdir -p $(CURDIR)/.omo/evidence/k6-logs
+	cd tests/load && k6 run --env PHASE=register sign-to-fly.js | tee $(CURDIR)/.omo/evidence/k6-logs/register-$$(date +%s).log
+
+loadtest-transition:
+	node scripts/transition-loadtest.mjs
+
+loadtest-sign:
+	@mkdir -p $(CURDIR)/.omo/evidence/k6-logs
+	cd tests/load && k6 run --env PHASE=sign sign-to-fly.js | tee $(CURDIR)/.omo/evidence/k6-logs/sign-$$(date +%s).log
+
+loadtest-cleanup:
+	node scripts/cleanup-loadtest.mjs
+
+# Make runs targets in dependency order; failure of any step short-circuits.
+loadtest: loadtest-prepare loadtest-register loadtest-transition loadtest-sign loadtest-cleanup
+	@echo "[loadtest] full pipeline complete"
 
 # ─── Clean ────────────────────────────────────────────────────────────────────
 
