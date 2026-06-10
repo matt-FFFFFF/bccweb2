@@ -36,3 +36,7 @@ iac/plan.binary
 # OpenCode session state
 .omo/
 
+# Load-testing fixtures and dev credentials (T1)
+.dev-credentials
+.fixture-manifest.json
+tests/load/.prepared-round.json
