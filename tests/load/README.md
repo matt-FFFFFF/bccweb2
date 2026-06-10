@@ -48,7 +48,7 @@ make loadtest-sign
 make loadtest-cleanup
 ```
 
-Stdout from k6 is persisted to `.omo/evidence/k6-logs/{phase}-{timestamp}.log`.
+Stdout from k6 is persisted to `logs/load-test/{phase}-{timestamp}.log` (gitignored).
 
 ## Running Against Azure
 

@@ -84,9 +84,9 @@ docker-down:
 # seed-rounds       — seed 4 dev-browsing rounds (Proposed/Confirmed/BriefComplete/Locked)
 # wipe-fixtures     — surgical wipe of all fixture entities by manifest
 # loadtest-prepare  — create load-test round + 50 teams + confirm (writes tests/load/.prepared-round.json)
-# loadtest-register — k6 register-self phase (500 VUs); logs in .omo/evidence/k6-logs/
+# loadtest-register — k6 register-self phase (500 VUs); logs in logs/load-test/
 # loadtest-transition — POST brief-complete on the prepared round
-# loadtest-sign     — k6 sign phase; logs in .omo/evidence/k6-logs/
+# loadtest-sign     — k6 sign phase; logs in logs/load-test/
 # loadtest-cleanup  — delete load-test round + signatures, keep fixtures
 # loadtest          — chains prepare → register → transition → sign → cleanup
 # All loadtest-* targets honour BCC_API_BASE_URL (default http://localhost:7071)
@@ -105,15 +105,15 @@ loadtest-prepare:
 	node scripts/prepare-loadtest.mjs
 
 loadtest-register:
-	@mkdir -p $(CURDIR)/.omo/evidence/k6-logs
-	cd tests/load && k6 run --env PHASE=register sign-to-fly.js | tee $(CURDIR)/.omo/evidence/k6-logs/register-$$(date +%s).log
+	@mkdir -p $(CURDIR)/logs/load-test
+	cd tests/load && k6 run --env PHASE=register sign-to-fly.js | tee $(CURDIR)/logs/load-test/register-$$(date +%s).log
 
 loadtest-transition:
 	node scripts/transition-loadtest.mjs
 
 loadtest-sign:
-	@mkdir -p $(CURDIR)/.omo/evidence/k6-logs
-	cd tests/load && k6 run --env PHASE=sign sign-to-fly.js | tee $(CURDIR)/.omo/evidence/k6-logs/sign-$$(date +%s).log
+	@mkdir -p $(CURDIR)/logs/load-test
+	cd tests/load && k6 run --env PHASE=sign sign-to-fly.js | tee $(CURDIR)/logs/load-test/sign-$$(date +%s).log
 
 loadtest-cleanup:
 	node scripts/cleanup-loadtest.mjs

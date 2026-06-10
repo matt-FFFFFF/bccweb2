@@ -40,3 +40,6 @@ iac/plan.binary
 .dev-credentials
 .fixture-manifest.json
 tests/load/.prepared-round.json
+
+# Load-test runtime logs (k6 stdout per `make loadtest-register` / `loadtest-sign`)
+logs/
