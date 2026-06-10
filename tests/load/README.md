@@ -97,6 +97,8 @@ k6 produces a summary at the end of each phase. Look for these key metrics:
 
 ### Baseline Metrics (Local)
 
+> **These are illustrative observations, not SLO gates.** k6 runs in advisory mode (no thresholds configured — see [§Interpreting output](#interpreting-output)). Numbers vary by hardware, contention, Azurite version. Don't compare local to Azure.
+
 As a reference, these metrics were observed on a standard local dev stack:
 - **Register phase**: 500 VUs finished in ~7m 40s.
 - **Sign phase**: 500 VUs finished in ~8m 00s.
