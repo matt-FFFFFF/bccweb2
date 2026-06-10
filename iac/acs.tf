@@ -19,42 +19,6 @@
 #
 # After applying, check outputs for DNS records to add at your registrar.
 
-# ─── Variables ────────────────────────────────────────────────────────────────
-
-variable "acs_email_domain" {
-  description = "Custom sending domain for ACS Email (e.g. mail.yourdomain.com)"
-  type        = string
-}
-
-variable "acs_sender_address" {
-  description = "Full sender email address (e.g. noreply@mail.yourdomain.com)"
-  type        = string
-}
-
-variable "round_brief_emails" {
-  description = "Comma-separated list of email addresses to receive round briefs"
-  type        = string
-  sensitive   = true
-}
-
-variable "puretrack_api_key" {
-  description = "PureTrack API key for the BCC account"
-  type        = string
-  sensitive   = true
-}
-
-variable "puretrack_email" {
-  description = "PureTrack login email for the BCC account"
-  type        = string
-  sensitive   = true
-}
-
-variable "puretrack_password" {
-  description = "PureTrack login password for the BCC account"
-  type        = string
-  sensitive   = true
-}
-
 # ─── ACS Email Service ────────────────────────────────────────────────────────
 
 resource "azapi_resource" "acs_email" {

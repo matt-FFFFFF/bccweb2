@@ -1,0 +1,32 @@
+# COMMITTED TEMPLATE. Copy to prod.tfvars (gitignored) and fill in:
+#   cp iac/env/prod.tfvars.example iac/env/prod.tfvars
+# Use with:
+#   terraform -chdir=iac init -backend-config=env/prod.backend.hcl && terraform -chdir=iac apply -var-file=env/prod.tfvars
+# DO NOT COMMIT REAL SECRETS. Set via env vars: TF_VAR_puretrack_api_key=... etc., or pipeline secrets.
+
+stamp_name = "prod"
+location    = "uksouth"
+
+# CORS: replace with the real production hostname before apply.
+allowed_origins = ["https://<your-prod-hostname>"]
+
+ops_email = "<REQUIRED: operator must replace before apply>" # REQUIRED
+
+acs_email_domain   = "<REQUIRED: operator must replace before apply>" # REQUIRED
+acs_sender_address = "<REQUIRED: operator must replace before apply>" # REQUIRED
+
+round_brief_emails = "<REQUIRED: see TF_VAR_round_brief_emails>" # REQUIRED
+puretrack_api_key  = "<REQUIRED: see TF_VAR_puretrack_api_key>" # REQUIRED
+puretrack_email    = "<REQUIRED: see TF_VAR_puretrack_email>" # REQUIRED
+puretrack_password = "<REQUIRED: see TF_VAR_puretrack_password>" # REQUIRED
+
+jwt_secret_version = "1"
+acs_secret_version = "1"
+
+# Leave empty until DNS/cutover is configured.
+production_hostname          = ""
+dns_zone_name                = ""
+dns_zone_resource_group_name = ""
+
+# Optional alert receiver.
+slack_webhook_url = ""
