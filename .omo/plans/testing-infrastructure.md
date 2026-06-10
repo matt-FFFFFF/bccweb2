@@ -86,7 +86,7 @@ Provide a turnkey testing capability covering three layers: instant `docker comp
 
 ### Definition of Done
 
-- [ ] `touch .dev-credentials && docker compose down -v && docker compose up --build` ⇒ admin credentials visible in compose log within 60s; `curl POST /api/auth/login` with those credentials returns 200 + JWT with `Admin` role.
+- [x] `touch .dev-credentials && docker compose down -v && docker compose up --build` ⇒ admin credentials visible in compose log within 60s; `curl POST /api/auth/login` with those credentials returns 200 + JWT with `Admin` role. (verified via podman-compose; see .omo/evidence/final-qa/01-fresh-stack.txt)
 - [ ] `make seed` ⇒ `pilots.json` has 500 entries, `clubs.json` 50, `club-teams.json` 100. `curl POST /api/auth/login` with `pilot001@bcc.local` returns 200.
 - [ ] `make seed-rounds` ⇒ rounds list page in SPA shows 4 rounds in varied statuses, all signable rounds have valid `round-briefs/{id}.json`.
 - [ ] **Step-by-step load test** (LOCAL): `make loadtest-prepare && make loadtest-register && make loadtest-transition && make loadtest-sign` completes; assert round blob has 500 slots with `signToFly=true` via `GET /api/rounds/{id}` BEFORE running `make loadtest-cleanup`. Wall-clock sign phase < 15 min.
