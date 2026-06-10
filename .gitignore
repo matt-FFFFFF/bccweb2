@@ -10,6 +10,10 @@ build/
 *.log
 local.settings.json
 
+# Azurite local storage emulator runtime state
+.azurite/*
+!.azurite/.gitkeep
+
 # Migration database backups
 *.bacpac
 
