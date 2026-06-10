@@ -12,9 +12,9 @@ The two changes are independent in DNS but conventionally done in the same opera
 1. Run `terraform -chdir=iac init -backend-config=env/prod.backend.hcl` and `terraform -chdir=iac apply -var-file=env/prod.tfvars`. This provisions the SWA and the ACS email domain, but does **not** by itself create the public CNAME unless `var.dns_zone_name` is set.
 2. Read the operator-facing outputs:
    ```bash
-   terraform -chdir=iac output -var-file=env/prod.tfvars acs_email_domain_verification_records
-   terraform -chdir=iac output -var-file=env/prod.tfvars -raw production_hostname_target
-   terraform -chdir=iac output -var-file=env/prod.tfvars -raw production_dns_managed_by_terraform
+terraform -chdir=iac output -var-file=env/prod.tfvars acs_email_domain_verification_records
+terraform -chdir=iac output -var-file=env/prod.tfvars -raw production_hostname_target
+terraform -chdir=iac output -var-file=env/prod.tfvars -raw production_dns_managed_by_terraform
    ```
    `acs_email_domain_verification_records` exposes `domain_ownership`, `spf`, `dkim`, `dkim2`, `dmarc` (each `{ type, name, value, ttl }`) plus a `dmarc_recommended_policy_value` template starting with `v=DMARC1; p=none; ...`.
 3. `production_hostname_target` is the stable SWA default hostname (e.g. `nice-stone-0a1b2c3d4.azurestaticapps.net`). This is cert-bound and safe to use as a long-lived CNAME target.
@@ -62,7 +62,7 @@ terraform -chdir=iac init -backend-config=env/prod.backend.hcl
 terraform -chdir=iac apply -var-file=env/prod.tfvars
 ```
 
-The plan should show one `azurerm_dns_cname_record.production[0]` to add. After apply, the record exists in the Azure DNS zone with TTL 3600. To run the T-24h lower-TTL phase, run:
+The plan should show one `module.stamp.azapi_resource.production_cname[0]` to add. After apply, the record exists in the Azure DNS zone with TTL 3600. To run the T-24h lower-TTL phase, run:
 
 ```bash
 az network dns record-set cname update \
