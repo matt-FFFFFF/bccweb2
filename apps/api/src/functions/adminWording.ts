@@ -74,14 +74,14 @@ async function readWordingBody(req: HttpRequest): Promise<{ html: string; plainT
 app.http("addSignToFlyWording", {
   methods: ["POST"],
   authLevel: "anonymous",
-  route: "admin/sign-to-fly/wording",
+  route: "manage/sign-to-fly/wording",
   handler: withErrorHandler(addSignToFlyWording),
 });
 
 app.http("getSignToFlyWordingVersion", {
   methods: ["GET"],
   authLevel: "anonymous",
-  route: "admin/sign-to-fly/wording/{version}",
+  route: "manage/sign-to-fly/wording/{version}",
   handler: withErrorHandler(getSignToFlyWordingVersion),
 });
 

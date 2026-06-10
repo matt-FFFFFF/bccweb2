@@ -72,8 +72,8 @@ export default function PilotSeasonClubs() {
     setLoading(true);
     try {
       const [assigns, sClubs] = await Promise.all([
-        api.get<PilotSeasonClubAssignment[]>(`admin/pilot-season-clubs?year=${seasonYear}`),
-        api.get<SeasonClub[]>(`admin/seasons/${seasonYear}/clubs`)
+        api.get<PilotSeasonClubAssignment[]>(`manage/pilot-season-clubs?year=${seasonYear}`),
+        api.get<SeasonClub[]>(`manage/seasons/${seasonYear}/clubs`)
       ]);
       setAssignments(assigns);
       setSeasonClubs(sClubs);
@@ -95,7 +95,7 @@ export default function PilotSeasonClubs() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.post(`admin/pilot-season-clubs${reassignFlag ? "?reassign=true" : ""}`, {
+      await api.post(`manage/pilot-season-clubs${reassignFlag ? "?reassign=true" : ""}`, {
         pilotId: selectedPilotId,
         clubId: selectedClubId,
         seasonYear
@@ -123,7 +123,7 @@ export default function PilotSeasonClubs() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.delete(`admin/pilot-season-clubs/${pilotId}/${seasonYear}`);
+      await api.delete(`manage/pilot-season-clubs/${pilotId}/${seasonYear}`);
       setMsg({ text: "Assignment removed.", ok: true });
       await load();
     } catch (ex) {

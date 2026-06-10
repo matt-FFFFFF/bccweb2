@@ -24,7 +24,7 @@ async function seedPureTrackGroupBlob(
   return record;
 }
 
-describe("GET /api/admin/puretrack/groups", () => {
+describe("GET /api/manage/puretrack/groups", () => {
   it("Admin GET groups for roundId -> returns matching groups", async () => {
     const clubId = randomUUID();
     const roundId = randomUUID();

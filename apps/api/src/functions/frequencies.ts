@@ -144,27 +144,27 @@ async function deleteFrequency(req: HttpRequest, _ctx: InvocationContext): Promi
 app.http("getFrequencies", {
   methods: ["GET"],
   authLevel: "anonymous",
-  route: "admin/frequencies",
+  route: "manage/frequencies",
   handler: withErrorHandler(getFrequencies),
 });
 
 app.http("createFrequency", {
   methods: ["POST"],
   authLevel: "anonymous",
-  route: "admin/frequencies",
+  route: "manage/frequencies",
   handler: withErrorHandler(createFrequency),
 });
 
 app.http("updateFrequency", {
   methods: ["PUT"],
   authLevel: "anonymous",
-  route: "admin/frequencies/{id}",
+  route: "manage/frequencies/{id}",
   handler: withErrorHandler(updateFrequency),
 });
 
 app.http("deleteFrequency", {
   methods: ["DELETE"],
   authLevel: "anonymous",
-  route: "admin/frequencies/{id}",
+  route: "manage/frequencies/{id}",
   handler: withErrorHandler(deleteFrequency),
 });

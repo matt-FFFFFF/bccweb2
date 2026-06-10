@@ -131,7 +131,7 @@ async function assignPilotSeasonClub(
       // If reassigned by a coord, wait, can a coord reassign a pilot that is in ANOTHER club? No, unless they are admin.
       if (!isAdmin && existing.clubId !== caller.clubId) {
          // coord can only steal from another club if...? Legacy behavior: Admin only initially. Wait, instruction says:
-         // "POST /api/admin/pilot-season-clubs (Admin only initially; RoundsCoord can assign to their OWN club only)"
+         // "POST /api/manage/pilot-season-clubs (Admin only initially; RoundsCoord can assign to their OWN club only)"
          // Actually, if a pilot is already assigned to a DIFFERENT club, should a coord be able to reassign them to their own club?
          // Let's restrict reassigning from another club to Admin only to be safe, or just return 403.
          // Actually, the legacy behavior usually means coord can assign to their own club. If the pilot is in another club, 403.
@@ -252,20 +252,20 @@ async function deletePilotSeasonClub(
 app.http("getPilotSeasonClubs", {
   methods: ["GET"],
   authLevel: "anonymous",
-  route: "admin/pilot-season-clubs",
+  route: "manage/pilot-season-clubs",
   handler: withErrorHandler(getPilotSeasonClubs),
 });
 
 app.http("assignPilotSeasonClub", {
   methods: ["POST"],
   authLevel: "anonymous",
-  route: "admin/pilot-season-clubs",
+  route: "manage/pilot-season-clubs",
   handler: withErrorHandler(assignPilotSeasonClub),
 });
 
 app.http("deletePilotSeasonClub", {
   methods: ["DELETE"],
   authLevel: "anonymous",
-  route: "admin/pilot-season-clubs/{pilotId}/{seasonYear}",
+  route: "manage/pilot-season-clubs/{pilotId}/{seasonYear}",
   handler: withErrorHandler(deletePilotSeasonClub),
 });

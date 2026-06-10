@@ -36,7 +36,7 @@ export default function Frequencies() {
   async function load() {
     setLoading(true);
     try {
-      setFrequencies(await api.get<Frequency[]>("admin/frequencies"));
+      setFrequencies(await api.get<Frequency[]>("manage/frequencies"));
     } catch (ex) {
       setMsg(ex instanceof Error ? ex.message : "Failed to load frequencies");
       setOk(false);
@@ -54,7 +54,7 @@ export default function Frequencies() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.post<Frequency>("admin/frequencies", { label, position });
+      await api.post<Frequency>("manage/frequencies", { label, position });
       setLabel("");
       setPosition(position + 1);
       setMsg("Frequency created.");
@@ -76,7 +76,7 @@ export default function Frequencies() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.put<Frequency>(`admin/frequencies/${frequency.id}`, { label: nextLabel, position: Number.parseInt(nextPosition, 10) });
+      await api.put<Frequency>(`manage/frequencies/${frequency.id}`, { label: nextLabel, position: Number.parseInt(nextPosition, 10) });
       setMsg("Frequency updated.");
       setOk(true);
       await load();
@@ -93,7 +93,7 @@ export default function Frequencies() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.delete<{ id: string }>(`admin/frequencies/${frequency.id}`);
+      await api.delete<{ id: string }>(`manage/frequencies/${frequency.id}`);
       setMsg("Frequency deleted.");
       setOk(true);
       await load();

@@ -459,27 +459,27 @@ async function deleteSeasonClub(req: HttpRequest, _ctx: InvocationContext): Prom
 app.http("getSeasonClubs", {
   methods: ["GET"],
   authLevel: "anonymous",
-  route: "admin/seasons/{year}/clubs",
+  route: "manage/seasons/{year}/clubs",
   handler: withErrorHandler(getSeasonClubs),
 });
 
 app.http("createSeasonClub", {
   methods: ["POST"],
   authLevel: "anonymous",
-  route: "admin/seasons/{year}/clubs",
+  route: "manage/seasons/{year}/clubs",
   handler: withErrorHandler(createSeasonClub),
 });
 
 app.http("updateSeasonClub", {
   methods: ["PUT"],
   authLevel: "anonymous",
-  route: "admin/seasons/{year}/clubs/{seasonClubId}",
+  route: "manage/seasons/{year}/clubs/{seasonClubId}",
   handler: withErrorHandler(updateSeasonClub),
 });
 
 app.http("deleteSeasonClub", {
   methods: ["DELETE"],
   authLevel: "anonymous",
-  route: "admin/seasons/{year}/clubs/{seasonClubId}",
+  route: "manage/seasons/{year}/clubs/{seasonClubId}",
   handler: withErrorHandler(deleteSeasonClub),
 });

@@ -72,8 +72,8 @@ export default function SeasonClubs() {
     setLoading(true);
     try {
       const [seasonClubRows, frequencyRows] = await Promise.all([
-        api.get<SeasonClub[]>(`admin/seasons/${seasonYear}/clubs`),
-        isAdmin ? api.get<Frequency[]>("admin/frequencies") : Promise.resolve([]),
+        api.get<SeasonClub[]>(`manage/seasons/${seasonYear}/clubs`),
+        isAdmin ? api.get<Frequency[]>("manage/frequencies") : Promise.resolve([]),
       ]);
       setSeasonClubs(seasonClubRows.map((row) => ({ ...row, clubName: clubNameById.get(row.clubId) })));
       setFrequencies(frequencyRows);
@@ -94,7 +94,7 @@ export default function SeasonClubs() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.post<RegisterResult>(`admin/seasons/${seasonYear}/clubs`, {
+      await api.post<RegisterResult>(`manage/seasons/${seasonYear}/clubs`, {
         clubId,
         numTeams,
         frequencyId: frequencyId || undefined,
@@ -124,7 +124,7 @@ export default function SeasonClubs() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.put<SeasonClub>(`admin/seasons/${seasonYear}/clubs/${row.id}`, {
+      await api.put<SeasonClub>(`manage/seasons/${seasonYear}/clubs/${row.id}`, {
         numTeams: Number.parseInt(nextTeamsRaw, 10),
         frequencyId: nextFrequency?.trim() || null,
       });
@@ -144,7 +144,7 @@ export default function SeasonClubs() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.delete<{ id: string }>(`admin/seasons/${seasonYear}/clubs/${row.id}`);
+      await api.delete<{ id: string }>(`manage/seasons/${seasonYear}/clubs/${row.id}`);
       setMsg("Season club deleted.");
       setMsgOk(true);
       await load();

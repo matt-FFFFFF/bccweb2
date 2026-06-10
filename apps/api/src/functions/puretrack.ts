@@ -5,7 +5,7 @@
  *   Manually (re-)creates PureTrack groups for a locked round.
  *   Auth: RoundsCoord or Admin only.
  *
- * GET /api/admin/puretrack/groups?roundId={id}
+ * GET /api/manage/puretrack/groups?roundId={id}
  *   Lists persisted PureTrackGroup records for a round.
  *   Auth: Admin, or RoundsCoord scoped to the round's organising club.
  */
@@ -166,7 +166,7 @@ async function createPureTrackGroupsHandler(
   return { status: 200, jsonBody: result };
 }
 
-// ─── GET /api/admin/puretrack/groups ─────────────────────────────────────────
+// ─── GET /api/manage/puretrack/groups ─────────────────────────────────────────
 
 async function listPureTrackGroupsHandler(
   req: HttpRequest,
@@ -212,6 +212,6 @@ app.http("createPureTrackGroups", {
 app.http("listPureTrackGroups", {
   methods: ["GET"],
   authLevel: "anonymous",
-  route: "admin/puretrack/groups",
+  route: "manage/puretrack/groups",
   handler: withErrorHandler(listPureTrackGroupsHandler),
 });
