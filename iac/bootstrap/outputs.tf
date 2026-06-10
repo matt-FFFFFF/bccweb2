@@ -70,13 +70,27 @@ output "github_actions_setup" {
     GitHub Actions OIDC setup for the Terraform UMI
     ===============================================
 
-    1. Set these as GitHub repo-level (or environment-level) secrets/variables:
+    1. GitHub repo/environment secrets:
+%{if var.manage_github_secrets~}
+       Created automatically by Terraform — no manual paste needed.
+       Verify in the GitHub UI at:
+%{for e in var.github_environments~}
+         https://github.com/${var.github_repo}/settings/environments/${e}
+%{endfor~}
+       Each environment receives:
+         AZURE_CLIENT_ID       = ${azapi_resource.tf_umi.output.properties.clientId}
+         AZURE_TENANT_ID       = ${data.azapi_client_config.current.tenant_id}
+         AZURE_SUBSCRIPTION_ID = ${data.azapi_client_config.current.subscription_id}
+%{else~}
+       Automatic creation is disabled (manage_github_secrets = false).
+       Set these as GitHub repo-level (or environment-level) secrets manually:
          AZURE_CLIENT_ID       = ${azapi_resource.tf_umi.output.properties.clientId}
          AZURE_TENANT_ID       = ${data.azapi_client_config.current.tenant_id}
          AZURE_SUBSCRIPTION_ID = ${data.azapi_client_config.current.subscription_id}
 
        Repo-level is fine when every environment shares the same UMI.
        Use environment-level if you ever provision per-env UMIs in future.
+%{endif~}
 
     2. Federated credentials exist for these GitHub environments (subject
        claim repo:${var.github_repo}:environment:<env>):
@@ -101,4 +115,9 @@ output "github_actions_setup" {
              tenant-id: $${{ secrets.AZURE_TENANT_ID }}
              subscription-id: $${{ secrets.AZURE_SUBSCRIPTION_ID }}
   EOT
+}
+
+output "github_environments_created" {
+  description = "List of GitHub environment names that Terraform created/adopted on this apply. Empty when manage_github_secrets = false. Useful for downstream automation that needs to enumerate the federated envs."
+  value       = var.manage_github_secrets ? var.github_environments : []
 }

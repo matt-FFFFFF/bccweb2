@@ -33,6 +33,15 @@ etc.).
 - `az login` against a principal with Contributor on the target subscription.
 - A globally-unique storage account name (3–24 chars, lowercase letters and
   digits only — see `variables.tf`).
+- `export GITHUB_TOKEN=<token>` — a GitHub fine-grained PAT with
+  Repository permissions **Actions: write**, **Environments: write**, and
+  **Secrets: write** on `matt-FFFFFF/bccweb2` (or a classic PAT with the
+  `repo` scope). Required only for bootstrap apply when
+  `manage_github_secrets = true` (the default). The PAT is **not** used by
+  the runtime Function App or by any CI workflow — it only authenticates
+  the `integrations/github` provider during this one-shot apply. If you
+  cannot supply a token, set `manage_github_secrets = false` and the
+  github provider will never be invoked (see "Escape hatch" below).
 
 ## How to run
 
@@ -87,6 +96,7 @@ supplied at `init` time from this file.
 | `tenant_id` | Azure AD tenant ID. Pass as `AZURE_TENANT_ID`. |
 | `subscription_id` | Azure subscription ID (also the scope of the UMI's Owner role assignment). Pass as `AZURE_SUBSCRIPTION_ID`. |
 | `github_actions_setup` | Operator runbook (multi-line). Run `terraform -chdir=iac/bootstrap output -raw github_actions_setup` to print. |
+| `github_environments_created` | List of GitHub environment names Terraform created/adopted (empty when `manage_github_secrets = false`). |
 
 ## GitHub Actions OIDC setup
 
@@ -123,7 +133,56 @@ environment) with the same name. The federated subject claim is
 
 ### Populate GitHub secrets
 
-Print the three values:
+When `manage_github_secrets = true` (the default), **Terraform creates the
+GitHub environments and pushes the three Azure identifiers as
+environment-scoped Actions secrets for you** — no manual paste is required.
+The `integrations/github` provider authenticates via the `GITHUB_TOKEN`
+environment variable (see Prerequisites). After `terraform -chdir=iac/bootstrap
+apply` completes, verify in the GitHub UI at:
+
+```
+https://github.com/<owner/repo>/settings/environments/<env>
+```
+
+Each environment receives the following secrets:
+
+| Secret | Source |
+|---|---|
+| `AZURE_CLIENT_ID` | `azapi_resource.tf_umi.output.properties.clientId` |
+| `AZURE_TENANT_ID` | `data.azapi_client_config.current.tenant_id` |
+| `AZURE_SUBSCRIPTION_ID` | `data.azapi_client_config.current.subscription_id` |
+
+None of these are real secrets — `clientId` is bound to the federated
+subject by OIDC (so even disclosed it cannot be used outside the
+permitted GitHub repo+environment), and `tenantId`/`subscriptionId` are
+just routing identifiers. GitHub's API still requires them to be
+delivered through the secrets channel (encrypted with the environment's
+public key before transit) which is what
+`github_actions_environment_secret.plaintext_value` does under the hood;
+only the ciphertext lands in Terraform state.
+
+The Terraform-managed resource adopts a pre-existing environment with the
+same name (idempotent) and `lifecycle.ignore_changes = [reviewers,
+deployment_branch_policy]` ensures Terraform will **not** fight any
+reviewer or branch-policy settings you configure manually in the GitHub UI
+— those remain operator-owned.
+
+#### Escape hatch: `manage_github_secrets = false`
+
+If you cannot supply a `GITHUB_TOKEN` (or want to manage the secrets out of
+band), set:
+
+```hcl
+# iac/bootstrap/terraform.tfvars
+manage_github_secrets = false
+```
+
+Or pass `-var 'manage_github_secrets=false'` on the command line. With this
+flag, neither `github_repository_environment` nor
+`github_actions_environment_secret` is created — the `for_each` evaluates to
+an empty set/map and the github provider is never invoked. You still get the
+UMI + federated credentials + subscription-Owner grant; just print the three
+identifiers from the outputs and paste them manually:
 
 ```sh
 terraform -chdir=iac/bootstrap output -raw terraform_umi_client_id

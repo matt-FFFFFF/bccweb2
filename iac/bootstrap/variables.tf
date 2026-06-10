@@ -63,3 +63,9 @@ variable "terraform_umi_name" {
   description = "Name of the user-assigned managed identity that Terraform uses (created in the bootstrap RG)."
   default     = "id-bccweb-terraform"
 }
+
+variable "manage_github_secrets" {
+  type        = bool
+  description = "Set to false to provision only the UMI + fed creds and skip GitHub repo secret creation (e.g. when operating without GITHUB_TOKEN). When true (default), Terraform creates one GitHub environment per `github_environments` entry and pushes AZURE_CLIENT_ID/AZURE_TENANT_ID/AZURE_SUBSCRIPTION_ID as environment-scoped Actions secrets."
+  default     = true
+}

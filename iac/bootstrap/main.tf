@@ -23,10 +23,21 @@ terraform {
       source  = "hashicorp/random"
       version = "~> 3.6"
     }
+    github = {
+      source  = "integrations/github"
+      version = "~> 6.4"
+    }
   }
 }
 
 provider "azapi" {}
+
+# The github provider authenticates via the GITHUB_TOKEN env var (default
+# behavior). When `manage_github_secrets = false`, every github_* resource is
+# gated off, so the provider is never invoked and the token can be absent.
+provider "github" {
+  owner = split("/", var.github_repo)[0]
+}
 
 data "azapi_client_config" "current" {}
 
@@ -186,4 +197,63 @@ resource "azapi_resource" "tf_owner_role" {
       principalType    = "ServicePrincipal"
     }
   }
+}
+
+# ─── GitHub repo environments + Azure OIDC secrets ───────────────────────────
+#
+# Closes the OIDC loop: instead of an operator manually pasting three values
+# into GitHub repo/env secrets after bootstrap, Terraform creates one GitHub
+# environment per entry in `var.github_environments` and pushes the three
+# Azure identifiers as environment-scoped Actions secrets.
+#
+# Gating: when `manage_github_secrets = false` (operator has no GITHUB_TOKEN
+# or wants to manage secrets manually), the for_each evaluates to an empty
+# set/map so neither resource is created and the github provider is never
+# called (provider config is still loaded but token absence is fine when no
+# resources/data sources reference it).
+#
+# Idempotency: `github_repository_environment` adopts a pre-existing env if
+# one exists with the same name. `lifecycle.ignore_changes` covers the
+# reviewers + deployment_branch_policy blocks because the operator manages
+# those in the GitHub UI (we do not want Terraform fighting their settings).
+
+locals {
+  env_secrets = {
+    for pair in setproduct(var.github_environments, ["AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID"]) :
+    "${pair[0]}/${pair[1]}" => { env = pair[0], name = pair[1] }
+  }
+}
+
+resource "github_repository_environment" "envs" {
+  for_each = var.manage_github_secrets ? toset(var.github_environments) : toset([])
+
+  repository  = split("/", var.github_repo)[1]
+  environment = each.key
+
+  lifecycle {
+    ignore_changes = [reviewers, deployment_branch_policy]
+  }
+}
+
+resource "github_actions_environment_secret" "azure" {
+  for_each = var.manage_github_secrets ? local.env_secrets : {}
+
+  repository  = split("/", var.github_repo)[1]
+  environment = github_repository_environment.envs[each.value.env].environment
+  secret_name = each.value.name
+
+  # plaintext_value is encrypted client-side using the environment's public
+  # key before being sent to GitHub; only the ciphertext lands in state. The
+  # values themselves are not real secrets — clientId/tenantId/subscriptionId
+  # are public identifiers (OIDC binds clientId to the federated subject).
+  plaintext_value = (
+    each.value.name == "AZURE_CLIENT_ID" ? azapi_resource.tf_umi.output.properties.clientId :
+    each.value.name == "AZURE_TENANT_ID" ? data.azapi_client_config.current.tenant_id :
+    each.value.name == "AZURE_SUBSCRIPTION_ID" ? data.azapi_client_config.current.subscription_id :
+    "" # unreachable — local.env_secrets only constructs the three names above
+  )
+
+  # Defensive: ensure the subscription-Owner grant lands first so that the
+  # UMI is fully usable the moment CI reads these secrets.
+  depends_on = [azapi_resource.tf_owner_role]
 }
