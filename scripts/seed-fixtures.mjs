@@ -168,6 +168,11 @@ async function patchConfig(privateContainer) {
     maxPilotsInTeam: 10,
     maxScoringPilotsInTeam: 5,
     flightDateValidationEnabled: false,
+    // Fixture-only: lets the load-test's 500 pilots (sourced from 50 different
+    // clubs by T8's round-robin assignment) auto-allocate to the load-test
+    // round's organising club at first register-self. Production default is
+    // missing (≈ false), which enforces strict pilot→club seasonal binding.
+    autoAllocatePilotsToRoundClub: true,
     wingFactors: existing.wingFactors ?? DEFAULT_WING_FACTORS,
   };
   await writeJson(privateContainer, "config.json", config);
