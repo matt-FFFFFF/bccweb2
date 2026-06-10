@@ -30,6 +30,7 @@ import AdminSites from "./pages/admin/Sites.js";
 import AdminConfig from "./pages/admin/Config.js";
 import MyClub from "./pages/club/MyClub.js";
 import FirstLoginOfSeasonGate from "./components/FirstLoginOfSeasonGate.js";
+import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import "./bcc-theme.css";
 
 function Nav() {
@@ -166,7 +167,19 @@ export default function App() {
       <AuthProvider>
         <FirstLoginOfSeasonGate><Nav />
         <main className="bcc-main">
-          <Routes>
+          <RoutedContent />
+        </main>
+        <Footer /></FirstLoginOfSeasonGate>
+      </AuthProvider>
+    </BrowserRouter>
+  );
+}
+
+function RoutedContent() {
+  const location = useLocation();
+  return (
+    <ErrorBoundary key={location.pathname}>
+      <Routes>
           <Route path="/" element={<Home />} />
 
           {/* Rounds */}
@@ -211,9 +224,6 @@ export default function App() {
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
-        </main>
-        <Footer /></FirstLoginOfSeasonGate>
-      </AuthProvider>
-    </BrowserRouter>
+    </ErrorBoundary>
   );
 }
