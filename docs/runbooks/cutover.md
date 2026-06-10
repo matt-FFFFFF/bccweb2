@@ -6,8 +6,8 @@ This document is the official execution plan for transitioning the BCC competiti
 
 The pre-flight phase ensures the destination environment is hardened, secrets are seeded, and legal requirements are met before any data migration starts. Every item in this checklist must be verified by the operator before proceeding to the dry-run.
 
-1. **Verify Infrastructure State**: Run `terraform plan` in the `iac/` directory. Ensure the plan shows zero changes and specifically verify that blob versioning (30d), soft-delete (30d), and GRS are enabled. The management lock must be present on the storage account to prevent accidental deletion during the cutover.
-2. **Confirm Secret Seeding**: Execute `az keyvault secret show --vault-name <key_vault_name> --name jwt-secret` to confirm the JWT secret was successfully seeded out-of-band. The Function App will fail to start if this secret is missing.
+1. **Verify Infrastructure State**: Run `terraform -chdir=iac plan -var-file=env/<env>.tfvars` to ensure the state is current. Ensure the plan shows zero changes and specifically verify that blob versioning (30d), soft-delete (30d), and GRS are enabled. The management lock must be present on the storage account to prevent accidental deletion during the cutover.
+2. **Confirm Secret Seeding**: See `iac/README.md` § Secret rotation for the declarative KV seeding flow. Execute `az keyvault secret show --vault-name <key_vault_name> --name jwt-secret` to confirm the JWT secret was successfully seeded. The Function App will fail to start if this secret is missing.
 3. **Legal Wording Check**: Ensure that `docs/legal/sign-to-fly-wording.md` matches the version approved by the project owner in `.omo/evidence/legal/sign-to-fly-wording-approval.md`. Any discrepancy here invalidates the legal integrity of the first round's signatures.
 4. **Local Migration Workspace**: Create a clean `.migration-state/` directory on the migration machine. Ensure the machine has the latest `node` (v20+) and `sqlcmd` utilities installed and can connect to both the legacy SQL Server and the target Azure Storage Account.
 
@@ -81,8 +81,8 @@ DNS cutover moves public traffic from the legacy hostname to the new bccweb2 Azu
 
 The detailed runbook (TTL strategy, SPF/DKIM/DMARC verification, manual-vs-Terraform CNAME path, validation script, rollback) lives at `docs/runbooks/dns-cutover.md`. The short version:
 
-1. **ACS Email Domain**: Execute the DNS verification in the registrar using the records provided by `terraform output acs_email_domain_verification_records` (SPF, DKIM, DKIM2 and DMARC, broken out by type). Publish DMARC with `p=none` for first cutover — tighten after one clean week. Confirm verification in the Azure Portal under the Communication Services resource.
-2. **CNAME Update**: Update the primary CNAME record (e.g. `bcc.flyparagliding.org.uk`) to point at `terraform output -raw production_hostname_target` (the stable, cert-bound SWA default hostname). If `var.dns_zone_name` is set, Terraform owns this record via `iac/dns.tf`; otherwise the operator does this at the registrar.
+1. **ACS Email Domain**: Execute the DNS verification in the registrar using the records provided by `terraform -chdir=iac output -var-file=env/<env>.tfvars acs_email_domain_verification_records` (SPF, DKIM, DKIM2 and DMARC, broken out by type). Publish DMARC with `p=none` for first cutover — tighten after one clean week. Confirm verification in the Azure Portal under the Communication Services resource.
+2. **CNAME Update**: Update the primary CNAME record (e.g. `bcc.flyparagliding.org.uk`) to point at `terraform -chdir=iac output -var-file=env/<env>.tfvars -raw production_hostname_target` (the stable, cert-bound SWA default hostname). If `var.dns_zone_name` is set, Terraform owns this record via `iac/dns.tf`; otherwise the operator does this at the registrar.
 3. **TTL Strategy**: 24h before cutover lower TTL to 300s; flip target at 300s; raise back to 3600s 24h after stable traffic. See `docs/runbooks/dns-cutover.md` for the full schedule.
 4. **Validation**: run `PROD_HOST=... SWA_HOST=... API_HOST=... ACS_EMAIL_DOMAIN=... bash scripts/iac/validate-dns.sh` and capture the output to `.omo/evidence/task-51-dns.txt`.
 
@@ -105,7 +105,7 @@ Decommissioning involves the permanent removal of legacy infrastructure and the 
 
 1. **Legacy App Shutdown**: Stop the IIS site or App Service hosting the legacy .NET application.
 2. **Database Archive**: Perform a final backup of the legacy SQL database and move the `.bak` file to long-term cold storage (e.g., Azure Archive Tier).
-3. **Infrastructure Cleanup**: Run `terraform destroy` on any legacy-specific infrastructure that was not migrated to bccweb2.
+3. **Infrastructure Cleanup**: Run `terraform -chdir=iac destroy -var-file=env/<env>.tfvars` on any legacy-specific infrastructure that was not migrated to bccweb2.
 
 Formal sign-off for decommissioning is required from the project owner (Matt White). This sign-off confirms that the new platform is stable, all historical data is safely archived, and the legacy system is no longer incurring costs or security risks.
 

@@ -122,9 +122,7 @@ Two GitHub Actions workflows deploy on push to `main`:
 - [`deploy-api.yml`](.github/workflows/deploy-api.yml) — Functions zip-deploy + `/api/health` smoke test
 - [`deploy-web.yml`](.github/workflows/deploy-web.yml) — SWA deploy + root smoke test
 
-Infrastructure is managed by Terraform in [`iac/`](iac/) — see
-[iac/README.md](iac/README.md) for bootstrap order (Terraform apply →
-`scripts/iac/seed-secrets.sh` → Function App deploy).
+Infrastructure is managed by Terraform in [`iac/`](iac/) — see [iac/README.md](iac/README.md) for bootstrap order (separate `iac/bootstrap/` config → root `terraform apply -var-file=env/<env>.tfvars`). Secrets are seeded declaratively via AzAPI data-plane writes (no shell script).
 
 There is **no auto-rollback**. A failed smoke test fails the workflow and
 leaves the deploy in place for operator investigation —

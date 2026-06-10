@@ -9,12 +9,12 @@ The two changes are independent in DNS but conventionally done in the same opera
 
 ## Pre-flight
 
-1. Run `terraform apply` in `iac/` with the production tfvars. This provisions the SWA and the ACS email domain, but does **not** by itself create the public CNAME unless `var.dns_zone_name` is set.
+1. Run `terraform -chdir=iac init -backend-config=env/prod.backend.hcl` and `terraform -chdir=iac apply -var-file=env/prod.tfvars`. This provisions the SWA and the ACS email domain, but does **not** by itself create the public CNAME unless `var.dns_zone_name` is set.
 2. Read the operator-facing outputs:
    ```bash
-   terraform -chdir=iac output acs_email_domain_verification_records
-   terraform -chdir=iac output -raw production_hostname_target
-   terraform -chdir=iac output -raw production_dns_managed_by_terraform
+   terraform -chdir=iac output -var-file=env/prod.tfvars acs_email_domain_verification_records
+   terraform -chdir=iac output -var-file=env/prod.tfvars -raw production_hostname_target
+   terraform -chdir=iac output -var-file=env/prod.tfvars -raw production_dns_managed_by_terraform
    ```
    `acs_email_domain_verification_records` exposes `domain_ownership`, `spf`, `dkim`, `dkim2`, `dmarc` (each `{ type, name, value, ttl }`) plus a `dmarc_recommended_policy_value` template starting with `v=DMARC1; p=none; ...`.
 3. `production_hostname_target` is the stable SWA default hostname (e.g. `nice-stone-0a1b2c3d4.azurestaticapps.net`). This is cert-bound and safe to use as a long-lived CNAME target.
@@ -32,13 +32,13 @@ DNS TTL controls how long resolvers cache the record. A high TTL is good for ste
 
 Apply the same TTL schedule to the ACS SPF / DKIM / DMARC TXT records during the email-verification window — if a wrong DKIM value gets published you want to be able to correct it in minutes, not hours.
 
-**Terraform path:** `iac/dns.tf` hard-codes `ttl = 3600`. To run the lower-TTL phase, manually `az network dns record-set cname update --ttl 300 ...` 24h before cutover, then re-run `terraform apply` after the stability window to let Terraform reassert 3600. Do **not** edit `ttl` in `dns.tf` during the cutover window — that would race with the operator's portal change.
+**Terraform path:** `iac/dns.tf` hard-codes `ttl = 3600`. To run the lower-TTL phase, manually `az network dns record-set cname update --ttl 300 ...` 24h before cutover, then re-run `terraform -chdir=iac apply -var-file=env/prod.tfvars` after the stability window to let Terraform reassert 3600. Do **not** edit `ttl` in `dns.tf` during the cutover window — that would race with the operator's portal change.
 
 **Manual / registrar path:** lower the TTL on the existing record at the registrar 24h before cutover, change the target at cutover, raise the TTL 24h after stable traffic. Same schedule.
 
 ## ACS email domain verification
 
-For each record returned by `terraform output acs_email_domain_verification_records`:
+For each record returned by `terraform -chdir=iac output -var-file=env/prod.tfvars acs_email_domain_verification_records`:
 
 1. **`domain_ownership`** — a TXT record proving you control the domain. Paste `name` and `value` at the registrar. Wait for the Azure portal under the Communication Services > Domains blade to mark the domain Verified.
 2. **`spf`** — TXT, value typically `v=spf1 include:azurecomm.net -all`. If the apex already has an SPF, merge the `include:azurecomm.net` clause rather than publishing a second SPF record (only one v=spf1 record is allowed per host).
@@ -58,22 +58,21 @@ For each record returned by `terraform output acs_email_domain_verification_reco
 ### Terraform-managed path (var.dns_zone_name set)
 
 ```bash
-cd iac/
-terraform plan -out=plan.binary -var-file=terraform.tfvars
-terraform apply plan.binary
+terraform -chdir=iac init -backend-config=env/prod.backend.hcl
+terraform -chdir=iac apply -var-file=env/prod.tfvars
 ```
 
 The plan should show one `azurerm_dns_cname_record.production[0]` to add. After apply, the record exists in the Azure DNS zone with TTL 3600. To run the T-24h lower-TTL phase, run:
 
 ```bash
 az network dns record-set cname update \
-  --resource-group "$(terraform output -raw resource_group_name)" \
+  --resource-group "$(terraform -chdir=iac output -var-file=env/prod.tfvars -raw resource_group_name)" \
   --zone-name "<dns_zone_name>" \
   --name "<relative-record-name>" \
   --set ttl=300
 ```
 
-24h after stable traffic, run `terraform apply` again to let Terraform reset the TTL to 3600.
+24h after stable traffic, run `terraform -chdir=iac apply -var-file=env/prod.tfvars` again to let Terraform reset the TTL to 3600.
 
 ### Manual / registrar path (var.dns_zone_name empty)
 
@@ -82,7 +81,7 @@ When DNS is NOT hosted in Azure (e.g. domain at Gandi, Cloudflare, Namecheap):
 1. Log in to the registrar's DNS console.
 2. Locate the existing CNAME (or A record) for `<production_hostname>`.
 3. 24h before cutover: lower TTL to 300s. Do not change the target yet.
-4. At cutover: change the target to the value returned by `terraform output -raw production_hostname_target`. Keep TTL at 300s.
+4. At cutover: change the target to the value returned by `terraform -chdir=iac output -var-file=env/prod.tfvars -raw production_hostname_target`. Keep TTL at 300s.
 5. Wait for propagation. Run `bash scripts/iac/validate-dns.sh` (see below) to verify.
 6. After 24h of stable traffic and clean Application Insights metrics, raise TTL back to 3600s.
 
@@ -94,7 +93,7 @@ Run the automated smoke script:
 
 ```bash
 PROD_HOST=bcc.flyparagliding.org.uk \
-SWA_HOST="$(terraform -chdir=iac output -raw production_hostname_target)" \
+SWA_HOST="$(terraform -chdir=iac output -var-file=env/prod.tfvars -raw production_hostname_target)" \
 API_HOST=func-bccweb-prod.azurewebsites.net \
 ACS_EMAIL_DOMAIN=mail.flyparagliding.org.uk \
   bash scripts/iac/validate-dns.sh

@@ -1,75 +1,82 @@
-# iac — Terraform infrastructure
+# iac — Terraform Infrastructure
 
-Manages all Azure resources for bccweb2: resource group, storage, Function App,
-Static Web App, ACS email, and Key Vault.
+This directory manages the Azure resources for bccweb2 using a multi-stamp, declarative approach. It covers the resource group, storage, Function App, Static Web App, ACS email, and Key Vault.
 
-Providers: `Azure/azapi ~> 2.8`, `hashicorp/azurerm ~> 3.0`.
-Terraform: `>= 1.10` (pinned to 1.10.5 via `.mise.toml`).
+All infrastructure is provisioned using **AzAPI v2.10** with HCL-native bodies.
 
-## Bootstrap order (first deploy)
+## Layout
 
-```
-1. terraform init
-2. terraform apply
-3. scripts/iac/seed-secrets.sh
-4. Deploy Function App package (CI/CD or az functionapp deployment)
-```
+- `bootstrap/`: One-shot config to provision the remote state storage account and container.
+- `env/`: Environment-specific configuration files (`<env>.tfvars` and `<env>.backend.hcl`).
+- `modules/stamp/`: The core infrastructure module instantiated once per environment.
+- `tests/`: Automated tests (unit and integration).
+- `main.tf`: Root assembly that instantiates the stamp module.
 
-Step 3 must run after step 2 because it reads `terraform output -raw key_vault_name`
-to locate the vault, then writes `jwt-secret` using the Azure CLI. The Function App
-reads the secret at startup via a `@Microsoft.KeyVault(...)` reference resolved
-through its system-assigned managed identity. If the secret is absent at startup
-the function app will fail to start — always run the seed script before deploying.
+## First-time Setup
 
-## Local development
+Follow these steps to provision a new environment from scratch.
 
-Copy `apps/api/local.settings.example.json` to `apps/api/local.settings.json` and
-set `JWT_SECRET` to any sufficiently long random string. The local Functions host
-reads `local.settings.json` directly; Key Vault is not used in local dev.
+1.  **Authenticate**: Run `az login` to set the subscription context.
+2.  **Bootstrap Remote State**:
+    See [iac/bootstrap/README.md](bootstrap/README.md) for detailed steps.
+    ```bash
+    terraform -chdir=iac/bootstrap init && \
+    terraform -chdir=iac/bootstrap apply -var tfstate_storage_account_name=<unique-global-name>
+    ```
+3.  **Prepare Environment Config**:
+    Populate `iac/env/<env>.backend.hcl` using the outputs from the bootstrap step.
+    Create your local variables file by copying the template:
+    ```bash
+    cp iac/env/prod.tfvars.example iac/env/prod.tfvars
+    ```
+    Open `iac/env/prod.tfvars` and fill in the required placeholders (marked `# REQUIRED`).
+4.  **Set Sensitive Environment Variables**:
+    Sensitive values like PureTrack credentials should be set as environment variables to avoid committing them to disk.
+    ```bash
+    export TF_VAR_puretrack_api_key="your-key"
+    export TF_VAR_puretrack_password="your-password"
+    # ... and others as defined in prod.tfvars.example
+    ```
+5.  **Initialize Root Configuration**:
+    Connect the root configuration to the remote backend for your specific environment.
+    ```bash
+    terraform -chdir=iac init -backend-config=env/prod.backend.hcl
+    ```
+6.  **Apply Infrastructure**:
+    ```bash
+    terraform -chdir=iac apply -var-file=env/prod.tfvars
+    ```
+    **Note on RBAC Propagation**: On the very first apply, you might encounter a `403 Forbidden` error when writing secrets to Key Vault. This is caused by Azure RBAC propagation lag. Simply re-run the `apply` command to resolve it.
 
-## Prerequisites
+## Secret Rotation
 
-- `az login` with an account that has Contributor on the subscription (for apply)
-  and Key Vault Secrets Officer on the vault (for `seed-secrets.sh`)
-- `ARM_SUBSCRIPTION_ID` environment variable (required by the azurerm provider in
-  some environments; the Azure CLI sets it automatically when there is one
-  subscription in context)
+Secrets are managed declaratively. Rotating them involves updating the version variables in your `tfvars` file and re-applying.
 
-## Variables
+-   **JWT Secret**: Bump the `jwt_secret_version` in `env/<env>.tfvars` (e.g., `"1"` → `"2"`). Terraform will generate a new random password and update Key Vault.
+-   **ACS Connection String**: Rotate the access key in the Azure portal, then bump `acs_secret_version` in `env/<env>.tfvars`. Terraform will fetch the new key and update Key Vault.
+-   **App Insights Connection String**: This string does not rotate.
 
-Copy `terraform.tfvars.example` to `terraform.tfvars` and fill in values.
-Sensitive variables (`round_brief_emails`, `puretrack_*`) are better supplied via
-`TF_VAR_*` environment variables in CI rather than committed to `terraform.tfvars`.
+## Adding a New Stamp
 
-`jwt_secret` is **not** a Terraform variable — it is seeded out-of-band by
-`scripts/iac/seed-secrets.sh` after the first apply.
+To add a new environment (e.g., `staging`):
 
-## Outputs
+1.  Create `iac/env/staging.tfvars` and `iac/env/staging.backend.hcl`.
+2.  Run `terraform -chdir=iac init -backend-config=env/staging.backend.hcl`.
+3.  Run `terraform -chdir=iac apply -var-file=env/staging.tfvars`.
 
-| Output | Description |
-|---|---|
-| `swa_url` | Public URL of the Static Web App |
-| `swa_api_key` | SWA deployment token (sensitive) |
-| `function_app_name` | Function App name (used by CI/CD) |
-| `storage_account_name` | Storage account name |
-| `resource_group_name` | Resource group name |
-| `key_vault_name` | Key Vault name (used by seed-secrets.sh) |
-| `acs_domain_verification_records` | DNS records to add at your registrar |
+State is isolated per environment within the bootstrap storage account.
 
-## Secret rotation (jwt-secret)
+## Tests
 
-```bash
-# Delete the current version — the function app will fail until the new value
-# is in place; rotate during a maintenance window or deploy in blue-green.
-az keyvault secret delete \
-  --vault-name "$(terraform -chdir=iac output -raw key_vault_name)" \
-  --name jwt-secret
+-   **Unit Tests**: Mocked provider tests that run quickly without Azure access.
+    ```bash
+    terraform -chdir=iac test -test-directory=tests/unit
+    ```
+-   **Integration Tests**: Plan-only tests that run against a real subscription.
+    ```bash
+    terraform -chdir=iac test -test-directory=tests/integration -var-file=env/prod.tfvars
+    ```
 
-# Re-run seed script to generate a new value
-scripts/iac/seed-secrets.sh
+## Provider Note
 
-# Restart the Function App to pick up the new secret
-az functionapp restart \
-  --name "$(terraform -chdir=iac output -raw function_app_name)" \
-  --resource-group "$(terraform -chdir=iac output -raw resource_group_name)"
-```
+This project uses **AzAPI v2.10** for all resource management. The subscription ID is derived automatically from your active `az login` context.

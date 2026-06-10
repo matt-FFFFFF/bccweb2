@@ -176,11 +176,9 @@ in `src/bcc-theme.css`.
 
 Terraform manages: RG, storage, Function App, SWA, ACS, Key Vault.
 
-**Bootstrap order (first deploy)**: `terraform init` → `terraform apply` →
-`scripts/iac/seed-secrets.sh` (writes `jwt-secret` to Key Vault) → deploy
-Function App. **`jwt-secret` is NOT a Terraform variable** — Function App reads
-it at startup via `@Microsoft.KeyVault(...)` reference through its managed
-identity; if missing, the app fails to start.
+**Bootstrap order (first deploy)**: `terraform -chdir=iac/bootstrap init && terraform -chdir=iac/bootstrap apply` (provisions tfstate storage) → populate `iac/env/<env>.backend.hcl` from bootstrap outputs → `terraform -chdir=iac init -backend-config=env/<env>.backend.hcl` → `terraform -chdir=iac apply -var-file=env/<env>.tfvars`. KV secrets are seeded declaratively via AzAPI data-plane writes; first-apply may 403 on RBAC propagation — re-apply to recover.
+
+`jwt-secret` is generated declaratively (ephemeral `random_password` → KV write-only) and rotated via the `jwt_secret_version` per-stamp variable.
 
 CI: `.github/workflows/`
 
