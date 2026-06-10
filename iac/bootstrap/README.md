@@ -81,6 +81,98 @@ supplied at `init` time from this file.
 | `storage_account_name` | Name of the storage account hosting tfstate blobs. |
 | `container_name` | Name of the tfstate blob container. |
 | `backend_config_hcl` | Copy-pasteable HCL for `iac/env/<env>.backend.hcl`. |
+| `terraform_umi_client_id` | App (client) ID of the Terraform UMI. Pass as `AZURE_CLIENT_ID` to `azure/login@v2`. Not a secret — OIDC binds it to the federated subject. |
+| `terraform_umi_principal_id` | Object (principal) ID of the Terraform UMI. For downstream RBAC. |
+| `terraform_umi_resource_id` | Full Azure resource ID of the Terraform UMI. |
+| `tenant_id` | Azure AD tenant ID. Pass as `AZURE_TENANT_ID`. |
+| `subscription_id` | Azure subscription ID (also the scope of the UMI's Owner role assignment). Pass as `AZURE_SUBSCRIPTION_ID`. |
+| `github_actions_setup` | Operator runbook (multi-line). Run `terraform -chdir=iac/bootstrap output -raw github_actions_setup` to print. |
+
+## GitHub Actions OIDC setup
+
+The bootstrap also provisions a **single user-assigned managed identity (UMI)**
+that GitHub Actions assumes via OIDC — no client secrets stored anywhere. One
+federated identity credential is created per GitHub environment listed in
+`var.github_environments` (default `["prod"]`), scoped to
+`repo:<github_repo>:environment:<env>`.
+
+**Security note**: The UMI is granted **Owner at subscription scope** (not
+just at the bootstrap RG) because Terraform must create per-stamp resource
+groups, role assignments, and Key Vault data-plane permissions across the
+subscription. Restrict who can edit `github_environments` and `github_repo` —
+adding a value here grants that GitHub environment subscription-Owner via
+OIDC. If you ever need tighter scoping, split into per-env UMIs and narrow
+each one's role assignment.
+
+### Adding a new GitHub environment
+
+```sh
+# Option A: bump terraform.tfvars (preferred — checked in).
+echo 'github_environments = ["prod", "dev"]' >> iac/bootstrap/terraform.tfvars
+
+# Option B: one-off override.
+terraform -chdir=iac/bootstrap apply \
+  -var 'github_environments=["prod","dev"]' \
+  -var 'tfstate_storage_account_name=<existing-name>'
+```
+
+Then create a matching GitHub environment (Settings → Environments → New
+environment) with the same name. The federated subject claim is
+`repo:<owner/repo>:environment:<name>`, so the names must match exactly
+(case-sensitive).
+
+### Populate GitHub secrets
+
+Print the three values:
+
+```sh
+terraform -chdir=iac/bootstrap output -raw terraform_umi_client_id
+terraform -chdir=iac/bootstrap output -raw tenant_id
+terraform -chdir=iac/bootstrap output -raw subscription_id
+```
+
+Add them as **repo-level** secrets (or environment-level if you prefer):
+
+| Secret | Value |
+|---|---|
+| `AZURE_CLIENT_ID` | `terraform_umi_client_id` output |
+| `AZURE_TENANT_ID` | `tenant_id` output |
+| `AZURE_SUBSCRIPTION_ID` | `subscription_id` output |
+
+Repo-level is fine when every environment shares the same UMI (current
+design). Use environment-level if you split into per-env UMIs later.
+
+### Workflow requirements
+
+Every job that runs `az` / Terraform must:
+
+```yaml
+permissions:
+  id-token: write   # required for OIDC token issuance
+  contents: read
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    environment: prod   # must match a federated env name
+    steps:
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+```
+
+Without `environment: <name>`, GitHub issues an OIDC token whose `sub` claim
+is `repo:<owner/repo>:ref:refs/heads/<branch>` (or similar), which no
+federated credential here trusts — `azure/login` will fail with a 400.
+
+Print the full operator runbook (including the resolved client-id, tenant-id,
+subscription-id, and the list of currently-federated environments):
+
+```sh
+terraform -chdir=iac/bootstrap output -raw github_actions_setup
+```
 
 ## Why local state?
 

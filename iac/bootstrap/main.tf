@@ -19,10 +19,16 @@ terraform {
       source  = "Azure/azapi"
       version = "~> 2.10"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = "~> 3.6"
+    }
   }
 }
 
 provider "azapi" {}
+
+data "azapi_client_config" "current" {}
 
 # ─── Bootstrap resource group ────────────────────────────────────────────────
 
@@ -126,4 +132,58 @@ resource "azapi_resource" "tfstate_sa_lock" {
   }
 
   depends_on = [azapi_resource.tfstate_sa]
+}
+
+# ─── Terraform UMI + GitHub OIDC federated credentials ───────────────────────
+#
+# Single user-assigned managed identity that GitHub Actions assumes via OIDC
+# (no client secrets stored anywhere). One federated credential per GitHub
+# environment in `var.github_environments`, scoped to
+# `repo:<owner/repo>:environment:<env>`. The UMI is granted Owner at
+# subscription scope (sub-scope, not RG) so a single identity can manage the
+# bootstrap RG + every per-stamp RG the root config creates.
+
+resource "azapi_resource" "tf_umi" {
+  type      = "Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31"
+  name      = var.terraform_umi_name
+  parent_id = azapi_resource.bootstrap_rg.id
+  location  = var.location
+
+  body = {}
+
+  response_export_values = ["id", "properties.principalId", "properties.clientId"]
+}
+
+resource "azapi_resource" "tf_umi_fed_cred" {
+  for_each = toset(var.github_environments)
+
+  type      = "Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31"
+  name      = "github-${each.key}"
+  parent_id = azapi_resource.tf_umi.id
+
+  body = {
+    properties = {
+      issuer    = "https://token.actions.githubusercontent.com"
+      subject   = "repo:${var.github_repo}:environment:${each.key}"
+      audiences = ["api://AzureADTokenExchange"]
+    }
+  }
+}
+
+resource "random_uuid" "tf_owner" {}
+
+# Owner role definition GUID is a well-known constant — see
+# https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#owner
+resource "azapi_resource" "tf_owner_role" {
+  type      = "Microsoft.Authorization/roleAssignments@2022-04-01"
+  name      = random_uuid.tf_owner.result
+  parent_id = "/subscriptions/${data.azapi_client_config.current.subscription_id}"
+
+  body = {
+    properties = {
+      roleDefinitionId = "/subscriptions/${data.azapi_client_config.current.subscription_id}/providers/Microsoft.Authorization/roleDefinitions/8e3af657-a8ff-443c-a75c-2fe8c4bcb635"
+      principalId      = azapi_resource.tf_umi.output.properties.principalId
+      principalType    = "ServicePrincipal"
+    }
+  }
 }

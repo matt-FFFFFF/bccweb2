@@ -88,4 +88,5 @@ module "stamp" {
   app_insights_id                = azapi_resource.ai.id
   app_insights_connection_string = azapi_resource.ai.output.properties.ConnectionString
   terraform_principal_object_id  = data.azapi_client_config.current.object_id
+  terraform_principal_type       = "ServicePrincipal"
 }

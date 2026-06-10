@@ -1,6 +1,5 @@
 # First-apply may 403 on KV data-plane writes due to RBAC propagation lag. Re-apply to recover. data.azapi_client_config.current is module-local (declared here, reused by dns.tf in the same module).
-# kv_admin_role assumes a user-context `az login` apply (`principalType = "User"`).
-# CI/service-principal applies need a future principalType switch to "ServicePrincipal".
+# kv_admin_role's principalType is switchable via var.terraform_principal_type — "User" for local az login applies, "ServicePrincipal" for UMI/SP applies (CI default).
 
 data "azapi_client_config" "current" {}
 
@@ -39,7 +38,7 @@ resource "azapi_resource" "kv_admin_role" {
     properties = {
       roleDefinitionId = "/subscriptions/${data.azapi_client_config.current.subscription_id}/providers/Microsoft.Authorization/roleDefinitions/b86a8fe4-44ce-4948-aee5-eccb2c155cd7"
       principalId      = var.terraform_principal_object_id
-      principalType    = "User"
+      principalType    = var.terraform_principal_type
     }
   }
 }

@@ -30,3 +30,75 @@ output "backend_config_hcl" {
     use_azuread_auth     = true
   EOT
 }
+
+# ─── Terraform UMI + GitHub OIDC outputs ─────────────────────────────────────
+#
+# `terraform_umi_client_id` is the appId of the UMI and is the value GitHub
+# Actions passes as `client-id` to `azure/login@v2`. It is not a secret —
+# OIDC binds it to the federated subject claim. `terraform_umi_principal_id`
+# is the UMI's object/principal ID, useful for downstream RBAC. The resource
+# ID is handy for `az identity ...` commands.
+
+output "terraform_umi_client_id" {
+  description = "Application (client) ID of the Terraform UMI. Pass as AZURE_CLIENT_ID to azure/login@v2 (not a secret — OIDC binds it to the federated subject)."
+  value       = azapi_resource.tf_umi.output.properties.clientId
+}
+
+output "terraform_umi_principal_id" {
+  description = "Object (principal) ID of the Terraform UMI. Used for downstream RBAC role assignments."
+  value       = azapi_resource.tf_umi.output.properties.principalId
+}
+
+output "terraform_umi_resource_id" {
+  description = "Full Azure resource ID of the Terraform UMI."
+  value       = azapi_resource.tf_umi.id
+}
+
+output "tenant_id" {
+  description = "Azure AD tenant ID. Pass as AZURE_TENANT_ID to azure/login@v2."
+  value       = data.azapi_client_config.current.tenant_id
+}
+
+output "subscription_id" {
+  description = "Azure subscription ID that owns the bootstrap RG and is the Owner-role scope for the Terraform UMI. Pass as AZURE_SUBSCRIPTION_ID to azure/login@v2."
+  value       = data.azapi_client_config.current.subscription_id
+}
+
+output "github_actions_setup" {
+  description = "Copy-pasteable operator runbook for wiring GitHub Actions to the Terraform UMI via OIDC. None of these values are secret."
+  value       = <<-EOT
+    GitHub Actions OIDC setup for the Terraform UMI
+    ===============================================
+
+    1. Set these as GitHub repo-level (or environment-level) secrets/variables:
+         AZURE_CLIENT_ID       = ${azapi_resource.tf_umi.output.properties.clientId}
+         AZURE_TENANT_ID       = ${data.azapi_client_config.current.tenant_id}
+         AZURE_SUBSCRIPTION_ID = ${data.azapi_client_config.current.subscription_id}
+
+       Repo-level is fine when every environment shares the same UMI.
+       Use environment-level if you ever provision per-env UMIs in future.
+
+    2. Federated credentials exist for these GitHub environments (subject
+       claim repo:${var.github_repo}:environment:<env>):
+%{for e in var.github_environments~}
+         - ${e}
+%{endfor~}
+
+       To add another env: append to `github_environments` in
+       terraform.tfvars (or pass `-var 'github_environments=[...]'`) and
+       re-run `terraform -chdir=iac/bootstrap apply`.
+
+    3. Each workflow job that needs Azure access MUST set:
+         permissions:
+           id-token: write   # required for OIDC
+           contents: read
+         environment: <env-name>  # e.g. prod — must match a federated env
+
+    4. Example azure/login@v2 step:
+         - uses: azure/login@v2
+           with:
+             client-id: $${{ secrets.AZURE_CLIENT_ID }}
+             tenant-id: $${{ secrets.AZURE_TENANT_ID }}
+             subscription-id: $${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  EOT
+}

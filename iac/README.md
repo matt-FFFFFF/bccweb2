@@ -37,6 +37,16 @@ Follow these steps to provision a new environment from scratch.
     export TF_VAR_puretrack_password="your-password"
     # ... and others as defined in prod.tfvars.example
     ```
+
+    **Principal type**: `terraform_principal_type` defaults to `"ServicePrincipal"` because CI (GitHub Actions → Terraform UMI via OIDC, see [bootstrap/README.md](bootstrap/README.md#github-actions-oidc-setup)) is the primary apply path. If you are applying locally as yourself (`az login` as a user), override to `"User"` so the Key Vault Secrets Officer role assignment uses the correct principal type:
+
+    ```bash
+    # In iac/env/prod.tfvars:
+    terraform_principal_type = "User"
+
+    # Or as a one-off override:
+    terraform -chdir=iac apply -var-file=env/prod.tfvars -var 'terraform_principal_type=User'
+    ```
 5.  **Initialize Root Configuration**:
     Connect the root configuration to the remote backend for your specific environment.
     ```bash

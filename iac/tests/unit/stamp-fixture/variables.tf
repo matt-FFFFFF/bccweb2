@@ -138,3 +138,14 @@ variable "terraform_principal_object_id" {
   type        = string
   nullable    = false
 }
+
+variable "terraform_principal_type" {
+  description = "Principal type for the Terraform-running identity (User for local az login; ServicePrincipal for UMI/SP via OIDC or client secret)."
+  type        = string
+  default     = "ServicePrincipal"
+
+  validation {
+    condition     = contains(["User", "ServicePrincipal"], var.terraform_principal_type)
+    error_message = "terraform_principal_type must be either \"User\" or \"ServicePrincipal\"."
+  }
+}
