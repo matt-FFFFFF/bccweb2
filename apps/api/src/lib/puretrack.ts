@@ -20,6 +20,13 @@ import { randomUUID } from "crypto";
 import type { Round, Team, PureTrackGroup } from "@bccweb/types";
 import { writePrivateBlob } from "./blob.js";
 
+/** Outbound PureTrack calls disabled when PURETRACK_ENABLED env equals the
+ *  literal string "false". Any other value (including unset) preserves
+ *  production behavior. Fail-open by default. */
+function isPureTrackEnabled(): boolean {
+  return process.env["PURETRACK_ENABLED"] !== "false";
+}
+
 const BASE_URL = "https://puretrack.io";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -275,6 +282,11 @@ export async function createPureTrackGroups(
   pilotPureTrackIds: Map<string, number>,
   options: CreatePureTrackGroupsOptions = {}
 ): Promise<PureTrackRoundResult | null> {
+  if (!isPureTrackEnabled()) {
+    console.log("[puretrack] skipped: PURETRACK_ENABLED=false");
+    return null;
+  }
+
   const teamResults: PureTrackRoundResult["teams"] = [];
   const allPureTrackIds: number[] = [];
   const allBccPilotIds: string[] = [];
