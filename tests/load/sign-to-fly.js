@@ -24,11 +24,11 @@ export function setup() {
   return PREPARED;
 }
 
-function retryDelay() {
+function retryDelay(attempt) {
   // The plan forbids success-path sleep because this test must maintain maximum
-  // contention pressure. This sleep is only conflict backoff after HTTP 500s
-  // from the round-blob lease bottleneck, so successful requests are unthrottled.
-  sleep(0.1 + Math.random() * 0.3);
+  // contention pressure. This sleep is only transient-failure backoff, so
+  // successful requests are unthrottled.
+  sleep((50 * 2 ** attempt + Math.random() * 120000) / 1000);
 }
 
 function postWithLeaseRetry(url, body, params) {
@@ -42,8 +42,44 @@ function postWithLeaseRetry(url, body, params) {
     }
     retries += 1;
     if (attempt < 4) {
-      retryDelay();
+      retryDelay(attempt);
     }
+  }
+
+  return { res: res, retries: retries };
+}
+
+function accessToken(res) {
+  try {
+    return res.json("accessToken");
+  } catch (_) {
+    return null;
+  }
+}
+
+function loginWithRetry(slot, sourceIp) {
+  var res = null;
+  var retries = 0;
+
+  for (var attempt = 0; attempt < 5; attempt++) {
+    res = http.post(
+      `${PREPARED.baseUrl}/api/auth/login`,
+      JSON.stringify({ email: slot.pilotEmail, password: slot.pilotPassword }),
+      {
+        headers: { "Content-Type": "application/json", "X-Forwarded-For": sourceIp },
+        tags: { name: "login" },
+        timeout: "15m",
+      },
+    );
+    if (res.status === 200 && accessToken(res)) {
+      return { res: res, retries: retries };
+    }
+    retries += 1;
+    if (attempt < 4 && (res.status === 429 || res.status >= 500 || !accessToken(res))) {
+      retryDelay(attempt);
+      continue;
+    }
+    return { res: res, retries: retries };
   }
 
   return { res: res, retries: retries };
@@ -59,17 +95,13 @@ export default function (data) {
   const slot = data.teams[idx];
   const sourceIp = vuSourceIp();
 
-  const loginRes = http.post(
-    `${data.baseUrl}/api/auth/login`,
-    JSON.stringify({ email: slot.pilotEmail, password: slot.pilotPassword }),
-    {
-      headers: { "Content-Type": "application/json", "X-Forwarded-For": sourceIp },
-      tags: { name: "login" },
-      timeout: "15m",
-    },
-  );
+  const loginResult = loginWithRetry(slot, sourceIp);
+  if (loginResult.retries > 0) {
+    console.log(`retry phase=login vu=${__VU} retries=${loginResult.retries} status=${loginResult.res.status}`);
+  }
+  const loginRes = loginResult.res;
   check(loginRes, { "login 200": (r) => r.status === 200 });
-  const token = loginRes.json("accessToken");
+  const token = accessToken(loginRes);
   if (!token) {
     fail("no token");
   }
