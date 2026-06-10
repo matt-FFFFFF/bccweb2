@@ -79,13 +79,20 @@ export interface RateLimitOpts {
   endpoint: string;
   capacity: number;
   refillPerMin: number;
+  /** When provided, used as the bucket key instead of the request IP.
+   *  Use for authenticated endpoints where per-identity limiting is desired
+   *  (e.g., register-self uses caller.pilotId). When absent, falls back to IP.
+   *  This fixes the shared-NAT problem where multiple pilots on the same
+   *  network (same hill, same router) would share a single IP-keyed budget. */
+  identityKey?: string;
 }
 
 /**
- * Token-bucket rate limiter keyed by (IP, endpoint).
+ * Token-bucket rate limiter keyed by (identityKey ?? IP, endpoint).
  *
  * Source IP is read from x-forwarded-for (first entry) or x-azure-clientip.
- * Falls back to "unknown" if neither header is present.
+ * Falls back to "unknown" if neither header is present. When opts.identityKey
+ * is supplied, it replaces the IP component of the bucket key.
  *
  * Throws HttpError(429, "RATE_LIMITED") with a Retry-After header when the
  * bucket is exhausted. Emits [METRIC] auth.rateLimit.hit on every rejection.
@@ -96,7 +103,8 @@ export function rateLimit(req: HttpRequest, opts: RateLimitOpts): void {
     req.headers.get("x-azure-clientip") ??
     "unknown";
 
-  const key = `${ip}:${opts.endpoint}`;
+  const keyPart = opts.identityKey ?? ip;
+  const key = `${keyPart}:${opts.endpoint}`;
   let bucket = _buckets.get(key);
   if (!bucket) {
     bucket = new TokenBucket(opts.capacity, opts.refillPerMin);

@@ -105,6 +105,25 @@ describe("rateLimit", () => {
     expect(caught).toBeInstanceOf(HttpError);
     expect(() => rateLimit(makeReq("10.0.0.4"), opts)).not.toThrow();
   });
+
+  test("identityKey isolates buckets between two identities on same IP", () => {
+    resetAllBuckets();
+    const req = makeReq("10.0.0.5");
+    const opts = { endpoint: "round-register", capacity: 1, refillPerMin: 0, identityKey: "pilot-a" };
+    const optsB = { ...opts, identityKey: "pilot-b" };
+    rateLimit(req, opts);
+    rateLimit(req, optsB);
+    expect(() => rateLimit(req, opts)).toThrow();
+    expect(() => rateLimit(req, optsB)).toThrow();
+  });
+
+  test("absent identityKey preserves IP-keyed behavior", () => {
+    resetAllBuckets();
+    const opts = { endpoint: "round-register", capacity: 1, refillPerMin: 0 };
+    rateLimit(makeReq("10.0.0.6"), opts);
+    expect(() => rateLimit(makeReq("10.0.0.6"), opts)).toThrow();
+    expect(() => rateLimit(makeReq("10.0.0.7"), opts)).not.toThrow();
+  });
 });
 
 // ─── Account lockout helpers ──────────────────────────────────────────────────

@@ -31,17 +31,30 @@ interface PilotClubForSeason {
 
 const OPEN_STATUSES = new Set<Round["status"]>(["Proposed", "Confirmed"]);
 
+function ipFallback(req: HttpRequest): string {
+  return (
+    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
+    req.headers.get("x-azure-clientip") ??
+    "unknown"
+  );
+}
+
 async function registerSelf(
   req: HttpRequest,
   _ctx: InvocationContext,
 ): Promise<HttpResponseInit> {
-  rateLimit(req, { endpoint: "round-register", capacity: 10, refillPerMin: 10 });
-
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!caller.roles.includes("Pilot") || !caller.pilotId) {
     throw new HttpError(403, "NOT_A_PILOT");
   }
+
+  rateLimit(req, {
+    endpoint: "round-register",
+    capacity: 10,
+    refillPerMin: 10,
+    identityKey: caller.pilotId ?? `anon:${ipFallback(req)}`,
+  });
 
   const roundId = req.params["roundId"];
   if (!roundId) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
@@ -82,13 +95,18 @@ async function unregisterSelf(
   req: HttpRequest,
   _ctx: InvocationContext,
 ): Promise<HttpResponseInit> {
-  rateLimit(req, { endpoint: "round-register", capacity: 10, refillPerMin: 10 });
-
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!caller.roles.includes("Pilot") || !caller.pilotId) {
     throw new HttpError(403, "NOT_A_PILOT");
   }
+
+  rateLimit(req, {
+    endpoint: "round-register",
+    capacity: 10,
+    refillPerMin: 10,
+    identityKey: caller.pilotId ?? `anon:${ipFallback(req)}`,
+  });
 
   const roundId = req.params["roundId"];
   if (!roundId) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");

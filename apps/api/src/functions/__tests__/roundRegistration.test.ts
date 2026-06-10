@@ -128,6 +128,45 @@ describe("round self-registration endpoints", () => {
     expect(res.status).toBe(403);
     expect((res.jsonBody as { code: string }).code).toBe("NOT_A_PILOT");
   });
+
+  it("two pilots from same IP can register back-to-back (per-pilot rate-limit bucket)", async () => {
+    const ctx = await seedRegistrationRound();
+
+    const secondPilot = await makePilot({ firstName: "Bob", lastName: "Pilot", clubId: ctx.clubId });
+    secondPilot.seasonClubs = [{ seasonYear: 2026, clubId: ctx.clubId, clubName: "Test Club" }];
+    await writePrivateJson(`pilots/${secondPilot.id}.json`, secondPilot);
+    const { user: secondUser } = await makeUser({
+      roles: ["Pilot"],
+      pilotId: secondPilot.id,
+      clubId: ctx.clubId,
+    });
+
+    const sharedIp = "203.0.113.42";
+
+    const first = await invoke(
+      "registerSelfForRound",
+      makeAuthRequest(ctx.userId, ctx.email, {
+        method: "POST",
+        params: { roundId: ctx.round.id },
+        body: { teamId: ctx.team.id, preferredPlace: 1 },
+        headers: { "x-forwarded-for": sharedIp },
+      }),
+    );
+
+    const second = await invoke(
+      "registerSelfForRound",
+      makeAuthRequest(secondUser.id, secondUser.email, {
+        method: "POST",
+        params: { roundId: ctx.round.id },
+        body: { teamId: ctx.team.id, preferredPlace: 2 },
+        headers: { "x-forwarded-for": sharedIp },
+      }),
+    );
+
+    expect(first.status).toBe(200);
+    expect(second.status).toBe(200);
+    expect((second.jsonBody as { place: number }).place).toBe(2);
+  });
 });
 
 interface SlotSeed {
