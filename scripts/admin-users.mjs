@@ -29,13 +29,34 @@ import { stdin, stdout, exit } from "node:process";
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-const BLOB_CS = process.env.BLOB_CONNECTION_STRING;
+const AZURITE_DEV_CS =
+  "DefaultEndpointsProtocol=http;" +
+  "AccountName=devstoreaccount1;" +
+  "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IkvFpEgBm+Nwj4gEWH9A3RoLOHKvPVZLqGw==;" +
+  "BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;";
+
+// If env points BlobEndpoint at the docker-compose hostname `azurite`, rewrite
+// it to 127.0.0.1 so the script works when run from the host shell.
+function rewriteDockerHost(cs) {
+  return cs.replace(
+    /BlobEndpoint=http:\/\/azurite:(\d+)/g,
+    "BlobEndpoint=http://127.0.0.1:$1",
+  );
+}
+
+const RAW_BLOB_CS = process.env.BLOB_CONNECTION_STRING ?? AZURITE_DEV_CS;
+const BLOB_CS = rewriteDockerHost(RAW_BLOB_CS);
 const PRIVATE_CONTAINER = process.env.BLOB_PRIVATE_CONTAINER_NAME ?? "data-private";
 const BCRYPT_COST = 12;
 
-if (!BLOB_CS) {
-  console.error("Error: BLOB_CONNECTION_STRING environment variable is required.");
-  exit(1);
+if (!process.env.BLOB_CONNECTION_STRING) {
+  console.error(
+    "Note: BLOB_CONNECTION_STRING not set — using local Azurite (127.0.0.1:10000).",
+  );
+} else if (RAW_BLOB_CS !== BLOB_CS) {
+  console.error(
+    "Note: rewrote BlobEndpoint host `azurite` → `127.0.0.1` for host-shell use.",
+  );
 }
 
 const blobService = BlobServiceClient.fromConnectionString(BLOB_CS);

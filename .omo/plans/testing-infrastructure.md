@@ -2069,7 +2069,7 @@ Max Concurrent: 5 (Waves 1 & 2)
 >
 > **Do NOT auto-proceed after verification. Wait for user's explicit approval before marking work complete.**
 
-- [ ] F1. **Plan Compliance Audit** — `oracle`
+- [x] F1. **Plan Compliance Audit** — `oracle`
   Read the plan end-to-end. For each "Must Have": verify implementation exists (read file, curl endpoint, run command). For each "Must NOT Have": search codebase for forbidden patterns — reject with file:line if found. Check evidence files exist in `.omo/evidence/`. Compare deliverables against plan.
 
   **Acceptance Criteria**:
@@ -2080,7 +2080,7 @@ Max Concurrent: 5 (Waves 1 & 2)
 
   Output: `Must Have [N/N] | Must NOT Have [N/N] | Tasks [N/N] | VERDICT: APPROVE/REJECT`
 
-- [ ] F2. **Code Quality Review** — `unspecified-high`
+- [x] F2. **Code Quality Review** — `unspecified-high`
   Run `make typecheck` + `make test` + privacy scan. Review all changed files for: `as any`/`@ts-ignore`, empty catches, `console.log` left in prod paths, commented-out code, unused imports. Check AI slop: excessive comments, over-abstraction, generic names (`data`/`result`/`item`/`temp`).
 
   **Acceptance Criteria**:
@@ -2092,7 +2092,7 @@ Max Concurrent: 5 (Waves 1 & 2)
 
   Output: `Typecheck [PASS/FAIL] | Tests [N pass/N fail] | Privacy [PASS/FAIL] | Files [N clean/N issues] | VERDICT`
 
-- [ ] F3. **Real Manual QA** — `unspecified-high`
+- [x] F3. **Real Manual QA** — `unspecified-high`
   Start from clean state (`docker compose down -v && rm -rf .azurite && touch .dev-credentials`). Execute the full lifecycle step-by-step (NOT `make loadtest` end-to-end — that includes cleanup which would delete the round blob before verification). Save evidence to `.omo/evidence/final-qa/`.
 
   **Acceptance Criteria**:
@@ -2106,7 +2106,7 @@ Max Concurrent: 5 (Waves 1 & 2)
 
   Output: `Compose [PASS/FAIL] | Seed [PASS/FAIL] | Loadtest [PASS/FAIL] | Sign count [N/500] | Cleanup [PASS/FAIL] | VERDICT`
 
-- [ ] F4. **Scope Fidelity Check** — `deep`
+- [x] F4. **Scope Fidelity Check** — `deep`
   For each task: read "What to do", read actual diff (`git log/diff`). Verify 1:1 — everything in spec was built (no missing), nothing beyond spec was built (no creep). Check "Must NOT do" compliance per task. Detect cross-task contamination: T9 touching T10's files etc. Flag unaccounted changes.
 
   **Acceptance Criteria**:
