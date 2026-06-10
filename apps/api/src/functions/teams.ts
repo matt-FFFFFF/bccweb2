@@ -15,8 +15,8 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import { randomUUID } from "crypto";
-import type { Round, Team, PilotSlot } from "@bccweb/types";
-import { getPrivateBlobClient, readBlob, writePrivateBlob, withPrivateLease } from "../lib/blob.js";
+import type { ClubTeamSummary, Round, Team, PilotSlot } from "@bccweb/types";
+import { getBlobClient, getPrivateBlobClient, readBlob, writePrivateBlob, withPrivateLease } from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -81,24 +81,42 @@ async function addTeam(
     throw new HttpError(400, "INVALID_BODY", "clubId and teamName are required");
   }
 
-  // Load club name
-  let clubName: string;
+  let round: Round;
   try {
-    const club = await readBlob<{ id: string; name: string }>(
-      getPrivateBlobClient(`clubs/${body.clubId}.json`)
-    );
-    clubName = club.name;
+    round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(400, "INVALID_BODY", "Club not found");
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
     throw new HttpError(500, "INTERNAL");
   }
 
+  // teamName must match a ClubTeam pre-registered for (clubId, seasonYear); canonical name + clubName come from the matched entry.
+  let clubTeams: ClubTeamSummary[] = [];
+  try {
+    clubTeams = await readBlob<ClubTeamSummary[]>(getBlobClient("club-teams.json"));
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode !== 404) throw err;
+  }
+  const submitted = body.teamName.trim().toLowerCase();
+  const matched = clubTeams.find(
+    (t) =>
+      t.clubId === body.clubId &&
+      t.seasonYear === round.season.year &&
+      t.teamName.trim().toLowerCase() === submitted
+  );
+  if (!matched) {
+    throw new HttpError(
+      400,
+      "UNKNOWN_TEAM_NAME",
+      `No team "${body.teamName}" is registered for this club in the ${round.season.year} season. Register it under Club Teams first.`
+    );
+  }
+
   const newTeam: Team = {
     id: randomUUID(),
-    teamName: body.teamName.trim(),
-    club: { id: body.clubId, name: clubName },
+    teamName: matched.teamName,
+    club: { id: matched.clubId, name: matched.clubName },
     score: 0,
     pilots: [],
   };

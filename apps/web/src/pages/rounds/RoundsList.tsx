@@ -37,9 +37,18 @@ export default function RoundsList() {
     return <p>No rounds found.</p>;
   }
 
+  // Drop malformed entries: a round missing seasonYear would key bySeason as
+  // "undefined", then Number("undefined")=NaN, then bySeason[NaN] crashes .sort().
+  const validRounds = rounds.filter(
+    (r) => typeof r?.seasonYear === "number" && typeof r?.date === "string" && typeof r?.status === "string",
+  );
+  if (validRounds.length === 0) {
+    return <p>No rounds found.</p>;
+  }
+
   // Group by season year, sort within each group by date desc
   const bySeason: Record<number, RoundSummary[]> = {};
-  for (const r of rounds) {
+  for (const r of validRounds) {
     if (!bySeason[r.seasonYear]) bySeason[r.seasonYear] = [];
     bySeason[r.seasonYear].push(r);
   }

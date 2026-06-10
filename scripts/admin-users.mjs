@@ -18,7 +18,7 @@
  * Override with BLOB_PRIVATE_CONTAINER_NAME env var if needed.
  *
  * For local Azurite:
- *   BLOB_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IkvFpEgBm+Nwj4gEWH9A3RoLOHKvPVZLqGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;" \
+ *   BLOB_CONNECTION_STRING="DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;" \
  *   node scripts/admin-users.mjs list
  */
 
@@ -32,7 +32,7 @@ import { stdin, stdout, exit } from "node:process";
 const AZURITE_DEV_CS =
   "DefaultEndpointsProtocol=http;" +
   "AccountName=devstoreaccount1;" +
-  "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IkvFpEgBm+Nwj4gEWH9A3RoLOHKvPVZLqGw==;" +
+  "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;" +
   "BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;";
 
 // If env points BlobEndpoint at the docker-compose hostname `azurite`, rewrite

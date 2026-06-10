@@ -30,6 +30,72 @@ function isAdmin(roles: string[]): boolean {
   return roles.includes("Admin");
 }
 
+// ─── Config defaults / heal ───────────────────────────────────────────────────
+
+const DEFAULT_CONFIG: Config = {
+  maxTeamsInClub: 2,
+  maxPilotsInTeam: 12,
+  maxScoringPilotsInTeam: 6,
+  flightDateValidationEnabled: true,
+  wingFactors: {
+    "EN A": 1.0,
+    "EN B": 0.9,
+    "EN C": 0.8,
+    "EN C 2-liner": 0.7,
+    "EN D": 0.6,
+    "EN D 2-liner": 0.5,
+  },
+};
+
+// Returns a complete Config, filling defaults for any missing/invalid fields. `healed` flags whether the caller should persist the repair.
+function healConfig(stored: Partial<Config> | null | undefined): {
+  config: Config;
+  healed: boolean;
+} {
+  let healed = false;
+
+  function pickNumber(v: unknown, fallback: number): number {
+    if (typeof v === "number" && Number.isFinite(v)) return v;
+    healed = true;
+    return fallback;
+  }
+  function pickBool(v: unknown, fallback: boolean): boolean {
+    if (typeof v === "boolean") return v;
+    healed = true;
+    return fallback;
+  }
+
+  const wingFactors = { ...DEFAULT_CONFIG.wingFactors };
+  if (stored?.wingFactors && typeof stored.wingFactors === "object") {
+    for (const wc of Object.keys(wingFactors) as Array<keyof typeof wingFactors>) {
+      const v = stored.wingFactors[wc];
+      if (typeof v === "number" && Number.isFinite(v)) {
+        wingFactors[wc] = v;
+      } else {
+        healed = true;
+      }
+    }
+  } else {
+    healed = true;
+  }
+
+  const config: Config = {
+    maxTeamsInClub: pickNumber(stored?.maxTeamsInClub, DEFAULT_CONFIG.maxTeamsInClub),
+    maxPilotsInTeam: pickNumber(stored?.maxPilotsInTeam, DEFAULT_CONFIG.maxPilotsInTeam),
+    maxScoringPilotsInTeam: pickNumber(
+      stored?.maxScoringPilotsInTeam,
+      DEFAULT_CONFIG.maxScoringPilotsInTeam,
+    ),
+    flightDateValidationEnabled: pickBool(
+      stored?.flightDateValidationEnabled,
+      DEFAULT_CONFIG.flightDateValidationEnabled,
+    ),
+    wingFactors,
+  };
+
+  return { config, healed };
+}
+
 // ─── POST /api/admin/rounds/{id}/recompute ────────────────────────────────────
 /**
  * Recompute all derived blobs for the season containing round {id}.
@@ -83,30 +149,20 @@ async function getConfig(
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
 
+  let stored: Partial<Config> | null = null;
   try {
-    const config = await readBlob<Config>(getPrivateBlobClient("config.json"));
-    return { status: 200, jsonBody: config };
+    stored = await readBlob<Partial<Config>>(getPrivateBlobClient("config.json"));
   } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      // Return sensible defaults when config.json hasn't been written yet
-      const defaults: Config = {
-        maxTeamsInClub: 2,
-        maxPilotsInTeam: 12,
-        maxScoringPilotsInTeam: 6,
-        flightDateValidationEnabled: true,
-        wingFactors: {
-          "EN A": 1.0,
-          "EN B": 0.9,
-          "EN C": 0.8,
-          "EN C 2-liner": 0.7,
-          "EN D": 0.6,
-          "EN D 2-liner": 0.5,
-        },
-      };
-      return { status: 200, jsonBody: defaults };
+    if ((err as { statusCode?: number }).statusCode !== 404) {
+      throw new HttpError(500, "INTERNAL");
     }
-    throw new HttpError(500, "INTERNAL");
   }
+
+  const { config, healed } = healConfig(stored);
+  if (healed) {
+    await writePrivateBlob("config.json", config);
+  }
+  return { status: 200, jsonBody: config };
 }
 
 // ─── PUT /api/admin/config ────────────────────────────────────────────────────
@@ -121,32 +177,17 @@ async function updateConfig(
 
   const body = (await req.json()) as Partial<Config>;
 
-  // Merge with existing (or start fresh)
-  let existing: Config = {
-    maxTeamsInClub: 2,
-    maxPilotsInTeam: 12,
-    maxScoringPilotsInTeam: 6,
-    flightDateValidationEnabled: true,
-    wingFactors: {
-      "EN A": 1.0,
-      "EN B": 0.9,
-      "EN C": 0.8,
-      "EN C 2-liner": 0.7,
-      "EN D": 0.6,
-      "EN D 2-liner": 0.5,
-    },
-  };
-
+  let stored: Partial<Config> | null = null;
   try {
-    existing = await readBlob<Config>(getPrivateBlobClient("config.json"));
+    stored = await readBlob<Partial<Config>>(getPrivateBlobClient("config.json"));
   } catch {
-    // start with defaults
+    /* missing blob → use defaults */
   }
+  const existing = healConfig(stored).config;
 
   const updated: Config = {
     ...existing,
     ...body,
-    // Deep-merge wingFactors
     wingFactors: {
       ...existing.wingFactors,
       ...(body.wingFactors ?? {}),

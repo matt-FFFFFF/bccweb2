@@ -15,6 +15,7 @@ import { makeAuthRequest, invoke } from "../../__tests__/helpers/api.js";
 import { getPrivateContainer, getPublicContainer } from "../../__tests__/helpers/azurite.js";
 import {
   makeClub,
+  makeClubTeam,
   makeConfig,
   makePilot,
   makeSite,
@@ -464,6 +465,7 @@ async function seedLifecycleRound(opts: {
 async function seedBaseEntities(opts: { pilotPureTrackId?: number } = {}) {
   const year = 3000 + Math.floor(Math.random() * 6_000);
   const club = await makeClub({ id: randomUUID(), name: "Test Club" });
+  await makeClubTeam({ clubId: club.id, clubName: club.name, seasonYear: year, teamName: "Alpha" });
   const site = await makeSite({ id: randomUUID(), name: "Milk Hill", clubId: club.id });
   await writePublicJson(`seasons/${year}.json`, { id: `season-${year}`, year, active: true, rounds: [], leagueTable: [] } satisfies Season);
   await makeConfig({

@@ -76,6 +76,8 @@ export interface AuthState {
   login: (email: string, password: string) => Promise<void>;
   /** Sign out and clear stored tokens. */
   logout: () => void;
+  /** Re-fetch /api/me with the stored access token and update state/storage. */
+  refreshIdentity: () => Promise<void>;
 }
 
 // ─── Context ──────────────────────────────────────────────────────────────────
@@ -197,6 +199,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setLoading(false);
   }, []);
 
+  const refreshIdentity = useCallback(async () => {
+    const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+    if (!accessToken) return;
+    const meRes = await fetch("/api/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!meRes.ok) return;
+    const fresh = (await meRes.json()) as CallerIdentity;
+    localStorage.setItem(IDENTITY_KEY, JSON.stringify(fresh));
+    setIdentity(fresh);
+  }, []);
+
   // Track in-progress refresh so consumers can show a loading indicator
   useEffect(() => {
     const onStart = () => setIsRefreshing(true);
@@ -221,7 +235,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener("bcc:auth-expired", handleAuthExpired);
   }, [logout, navigate]);
 
-  const value: AuthState = { loading, identity, isRefreshing, login, logout };
+  const value: AuthState = { loading, identity, isRefreshing, login, logout, refreshIdentity };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

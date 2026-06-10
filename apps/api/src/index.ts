@@ -11,6 +11,7 @@ setupTelemetry();
 
 import "./functions/health.js";
 import "./functions/me.js";
+import "./functions/meProfile.js";
 
 // Phase 2 — Public read endpoints
 import "./functions/rounds.js";

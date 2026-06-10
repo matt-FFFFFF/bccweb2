@@ -47,14 +47,25 @@ interface FormState {
   wingFactors: Record<WingClass, string>;
 }
 
-function configToForm(c: Config): FormState {
+const DEFAULT_WING_FACTORS: Record<WingClass, number> = {
+  "EN A": 1.0,
+  "EN B": 0.9,
+  "EN C": 0.8,
+  "EN C 2-liner": 0.7,
+  "EN D": 0.6,
+  "EN D 2-liner": 0.5,
+};
+
+function configToForm(c: Partial<Config> | null | undefined): FormState {
+  const safe = c ?? {};
+  const wf = (safe.wingFactors ?? {}) as Partial<Record<WingClass, number>>;
   return {
-    maxTeamsInClub: String(c.maxTeamsInClub),
-    maxPilotsInTeam: String(c.maxPilotsInTeam),
-    maxScoringPilotsInTeam: String(c.maxScoringPilotsInTeam),
-    flightDateValidationEnabled: c.flightDateValidationEnabled,
+    maxTeamsInClub: String(safe.maxTeamsInClub ?? 2),
+    maxPilotsInTeam: String(safe.maxPilotsInTeam ?? 12),
+    maxScoringPilotsInTeam: String(safe.maxScoringPilotsInTeam ?? 6),
+    flightDateValidationEnabled: safe.flightDateValidationEnabled ?? true,
     wingFactors: Object.fromEntries(
-      WING_CLASSES.map((wc) => [wc, String(c.wingFactors[wc] ?? 1)])
+      WING_CLASSES.map((wc) => [wc, String(wf[wc] ?? DEFAULT_WING_FACTORS[wc])])
     ) as Record<WingClass, string>,
   };
 }

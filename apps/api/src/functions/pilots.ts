@@ -18,6 +18,7 @@ import type {
   Pilot,
   PilotSummary,
   PilotClubMembership,
+  SeasonSummary,
   WingClass,
   CoachType,
   PilotRatingValue,
@@ -249,6 +250,21 @@ async function updatePilot(
     throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
+  // Non-admin pilots cannot change currentClub once committed to a club for the active season.
+  if (!isAdmin && body.currentClub && body.currentClub.id !== existing.currentClub?.id) {
+    const activeYear = await getActiveSeasonYear();
+    const hasActiveSeasonClub = existing.seasonClubs.some(
+      (sc) => sc.seasonYear === activeYear
+    );
+    if (hasActiveSeasonClub) {
+      throw new HttpError(
+        409,
+        "CLUB_LOCKED",
+        `Club is locked for the ${activeYear} season. Contact an admin to change it.`
+      );
+    }
+  }
+
   // Build updated pilot — common fields (both Admin and self)
   const firstName = body.firstName?.trim() ?? existing.person.firstName;
   const lastName = body.lastName?.trim() ?? existing.person.lastName;
@@ -371,6 +387,19 @@ async function ensurePilotsIndexBlob(): Promise<void> {
       if (statusCode !== 412 || attempt === maxAttempts) throw err;
       await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
     }
+  }
+}
+
+async function getActiveSeasonYear(): Promise<number> {
+  try {
+    const seasons = await readBlob<SeasonSummary[]>(getBlobClient("seasons.json"));
+    const active = seasons.find((s) => s.active) ?? seasons[seasons.length - 1];
+    return active?.year ?? new Date().getFullYear();
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      return new Date().getFullYear();
+    }
+    throw err;
   }
 }
 

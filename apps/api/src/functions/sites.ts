@@ -1,9 +1,11 @@
 /**
- * Site endpoints — Phase 2 + Phase 5
+ * Site endpoints
  *
- * GET  /api/sites      — site list (public)
- * POST /api/sites      — create site (Admin) — Phase 5
- * PUT  /api/sites/{id} — update site (Admin) — Phase 5
+ * GET    /api/sites       — site list (public; SiteSummary[] — no W3W)
+ * GET    /api/sites/{id}  — full site detail (Admin OR RoundsCoord of site's club)
+ * POST   /api/sites       — create site (Admin OR RoundsCoord; coord forced to own clubId)
+ * PUT    /api/sites/{id}  — update site (Admin OR coord of site's club; coord cannot reassign clubId)
+ * DELETE /api/sites/{id}  — delete site (Admin OR coord of site's club)
  */
 
 import {
@@ -13,14 +15,34 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import { randomUUID } from "crypto";
-import type { Site, SiteSummary, SiteStatus } from "@bccweb/types";
-import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob } from "../lib/blob.js";
+import type {
+  CallerIdentity,
+  Site,
+  SiteSummary,
+  SiteStatus,
+} from "@bccweb/types";
+import {
+  getBlobClient,
+  getPrivateBlobClient,
+  getPrivateBlockBlobClient,
+  readBlob,
+  writeBlob,
+  writePrivateBlob,
+} from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+
+function isAdmin(caller: CallerIdentity): boolean {
+  return caller.roles.includes("Admin");
+}
+
+function isCoordOfClub(caller: CallerIdentity, clubId: string): boolean {
+  return caller.roles.includes("RoundsCoord") && caller.clubId === clubId;
+}
 
 // ─── GET /api/sites ───────────────────────────────────────────────────────────
 
@@ -38,6 +60,35 @@ async function getSites(
     }
     throw new HttpError(500, "INTERNAL");
   }
+}
+
+// ─── GET /api/sites/{id} ─────────────────────────────────────────────────────
+
+async function getSiteById(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const id = req.params["id"];
+  if (!id) throw new HttpError(400, "MISSING_SITE_ID", "Missing site id");
+
+  let site: Site;
+  try {
+    site = await readBlob<Site>(getPrivateBlobClient(`sites/${id}.json`));
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Site not found");
+    }
+    throw new HttpError(500, "INTERNAL");
+  }
+
+  if (!isAdmin(caller) && !isCoordOfClub(caller, site.clubId)) {
+    return forbiddenResponse();
+  }
+
+  return { status: 200, jsonBody: site };
 }
 
 // ─── POST /api/sites ──────────────────────────────────────────────────────────
@@ -59,7 +110,9 @@ async function createSite(
 ): Promise<HttpResponseInit> {
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
-  if (!caller.roles.includes("Admin")) return forbiddenResponse();
+  if (!isAdmin(caller) && !caller.roles.includes("RoundsCoord")) {
+    return forbiddenResponse();
+  }
 
   let body: CreateSiteBody;
   try {
@@ -73,6 +126,10 @@ async function createSite(
   }
   if (!body.clubId) {
     throw new HttpError(400, "INVALID_BODY", "clubId is required");
+  }
+
+  if (!isAdmin(caller) && !isCoordOfClub(caller, body.clubId)) {
+    return forbiddenResponse();
   }
 
   const id = randomUUID();
@@ -107,7 +164,6 @@ async function updateSite(
 ): Promise<HttpResponseInit> {
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
-  if (!caller.roles.includes("Admin")) return forbiddenResponse();
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_SITE_ID", "Missing site id");
@@ -122,6 +178,10 @@ async function updateSite(
     throw new HttpError(500, "INTERNAL");
   }
 
+  if (!isAdmin(caller) && !isCoordOfClub(caller, existing.clubId)) {
+    return forbiddenResponse();
+  }
+
   let body: Partial<Site>;
   try {
     body = (await req.json()) as Partial<Site>;
@@ -129,17 +189,26 @@ async function updateSite(
     throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
+  // Coords cannot reassign a site to a different club.
+  if (!isAdmin(caller) && body.clubId && body.clubId !== existing.clubId) {
+    throw new HttpError(
+      403,
+      "CLUB_CHANGE_FORBIDDEN",
+      "Only Admin can change a site's club"
+    );
+  }
+
   const updated: Site = {
     ...existing,
     name: body.name?.trim() ?? existing.name,
     status: body.status ?? existing.status,
-    clubId: body.clubId ?? existing.clubId,
+    clubId: isAdmin(caller) ? (body.clubId ?? existing.clubId) : existing.clubId,
     parkingW3W: body.parkingW3W ?? existing.parkingW3W,
     briefingW3W: body.briefingW3W ?? existing.briefingW3W,
     takeOffW3W: body.takeOffW3W ?? existing.takeOffW3W,
     guideUrl: body.guideUrl ?? existing.guideUrl,
     contactInfo: body.contactInfo ?? existing.contactInfo,
-    id: existing.id, // immutable
+    id: existing.id,
   };
 
   await writePrivateBlob(`sites/${id}.json`, updated);
@@ -153,7 +222,39 @@ async function updateSite(
   return { status: 200, jsonBody: updated };
 }
 
-// ─── Index helper ─────────────────────────────────────────────────────────────
+// ─── DELETE /api/sites/{id} ──────────────────────────────────────────────────
+
+async function deleteSite(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const id = req.params["id"];
+  if (!id) throw new HttpError(400, "MISSING_SITE_ID", "Missing site id");
+
+  let existing: Site;
+  try {
+    existing = await readBlob<Site>(getPrivateBlobClient(`sites/${id}.json`));
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      return { status: 204 };
+    }
+    throw new HttpError(500, "INTERNAL");
+  }
+
+  if (!isAdmin(caller) && !isCoordOfClub(caller, existing.clubId)) {
+    return forbiddenResponse();
+  }
+
+  await getPrivateBlockBlobClient(`sites/${id}.json`).deleteIfExists();
+  await removeSiteFromIndex(id);
+
+  return { status: 204 };
+}
+
+// ─── Index helpers ────────────────────────────────────────────────────────────
 
 async function upsertSiteInIndex(summary: SiteSummary): Promise<void> {
   let index: SiteSummary[] = [];
@@ -174,6 +275,18 @@ async function upsertSiteInIndex(summary: SiteSummary): Promise<void> {
   await writeBlob("sites.json", index);
 }
 
+async function removeSiteFromIndex(id: string): Promise<void> {
+  let index: SiteSummary[] = [];
+  try {
+    index = await readBlob<SiteSummary[]>(getBlobClient("sites.json"));
+  } catch {
+    return;
+  }
+  const filtered = index.filter((s) => s.id !== id);
+  if (filtered.length === index.length) return;
+  await writeBlob("sites.json", filtered);
+}
+
 // ─── Registration ─────────────────────────────────────────────────────────────
 
 app.http("getSites", {
@@ -181,6 +294,13 @@ app.http("getSites", {
   authLevel: "anonymous",
   route: "sites",
   handler: withErrorHandler(getSites),
+});
+
+app.http("getSiteById", {
+  methods: ["GET"],
+  authLevel: "anonymous",
+  route: "sites/{id}",
+  handler: withErrorHandler(getSiteById),
 });
 
 app.http("createSite", {
@@ -195,4 +315,11 @@ app.http("updateSite", {
   authLevel: "anonymous",
   route: "sites/{id}",
   handler: withErrorHandler(updateSite),
+});
+
+app.http("deleteSite", {
+  methods: ["DELETE"],
+  authLevel: "anonymous",
+  route: "sites/{id}",
+  handler: withErrorHandler(deleteSite),
 });

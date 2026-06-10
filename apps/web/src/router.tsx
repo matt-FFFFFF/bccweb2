@@ -15,6 +15,7 @@ import League from "./pages/results/League.js";
 import RoundResults from "./pages/results/RoundResults.js";
 import PilotsList from "./pages/pilots/PilotsList.js";
 import PilotProfile from "./pages/pilots/PilotProfile.js";
+import Profile from "./pages/Profile.js";
 import Login from "./pages/auth/Login.js";
 import Register from "./pages/auth/Register.js";
 import VerifyEmail from "./pages/auth/VerifyEmail.js";
@@ -23,6 +24,7 @@ import ResetPassword from "./pages/auth/ResetPassword.js";
 import Terms from "./pages/Terms.js";
 import AdminUsers from "./pages/admin/Users.js";
 import AdminClubs from "./pages/admin/Clubs.js";
+import AdminSeasons from "./pages/admin/Seasons.js";
 import SeasonClubs from "./pages/admin/SeasonClubs.js";
 import PilotSeasonClubs from "./pages/admin/PilotSeasonClubs.js";
 import Frequencies from "./pages/admin/Frequencies.js";
@@ -70,6 +72,11 @@ function Nav() {
             My Club
           </NavLink>
         )}
+        {isCoord && (
+          <NavLink to="/admin/sites" className={({ isActive }) => isActive ? "active" : ""}>
+            Sites
+          </NavLink>
+        )}
         {isAdmin && (
           <>
             <NavLink to="/admin/users" className={({ isActive }) => isActive ? "active" : ""}>
@@ -78,11 +85,11 @@ function Nav() {
             <NavLink to="/admin/clubs" className={({ isActive }) => isActive ? "active" : ""}>
               Clubs
             </NavLink>
+            <NavLink to="/admin/seasons" className={({ isActive }) => isActive ? "active" : ""}>
+              Seasons
+            </NavLink>
             <NavLink to="/admin/frequencies" className={({ isActive }) => isActive ? "active" : ""}>
               Frequencies
-            </NavLink>
-            <NavLink to="/admin/sites" className={({ isActive }) => isActive ? "active" : ""}>
-              Sites
             </NavLink>
             <NavLink to="/admin/config" className={({ isActive }) => isActive ? "active" : ""}>
               Config
@@ -94,7 +101,9 @@ function Nav() {
       <div className="bcc-nav__auth">
         {loading ? null : identity ? (
           <>
-            <span>{identity.email}</span>
+            <NavLink to="/profile" className={({ isActive }) => isActive ? "active" : ""}>
+              {identity.email}
+            </NavLink>
             <button onClick={logout}>Sign out</button>
           </>
         ) : (
@@ -201,6 +210,9 @@ function RoutedContent() {
           <Route path="/pilots" element={<RequireCoord><Page><PilotsList /></Page></RequireCoord>} />
           <Route path="/pilots/:id" element={<RequireAuth><Page><PilotProfile /></Page></RequireAuth>} />
 
+          {/* My profile — self-claim if no pilotId, otherwise redirects to /pilots/{id} */}
+          <Route path="/profile" element={<RequireAuth><Page><Profile /></Page></RequireAuth>} />
+
           {/* Auth */}
           <Route path="/login" element={<Page><Login /></Page>} />
           <Route path="/register" element={<Page><Register /></Page>} />
@@ -212,10 +224,11 @@ function RoutedContent() {
           {/* Admin */}
           <Route path="/admin/users" element={<RequireAuth><Page><AdminUsers /></Page></RequireAuth>} />
           <Route path="/admin/clubs" element={<RequireAuth><Page><AdminClubs /></Page></RequireAuth>} />
+          <Route path="/admin/seasons" element={<RequireAuth><Page><AdminSeasons /></Page></RequireAuth>} />
           <Route path="/admin/seasons/:year/clubs" element={<RequireAuth><Page><SeasonClubs /></Page></RequireAuth>} />
           <Route path="/admin/pilot-season-clubs" element={<RequireAuth><Page><PilotSeasonClubs /></Page></RequireAuth>} />
           <Route path="/admin/frequencies" element={<RequireAuth><Page><Frequencies /></Page></RequireAuth>} />
-          <Route path="/admin/sites" element={<RequireAuth><Page><AdminSites /></Page></RequireAuth>} />
+          <Route path="/admin/sites" element={<RequireCoord><Page><AdminSites /></Page></RequireCoord>} />
           <Route path="/admin/config" element={<RequireAuth><Page><AdminConfig /></Page></RequireAuth>} />
 
           {/* Club — RoundsCoord self-service */}

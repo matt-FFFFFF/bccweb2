@@ -24,6 +24,7 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { invoke, makeAuthRequest } from "../../__tests__/helpers/api.js";
 import {
   makeClub,
+  makeClubTeam,
   makeConfig,
   makePilot,
   makeSite,
@@ -105,6 +106,7 @@ async function seedBaseEntities(): Promise<E2ECtx> {
   const year = 3000 + Math.floor(Math.random() * 6_000);
 
   const club = await makeClub({ id: randomUUID(), name: "E2E Test Club" });
+  await makeClubTeam({ clubId: club.id, clubName: club.name, seasonYear: year, teamName: "Alpha" });
   const site = await makeSite({
     id: randomUUID(),
     name: "Milk Hill",

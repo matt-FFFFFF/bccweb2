@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { Site, SiteSummary, ClubSummary, SiteStatus } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
-import { api } from "../../lib/api.js";
+import { api, ApiError } from "../../lib/api.js";
 import { useBlob } from "../../hooks/useBlob.js";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
 
@@ -50,11 +50,11 @@ interface SiteFormState {
   contactInfo: string;
 }
 
-function emptyForm(clubs: ClubSummary[]): SiteFormState {
+function emptyForm(defaultClubId: string): SiteFormState {
   return {
     name: "",
     status: "Active",
-    clubId: clubs[0]?.id ?? "",
+    clubId: defaultClubId,
     parkingW3W: "",
     briefingW3W: "",
     takeOffW3W: "",
@@ -63,14 +63,22 @@ function emptyForm(clubs: ClubSummary[]): SiteFormState {
   };
 }
 
+function clubNameFor(clubs: ClubSummary[], clubId: string): string {
+  return clubs.find((c) => c.id === clubId)?.name ?? clubId;
+}
+
 function SiteEditRow({
   site,
   clubs,
+  isAdmin,
   onSaved,
+  onDeleted,
 }: {
   site: SiteSummary;
   clubs: ClubSummary[];
+  isAdmin: boolean;
   onSaved: () => void;
+  onDeleted: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const [form, setForm] = useState<SiteFormState>({
@@ -86,6 +94,37 @@ function SiteEditRow({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [msgOk, setMsgOk] = useState(false);
+  const [hydrated, setHydrated] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+
+  // SiteSummary lacks W3W/guideUrl/contactInfo — fetch full private blob on first open.
+  useEffect(() => {
+    if (!open || hydrated) return;
+    let cancelled = false;
+    api
+      .get<Site>(`sites/${site.id}`)
+      .then((full) => {
+        if (cancelled) return;
+        setForm({
+          name: full.name,
+          status: full.status,
+          clubId: full.clubId,
+          parkingW3W: full.parkingW3W ?? "",
+          briefingW3W: full.briefingW3W ?? "",
+          takeOffW3W: full.takeOffW3W ?? "",
+          guideUrl: full.guideUrl ?? "",
+          contactInfo: full.contactInfo ?? "",
+        });
+        setHydrated(true);
+      })
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        setLoadError(err instanceof ApiError ? err.message : "Failed to load site");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, hydrated, site.id]);
 
   function setF<K extends keyof SiteFormState>(k: K, v: SiteFormState[K]) {
     setForm((p) => ({ ...p, [k]: v }));
@@ -99,7 +138,7 @@ function SiteEditRow({
       await api.put<Site>(`sites/${site.id}`, {
         name: form.name,
         status: form.status,
-        clubId: form.clubId,
+        clubId: isAdmin ? form.clubId : undefined,
         parkingW3W: form.parkingW3W || undefined,
         briefingW3W: form.briefingW3W || undefined,
         takeOffW3W: form.takeOffW3W || undefined,
@@ -108,11 +147,26 @@ function SiteEditRow({
       });
       setMsg("Saved.");
       setMsgOk(true);
+      setHydrated(false);
       onSaved();
     } catch (ex) {
-      setMsg(ex instanceof Error ? ex.message : "Failed");
+      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed");
       setMsgOk(false);
     } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!window.confirm(`Delete site "${site.name}"? This cannot be undone.`)) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.delete<void>(`sites/${site.id}`);
+      onDeleted();
+    } catch (ex) {
+      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Delete failed");
+      setMsgOk(false);
       setBusy(false);
     }
   }
@@ -141,6 +195,16 @@ function SiteEditRow({
           onSubmit={(e) => { void save(e); }}
           style={{ marginTop: "0.75rem", display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "0.5rem" }}
         >
+          {loadError && (
+            <div style={{ gridColumn: "1 / -1" }}>
+              <Banner msg={loadError} />
+            </div>
+          )}
+          {!hydrated && !loadError && (
+            <div style={{ gridColumn: "1 / -1", fontSize: "0.8rem", color: "#888" }}>
+              Loading site details…
+            </div>
+          )}
           <div style={{ gridColumn: "1 / -1" }}>
             <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Name *</label>
             <input required style={fi} value={form.name} onChange={(e) => setF("name", e.target.value)} />
@@ -153,10 +217,16 @@ function SiteEditRow({
             </select>
           </div>
           <div>
-            <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Club</label>
-            <select style={fi} value={form.clubId} onChange={(e) => setF("clubId", e.target.value)}>
-              {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>
+              Club{!isAdmin && " (locked)"}
+            </label>
+            {isAdmin ? (
+              <select style={fi} value={form.clubId} onChange={(e) => setF("clubId", e.target.value)}>
+                {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            ) : (
+              <input style={{ ...fi, background: "#f1f3f5" }} value={clubNameFor(clubs, form.clubId)} disabled readOnly />
+            )}
           </div>
           <div>
             <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Parking W3W</label>
@@ -182,6 +252,9 @@ function SiteEditRow({
             <button type="submit" disabled={busy} style={btnStyle("#fff", busy ? "#6c757d" : "#0066cc")}>
               {busy ? "Saving…" : "Save"}
             </button>
+            <button type="button" disabled={busy} onClick={() => { void handleDelete(); }} style={btnStyle("#fff", busy ? "#6c757d" : "#b02a37")}>
+              Delete
+            </button>
             {msg && <Banner msg={msg} ok={msgOk} />}
           </div>
         </form>
@@ -190,8 +263,18 @@ function SiteEditRow({
   );
 }
 
-function CreateSiteForm({ clubs, onCreated }: { clubs: ClubSummary[]; onCreated: () => void }) {
-  const [form, setForm] = useState<SiteFormState>(() => emptyForm(clubs));
+function CreateSiteForm({
+  clubs,
+  isAdmin,
+  defaultClubId,
+  onCreated,
+}: {
+  clubs: ClubSummary[];
+  isAdmin: boolean;
+  defaultClubId: string;
+  onCreated: () => void;
+}) {
+  const [form, setForm] = useState<SiteFormState>(() => emptyForm(defaultClubId));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [msgOk, setMsgOk] = useState(false);
@@ -202,6 +285,11 @@ function CreateSiteForm({ clubs, onCreated }: { clubs: ClubSummary[]; onCreated:
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
+    if (!form.clubId) {
+      setMsg("Pick a club.");
+      setMsgOk(false);
+      return;
+    }
     setBusy(true);
     setMsg(null);
     try {
@@ -215,12 +303,12 @@ function CreateSiteForm({ clubs, onCreated }: { clubs: ClubSummary[]; onCreated:
         guideUrl: form.guideUrl || undefined,
         contactInfo: form.contactInfo || undefined,
       });
-      setForm(emptyForm(clubs));
+      setForm(emptyForm(defaultClubId));
       setMsg("Site created.");
       setMsgOk(true);
       onCreated();
     } catch (ex) {
-      setMsg(ex instanceof Error ? ex.message : "Failed");
+      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed");
       setMsgOk(false);
     } finally {
       setBusy(false);
@@ -241,11 +329,17 @@ function CreateSiteForm({ clubs, onCreated }: { clubs: ClubSummary[]; onCreated:
           <input required style={fi} value={form.name} onChange={(e) => setF("name", e.target.value)} />
         </div>
         <div>
-          <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Club *</label>
-          <select required style={fi} value={form.clubId} onChange={(e) => setF("clubId", e.target.value)}>
-            <option value="">— select —</option>
-            {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>
+            Club *{!isAdmin && " (your club)"}
+          </label>
+          {isAdmin ? (
+            <select required style={fi} value={form.clubId} onChange={(e) => setF("clubId", e.target.value)}>
+              <option value="">— select —</option>
+              {clubs.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          ) : (
+            <input style={{ ...fi, background: "#f1f3f5" }} value={clubNameFor(clubs, form.clubId)} disabled readOnly />
+          )}
         </div>
         <div>
           <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Status</label>
@@ -271,22 +365,52 @@ export default function AdminSites() {
   const { data: sites, loading: sitesLoading } = useBlob<SiteSummary[]>(`sites.json?v=${refresh}`);
   const { data: clubs, loading: clubsLoading } = useBlob<ClubSummary[]>("clubs.json");
 
-  const isAdmin = identity?.roles.includes("Admin");
+  const isAdmin = identity?.roles.includes("Admin") ?? false;
+  const isCoord = identity?.roles.includes("RoundsCoord") ?? false;
 
   if (authLoading || sitesLoading || clubsLoading) return <LoadingSpinner message="Loading sites…" />;
-  if (!isAdmin) return <p style={{ color: "#721c24" }}>Admin access required.</p>;
+  if (!isAdmin && !isCoord) {
+    return <p style={{ color: "#721c24" }}>Admin or RoundsCoord access required.</p>;
+  }
+  if (!isAdmin && !identity?.clubId) {
+    return <p style={{ color: "#721c24" }}>Your coord account is not linked to a club. Contact an admin.</p>;
+  }
 
-  const sortedSites = (sites ?? []).slice().sort((a, b) => a.name.localeCompare(b.name));
+  const visibleSites = isAdmin
+    ? (sites ?? [])
+    : (sites ?? []).filter((s) => s.clubId === identity?.clubId);
+  const sortedSites = visibleSites.slice().sort((a, b) => a.name.localeCompare(b.name));
+
+  const defaultClubId = isAdmin ? "" : (identity?.clubId ?? "");
 
   return (
     <div style={{ maxWidth: 800, margin: "0 auto" }}>
-      <h1 style={{ fontSize: "1.5rem", marginBottom: "1.5rem" }}>Sites</h1>
+      <h1 style={{ fontSize: "1.5rem", marginBottom: "1.5rem" }}>
+        Sites{!isAdmin && clubs && identity?.clubId && ` — ${clubNameFor(clubs, identity.clubId)}`}
+      </h1>
 
       <div style={{ border: "1px solid #dee2e6", borderRadius: "0.5rem", padding: "0.75rem 1rem" }}>
+        {sortedSites.length === 0 && (
+          <p style={{ color: "#888", fontSize: "0.85rem", margin: "0.25rem 0" }}>
+            No sites yet.
+          </p>
+        )}
         {sortedSites.map((s) => (
-          <SiteEditRow key={s.id} site={s} clubs={clubs ?? []} onSaved={() => setRefresh((v) => v + 1)} />
+          <SiteEditRow
+            key={s.id}
+            site={s}
+            clubs={clubs ?? []}
+            isAdmin={isAdmin}
+            onSaved={() => setRefresh((v) => v + 1)}
+            onDeleted={() => setRefresh((v) => v + 1)}
+          />
         ))}
-        <CreateSiteForm clubs={clubs ?? []} onCreated={() => setRefresh((v) => v + 1)} />
+        <CreateSiteForm
+          clubs={clubs ?? []}
+          isAdmin={isAdmin}
+          defaultClubId={defaultClubId}
+          onCreated={() => setRefresh((v) => v + 1)}
+        />
       </div>
     </div>
   );

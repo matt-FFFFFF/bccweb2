@@ -1,8 +1,9 @@
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router-dom";
-import type { Pilot, PilotClubMembership, CoachType, PilotRatingValue, WingClass, ManufacturerRef } from "@bccweb/types";
+import type { Pilot, PilotClubMembership, CoachType, PilotRatingValue, WingClass, ManufacturerRef, ClubSummary } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
+import { useBlob } from "../../hooks/useBlob.js";
 import { api, ApiError } from "../../lib/api.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
 
@@ -108,6 +109,7 @@ interface EditForm {
   emergencyContactName: string;
   emergencyPhoneNumber: string;
   medicalInfo: string;
+  currentClubId: string;
 }
 
 function pilotToForm(p: Pilot): EditForm {
@@ -124,14 +126,31 @@ function pilotToForm(p: Pilot): EditForm {
     emergencyContactName: p.emergencyContactName ?? "",
     emergencyPhoneNumber: p.emergencyPhoneNumber ?? "",
     medicalInfo: p.medicalInfo ?? "",
+    currentClubId: p.currentClub?.id ?? "",
   };
 }
 
-function EditProfileForm({ pilot, onSaved }: { pilot: Pilot; onSaved: () => void }) {
+function EditProfileForm({
+  pilot,
+  isAdmin,
+  activeSeasonYear,
+  onSaved,
+}: {
+  pilot: Pilot;
+  isAdmin: boolean;
+  activeSeasonYear: number | undefined;
+  onSaved: () => void;
+}) {
   const [form, setForm] = useState<EditForm>(() => pilotToForm(pilot));
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [msgOk, setMsgOk] = useState(false);
+  const { data: clubs } = useBlob<ClubSummary[]>("clubs.json");
+
+  const seasonClubEntry = activeSeasonYear
+    ? pilot.seasonClubs.find((sc) => sc.seasonYear === activeSeasonYear)
+    : undefined;
+  const clubLocked = !isAdmin && seasonClubEntry !== undefined;
 
   function setF<K extends keyof EditForm>(k: K, v: EditForm[K]) {
     setForm((p) => ({ ...p, [k]: v }));
@@ -142,6 +161,15 @@ function EditProfileForm({ pilot, onSaved }: { pilot: Pilot; onSaved: () => void
     setBusy(true);
     setMsg(null);
     try {
+      const selectedClub = clubs?.find((c) => c.id === form.currentClubId);
+      const clubChanged = (selectedClub?.id ?? "") !== (pilot.currentClub?.id ?? "");
+      const currentClubPayload =
+        clubChanged && !clubLocked
+          ? selectedClub
+            ? { id: selectedClub.id, name: selectedClub.name }
+            : undefined
+          : undefined;
+
       await api.put(`pilots/${pilot.id}`, {
         coachType: form.coachType,
         pilotRating: form.pilotRating,
@@ -155,12 +183,13 @@ function EditProfileForm({ pilot, onSaved }: { pilot: Pilot; onSaved: () => void
         emergencyContactName: form.emergencyContactName || undefined,
         emergencyPhoneNumber: form.emergencyPhoneNumber || undefined,
         medicalInfo: form.medicalInfo || undefined,
+        currentClub: currentClubPayload,
       });
       setMsg("Saved.");
       setMsgOk(true);
       onSaved();
     } catch (ex) {
-      setMsg(ex instanceof Error ? ex.message : "Failed to save");
+      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed to save");
       setMsgOk(false);
     } finally {
       setBusy(false);
@@ -223,6 +252,31 @@ function EditProfileForm({ pilot, onSaved }: { pilot: Pilot; onSaved: () => void
           <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>PureTrack ID</label>
           <input type="number" min={0} style={inputStyle} value={form.pureTrackId} onChange={(e) => setF("pureTrackId", e.target.value)} />
         </div>
+      </div>
+
+      <div style={{ marginTop: "0.75rem" }}>
+        <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>
+          Current club{clubLocked && " (locked for this season)"}
+        </label>
+        <select
+          style={{ ...inputStyle, background: clubLocked ? "#f1f3f5" : undefined }}
+          value={form.currentClubId}
+          onChange={(e) => setF("currentClubId", e.target.value)}
+          disabled={clubLocked}
+        >
+          <option value="">— None —</option>
+          {clubs?.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.name}
+            </option>
+          ))}
+        </select>
+        {clubLocked && seasonClubEntry && (
+          <p style={{ margin: "0.3rem 0 0", fontSize: "0.75rem", color: "#666" }}>
+            Assigned to <strong>{seasonClubEntry.clubName}</strong> for the {seasonClubEntry.seasonYear} season.
+            Contact an admin to change.
+          </p>
+        )}
       </div>
 
       <div style={{ marginTop: "0.75rem" }}>
@@ -440,7 +494,12 @@ export default function PilotProfile() {
 
       {/* Edit form — shown to the pilot themselves or an admin */}
       {canEdit && (
-        <EditProfileForm pilot={pilot} onSaved={() => setRefresh((v) => v + 1)} />
+        <EditProfileForm
+          pilot={pilot}
+          isAdmin={identity?.roles.includes("Admin") ?? false}
+          activeSeasonYear={identity?.activeSeasonYear}
+          onSaved={() => setRefresh((v) => v + 1)}
+        />
       )}
     </div>
   );

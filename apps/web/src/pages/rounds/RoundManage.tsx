@@ -19,6 +19,7 @@ import type {
   PilotSlot,
   PilotSummary,
   ClubSummary,
+  ClubTeamSummary,
   ScoringType,
   Signature,
 } from "@bccweb/types";
@@ -195,16 +196,38 @@ const WORKFLOW: Record<
 function AddTeamForm({
   roundId,
   clubs,
+  clubTeams,
+  seasonYear,
+  existingTeams,
   onAdded,
 }: {
   roundId: string;
   clubs: ClubSummary[];
+  clubTeams: ClubTeamSummary[];
+  seasonYear: number;
+  existingTeams: Team[];
   onAdded: () => void;
 }) {
   const [clubId, setClubId] = useState("");
   const [teamName, setTeamName] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const availableTeams = clubId
+    ? clubTeams
+        .filter(
+          (t) =>
+            t.clubId === clubId &&
+            t.seasonYear === seasonYear &&
+            !existingTeams.some(
+              (et) =>
+                et.club.id === t.clubId &&
+                et.teamName.toLowerCase() === t.teamName.toLowerCase()
+            )
+        )
+        .slice()
+        .sort((a, b) => a.teamName.localeCompare(b.teamName))
+    : [];
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -233,7 +256,10 @@ function AddTeamForm({
           required
           style={{ ...inputStyle, minWidth: 160 }}
           value={clubId}
-          onChange={(e) => setClubId(e.target.value)}
+          onChange={(e) => {
+            setClubId(e.target.value);
+            setTeamName("");
+          }}
         >
           <option value="">— club —</option>
           {clubs.map((c) => (
@@ -244,21 +270,39 @@ function AddTeamForm({
         </select>
       </div>
       <div>
-        <input
+        <select
           required
-          placeholder="Team name"
           style={{ ...inputStyle, minWidth: 160 }}
           value={teamName}
           onChange={(e) => setTeamName(e.target.value)}
-        />
+          disabled={!clubId || availableTeams.length === 0}
+        >
+          <option value="">
+            {!clubId
+              ? "— pick a club first —"
+              : availableTeams.length === 0
+                ? "— no teams available —"
+                : "— team —"}
+          </option>
+          {availableTeams.map((t) => (
+            <option key={t.id} value={t.teamName}>
+              {t.teamName}
+            </option>
+          ))}
+        </select>
       </div>
       <button
         type="submit"
-        disabled={busy}
+        disabled={busy || !clubId || !teamName}
         style={btnStyle("#fff", busy ? "#6c757d" : "#0066cc")}
       >
         {busy ? "Adding…" : "Add Team"}
       </button>
+      {clubId && availableTeams.length === 0 && (
+        <span style={{ fontSize: "0.75rem", color: "#888" }}>
+          No unassigned teams for this club in {seasonYear}. Register more under Club Teams.
+        </span>
+      )}
       {err && <Banner msg={err} />}
     </form>
   );
@@ -1210,6 +1254,7 @@ export default function RoundManage() {
 
   const { data: pilotsIndex } = useBlob<PilotSummary[]>("pilots.json");
   const { data: clubs } = useBlob<ClubSummary[]>("clubs.json");
+  const { data: clubTeams } = useBlob<ClubTeamSummary[]>("club-teams.json");
 
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
@@ -1428,6 +1473,9 @@ export default function RoundManage() {
             <AddTeamForm
               roundId={r.id}
               clubs={clubs ?? []}
+              clubTeams={clubTeams ?? []}
+              seasonYear={r.season.year}
+              existingTeams={r.teams}
               onAdded={() => { void loadRound(); }}
             />
           </div>

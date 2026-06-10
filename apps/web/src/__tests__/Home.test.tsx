@@ -32,18 +32,16 @@ vi.mock("../hooks/useBlob.js", () => ({
   },
 }));
 
-if (process.env.VITEST) {
-  describe("Home", () => {
-    it("renders the landing intro", () => {
-      render(
-        <MemoryRouter>
-          <Home />
-        </MemoryRouter>,
-      );
+describe("Home", () => {
+  it("renders the landing intro", () => {
+    render(
+      <MemoryRouter>
+        <Home />
+      </MemoryRouter>,
+    );
 
-      expect(
-        screen.getByText("Advance British Club Challenge (BCC)", { exact: false }),
-      ).toBeVisible();
-    });
+    expect(
+      screen.getByText("Advance British Club Challenge (BCC)", { exact: false }),
+    ).toBeVisible();
   });
-}
+});

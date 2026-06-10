@@ -1,129 +1,99 @@
-# ─── bccweb2 Makefile ─────────────────────────────────────────────────────────
-#
-# Usage:
-#   make              # install + build everything
-#   make build        # build all packages in dependency order
-#   make build-types  # build shared types package
-#   make build-scoring# build scoring package
-#   make build-api    # build Azure Functions API
-#   make build-web    # build React SPA
-#   make typecheck    # typecheck all workspaces
-#   make test         # run all tests
-#   make dev          # start local dev stack (Docker + func + vite)
-#   make dev-api      # start Azure Functions locally (requires Azurite running)
-#   make dev-web      # start Vite dev server
-#   make docker-up    # start Azurite + API + Web via Docker Compose
-#   make docker-down  # stop Docker Compose stack
-#   make clean        # remove all dist/ directories
+.PHONY: help
+help: ## Show this help
+	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
 
-.PHONY: all install build build-types build-scoring build-api build-web \
-        typecheck test dev dev-api dev-web \
-        docker-up docker-down clean \
-        seed seed-rounds wipe-fixtures \
-        loadtest-prepare loadtest-register loadtest-transition loadtest-sign loadtest-cleanup loadtest
+.PHONY: all
+all: install build ## Install dependencies and build everything
 
-# ─── Default ──────────────────────────────────────────────────────────────────
-
-all: install build
-
-# ─── Install ──────────────────────────────────────────────────────────────────
-
-install:
+.PHONY: install
+install: ## Install npm dependencies
 	npm install
 
-# ─── Build ────────────────────────────────────────────────────────────────────
+.PHONY: build
+build: build-types build-scoring build-api build-web ## Build all packages in dependency order
 
-# Full build in dependency order: shared packages first, then apps.
-build: build-types build-scoring build-api build-web
-
-build-types:
+.PHONY: build-types
+build-types: ## Build shared types package
 	npm run build --workspace=packages/types
 
-build-scoring: build-types
+.PHONY: build-scoring
+build-scoring: build-types ## Build scoring package
 	npm run build --workspace=packages/scoring
 
-build-api: build-types build-scoring
+.PHONY: build-api
+build-api: build-types build-scoring ## Build Azure Functions API
 	npm run build --workspace=apps/api
 
-build-web: build-types
+.PHONY: build-web
+build-web: build-types ## Build React SPA
 	npm run build --workspace=apps/web
 
-# ─── Typecheck ────────────────────────────────────────────────────────────────
-
-typecheck:
+.PHONY: typecheck
+typecheck: ## Typecheck all workspaces
 	npm run typecheck --workspaces --if-present
 
-# ─── Test ─────────────────────────────────────────────────────────────────────
-
-test:
+.PHONY: test
+test: ## Run all tests (requires Azurite for API tests)
 	npx vitest run
 
-# ─── Dev ──────────────────────────────────────────────────────────────────────
+.PHONY: dev
+dev: docker-up ## Start full local dev stack (Docker Compose)
 
-# Start the full local dev stack via Docker Compose (Azurite + API + Web).
-dev: docker-up
-
-# Start the Azure Functions host locally (Azurite must already be running).
-dev-api: build-types build-scoring build-api
+.PHONY: dev-api
+dev-api: build-types build-scoring build-api ## Start Azure Functions host (requires Azurite)
 	npm run start --workspace=apps/api
 
-# Start the Vite dev server (proxies /api → :7071, /blob → Azurite :10000).
-dev-web:
+.PHONY: dev-web
+dev-web: ## Start Vite dev server on :5173
 	npm run dev --workspace=apps/web
 
-# ─── Docker ───────────────────────────────────────────────────────────────────
-
-docker-up:
+.PHONY: docker-up
+docker-up: ## Start Azurite + API + Web via Docker Compose
 	docker compose up --build
 
-docker-down:
+.PHONY: docker-down
+docker-down: ## Stop Docker Compose stack
 	docker compose down
 
-# ─── Fixtures and load test ───────────────────────────────────────────────────
-# seed              — seed 500 pilots / 50 clubs / 100 club-teams + season / sites / config
-# seed-rounds       — seed 4 dev-browsing rounds (Proposed/Confirmed/BriefComplete/Locked)
-# wipe-fixtures     — surgical wipe of all fixture entities by manifest
-# loadtest-prepare  — create load-test round + 50 teams + confirm (writes tests/load/.prepared-round.json)
-# loadtest-register — k6 register-self phase (500 VUs); logs in logs/load-test/
-# loadtest-transition — POST brief-complete on the prepared round
-# loadtest-sign     — k6 sign phase; logs in logs/load-test/
-# loadtest-cleanup  — delete load-test round + signatures, keep fixtures
-# loadtest          — chains prepare → register → transition → sign → cleanup
-# All loadtest-* targets honour BCC_API_BASE_URL (default http://localhost:7071)
-# and ADMIN_PASSWORD env vars for dual local/Azure operation.
-
-seed:
+.PHONY: seed
+seed: ## Seed 500 pilots / 50 clubs / 100 club-teams + season fixtures
 	node scripts/seed-fixtures.mjs
 
-seed-rounds:
+.PHONY: seed-rounds
+seed-rounds: ## Seed 4 dev-browsing rounds (Proposed/Confirmed/BriefComplete/Locked)
 	node scripts/seed-rounds.mjs
 
-wipe-fixtures:
+.PHONY: wipe-fixtures
+wipe-fixtures: ## Surgical wipe of all fixture entities by manifest
 	node scripts/wipe-fixtures.mjs
 
-loadtest-prepare:
+.PHONY: loadtest-prepare
+loadtest-prepare: ## Create load-test round + 50 teams + confirm
 	node scripts/prepare-loadtest.mjs
 
-loadtest-register:
+.PHONY: loadtest-register
+loadtest-register: ## k6 register-self phase (500 VUs)
 	@mkdir -p $(CURDIR)/logs/load-test
 	cd tests/load && k6 run --env PHASE=register sign-to-fly.js | tee $(CURDIR)/logs/load-test/register-$$(date +%s).log
 
-loadtest-transition:
+.PHONY: loadtest-transition
+loadtest-transition: ## POST brief-complete on the prepared round
 	node scripts/transition-loadtest.mjs
 
-loadtest-sign:
+.PHONY: loadtest-sign
+loadtest-sign: ## k6 sign phase
 	@mkdir -p $(CURDIR)/logs/load-test
 	cd tests/load && k6 run --env PHASE=sign sign-to-fly.js | tee $(CURDIR)/logs/load-test/sign-$$(date +%s).log
 
-loadtest-cleanup:
+.PHONY: loadtest-cleanup
+loadtest-cleanup: ## Delete load-test round + signatures, keep fixtures
 	node scripts/cleanup-loadtest.mjs
 
-# Make runs targets in dependency order; failure of any step short-circuits.
-loadtest: loadtest-prepare loadtest-register loadtest-transition loadtest-sign loadtest-cleanup
+.PHONY: loadtest
+loadtest: loadtest-prepare loadtest-register loadtest-transition loadtest-sign loadtest-cleanup ## Full loadtest pipeline (prepare to cleanup)
 	@echo "[loadtest] full pipeline complete"
 
-# ─── Clean ────────────────────────────────────────────────────────────────────
-
-clean:
+.PHONY: clean
+clean: ## Remove all dist/ directories and tsbuildinfo files
 	rm -rf apps/api/dist apps/web/dist packages/types/dist packages/scoring/dist
 	rm -f packages/types/tsconfig.tsbuildinfo packages/scoring/tsconfig.tsbuildinfo
