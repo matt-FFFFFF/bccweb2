@@ -147,10 +147,18 @@ const seasonYear = manifest.seasonYear;
 const createdRound = await callApi("POST", "/api/rounds", {
   token,
   body: {
-    date: isoDatePlusDays(7),
+    // 21 days out (not 7) so the load-test round can coexist with seed-rounds.mjs's
+    // Proposed round (at +7 days) without triggering DOUBLE_BOOKING in
+    // ensureNotDoubleBooked (roundRegistration.ts:286-307).
+    date: isoDatePlusDays(21),
     siteId,
     seasonYear,
     maxTeams: LOADTEST_TEAMS, // default is 8 — must override to fit 50 teams
+    // register-self requires round.organisingClub to be set
+    // (apps/api/src/functions/roundRegistration.ts:243-244). The 500 VUs all
+    // register against THIS club; autoAllocatePilotsToRoundClub (set by T8
+    // seed-fixtures) lets pilots from other fixture clubs join.
+    organisingClubId: manifest.clubIds[0],
   },
 });
 const roundId = createdRound.id;
@@ -163,7 +171,12 @@ if (!roundId) {
 
 const teamSpecs = Array.from({ length: LOADTEST_TEAMS }, (_, i) => ({
   index: i, // 0..49 — preserves teamN ordering for prepared.teams build
-  clubId: manifest.clubIds[i],
+  // All 50 teams MUST belong to the organising club so findTeamForPilotClub
+  // (roundRegistration.ts:280) accepts pilot registrations regardless of
+  // their seasonal club. teams.ts addTeam only enforces r.maxTeams (not
+  // config.maxTeamsInClub) and de-dupes on (teamName, clubId) — unique
+  // teamNames keep us safe.
+  clubId: manifest.clubIds[0],
   teamName: `Loadtest Team ${String(i + 1).padStart(2, "0")}`,
 }));
 
