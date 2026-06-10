@@ -91,10 +91,9 @@ resource "azapi_resource" "tfstate_sa" {
 
 # ─── Blob service (soft delete) ──────────────────────────────────────────────
 
-resource "azapi_resource" "tfstate_blob_service" {
-  type      = "Microsoft.Storage/storageAccounts/blobServices@2025-06-01"
-  name      = "default"
-  parent_id = azapi_resource.tfstate_sa.id
+resource "azapi_update_resource" "tfstate_blob_service" {
+  type        = "Microsoft.Storage/storageAccounts/blobServices@2025-06-01"
+  resource_id = "${azapi_resource.tfstate_sa.id}/blobServices/default"
 
   body = {
     properties = {
@@ -115,13 +114,18 @@ resource "azapi_resource" "tfstate_blob_service" {
 resource "azapi_resource" "tfstate_container" {
   type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2025-06-01"
   name      = var.tfstate_container_name
-  parent_id = azapi_resource.tfstate_blob_service.id
+  parent_id = "${azapi_resource.tfstate_sa.id}/blobServices/default"
 
   body = {
     properties = {
       publicAccess = "None"
     }
   }
+
+  # The default blob service is implicit — we use azapi_update_resource to
+  # customize it without trying to create it. Ensure the update lands before
+  # the container is created (containers inherit blob-service properties).
+  depends_on = [azapi_update_resource.tfstate_blob_service]
 }
 
 # ─── CanNotDelete lock on the storage account ────────────────────────────────
