@@ -77,10 +77,11 @@ export default function Login() {
 
       <form onSubmit={(e) => { void handleSubmit(e); }} style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
         <div>
-          <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem", color: "#555" }}>
+          <label htmlFor="login-email" style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem", color: "#555" }}>
             Email address
           </label>
           <input
+            id="login-email"
             type="email"
             required
             autoComplete="username"
@@ -90,10 +91,11 @@ export default function Login() {
           />
         </div>
         <div>
-          <label style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem", color: "#555" }}>
+          <label htmlFor="login-password" style={{ display: "block", fontSize: "0.8rem", marginBottom: "0.3rem", color: "#555" }}>
             Password
           </label>
           <input
+            id="login-password"
             type="password"
             required
             autoComplete="current-password"

@@ -52,7 +52,7 @@ export default function FirstLoginOfSeasonGate({ children }: { children: React.R
 
   useEffect(() => {
     if (showModal && identity?.pilotId && !pilot) {
-      api.get<Pilot>(`/api/pilots/${identity.pilotId}`)
+      api.get<Pilot>(`pilots/${identity.pilotId}`)
         .then(p => {
           setPilot(p);
           setFormData({
@@ -88,7 +88,7 @@ export default function FirstLoginOfSeasonGate({ children }: { children: React.R
     try {
       const selectedClub = clubs?.find(c => c.id === formData.currentClubId);
       
-      await api.put(`/api/pilots/${identity.pilotId}`, {
+      await api.put(`pilots/${identity.pilotId}`, {
         phoneNumber: formData.phoneNumber,
         emergencyContactName: formData.emergencyContactName,
         emergencyPhoneNumber: formData.emergencyPhoneNumber,

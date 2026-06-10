@@ -126,7 +126,7 @@ describe("FirstLoginOfSeasonGate", () => {
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(api.put).toHaveBeenCalledWith("/api/pilots/p1", expect.objectContaining({
+      expect(api.put).toHaveBeenCalledWith("pilots/p1", expect.objectContaining({
         emergencyContactName: "Mom",
         emergencyPhoneNumber: "911",
         wingClass: "EN-A",

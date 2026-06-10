@@ -86,7 +86,7 @@ test.describe("sign-to-fly journey", () => {
 
     await page.getByRole("link", { name: /sign to fly/i }).click();
     await expect(page.getByRole("heading", { name: /sign to fly/i })).toBeVisible({ timeout: 5000 });
-    await expect(page.getByText(/legal acceptance text/i)).toBeVisible({ timeout: 5000 });
+    await expect(page.getByRole("heading", { name: /legal acceptance text/i })).toBeVisible({ timeout: 5000 });
     await shot(page, "06-sign-to-fly-legal-text");
 
     await page.getByLabel(/i have read and understood/i).check();
@@ -505,7 +505,7 @@ function publicBlob(blobPath: string, state: E2EState) {
   if (blobPath === "clubs.json") return [{ id: CLUB_ID, name: "Alpha Club" }];
   if (blobPath === "rounds.json") return [{ id: ROUND_ID, date: state.round.date, siteId: state.round.site.id, siteName: state.round.site.name, status: state.round.status, seasonYear: YEAR }];
   if (blobPath === "seasons.json") return [{ year: YEAR, active: true }];
-  if (blobPath === `seasons/${YEAR}.json`) return { year: YEAR, recomputed: state.leagueRecomputed, league: [] };
+  if (blobPath === `seasons/${YEAR}.json`) return { year: YEAR, recomputed: state.leagueRecomputed, leagueTable: [] };
   return { error: `Unhandled blob ${blobPath}` };
 }
 

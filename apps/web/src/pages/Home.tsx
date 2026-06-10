@@ -73,7 +73,7 @@ function HomeLeagueTable({ year }: { year: number }) {
   if (loading) return <LoadingSpinner />;
   if (notFound) return null;
   if (error) return <ErrorMessage error={error} />;
-  if (!season || season.leagueTable.length === 0) return null;
+  if (!season?.leagueTable || season.leagueTable.length === 0) return null;
 
   const top = season.leagueTable.slice(0, 8);
 
