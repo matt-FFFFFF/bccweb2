@@ -1,5 +1,5 @@
 locals {
-  function_app_base_settings = [
+  function_app_settings = [
     { name = "FUNCTIONS_WORKER_RUNTIME", value = "node" },
     { name = "FUNCTIONS_EXTENSION_VERSION", value = "~4" },
     { name = "WEBSITE_NODE_DEFAULT_VERSION", value = "~20" },
@@ -16,13 +16,6 @@ locals {
     { name = "PURETRACK_EMAIL", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/puretrack-email/)" },
     { name = "PURETRACK_PASSWORD", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/puretrack-password/)" },
   ]
-
-  function_app_base_setting_names = toset([for setting in local.function_app_base_settings : setting.name])
-  acs_app_settings_without_function_duplicates = [
-    for setting in local.acs_app_settings_list : setting
-    if !contains(local.function_app_base_setting_names, setting.name)
-  ]
-  function_app_settings = concat(local.function_app_base_settings, local.acs_app_settings_without_function_duplicates)
 }
 
 resource "azapi_resource" "fn_umi" {

@@ -15,10 +15,10 @@
 #
 # Coordination:
 #   * The `ephemeral "azapi_resource_action" "acs_keys"` block lives in
-#     keyvault.tf (T10). It is called against azapi_resource.acs.id and used
+#     keyvault.tf. It is called against azapi_resource.acs.id and used
 #     ONLY to write the ACS primary connection string into Key Vault. The
 #     Function App reads it back via a Key Vault reference (see
-#     local.acs_app_settings_list below). No non-ephemeral listKeys action is
+#     iac/modules/stamp/functions.tf). No non-ephemeral listKeys action is
 #     declared here, so the raw connection string never lands in state.
 #
 # After applying, run `terraform output acs_dns_records_for_operator` and add
@@ -26,9 +26,9 @@
 # mark the domain Verified.
 
 locals {
-  # Mirrors storage.tf's storage_prefix recomputation: T5 does not pass
-  # `prefix` into the stamp module, so each stamp file derives it from
-  # var.stamp_name independently.
+  # Mirrors storage.tf's storage_prefix recomputation: the root module does
+  # not pass `prefix` into the stamp module, so each stamp file derives it
+  # from var.stamp_name independently.
   acs_prefix = "bccweb-${var.stamp_name}"
 }
 
@@ -96,8 +96,6 @@ locals {
     dkim2            = try(local.acs_verification_records.DKIM2, null)
     dmarc            = try(local.acs_verification_records.DMARC, null)
   }
-
-  acs_dmarc_recommended_value = "v=DMARC1; p=none; rua=mailto:${var.acs_sender_address}; ruf=mailto:${var.acs_sender_address}; pct=100; adkim=s; aspf=s"
 }
 
 # ─── ACS Base Resource ────────────────────────────────────────────────────────
@@ -118,36 +116,4 @@ resource "azapi_resource" "acs" {
       linkedDomains = [azapi_resource.acs_email_domain.id]
     }
   }
-}
-
-# ─── Function App settings — ACS + PureTrack ─────────────────────────────────
-#
-# The Function App's siteConfig.appSettings expects a list of {name, value}
-# objects. T12 concatenates this list with the storage + auth settings.
-#
-# All secret values are sourced via Key Vault references rather than embedded
-# plaintext. T10 declares `azapi_resource.kv` and writes the seven secrets
-# (acs-connection-string, round-brief-emails, puretrack-*) into it; the
-# Function App reads them at startup through its user-assigned managed
-# identity (see T12). The Key Vault name is forwarded into the reference
-# string via the `@Microsoft.KeyVault(VaultName=...;SecretName=...)` syntax
-# that Azure App Service / Functions resolves natively.
-#
-# `local.acs_connection_string` is intentionally a Key Vault reference string
-# (not a raw value): the underlying listKeys action lives as an `ephemeral
-# azapi_resource_action.acs_keys` in keyvault.tf (T10), and ephemeral outputs
-# cannot flow into a local. Routing the value through Key Vault is the
-# secure-by-default path for app settings anyway.
-
-locals {
-  acs_connection_string = "@Microsoft.KeyVault(VaultName=${azapi_resource.kv.name};SecretName=acs-connection-string)"
-
-  acs_app_settings_list = [
-    { name = "ACS_CONNECTION_STRING", value = local.acs_connection_string },
-    { name = "ACS_SENDER_ADDRESS", value = var.acs_sender_address },
-    { name = "ROUND_BRIEF_EMAILS", value = "@Microsoft.KeyVault(VaultName=${azapi_resource.kv.name};SecretName=round-brief-emails)" },
-    { name = "PURETRACK_API_KEY", value = "@Microsoft.KeyVault(VaultName=${azapi_resource.kv.name};SecretName=puretrack-api-key)" },
-    { name = "PURETRACK_EMAIL", value = "@Microsoft.KeyVault(VaultName=${azapi_resource.kv.name};SecretName=puretrack-email)" },
-    { name = "PURETRACK_PASSWORD", value = "@Microsoft.KeyVault(VaultName=${azapi_resource.kv.name};SecretName=puretrack-password)" },
-  ]
 }

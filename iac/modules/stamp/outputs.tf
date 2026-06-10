@@ -8,16 +8,6 @@ output "function_app_name" {
   value       = azapi_resource.function_app.name
 }
 
-output "function_app_default_hostname" {
-  description = "Default hostname of the Function App for API routing and smoke tests."
-  value       = azapi_resource.function_app.output.properties.defaultHostName
-}
-
-output "swa_default_hostname" {
-  description = "Default hostname of the Static Web App for CNAME and site access."
-  value       = azapi_resource.swa.output.properties.defaultHostname
-}
-
 output "swa_url" {
   description = "Public HTTPS URL of the Static Web App."
   value       = "https://${azapi_resource.swa.output.properties.defaultHostname}"

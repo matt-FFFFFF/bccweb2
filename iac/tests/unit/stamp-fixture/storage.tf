@@ -2,7 +2,7 @@ locals {
   # Storage account names: lowercase, no hyphens, ≤24 chars.
   # Mirrors legacy iac/storage.tf naming (`replace("st${local.prefix}", "-", "")`)
   # where `local.prefix = "bccweb-${var.stamp_name}"`. Recomputed inline here
-  # because T5 does not pass `prefix` into the stamp module.
+  # because the root module does not pass `prefix` into the stamp module.
   storage_prefix       = "bccweb-${var.stamp_name}"
   storage_account_name = replace("st${local.storage_prefix}", "-", "")
 }
@@ -129,8 +129,8 @@ resource "azapi_resource" "storage_container_data_private" {
 #
 # Used to construct the connection string for the Function App.
 # NON-ephemeral: the resulting connection string is consumed by Function App
-# app settings via local.storage_primary_connection_string (T12), which must
-# be available at plan time.
+# app settings via local.storage_primary_connection_string (iac/modules/stamp/functions.tf),
+# which must be available at plan time.
 
 resource "azapi_resource_action" "storage_keys" {
   type        = "Microsoft.Storage/storageAccounts@2025-06-01"

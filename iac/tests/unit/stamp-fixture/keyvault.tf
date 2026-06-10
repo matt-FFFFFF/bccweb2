@@ -1,3 +1,10 @@
+# TEST FIXTURE ONLY — see iac/tests/unit/stamp-fixture/README.md.
+# This file substitutes the real module's `ephemeral` resources (random_password
+# and azapi_resource_action.acs_keys) with plain sentinel locals so that
+# `terraform test` plan runs succeed under mock_provider, which cannot satisfy
+# ephemerals. All other stamp-fixture/*.tf files must stay byte-identical to
+# iac/modules/stamp/*.tf.
+#
 # First-apply may 403 on KV data-plane writes due to RBAC propagation lag. Re-apply to recover. data.azapi_client_config.current is module-local (declared here, reused by dns.tf in the same module).
 # kv_admin_role assumes a user-context `az login` apply (`principalType = "User"`).
 # CI/service-principal applies need a future principalType switch to "ServicePrincipal".

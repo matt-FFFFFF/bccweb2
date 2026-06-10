@@ -207,11 +207,11 @@ resource "azapi_resource" "storage_server_errors" {
 
 # ─── Alert 4: Auth lockout spike > 5 in 15min (severity 2) ───────────────────
 #
-# Scheduled query against App Insights traces. T16 emits
-# `[METRIC] auth.lockout.triggered userId=<sha8>` via console.warn whenever a
-# user crosses 5 failed login attempts inside the 10-minute window — these
-# surface in App Insights as rows in the `traces` table (NOT customEvents;
-# we did not wire trackEvent in T16).
+# Scheduled query against App Insights traces. apps/api/src/lib/rateLimit.ts
+# emits `[METRIC] auth.lockout.triggered userId=<sha8>` via console.warn
+# whenever a user crosses 5 failed login attempts inside the 10-minute window —
+# these surface in App Insights as rows in the `traces` table (NOT customEvents;
+# trackEvent is not wired in apps/api/src/lib/rateLimit.ts).
 #
 # Investigate-async severity 2: 6 lockouts in 15 minutes is anomalous (could
 # indicate credential stuffing) but not site-down. Page only if the count

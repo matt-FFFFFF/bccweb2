@@ -1,4 +1,4 @@
-# Required inputs from root: app_insights_id, app_insights_connection_string, log_analytics_workspace_id, terraform_principal_object_id.
+# Required inputs from root: app_insights_id, app_insights_connection_string, terraform_principal_object_id.
 #
 # This is the stamp module's input schema. The root module declares the same
 # user-facing variable names in iac/variables.tf and forwards them into the
@@ -130,12 +130,6 @@ variable "app_insights_connection_string" {
   description = "Application Insights connection string forwarded from root into Key Vault via the ephemeral pipeline (REQUIRED INPUT from root)."
   type        = string
   sensitive   = true
-  nullable    = false
-}
-
-variable "log_analytics_workspace_id" {
-  description = "Resource ID of the shared Log Analytics workspace (REQUIRED INPUT from root)."
-  type        = string
   nullable    = false
 }
 

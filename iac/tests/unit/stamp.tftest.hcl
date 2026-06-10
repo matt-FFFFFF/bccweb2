@@ -87,6 +87,29 @@ override_resource {
   }
 }
 
+variables {
+  stamp_name                     = "unit"
+  location                       = "uksouth"
+  allowed_origins                = ["https://unit.example.test"]
+  ops_email                      = "ops@example.test"
+  slack_webhook_url              = "https://hooks.example.test/unit"
+  production_hostname            = "www.example.test"
+  dns_zone_name                  = "example.test"
+  dns_zone_resource_group_name   = "dns-rg-test"
+  acs_email_domain               = "mail.example.test"
+  acs_sender_address             = "noreply@mail.example.test"
+  round_brief_emails             = "briefs@example.test"
+  puretrack_api_key              = "TEST_PT_KEY_SENTINEL"
+  puretrack_email                = "TEST_PT_EMAIL@example.test"
+  puretrack_password             = "TEST_PT_PASSWORD_SENTINEL"
+  jwt_secret_version             = "1"
+  acs_secret_version             = "1"
+  tags                           = { environment = "unit", managed_by = "terraform" }
+  app_insights_id                = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Insights/components/test-ai"
+  app_insights_connection_string = "InstrumentationKey=TEST_APPINSIGHTS_SENTINEL;IngestionEndpoint=https://example.test/"
+  terraform_principal_object_id  = "00000000-0000-0000-0000-000000000005"
+}
+
 run "module_plans_with_minimum_inputs" {
   command = plan
 
@@ -97,30 +120,6 @@ run "module_plans_with_minimum_inputs" {
 
   module {
     source = "./tests/unit/stamp-fixture"
-  }
-
-  variables {
-    stamp_name                     = "unit"
-    location                       = "uksouth"
-    allowed_origins                = ["https://unit.example.test"]
-    ops_email                      = "ops@example.test"
-    slack_webhook_url              = "https://hooks.example.test/unit"
-    production_hostname            = "www.example.test"
-    dns_zone_name                  = "example.test"
-    dns_zone_resource_group_name   = "dns-rg-test"
-    acs_email_domain               = "mail.example.test"
-    acs_sender_address             = "noreply@mail.example.test"
-    round_brief_emails             = "briefs@example.test"
-    puretrack_api_key              = "TEST_PT_KEY_SENTINEL"
-    puretrack_email                = "TEST_PT_EMAIL@example.test"
-    puretrack_password             = "TEST_PT_PASSWORD_SENTINEL"
-    jwt_secret_version             = "1"
-    acs_secret_version             = "1"
-    tags                           = { environment = "unit", managed_by = "terraform" }
-    app_insights_id                = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Insights/components/test-ai"
-    app_insights_connection_string = "InstrumentationKey=TEST_APPINSIGHTS_SENTINEL;IngestionEndpoint=https://example.test/"
-    log_analytics_workspace_id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.OperationalInsights/workspaces/test-law"
-    terraform_principal_object_id  = "00000000-0000-0000-0000-000000000005"
   }
 
   assert {
@@ -139,30 +138,6 @@ run "key_vault_has_seven_secrets" {
 
   module {
     source = "./tests/unit/stamp-fixture"
-  }
-
-  variables {
-    stamp_name                     = "unit"
-    location                       = "uksouth"
-    allowed_origins                = ["https://unit.example.test"]
-    ops_email                      = "ops@example.test"
-    slack_webhook_url              = "https://hooks.example.test/unit"
-    production_hostname            = "www.example.test"
-    dns_zone_name                  = "example.test"
-    dns_zone_resource_group_name   = "dns-rg-test"
-    acs_email_domain               = "mail.example.test"
-    acs_sender_address             = "noreply@mail.example.test"
-    round_brief_emails             = "briefs@example.test"
-    puretrack_api_key              = "TEST_PT_KEY_SENTINEL"
-    puretrack_email                = "TEST_PT_EMAIL@example.test"
-    puretrack_password             = "TEST_PT_PASSWORD_SENTINEL"
-    jwt_secret_version             = "1"
-    acs_secret_version             = "1"
-    tags                           = { environment = "unit", managed_by = "terraform" }
-    app_insights_id                = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Insights/components/test-ai"
-    app_insights_connection_string = "InstrumentationKey=TEST_APPINSIGHTS_SENTINEL;IngestionEndpoint=https://example.test/"
-    log_analytics_workspace_id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.OperationalInsights/workspaces/test-law"
-    terraform_principal_object_id  = "00000000-0000-0000-0000-000000000005"
   }
 
   assert {
@@ -189,30 +164,6 @@ run "function_app_settings_use_kv_references" {
     source = "./tests/unit/stamp-fixture"
   }
 
-  variables {
-    stamp_name                     = "unit"
-    location                       = "uksouth"
-    allowed_origins                = ["https://unit.example.test"]
-    ops_email                      = "ops@example.test"
-    slack_webhook_url              = "https://hooks.example.test/unit"
-    production_hostname            = "www.example.test"
-    dns_zone_name                  = "example.test"
-    dns_zone_resource_group_name   = "dns-rg-test"
-    acs_email_domain               = "mail.example.test"
-    acs_sender_address             = "noreply@mail.example.test"
-    round_brief_emails             = "briefs@example.test"
-    puretrack_api_key              = "TEST_PT_KEY_SENTINEL"
-    puretrack_email                = "TEST_PT_EMAIL@example.test"
-    puretrack_password             = "TEST_PT_PASSWORD_SENTINEL"
-    jwt_secret_version             = "1"
-    acs_secret_version             = "1"
-    tags                           = { environment = "unit", managed_by = "terraform" }
-    app_insights_id                = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Insights/components/test-ai"
-    app_insights_connection_string = "InstrumentationKey=TEST_APPINSIGHTS_SENTINEL;IngestionEndpoint=https://example.test/"
-    log_analytics_workspace_id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.OperationalInsights/workspaces/test-law"
-    terraform_principal_object_id  = "00000000-0000-0000-0000-000000000005"
-  }
-
   assert {
     condition = length([
       for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting
@@ -235,27 +186,7 @@ run "no_plaintext_secrets_in_plan" {
   }
 
   variables {
-    stamp_name                     = "unit"
-    location                       = "uksouth"
-    allowed_origins                = ["https://unit.example.test"]
-    ops_email                      = "ops@example.test"
-    slack_webhook_url              = "https://hooks.example.test/unit"
-    production_hostname            = "www.example.test"
-    dns_zone_name                  = "example.test"
-    dns_zone_resource_group_name   = "dns-rg-test"
-    acs_email_domain               = "mail.example.test"
-    acs_sender_address             = "noreply@mail.example.test"
-    round_brief_emails             = "TEST_BRIEF_EMAILS_SENTINEL@example.test"
-    puretrack_api_key              = "TEST_PT_KEY_SENTINEL"
-    puretrack_email                = "TEST_PT_EMAIL@example.test"
-    puretrack_password             = "TEST_PT_PASSWORD_SENTINEL"
-    jwt_secret_version             = "1"
-    acs_secret_version             = "1"
-    tags                           = { environment = "unit", managed_by = "terraform" }
-    app_insights_id                = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Insights/components/test-ai"
-    app_insights_connection_string = "InstrumentationKey=TEST_APPINSIGHTS_SENTINEL;IngestionEndpoint=https://example.test/"
-    log_analytics_workspace_id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.OperationalInsights/workspaces/test-law"
-    terraform_principal_object_id  = "00000000-0000-0000-0000-000000000005"
+    round_brief_emails = "TEST_BRIEF_EMAILS_SENTINEL@example.test"
   }
 
   assert {
@@ -282,30 +213,6 @@ run "alerts_use_passed_in_app_insights_id" {
     source = "./tests/unit/stamp-fixture"
   }
 
-  variables {
-    stamp_name                     = "unit"
-    location                       = "uksouth"
-    allowed_origins                = ["https://unit.example.test"]
-    ops_email                      = "ops@example.test"
-    slack_webhook_url              = "https://hooks.example.test/unit"
-    production_hostname            = "www.example.test"
-    dns_zone_name                  = "example.test"
-    dns_zone_resource_group_name   = "dns-rg-test"
-    acs_email_domain               = "mail.example.test"
-    acs_sender_address             = "noreply@mail.example.test"
-    round_brief_emails             = "briefs@example.test"
-    puretrack_api_key              = "TEST_PT_KEY_SENTINEL"
-    puretrack_email                = "TEST_PT_EMAIL@example.test"
-    puretrack_password             = "TEST_PT_PASSWORD_SENTINEL"
-    jwt_secret_version             = "1"
-    acs_secret_version             = "1"
-    tags                           = { environment = "unit", managed_by = "terraform" }
-    app_insights_id                = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Insights/components/test-ai"
-    app_insights_connection_string = "InstrumentationKey=TEST_APPINSIGHTS_SENTINEL;IngestionEndpoint=https://example.test/"
-    log_analytics_workspace_id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.OperationalInsights/workspaces/test-law"
-    terraform_principal_object_id  = "00000000-0000-0000-0000-000000000005"
-  }
-
   assert {
     condition = (
       azapi_resource.api_5xx_rate.body.properties.scopes == [var.app_insights_id] &&
@@ -329,30 +236,6 @@ run "no_diagnostic_settings" {
 
   module {
     source = "./tests/unit/stamp-fixture"
-  }
-
-  variables {
-    stamp_name                     = "unit"
-    location                       = "uksouth"
-    allowed_origins                = ["https://unit.example.test"]
-    ops_email                      = "ops@example.test"
-    slack_webhook_url              = "https://hooks.example.test/unit"
-    production_hostname            = "www.example.test"
-    dns_zone_name                  = "example.test"
-    dns_zone_resource_group_name   = "dns-rg-test"
-    acs_email_domain               = "mail.example.test"
-    acs_sender_address             = "noreply@mail.example.test"
-    round_brief_emails             = "briefs@example.test"
-    puretrack_api_key              = "TEST_PT_KEY_SENTINEL"
-    puretrack_email                = "TEST_PT_EMAIL@example.test"
-    puretrack_password             = "TEST_PT_PASSWORD_SENTINEL"
-    jwt_secret_version             = "1"
-    acs_secret_version             = "1"
-    tags                           = { environment = "unit", managed_by = "terraform" }
-    app_insights_id                = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Insights/components/test-ai"
-    app_insights_connection_string = "InstrumentationKey=TEST_APPINSIGHTS_SENTINEL;IngestionEndpoint=https://example.test/"
-    log_analytics_workspace_id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.OperationalInsights/workspaces/test-law"
-    terraform_principal_object_id  = "00000000-0000-0000-0000-000000000005"
   }
 
   assert {
@@ -402,27 +285,7 @@ run "dns_skipped_when_hostname_empty" {
   }
 
   variables {
-    stamp_name                     = "unit"
-    location                       = "uksouth"
-    allowed_origins                = ["https://unit.example.test"]
-    ops_email                      = "ops@example.test"
-    slack_webhook_url              = "https://hooks.example.test/unit"
-    production_hostname            = ""
-    dns_zone_name                  = "example.test"
-    dns_zone_resource_group_name   = "dns-rg-test"
-    acs_email_domain               = "mail.example.test"
-    acs_sender_address             = "noreply@mail.example.test"
-    round_brief_emails             = "briefs@example.test"
-    puretrack_api_key              = "TEST_PT_KEY_SENTINEL"
-    puretrack_email                = "TEST_PT_EMAIL@example.test"
-    puretrack_password             = "TEST_PT_PASSWORD_SENTINEL"
-    jwt_secret_version             = "1"
-    acs_secret_version             = "1"
-    tags                           = { environment = "unit", managed_by = "terraform" }
-    app_insights_id                = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Insights/components/test-ai"
-    app_insights_connection_string = "InstrumentationKey=TEST_APPINSIGHTS_SENTINEL;IngestionEndpoint=https://example.test/"
-    log_analytics_workspace_id     = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.OperationalInsights/workspaces/test-law"
-    terraform_principal_object_id  = "00000000-0000-0000-0000-000000000005"
+    production_hostname = ""
   }
 
   assert {
