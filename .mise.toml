@@ -1,9 +1,7 @@
 [tools]
-node = "20.20.2"
+node = "24.16.0"
 terraform = "latest"
-
-[tools."npm:azure-functions-core-tools"]
-version = "4.9.0"
+azure-functions-core-tools = "4.12.0"
 
 [settings]
 experimental = true

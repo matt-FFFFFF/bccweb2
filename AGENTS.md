@@ -6,7 +6,7 @@ rewriting a legacy .NET app. **All data lives in Azure Blob Storage — no DB.**
 ## Monorepo Layout (npm workspaces)
 
 ```
-apps/api/        @bccweb/api     — Azure Functions v4 HTTP API (Node 20, ESM, TS)
+apps/api/        @bccweb/api     — Azure Functions v4 HTTP API (Node 24, ESM, TS)
 apps/web/        @bccweb/web     — React 18 SPA (Vite 5, TS)
 packages/types/  @bccweb/types   — Shared TS interfaces (no runtime deps)
 packages/scoring/@bccweb/scoring — Pure scoring: scoreRound(), computeLeague()
@@ -24,7 +24,7 @@ typechecking dependents, or use `make build`. `make clean` deletes
 
 ## Toolchain (pinned in `.mise.toml`)
 
-- Node 20.20.2, Terraform `latest` (workflows expect 1.10.x), `azure-functions-core-tools` 4.9.0
+- Node 24.16.0, Terraform `latest` (workflows expect 1.10.x), `azure-functions-core-tools` 4.12.0
 - npm ≥ 10 (workspaces). `mise install` brings these up.
 
 ## Build / Test / Dev

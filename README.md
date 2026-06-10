@@ -7,7 +7,7 @@ data stored in Azure Blob Storage (no database). Replaces a legacy .NET app.
 ## Stack
 
 - **Web**: React 18, Vite 5, React Router v6, TypeScript
-- **API**: Azure Functions v4 (Node 20, ESM, programming-model v4), TypeScript
+- **API**: Azure Functions v4 (Node 24, ESM, programming-model v4), TypeScript
 - **Storage**: Azure Blob Storage (two containers: `data` public, `data-private` private)
 - **Auth**: HS256 JWT (bespoke), `JWT_SECRET` from Azure Key Vault in prod
 - **Hosting**: Static Web App (SPA) + Function App (API), Terraform-managed
@@ -40,7 +40,7 @@ Install with [mise](https://mise.jdx.dev/) (versions pinned in `.mise.toml`):
 mise install
 ```
 
-Provides Node 20.20.2, Terraform, and `azure-functions-core-tools` 4.9.0.
+Provides Node 24.16.0, Terraform, and `azure-functions-core-tools` 4.12.0.
 
 You also need:
 

@@ -70,7 +70,7 @@ function fail(check, violations) {
   }
 }
 
-// ─── Directory walker (Node 20 compatible) ────────────────────────────────────
+// ─── Directory walker (Node 24 compatible) ────────────────────────────────────
 
 async function* walkDir(dir, ext) {
   let entries;

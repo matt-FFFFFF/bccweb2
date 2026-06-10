@@ -1,5 +1,5 @@
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /build
 
 # Copy manifests first for better layer caching
@@ -30,7 +30,7 @@ RUN rm -rf node_modules/@bccweb/scoring && cp -r packages/scoring node_modules/@
 RUN node_modules/.bin/tsc --project apps/api/tsconfig.json
 
 # ── Stage 2: Runtime (official Azure Functions host) ──────────────────────────
-FROM --platform=linux/amd64 mcr.microsoft.com/azure-functions/node:4-node20
+FROM --platform=linux/amd64 mcr.microsoft.com/azure-functions/node:4-node24
 
 ENV AzureWebJobsScriptRoot=/home/site/wwwroot \
     AzureFunctionsJobHost__Logging__Console__IsEnabled=true

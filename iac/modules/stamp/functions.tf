@@ -2,7 +2,7 @@ locals {
   function_app_settings = [
     { name = "FUNCTIONS_WORKER_RUNTIME", value = "node" },
     { name = "FUNCTIONS_EXTENSION_VERSION", value = "~4" },
-    { name = "WEBSITE_NODE_DEFAULT_VERSION", value = "~20" },
+    { name = "WEBSITE_NODE_DEFAULT_VERSION", value = "~24" },
     { name = "AzureWebJobsStorage", value = local.storage_primary_connection_string },
     { name = "BLOB_CONNECTION_STRING", value = local.storage_primary_connection_string },
     { name = "BLOB_CONTAINER_NAME", value = "data" },
@@ -68,7 +68,7 @@ resource "azapi_resource" "function_app" {
       httpsOnly                 = true
       keyVaultReferenceIdentity = azapi_resource.fn_umi.id
       siteConfig = {
-        linuxFxVersion = "NODE|20"
+        linuxFxVersion = "NODE|24"
         appSettings    = local.function_app_settings
         cors = {
           allowedOrigins = var.allowed_origins
