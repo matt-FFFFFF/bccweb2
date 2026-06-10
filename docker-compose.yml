@@ -102,15 +102,22 @@ services:
       # Source /scripts is read-only; copied into writable /workspace/scripts
       # at runtime so node can resolve relative imports (./lib/blobSeed.mjs etc.)
       - ./scripts:/scripts:ro
-      - ./package.json:/workspace/package.json:ro
-      - ./package-lock.json:/workspace/package-lock.json:ro
       # Read-write so seed-admin.mjs can write the generated password back to host.
       - ./.dev-credentials:/workspace/.dev-credentials
     working_dir: /workspace
     networks:
       - bccweb
+    # Create a minimal in-container package.json (so npm has a workspace context)
+    # rather than bind-mounting the host one as :ro. The host manifest is
+    # read-only under podman virtiofs and npm wants to update it when ad-hoc
+    # installing bcryptjs + @azure/storage-blob. --no-save and --no-package-lock
+    # keep the install fully ephemeral.
     command: >
-      sh -c "cp -r /scripts /workspace/scripts && cd /workspace && npm install --omit=dev --no-audit --no-fund bcryptjs @azure/storage-blob && node /workspace/scripts/seed-admin.mjs"
+      sh -c "cp -r /scripts /workspace/scripts &&
+             cd /workspace &&
+             echo '{\"name\":\"bccweb-api-init\",\"private\":true}' > package.json &&
+             npm install --no-save --no-package-lock --omit=dev --no-audit --no-fund bcryptjs @azure/storage-blob &&
+             node /workspace/scripts/seed-admin.mjs"
     restart: "no"
 
   # ─── Web (React SPA via Caddy) ───────────────────────────────────────────────
