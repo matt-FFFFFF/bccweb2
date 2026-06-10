@@ -303,12 +303,17 @@ async function main() {
   ]);
   await inChunks(pilotWriteJobs, (job) => job());
 
+  // Preserves admin (T7) and any non-fixture user entries across wipe→reseed cycles.
+  // Fixture entries always win on collision.
+  const existingUserIndex = (await readJson(privateContainer, "user-index.json")) ?? {};
   await writeJson(privateContainer, "user-index.json", {
-    ...((await readJson(privateContainer, "user-index.json")) ?? {}),
+    ...existingUserIndex,
     ...userIndexEntries,
   });
+
+  const existingPilotEmailIndex = (await readJson(privateContainer, "pilot-email-index.json")) ?? {};
   await writeJson(privateContainer, "pilot-email-index.json", {
-    ...((await readJson(privateContainer, "pilot-email-index.json")) ?? {}),
+    ...existingPilotEmailIndex,
     ...pilotEmailIndexEntries,
   });
 
