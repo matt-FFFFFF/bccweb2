@@ -9,9 +9,9 @@
  * - Missing blobs are fine; deleteBlob() is delete-if-exists.
  * - The admin user is preserved by omission: do not place admin IDs in the manifest.
  *
- * Season handling:
- * - For dev-only reseeding, we delete `seasons/{seasonYear}.json` outright.
- * - We leave `seasons.json` alone because the next seed run recreates the fixture season entry.
+ * Season handling follows the T10 plan spec: filter `seasons.json`, then delete
+ * or filter `seasons/{seasonYear}.json` depending on whether non-fixture rounds
+ * remain.
  */
 
 import {
@@ -117,7 +117,30 @@ async function main() {
   await runChunked(publicIndexTasks, 50);
 
   if (seasonYear != null) {
-    await deleteBlob(publicContainer, `seasons/${seasonYear}.json`);
+    // Plan T10 spec: read public `seasons.json`, filter out the fixture season,
+    // then write it back instead of leaving stale fixture summary entries behind.
+    const seasonsIndex = (await readJson(publicContainer, "seasons.json")) ?? [];
+    const nextSeasonsIndex = Array.isArray(seasonsIndex)
+      ? seasonsIndex.filter((season) => season?.year !== seasonYear)
+      : [];
+    await writeJson(publicContainer, "seasons.json", nextSeasonsIndex);
+
+    // Plan T10 spec: delete `seasons/{seasonYear}.json` only when it is entirely
+    // fixture-seeded; otherwise remove just the manifest round IDs from `rounds`.
+    const seasonPath = `seasons/${seasonYear}.json`;
+    const season = await readJson(publicContainer, seasonPath);
+    if (season != null) {
+      const rounds = Array.isArray(season.rounds) ? season.rounds : [];
+      const containsOnlyFixtureRounds = rounds.every((id) => roundSet.has(id));
+      if (containsOnlyFixtureRounds) {
+        await deleteBlob(publicContainer, seasonPath);
+      } else {
+        await writeJson(publicContainer, seasonPath, {
+          ...season,
+          rounds: rounds.filter((id) => !roundSet.has(id)),
+        });
+      }
+    }
   }
 
   if (existsSync(FIXTURE_MANIFEST_PATH)) unlinkSync(FIXTURE_MANIFEST_PATH);
