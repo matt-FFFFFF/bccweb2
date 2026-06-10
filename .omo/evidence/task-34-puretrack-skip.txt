@@ -1,7 +1,0 @@
-Verified: PureTrack pilot skip behavior
-Commands:
-- npm run test --workspace=@bccweb/api
-Result: PASS
-Notes:
-- pilots with null / 0 pureTrackId are skipped with [METRIC] warning
-- all-missing case returns null result
