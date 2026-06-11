@@ -95,6 +95,7 @@ Lib helpers: `blob` (storage + lease), `auth` + `authHelpers` (HS256 JWT),
 `rateLimit`, `recompute`, `puretrack`, `teamCaptain`, `telemetry` +
 `telemetryRedactor` (App Insights PII scrubber set up BEFORE function imports),
 `signTofly/*` (signature ledger).
+See `docs/runbooks/alerts.md#blobhealed-events--blob-heal-storm-alert` for `blob.healed` / blob-heal-storm triage.
 
 **Auth**: bespoke HS256 JWT (`JWT_SECRET` env). Access token 1h, refresh 30d.
 Roles: `Admin`, `RoundsCoord`, `Pilot`. `getCallerIdentity(req)` returns
