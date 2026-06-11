@@ -1,20 +1,20 @@
-# COMMITTED TEMPLATE. Copy to prod.tfvars (gitignored) and fill in:
-#   cp iac/env/prod.tfvars.example iac/env/prod.tfvars
+# COMMITTED TEMPLATE. Copy to dev.tfvars (gitignored) and fill in:
+#   cp iac/env/dev.tfvars.example iac/env/dev.tfvars
 # Use with:
-#   terraform -chdir=iac/service init -backend-config=../env/prod.backend.hcl && terraform -chdir=iac/service apply -var-file=../env/prod.tfvars
+#   terraform -chdir=iac/service init -backend-config=../env/dev.backend.hcl && terraform -chdir=iac/service apply -var-file=../env/dev.tfvars
 # DO NOT COMMIT REAL SECRETS. Set via env vars: TF_VAR_puretrack_api_key=... etc., or pipeline secrets.
-# CI does not use this file directly — deploy workflows generate prod.tfvars at
+# CI does not use this file directly — deploy workflows generate dev.tfvars at
 # runtime from GitHub env-scoped vars + TF_VAR_* secrets (see .github/workflows).
 
-stamp_name = "prod"
-location    = "uksouth"
+stamp_name = "dev"
+location   = "uksouth"
 
 # Name of the tfstate storage account (bootstrap output storage_account_name) —
 # the service stack reads the common stack's remote state from it.
 tfstate_sa_name = "<REQUIRED: bootstrap output storage_account_name>"
 
-# CORS: replace with the real production hostname before apply.
-allowed_origins = ["https://<your-prod-hostname>"]
+# CORS: dev SWA default hostname; leave empty until known.
+allowed_origins = []
 
 ops_email = "<REQUIRED: operator must replace before apply>" # REQUIRED
 
@@ -30,8 +30,8 @@ jwt_secret_version = "1"
 acs_secret_version = "1"
 
 # Principal type for the identity running Terraform. Default is ServicePrincipal
-# because CI (GitHub Actions → Terraform UMI via OIDC) is the primary path.
-# Override to "User" when applying locally as yourself (`az login` context).
+# because CI (GitHub Actions → per-env Terraform UMI via OIDC) is the primary
+# path. Override to "User" when applying locally as yourself (`az login` context).
 terraform_principal_type = "ServicePrincipal"
 
 # Leave empty until DNS/cutover is configured.
