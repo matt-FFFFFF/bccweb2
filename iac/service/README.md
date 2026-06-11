@@ -14,8 +14,10 @@ secrets, email, and alerting. Observability lives in the sibling
 ## Resources
 
 Storage account (+ lifecycle, locks, containers), Function App (Flex/Linux,
-UMI), Static Web App, Key Vault (RBAC, 7 secrets), ACS email (service +
-domain), 7 alert rules + ops action group, optional production DNS CNAME.
+UMI), Static Web App, Key Vault (RBAC, 7 secrets), ACS
+(`communicationServices` — the email service + DNS-verified domain live in
+[`iac/common/`](../common/README.md) and are linked here by ID), 7 alert
+rules + ops action group, optional production DNS CNAME.
 
 The stamp resource group (`rg-bccweb-<env>`) is **referenced by interpolated
 name/ID** — pre-created by bootstrap, which also grants the env's Terraform
@@ -37,8 +39,9 @@ vars and pass secrets via `TF_VAR_*` environment variables.
 
 From the common stack via `data.terraform_remote_state.common`
 (`common-<env>.tfstate`, located through `tfstate_sa_name`/`tfstate_rg_name`):
-`app_insights_id` (alert scopes) and `app_insights_connection_string`
-(copied into Key Vault for the Function App).
+`app_insights_id` (alert scopes), `app_insights_connection_string`
+(copied into Key Vault for the Function App), and `acs_email_domain_id`
+(linked to this stack's `communicationServices`).
 
 ## How to run
 

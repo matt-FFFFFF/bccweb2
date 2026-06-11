@@ -52,7 +52,6 @@ jobs:
         env:
           TFSTATE_SA_NAME: ${{ vars.TFSTATE_SA_NAME }}
           OPS_EMAIL: ${{ vars.OPS_EMAIL }}
-          ACS_EMAIL_DOMAIN: ${{ vars.ACS_EMAIL_DOMAIN }}
           ACS_SENDER_ADDRESS: ${{ vars.ACS_SENDER_ADDRESS }}
           ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
           PRODUCTION_HOSTNAME: ${{ vars.PRODUCTION_HOSTNAME }}
@@ -75,7 +74,6 @@ jobs:
 
           ops_email = "${OPS_EMAIL}"
 
-          acs_email_domain   = "${ACS_EMAIL_DOMAIN}"
           acs_sender_address = "${ACS_SENDER_ADDRESS}"
 
           jwt_secret_version = "${JWT_SECRET_VERSION:-1}"

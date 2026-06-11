@@ -20,3 +20,18 @@ output "platform_rg_name" {
   description = "Name of the pre-created platform resource group this stack deploys into."
   value       = local.platform_rg_name
 }
+
+output "acs_email_domain_id" {
+  description = "Resource ID of the ACS email domain. The service stack links it to its communicationServices resource via linkedDomains."
+  value       = azapi_resource.acs_email_domain.id
+}
+
+output "acs_email_domain_verification_records" {
+  description = "Raw ACS domain verification records as returned by Azure."
+  value       = local.acs_verification_records
+}
+
+output "acs_dns_records_for_operator" {
+  description = "ACS DNS records formatted for operator registrar setup (ownership TXT, SPF, DKIM, DKIM2, DMARC)."
+  value       = local.acs_dns_records_for_operator
+}

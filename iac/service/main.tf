@@ -34,7 +34,7 @@ module "stamp" {
   production_hostname          = var.production_hostname
   dns_zone_name                = var.dns_zone_name
   dns_zone_resource_group_name = var.dns_zone_resource_group_name
-  acs_email_domain             = var.acs_email_domain
+  acs_email_domain_id          = data.terraform_remote_state.common.outputs.acs_email_domain_id
   acs_sender_address           = var.acs_sender_address
   round_brief_emails           = var.round_brief_emails
   puretrack_api_key            = var.puretrack_api_key

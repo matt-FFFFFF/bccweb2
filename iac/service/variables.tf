@@ -71,12 +71,6 @@ variable "dns_zone_resource_group_name" {
   default     = ""
 }
 
-variable "acs_email_domain" {
-  description = "ACS email sending domain."
-  type        = string
-  nullable    = false
-}
-
 variable "acs_sender_address" {
   description = "ACS sender address."
   type        = string

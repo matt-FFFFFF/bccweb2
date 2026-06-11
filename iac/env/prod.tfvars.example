@@ -18,7 +18,8 @@ allowed_origins = ["https://<your-prod-hostname>"]
 
 ops_email = "<REQUIRED: operator must replace before apply>" # REQUIRED
 
-acs_email_domain   = "<REQUIRED: operator must replace before apply>" # REQUIRED
+# The sending domain itself lives in the common stack (iac/env/common-prod.tfvars);
+# this address must be on that domain.
 acs_sender_address = "<REQUIRED: operator must replace before apply>" # REQUIRED
 
 round_brief_emails = "<REQUIRED: see TF_VAR_round_brief_emails>" # REQUIRED

@@ -1,15 +1,16 @@
-# ─── Azure Communication Services (ACS) — Email ───────────────────────────────
+# ─── Azure Communication Services (ACS) ───────────────────────────────────────
 #
 # Resources:
-#   azapi_resource.acs              — ACS base resource
-#   azapi_resource.acs_email        — Email channel
-#   azapi_resource.acs_email_domain — CustomerManaged domain (requires DNS)
+#   azapi_resource.acs — ACS base resource (communicationServices)
 #
-# The email domain is linked to the ACS service via the `linkedDomains`
-# property on the communicationServices resource (no separate association
-# resource needed with azapi).
+# The email service and its DNS-verified domain live in the iac/common stack
+# (pets: registrar records + verification wait + sender reputation survive
+# stamp rebuilds). This stamp links the domain by ID via the `linkedDomains`
+# property — cross-RG linking within the subscription. The access key grants
+# send rights on every linked domain, so the key-holding resource stays
+# per-stamp to preserve env blast-radius isolation.
 #
-# Required module inputs (see variables.tf): acs_email_domain,
+# Required module inputs (see variables.tf): acs_email_domain_id,
 # acs_sender_address, round_brief_emails, puretrack_api_key, puretrack_email,
 # puretrack_password.
 #
@@ -18,12 +19,11 @@
 #     keyvault.tf. It is called against azapi_resource.acs.id and used
 #     ONLY to write the ACS primary connection string into Key Vault. The
 #     Function App reads it back via a Key Vault reference (see
-#     iac/modules/stamp/functions.tf). No non-ephemeral listKeys action is
-#     declared here, so the raw connection string never lands in state.
-#
-# After applying, run `terraform output acs_dns_records_for_operator` and add
-# every returned record at your domain registrar before the Azure portal will
-# mark the domain Verified.
+#     iac/service/modules/stamp/functions.tf). No non-ephemeral listKeys
+#     action is declared here, so the raw connection string never lands in
+#     state.
+#   * Domain verification DNS records are an iac/common concern: run
+#     `terraform -chdir=iac/common output acs_dns_records_for_operator`.
 
 locals {
   # Mirrors storage.tf's storage_prefix recomputation: the root module does
@@ -31,77 +31,6 @@ locals {
   # from var.stamp_name independently.
   acs_prefix = "bccweb-${var.stamp_name}"
 }
-
-# ─── ACS Email Service ────────────────────────────────────────────────────────
-
-resource "azapi_resource" "acs_email" {
-  type      = "Microsoft.Communication/emailServices@2025-09-01"
-  name      = "acs-email-${local.acs_prefix}"
-  parent_id = local.stamp_rg_id
-  location  = "global"
-  tags      = var.tags
-
-  body = {
-    properties = {
-      dataLocation = "Europe"
-    }
-  }
-}
-
-# ─── Custom Domain (CustomerManaged) ─────────────────────────────────────────
-#
-# After apply, run: terraform output acs_dns_records_for_operator
-# Add all returned DNS records at your domain registrar, then verify in the
-# Azure portal or via: az communication email domain verify ...
-
-resource "azapi_resource" "acs_email_domain" {
-  type      = "Microsoft.Communication/emailServices/domains@2025-09-01"
-  name      = var.acs_email_domain
-  parent_id = azapi_resource.acs_email.id
-  location  = "global"
-  tags      = var.tags
-
-  body = {
-    properties = {
-      domainManagement = "CustomerManaged"
-    }
-  }
-
-  response_export_values = ["properties.verificationRecords"]
-}
-
-# ─── Verification-record decomposition ───────────────────────────────────────
-#
-# Azure ACS returns `properties.verificationRecords` as an object with keys
-# Domain (ownership TXT), SPF (TXT), DKIM (CNAME), DKIM2 (CNAME) and DMARC
-# (TXT). The operator must paste each record at their DNS registrar before the
-# Azure portal will mark the domain Verified.
-#
-# DMARC policy guidance: the suggested DMARC TXT value returned by Azure is a
-# starter record. For first deployment publish it with `p=none` so a
-# misconfigured SPF/DKIM does NOT cause mail to be silently dropped. After at
-# least one full week of clean delivery + monitored DMARC aggregate reports,
-# tighten to `p=quarantine` and eventually `p=reject`.
-
-locals {
-  acs_verification_records = try(
-    azapi_resource.acs_email_domain.output.properties.verificationRecords,
-    {}
-  )
-
-  acs_dns_records_for_operator = {
-    domain_ownership = try(local.acs_verification_records.Domain, null)
-    spf              = try(local.acs_verification_records.SPF, null)
-    dkim             = try(local.acs_verification_records.DKIM, null)
-    dkim2            = try(local.acs_verification_records.DKIM2, null)
-    dmarc            = try(local.acs_verification_records.DMARC, null)
-  }
-}
-
-# ─── ACS Base Resource ────────────────────────────────────────────────────────
-#
-# The email domain is linked via the `linkedDomains` property on the
-# communicationServices body — no separate association resource needed.
 
 resource "azapi_resource" "acs" {
   type      = "Microsoft.Communication/communicationServices@2025-09-01"
@@ -113,7 +42,7 @@ resource "azapi_resource" "acs" {
   body = {
     properties = {
       dataLocation  = "Europe"
-      linkedDomains = [azapi_resource.acs_email_domain.id]
+      linkedDomains = [var.acs_email_domain_id]
     }
   }
 }

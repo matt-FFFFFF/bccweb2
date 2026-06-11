@@ -97,7 +97,7 @@ variables {
   production_hostname            = "www.example.test"
   dns_zone_name                  = "example.test"
   dns_zone_resource_group_name   = "dns-rg-test"
-  acs_email_domain               = "mail.example.test"
+  acs_email_domain_id            = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-bccweb-platform-unit/providers/Microsoft.Communication/emailServices/acs-email-bccweb-unit/domains/mail.example.test"
   acs_sender_address             = "noreply@mail.example.test"
   round_brief_emails             = "briefs@example.test"
   puretrack_api_key              = "TEST_PT_KEY_SENTINEL"
@@ -251,8 +251,6 @@ run "no_diagnostic_settings" {
         azapi_resource.kv.type,
         azapi_resource.kv_admin_role.type,
         azapi_resource.fn_kv_role.type,
-        azapi_resource.acs_email.type,
-        azapi_resource.acs_email_domain.type,
         azapi_resource.acs.type,
         azapi_resource.fn_umi.type,
         azapi_resource.service_plan.type,

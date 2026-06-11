@@ -28,16 +28,6 @@ output "key_vault_uri" {
   value       = module.stamp.key_vault_uri
 }
 
-output "acs_email_domain_verification_records" {
-  description = "ACS email domain verification records for registrar setup."
-  value       = module.stamp.acs_email_domain_verification_records
-}
-
-output "acs_dns_records_for_operator" {
-  description = "ACS DNS records formatted for operator cutover steps."
-  value       = module.stamp.acs_dns_records_for_operator
-}
-
 output "production_hostname_target" {
   description = "Target hostname for the production CNAME."
   value       = module.stamp.production_hostname_target

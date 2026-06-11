@@ -1,17 +1,17 @@
 # iac — Terraform Infrastructure
 
-This directory manages the Azure resources for bccweb2 using a multi-stamp, declarative approach, split into three stacks: `bootstrap/` (state backend + identities + resource groups), `common/` (per-env observability), and `service/` (per-env application stamp).
+This directory manages the Azure resources for bccweb2 using a multi-stamp, declarative approach, split into three stacks: `bootstrap/` (state backend + identities + resource groups), `common/` (per-env observability + email domain), and `service/` (per-env application stamp).
 
 All infrastructure is provisioned using **AzAPI v2.10** with HCL-native bodies.
 
 ## Layout
 
 - `bootstrap/`: One-shot config provisioning the remote state storage account, the per-env Terraform UMIs (GitHub OIDC, RG-scoped Owner), the per-env resource groups, and the GitHub environment secrets. See [bootstrap/README.md](bootstrap/README.md).
-- `common/`: Per-env Log Analytics workspace + Application Insights, deployed into the bootstrap-created platform RG. See [common/README.md](common/README.md).
+- `common/`: Per-env Log Analytics workspace + Application Insights + ACS email service/domain, deployed into the bootstrap-created platform RG. See [common/README.md](common/README.md).
 - `service/`: Per-env application stamp (storage, Function App, SWA, Key Vault, ACS, alerts, optional DNS), instantiating `service/modules/stamp/` once per environment. Reads common's outputs via remote state. See [service/README.md](service/README.md).
 - `env/`: Environment-specific configuration (`<env>.tfvars` + `<env>.backend.hcl` for service; `common-<env>.tfvars` + `common-<env>.backend.hcl` for common).
 
-State ownership: bootstrap owns ALL resource groups; common owns LAW + App Insights; service owns everything inside the stamp RG. Common and service never create RGs — they reference bootstrap's by interpolated name/ID.
+State ownership: bootstrap owns ALL resource groups; common owns LAW + App Insights + the ACS email service/domain; service owns everything inside the stamp RG. Common and service never create RGs — they reference bootstrap's by interpolated name/ID.
 
 ## First-time Setup
 
@@ -43,7 +43,7 @@ Follow these steps to provision a new environment from scratch.
     ```bash
     terraform -chdir=iac/service apply -var-file=../env/dev.tfvars -var 'terraform_principal_type=User'
     ```
-5.  **Deploy the common stack** (preferred: via workflow; local shown for completeness):
+5.  **Deploy the common stack** (preferred: via workflow; local shown for completeness). First set the real `acs_email_domain` in `iac/env/common-<env>.tfvars`; after the apply, add the registrar DNS records printed by `terraform -chdir=iac/common output acs_dns_records_for_operator`:
     ```bash
     gh workflow run terraform.yml -f stack=common -f env=dev -f mode=apply
     # or locally:

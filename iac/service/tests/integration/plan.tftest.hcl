@@ -35,7 +35,6 @@ variables {
   ops_email         = "ops-integration-test@example.invalid"
   slack_webhook_url = ""
 
-  acs_email_domain   = "integration-test.example.invalid"
   acs_sender_address = "no-reply@integration-test.example.invalid"
 
   # Sentinel values — never real secrets. The plan-only invocation does not

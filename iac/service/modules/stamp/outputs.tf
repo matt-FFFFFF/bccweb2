@@ -28,16 +28,6 @@ output "key_vault_uri" {
   value       = azapi_resource.kv.output.properties.vaultUri
 }
 
-output "acs_email_domain_verification_records" {
-  description = "ACS email domain verification records formatted for registrar copy."
-  value       = local.acs_verification_records
-}
-
-output "acs_dns_records_for_operator" {
-  description = "ACS DNS records reshaped for operator-friendly runbook copy and paste."
-  value       = local.acs_dns_records_for_operator
-}
-
 output "production_hostname_target" {
   description = "Target hostname for the production CNAME when DNS is not managed by Terraform."
   value       = local.manage_dns_in_azure ? "" : azapi_resource.swa.output.properties.defaultHostname
