@@ -25,6 +25,7 @@ import type {
   Site,
   Config,
   Pilot,
+  PilotSummary,
   PilotSnapshot,
   WingClass,
   RoundBrief,
@@ -32,7 +33,7 @@ import type {
 } from "@bccweb/types";
 import { normalizeStatus } from "@bccweb/types";
 import { scoreRound } from "@bccweb/scoring";
-import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob, withLease, withPrivateLease, withPrivateLeaseRenewing, getBlockBlobClient, getPrivateBlockBlobClient } from "../lib/blob.js";
+import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob, withLease, withPrivateLease, withPrivateLeaseRenewing, getPrivateBlockBlobClient } from "../lib/blob.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -477,9 +478,9 @@ async function buildRoundBrief(round: Round): Promise<RoundBrief> {
     siteGuideUrl = undefined;
   }
 
-  const pilotsIndex = await readBlob<Array<{ id: string; name: string; bhpaNumber?: number; pureTrackId?: number }>>(
+  const pilotsIndex = await readBlob<PilotSummary[]>(
     getBlobClient("pilots.json")
-  ).catch(() => [] as Array<{ id: string; name: string; bhpaNumber?: number; pureTrackId?: number }>);
+  ).catch(() => [] as PilotSummary[]);
   const pilotNameMap = new Map(pilotsIndex.map((p) => [p.id, p]));
 
   const teams: BriefTeamEntry[] = await Promise.all(
@@ -495,25 +496,29 @@ async function buildRoundBrief(round: Round): Promise<RoundBrief> {
             .filter((s) => s.status === "Filled" && s.pilotId && s.snapshot)
             .map(async (s) => {
               const pilotMeta = pilotNameMap.get(s.pilotId!);
-              let wingManufacturer;
-              try {
-                const pilotDoc = await readBlob<Pilot>(
-                  getPrivateBlobClient(`pilots/${s.pilotId!}.json`)
-                );
-                wingManufacturer = pilotDoc.wingManufacturer;
-              } catch {
-                wingManufacturer = undefined;
-              }
-              return {
-                placeInTeam: s.placeInTeam,
-                pilotId: s.pilotId!,
-                name: pilotMeta?.name ?? s.pilotId!,
-                bhpaNumber: pilotMeta?.bhpaNumber,
-                pureTrackId: pilotMeta?.pureTrackId,
-                ...(wingManufacturer ? { wingManufacturer } : {}),
-                isScoring: s.isScoring,
-                snapshot: s.snapshot!,
-              };
+               let wingManufacturer;
+               let bhpaNumber;
+               let pureTrackId;
+               try {
+                 const pilotDoc = await readBlob<Pilot>(
+                   getPrivateBlobClient(`pilots/${s.pilotId!}.json`)
+                 );
+                 wingManufacturer = pilotDoc.wingManufacturer;
+                 bhpaNumber = pilotDoc.bhpaNumber;
+                 pureTrackId = pilotDoc.pureTrackId;
+               } catch {
+                 wingManufacturer = undefined;
+               }
+               return {
+                 placeInTeam: s.placeInTeam,
+                 pilotId: s.pilotId!,
+                 name: pilotMeta?.name ?? s.pilotId!,
+                 bhpaNumber,
+                 pureTrackId,
+                 ...(wingManufacturer ? { wingManufacturer } : {}),
+                 isScoring: s.isScoring,
+                 snapshot: s.snapshot!,
+               };
             })
         ),
       }))
