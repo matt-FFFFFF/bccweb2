@@ -258,6 +258,16 @@ export const RoundSchema = z
     organisingClub: lenientOptional(ClubRefSchema),
     season: SeasonRefSchema,
     teams: healingArray(TeamSchema).default([]),
+    brief: lenientOptional(
+      z
+        .object({
+          version: lenientOptional(z.number().int()),
+          jsonPath: lenientOptional(z.string()),
+          pdfPath: lenientOptional(z.string()),
+          generatedAt: lenientOptional(z.string()),
+        })
+        .strict(),
+    ),
     createdAt: lenientOptional(z.string()),
     updatedAt: lenientOptional(z.string()),
     updatedBy: lenientOptional(z.string()),

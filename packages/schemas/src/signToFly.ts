@@ -1,3 +1,4 @@
+import type { Signature, SignToFlyWording } from "@bccweb/types";
 import * as z from "zod/v4";
 
 import { lenientOptional } from "./helpers.js";
@@ -5,12 +6,17 @@ import { lenientOptional } from "./helpers.js";
 export const SignToFlyWordingSchema = z
   .object({
     version: z.number().int().min(1),
+    hash: z.string().min(1),
     html: z.string(),
     plainText: z.string(),
-    publishedAt: z.string().min(1),
-    publishedBy: z.string().min(1),
+    createdAt: z.string().min(1),
+    createdBy: z.string().min(1),
+    supersededAt: lenientOptional(z.string()),
+    supersededBy: lenientOptional(z.number().int()),
   })
   .strip();
+
+SignToFlyWordingSchema satisfies z.ZodType<SignToFlyWording>;
 
 export const ActiveWordingPointerSchema = z
   .object({
@@ -26,20 +32,20 @@ const signatureSourceValues = [
 
 export const SignatureLedgerSchema = z
   .object({
-    pilotId: z.string().min(1),
+    id: z.string().min(1),
     roundId: z.string().min(1),
-    wordingVersion: z.number().int().min(1),
-    id: lenientOptional(z.string()),
-    teamId: lenientOptional(z.string()),
-    place: lenientOptional(z.number().int()),
-    userId: lenientOptional(z.string()),
-    signedAt: lenientOptional(z.string().nullable()),
-    briefVersion: lenientOptional(z.number().int().nullable()),
-    briefHash: lenientOptional(z.string().nullable()),
-    wordingHash: lenientOptional(z.string().nullable()),
-    ip: lenientOptional(z.string().nullable()),
-    userAgent: lenientOptional(z.string().nullable()),
-    source: lenientOptional(z.enum(signatureSourceValues)),
+    teamId: z.string().min(1),
+    place: z.number().int(),
+    pilotId: z.string().min(1),
+    userId: z.string().min(1),
+    signedAt: z.string().nullable(),
+    briefVersion: z.number().int().nullable(),
+    briefHash: z.string().nullable(),
+    wordingVersion: z.number().int().min(1).nullable(),
+    wordingHash: z.string().nullable(),
+    ip: z.string().nullable(),
+    userAgent: z.string().nullable(),
+    source: z.enum(signatureSourceValues),
     overrideReason: lenientOptional(z.string()),
     overrideBy: lenientOptional(z.string()),
     createdAt: lenientOptional(z.string()),
@@ -48,3 +54,5 @@ export const SignatureLedgerSchema = z
     legacyId: lenientOptional(z.number().int()),
   })
   .strip();
+
+SignatureLedgerSchema satisfies z.ZodType<Signature>;

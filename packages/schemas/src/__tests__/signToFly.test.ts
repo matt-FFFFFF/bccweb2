@@ -8,10 +8,11 @@ import {
 
 const validWording = {
   version: 2,
+  hash: "wording-hash",
   html: "<p>Sign to fly</p>",
   plainText: "Sign to fly",
-  publishedAt: "2026-06-11T00:00:00Z",
-  publishedBy: "admin-1",
+  createdAt: "2026-06-11T00:00:00Z",
+  createdBy: "admin-1",
 } as const;
 
 const validSignature = {
@@ -42,11 +43,35 @@ describe("SignToFlyWordingSchema", () => {
     expect(SignToFlyWordingSchema.safeParse(withoutVersion).success).toBe(false);
   });
 
+  test.each(["hash", "createdAt", "createdBy"] as const)(
+    "fails when required wording field %s is missing",
+    (field) => {
+      const incomplete = { ...validWording };
+      delete incomplete[field];
+
+      expect(SignToFlyWordingSchema.safeParse(incomplete).success).toBe(false);
+    },
+  );
+
+  test("preserves optional supersession metadata", () => {
+    expect(
+      SignToFlyWordingSchema.parse({
+        ...validWording,
+        supersededAt: "2026-06-12T00:00:00Z",
+        supersededBy: 3,
+      }),
+    ).toEqual({
+      ...validWording,
+      supersededAt: "2026-06-12T00:00:00Z",
+      supersededBy: 3,
+    });
+  });
+
   test("strips unknown wording metadata", () => {
     expect(
       SignToFlyWordingSchema.parse({
         ...validWording,
-        hash: "stored-but-not-schema-identity",
+        publishedAt: "legacy-field",
       }),
     ).toEqual(validWording);
   });
@@ -63,43 +88,75 @@ describe("ActiveWordingPointerSchema", () => {
 });
 
 describe("SignatureLedgerSchema", () => {
-  test("accepts the per-pilot signature identity triple", () => {
-    expect(
-      SignatureLedgerSchema.parse({
-        pilotId: "p1",
-        roundId: "r1",
-        wordingVersion: 2,
-        signedAt: "2026-06-11T00:00:00Z",
-      }),
-    ).toEqual({
-      pilotId: "p1",
-      roundId: "r1",
-      wordingVersion: 2,
-      signedAt: "2026-06-11T00:00:00Z",
-    });
+  test("round-trips a valid signature ledger entry", () => {
+    expect(SignatureLedgerSchema.parse(validSignature)).toEqual(validSignature);
   });
 
-  test("hard-fails when pilotId identity field is missing", () => {
-    const { pilotId: _pilotId, ...withoutPilotId } = validSignature;
+  test.each([
+    "id",
+    "roundId",
+    "teamId",
+    "place",
+    "pilotId",
+    "userId",
+    "signedAt",
+    "briefVersion",
+    "briefHash",
+    "wordingVersion",
+    "wordingHash",
+    "ip",
+    "userAgent",
+    "source",
+  ] as const)("hard-fails when required signature field %s is missing", (field) => {
+    const incomplete = { ...validSignature };
+    delete incomplete[field];
 
-    expect(() => SignatureLedgerSchema.parse(withoutPilotId)).toThrow(/pilotId/);
+    expect(SignatureLedgerSchema.safeParse(incomplete).success).toBe(false);
+  });
+
+  test("preserves nullable signature fields", () => {
+    const parsed = SignatureLedgerSchema.parse({
+      ...validSignature,
+      signedAt: null,
+      briefVersion: null,
+      briefHash: null,
+      wordingVersion: null,
+      wordingHash: null,
+      ip: null,
+      userAgent: null,
+    });
+
+    expect(parsed.signedAt).toBeNull();
+    expect(parsed.briefVersion).toBeNull();
+    expect(parsed.briefHash).toBeNull();
+    expect(parsed.wordingVersion).toBeNull();
+    expect(parsed.wordingHash).toBeNull();
+    expect(parsed.ip).toBeNull();
+    expect(parsed.userAgent).toBeNull();
+  });
+
+  test("rejects corrupt required signature metadata", () => {
+    expect(
+      SignatureLedgerSchema.safeParse({
+        ...validSignature,
+        ip: 123,
+      }).success,
+    ).toBe(false);
   });
 
   test("heals corrupt optional signature metadata without changing identity", () => {
     const parsed = SignatureLedgerSchema.parse({
       ...validSignature,
-      ip: 123,
-      userAgent: false,
-      source: "legacy-alias",
+      overrideReason: 123,
+      legacyId: "not-a-number",
       obsolete: true,
     });
 
     expect(parsed.pilotId).toBe("pilot-1");
     expect(parsed.roundId).toBe("round-1");
     expect(parsed.wordingVersion).toBe(2);
-    expect(parsed.ip).toBeUndefined();
-    expect(parsed.userAgent).toBeUndefined();
-    expect(parsed.source).toBeUndefined();
+    expect(parsed.overrideReason).toBeUndefined();
+    expect(parsed.legacyId).toBeUndefined();
     expect(parsed).not.toHaveProperty("obsolete");
   });
 });

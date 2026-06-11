@@ -188,6 +188,17 @@ describe("RoundSchema", () => {
     expect(parsed.site).not.toHaveProperty("obsoleteSite");
   });
 
+  test("preserves generated round brief metadata", () => {
+    const brief = {
+      version: 1,
+      jsonPath: "x",
+      pdfPath: "y",
+      generatedAt: "z",
+    } as const;
+
+    expect(RoundSchema.parse({ ...validRound, brief }).brief).toEqual(brief);
+  });
+
   test("fills optional fields with undefined when invalid", () => {
     const parsed = RoundSchema.parse({
       ...validRound,
