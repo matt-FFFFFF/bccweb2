@@ -265,6 +265,64 @@ resource "azapi_resource" "auth_lockout_spike" {
   }
 }
 
+# ─── Alert 4b: Blob heal storm > 25 events in 30min (severity 2) ─────────────
+#
+# Scheduled query against App Insights customEvents. apps/api/src/lib/blob.ts
+# (T17) emits `blob.healed` via getTelemetryClient()?.trackEvent whenever a
+# read-time schema sanitiser drops or coerces fields from a persisted blob.
+# A storm of these events strongly suggests a Zod/JSON schema is too narrow
+# for the data shape on disk — fields are being silently stripped on every
+# read, masking data loss / shape drift.
+#
+# Investigate-async severity 2: persisted data is not changing under our feet,
+# but the read-time sanitiser is hiding a contract mismatch that operators
+# need to reconcile before the next write round-trips and truncates the blob.
+
+resource "azapi_resource" "blob_heal_storm" {
+  type      = "Microsoft.Insights/scheduledQueryRules@2026-03-01"
+  name      = "alert-bccweb-${var.stamp_name}-blob-heal-storm"
+  parent_id = azapi_resource.rg.id
+  location  = var.location
+  tags      = var.tags
+
+  body = {
+    kind = "LogAlert"
+    properties = {
+      description                           = "Storm of blob.healed events suggests a schema is too narrow and is silently stripping fields. See docs/runbooks/alerts.md."
+      enabled                               = true
+      evaluationFrequency                   = "PT5M"
+      windowSize                            = "PT30M"
+      scopes                                = [var.app_insights_id]
+      severity                              = 2
+      autoMitigate                          = true
+      checkWorkspaceAlertsStorageConfigured = false
+      skipQueryValidation                   = true
+      criteria = {
+        allOf = [
+          {
+            query           = <<-KQL
+      customEvents
+      | where name == "blob.healed"
+      | summarize count() by tostring(customDimensions.path), tostring(customDimensions.schema)
+            KQL
+            timeAggregation = "Count"
+            dimensions      = []
+            operator        = "GreaterThan"
+            threshold       = 25
+            failingPeriods = {
+              minFailingPeriodsToAlert  = 1
+              numberOfEvaluationPeriods = 1
+            }
+          }
+        ]
+      }
+      actions = {
+        actionGroups = [azapi_resource.ops.id]
+      }
+    }
+  }
+}
+
 # ─── Alert 5: PDF / lockRound duration p95 > 30s (severity 2) ────────────────
 #
 # Scheduled query against App Insights requests. `lockRound` is the slowest
