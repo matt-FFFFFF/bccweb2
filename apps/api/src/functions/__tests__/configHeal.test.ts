@@ -4,6 +4,7 @@ import { getRegisteredHandler } from "../../__tests__/helpers/setup.js";
 import { makeAuthRequest } from "../../__tests__/helpers/api.js";
 import {
   makeUser,
+  privateBlobExists,
   readPrivateJson,
   writePrivateJson,
 } from "../../__tests__/helpers/seed.js";
@@ -21,20 +22,35 @@ async function callGetConfig(userId: string, email: string) {
   };
 }
 
-describe("GET /api/manage/config — heal partial blobs", () => {
-  test("returns full defaults when blob is missing (no write)", async () => {
+describe("GET /api/manage/config — schema heal & defaults", () => {
+  test("virgin store: returns full defaults AND persists config.json", async () => {
     const { user } = await makeUser({ roles: ["Admin"], emailVerified: true });
 
+    // Sanity: virgin store has no config.json. (makeUser does not touch it.)
+    // We can't assert pre-state across suites cleanly, so just exercise the
+    // contract on the response + persisted blob.
     const res = await callGetConfig(user.id, user.email);
 
     expect(res.status).toBe(200);
     const cfg = res.jsonBody as Config;
-    expect(cfg.wingFactors["EN A"]).toBeTypeOf("number");
-    expect(cfg.maxTeamsInClub).toBeTypeOf("number");
-    expect(cfg.flightDateValidationEnabled).toBeTypeOf("boolean");
+    expect(cfg.maxTeamsInClub).toBe(2);
+    expect(cfg.maxPilotsInTeam).toBe(12);
+    expect(cfg.maxScoringPilotsInTeam).toBe(6);
+    expect(cfg.flightDateValidationEnabled).toBe(true);
+    expect(cfg.wingFactors["EN A"]).toBe(1.0);
+    expect(cfg.wingFactors["EN B"]).toBe(0.9);
+    expect(cfg.wingFactors["EN C"]).toBe(0.8);
+    expect(cfg.wingFactors["EN C 2-liner"]).toBe(0.7);
+    expect(cfg.wingFactors["EN D"]).toBe(0.6);
+    expect(cfg.wingFactors["EN D 2-liner"]).toBe(0.5);
+
+    // On 404, getConfig persists defaults so the next reader sees them.
+    expect(await privateBlobExists("config.json")).toBe(true);
+    const persisted = await readPrivateJson<Config>("config.json");
+    expect(persisted).toEqual(cfg);
   });
 
-  test("heals a blob missing wingFactors and persists the repair", async () => {
+  test("partial blob (missing wingFactors): response heals via ConfigSchema defaults", async () => {
     const { user } = await makeUser({ roles: ["Admin"], emailVerified: true });
     await writePrivateJson("config.json", {
       maxTeamsInClub: 4,
@@ -47,17 +63,14 @@ describe("GET /api/manage/config — heal partial blobs", () => {
 
     expect(res.status).toBe(200);
     const cfg = res.jsonBody as Config;
-    expect(cfg.wingFactors).toBeTruthy();
-    expect(cfg.wingFactors["EN A"]).toBeTypeOf("number");
     expect(cfg.maxTeamsInClub).toBe(4);
     expect(cfg.flightDateValidationEnabled).toBe(false);
-
-    const persisted = await readPrivateJson<Config>("config.json");
-    expect(persisted?.wingFactors["EN A"]).toBeTypeOf("number");
-    expect(persisted?.maxTeamsInClub).toBe(4);
+    // ConfigSchema fills wingFactors with defaults when absent.
+    expect(cfg.wingFactors["EN A"]).toBe(1.0);
+    expect(cfg.wingFactors["EN D 2-liner"]).toBe(0.5);
   });
 
-  test("fills missing wing factor entries while keeping the present ones", async () => {
+  test("partial wingFactors: schema fills missing keys, keeps present ones", async () => {
     const { user } = await makeUser({ roles: ["Admin"], emailVerified: true });
     await writePrivateJson("config.json", {
       maxTeamsInClub: 2,
@@ -69,17 +82,14 @@ describe("GET /api/manage/config — heal partial blobs", () => {
 
     const res = await callGetConfig(user.id, user.email);
 
-    const cfg = (res.jsonBody as Config);
+    expect(res.status).toBe(200);
+    const cfg = res.jsonBody as Config;
     expect(cfg.wingFactors["EN A"]).toBe(1.42);
-    expect(cfg.wingFactors["EN B"]).toBeTypeOf("number");
-    expect(cfg.wingFactors["EN D 2-liner"]).toBeTypeOf("number");
-
-    const persisted = await readPrivateJson<Config>("config.json");
-    expect(persisted?.wingFactors["EN A"]).toBe(1.42);
-    expect(persisted?.wingFactors["EN B"]).toBeTypeOf("number");
+    expect(cfg.wingFactors["EN B"]).toBe(0.9);
+    expect(cfg.wingFactors["EN D 2-liner"]).toBe(0.5);
   });
 
-  test("does NOT rewrite a fully-valid blob", async () => {
+  test("fully-valid blob: response matches stored exactly", async () => {
     const { user } = await makeUser({ roles: ["Admin"], emailVerified: true });
     const fullCfg: Config = {
       maxTeamsInClub: 5,
@@ -99,6 +109,7 @@ describe("GET /api/manage/config — heal partial blobs", () => {
 
     const res = await callGetConfig(user.id, user.email);
     expect(res.status).toBe(200);
+    expect(res.jsonBody).toEqual(fullCfg);
 
     const persisted = await readPrivateJson<Config>("config.json");
     expect(persisted).toEqual(fullCfg);
