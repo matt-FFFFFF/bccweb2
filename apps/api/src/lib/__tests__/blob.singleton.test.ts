@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
 const { fromConnectionString } = vi.hoisted(() => ({
   fromConnectionString: vi.fn((connectionString: string) => ({
@@ -18,18 +18,26 @@ vi.mock("@azure/storage-blob", () => ({
   },
 }));
 
-import { getBlobClient, resetBlobSingletons } from "../blob.js";
-
 describe("resetBlobSingletons", () => {
+  beforeEach(() => {
+    // Reset the module registry so the dynamic import below re-loads blob.js
+    // with the mocked @azure/storage-blob in place. Without this, blob.js is
+    // cached from earlier setup-file imports and still references the real
+    // package — making the mock invisible.
+    vi.resetModules();
+    fromConnectionString.mockClear();
+  });
+
   afterEach(() => {
-    resetBlobSingletons();
     delete process.env.BLOB_CONNECTION_STRING;
     delete process.env.BLOB_CONTAINER_NAME;
   });
 
-  test("re-reads BLOB_CONNECTION_STRING after reset", () => {
+  test("re-reads BLOB_CONNECTION_STRING after reset", async () => {
     process.env.BLOB_CONNECTION_STRING = "UseDevelopmentStorage=true;first";
     process.env.BLOB_CONTAINER_NAME = "data";
+
+    const { getBlobClient, resetBlobSingletons } = await import("../blob.js");
 
     getBlobClient("rounds/one.json");
     expect(fromConnectionString).toHaveBeenCalledTimes(1);

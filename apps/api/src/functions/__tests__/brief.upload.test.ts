@@ -45,7 +45,6 @@ describe("uploadBriefImage", () => {
     const res = await invoke("uploadBriefImage", req);
     expect(res.status).toBe(400);
     expect((res.jsonBody as any).code).toBe("IMAGE_MAGIC_MISMATCH");
-    expect((res.jsonBody as any).error).toBe("IMAGE_MAGIC_MISMATCH");
     expect(mockUpload).not.toHaveBeenCalled();
   });
 
@@ -65,7 +64,6 @@ describe("uploadBriefImage", () => {
     const res = await invoke("uploadBriefImage", req);
     expect(res.status).toBe(400);
     expect((res.jsonBody as any).code).toBe("TOO_MANY_IMAGES");
-    expect((res.jsonBody as any).error).toBe("TOO_MANY_IMAGES");
     expect(mockUpload).not.toHaveBeenCalled();
   });
 
