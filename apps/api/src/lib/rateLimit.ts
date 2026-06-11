@@ -11,6 +11,7 @@
 
 import { createHash } from "crypto";
 import type { HttpRequest } from "@azure/functions";
+import type { CallerIdentity } from "@bccweb/types";
 import {
   getPrivateBlobClient,
   readBlob,
@@ -120,6 +121,43 @@ export function rateLimit(req: HttpRequest, opts: RateLimitOpts): void {
       { "Retry-After": String(bucket.retryAfterSecs()) }
     );
   }
+}
+
+// ─── Mutation rate limit ──────────────────────────────────────────────────────
+
+// Tier table (capacity/min : burst capacity, refillPerMin):
+//   standard : 30/min  — admin/reference data writes
+//   heavy    :  5/min  — round lock/complete/recompute, brief PDF build, PureTrack group create
+//   flights  : 60/min  — pilot hillside logging (legitimate burst)
+const MUTATION_TIERS = {
+  standard: { capacity: 30, refillPerMin: 30 },
+  heavy: { capacity: 5, refillPerMin: 5 },
+  flights: { capacity: 60, refillPerMin: 60 },
+} as const;
+
+export type MutationRateLimitTier = keyof typeof MUTATION_TIERS;
+
+/**
+ * Per-identity mutation rate limiter for authenticated write endpoints.
+ *
+ * MUST be called AFTER the auth/role check — `caller.userId` is the bucket key
+ * via the existing `identityKey` option, so unauthenticated callers (with no
+ * userId) must never reach this point. Throws HttpError(429, "RATE_LIMITED")
+ * with a Retry-After header when the per-tier bucket is exhausted.
+ */
+export async function mutationRateLimit(
+  req: HttpRequest,
+  caller: CallerIdentity,
+  endpoint: string,
+  tier: MutationRateLimitTier
+): Promise<void> {
+  const { capacity, refillPerMin } = MUTATION_TIERS[tier];
+  rateLimit(req, {
+    endpoint: `mutation:${tier}:${endpoint}`,
+    capacity,
+    refillPerMin,
+    identityKey: caller.userId,
+  });
 }
 
 // ─── Lockout constants ────────────────────────────────────────────────────────
