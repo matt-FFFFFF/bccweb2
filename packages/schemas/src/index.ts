@@ -5,5 +5,6 @@ export * from "./helpers.js";
 export * from "./pilot.js";
 export * from "./round.js";
 export * from "./season.js";
+export * from "./seasonClub.js";
 export * from "./site.js";
 export * from "./user.js";
