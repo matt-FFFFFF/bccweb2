@@ -67,8 +67,8 @@ export function getRegisteredHandlers() {
 // Mock email module — prevent real ACS email calls
 vi.mock("../../lib/email.js", () => ({
   sendEmail: vi.fn().mockResolvedValue(undefined),
-  verificationEmailHtml: vi.fn().mockReturnValue("<p>verify</p>"),
-  verificationEmailText: vi.fn().mockReturnValue("verify"),
+  verificationEmailHtml: vi.fn((url: string) => `<p>verify ${url}</p>`),
+  verificationEmailText: vi.fn((url: string) => `verify ${url}`),
   passwordResetEmailHtml: vi.fn().mockReturnValue("<p>reset</p>"),
   passwordResetEmailText: vi.fn().mockReturnValue("reset"),
   getBriefRecipients: vi.fn().mockReturnValue([]),
@@ -91,6 +91,15 @@ export interface CapturedEmail {
 export function getSentEmails(): CapturedEmail[] {
   const calls = vi.mocked(sendEmail).mock.calls as Array<[CapturedEmail]>;
   return calls.map(([opts]) => opts);
+}
+
+export function getLastVerificationUrl(): string | null {
+  for (const email of getSentEmails().toReversed()) {
+    const content = `${email.html ?? ""}\n${email.text ?? ""}`;
+    const match = content.match(/https?:\/\/\S+\/verify-email\?token=[^\s<"]+/);
+    if (match) return match[0];
+  }
+  return null;
 }
 
 export function clearSentEmails(): void {
