@@ -106,6 +106,10 @@ Roles: `Admin`, `RoundsCoord`, `Pilot`. `getCallerIdentity(req)` returns
 `ACS_SENDER_ADDRESS`, `ROUND_BRIEF_EMAILS`, `PURETRACK_*`. Copy
 `local.settings.example.json` → `local.settings.json`.
 
+## Feature Completeness Rule
+
+Any new feature or endpoint MUST ship with the UI for the people who operate it — in the same PR or an explicitly linked follow-up merged in the same release. In particular, admin-managed data (config, wording, reference data) MUST have an admin page; an API without an operator UI is not done. Exceptions require a documented rationale in the PR description and an entry here.
+
 ## Web (`apps/web`)
 
 Entry: `src/main.tsx` → [`src/router.tsx`](file:///Volumes/code/bccweb2/apps/web/src/router.tsx)
@@ -158,12 +162,7 @@ in `src/bcc-theme.css`.
   sequentially for stable blob state. **Do not assume parallel execution.**
 - No `afterEach` blob cleanup — each test uses `crypto.randomUUID()` for
   unique IDs to avoid collisions across files.
-- The `include` array is partly explicit, not pure-glob: `src/__tests__/**`
-  and `src/functions/__tests__/**` are globbed, but individual `src/lib/__tests__/*.test.ts`
-  files are listed by name. **New lib test files often need to be added to
-  the `include` array** or they will silently not run. (Several heavier tests
-  like `lib/__tests__/puretrack.test.ts`, `blob.test.ts`,
-  `telemetry.integration.test.ts` are deliberately excluded.)
+- Include is glob-based as of Task 7. Three heavy tests are deliberately excluded (`blob.test.ts`, `puretrack.test.ts`, `telemetry.integration.test.ts`) — each with a reason comment in `vitest.config.ts`. Run them via `make test-heavy`.
 
 **Web tests** ([apps/web/vitest.config.ts](file:///Volumes/code/bccweb2/apps/web/vitest.config.ts)):
 `jsdom` env, `@testing-library/react`. Aliases `@bccweb/types` to
