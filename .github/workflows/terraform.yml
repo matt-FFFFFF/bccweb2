@@ -1,0 +1,143 @@
+name: Terraform (manual)
+
+# Operator-invoked plan/apply for any stack × environment combination.
+# Azure auth is OIDC via the per-env Terraform UMI (no static secrets) —
+# see iac/bootstrap/README.md. Also the drift-recovery path when a deploy
+# workflow's terraform-check fails: re-run here with mode=apply.
+
+on:
+  workflow_dispatch:
+    inputs:
+      stack:
+        description: Terraform stack to operate on
+        required: true
+        type: choice
+        options: [common, service]
+      env:
+        description: Target environment
+        required: true
+        type: choice
+        options: [dev, prod]
+      mode:
+        description: plan only, or plan then apply
+        required: true
+        type: choice
+        options: [plan, apply]
+
+permissions:
+  id-token: write # required for OIDC token issuance
+  contents: read
+
+concurrency:
+  group: terraform-${{ inputs.stack }}-${{ inputs.env }}
+  cancel-in-progress: false
+
+jobs:
+  terraform:
+    name: ${{ inputs.mode }} ${{ inputs.stack }} (${{ inputs.env }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.env }}
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_USE_AZUREAD: "true"
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_IN_AUTOMATION: "true"
+      # Sensitive service-stack inputs flow as TF_VAR_* env vars straight from
+      # env-scoped secrets — never written to disk. Unset for the common
+      # stack, which declares no such variables (terraform ignores extras).
+      TF_VAR_round_brief_emails: ${{ secrets.TF_VAR_ROUND_BRIEF_EMAILS }}
+      TF_VAR_puretrack_api_key: ${{ secrets.TF_VAR_PURETRACK_API_KEY }}
+      TF_VAR_puretrack_email: ${{ secrets.TF_VAR_PURETRACK_EMAIL }}
+      TF_VAR_puretrack_password: ${{ secrets.TF_VAR_PURETRACK_PASSWORD }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "<2.0.0"
+          terraform_wrapper: false
+
+      - uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Resolve stack paths
+        id: paths
+        run: |
+          set -euo pipefail
+          if [ "${{ inputs.stack }}" = "common" ]; then
+            # Committed files — the common stack has no sensitive inputs.
+            echo "backend=../env/common-${{ inputs.env }}.backend.hcl" >> "$GITHUB_OUTPUT"
+            echo "tfvars=../env/common-${{ inputs.env }}.tfvars" >> "$GITHUB_OUTPUT"
+          else
+            echo "backend=../env/${{ inputs.env }}.backend.hcl" >> "$GITHUB_OUTPUT"
+            echo "tfvars=../env/${{ inputs.env }}.tfvars" >> "$GITHUB_OUTPUT"
+          fi
+
+      # iac/env/<env>.tfvars is gitignored (holds operator-specific values),
+      # so a clean CI checkout lacks it. Generate the non-sensitive half from
+      # env-scoped GitHub vars; the sensitive half rides TF_VAR_* job env.
+      - name: Generate service tfvars (runtime)
+        if: inputs.stack == 'service'
+        env:
+          TFSTATE_SA_NAME: ${{ vars.TFSTATE_SA_NAME }}
+          OPS_EMAIL: ${{ vars.OPS_EMAIL }}
+          ACS_EMAIL_DOMAIN: ${{ vars.ACS_EMAIL_DOMAIN }}
+          ACS_SENDER_ADDRESS: ${{ vars.ACS_SENDER_ADDRESS }}
+          ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
+          PRODUCTION_HOSTNAME: ${{ vars.PRODUCTION_HOSTNAME }}
+          DNS_ZONE_NAME: ${{ vars.DNS_ZONE_NAME }}
+          DNS_ZONE_RESOURCE_GROUP_NAME: ${{ vars.DNS_ZONE_RESOURCE_GROUP_NAME }}
+          JWT_SECRET_VERSION: ${{ vars.JWT_SECRET_VERSION }}
+          ACS_SECRET_VERSION: ${{ vars.ACS_SECRET_VERSION }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          cat > "iac/env/${{ inputs.env }}.tfvars" <<EOF
+          # Generated at workflow runtime from GitHub env-scoped vars — never committed.
+          # Sensitive values (round_brief_emails, puretrack_*) ride TF_VAR_* env vars.
+          stamp_name = "${{ inputs.env }}"
+          location   = "uksouth"
+
+          tfstate_sa_name = "${TFSTATE_SA_NAME}"
+
+          allowed_origins = ${ALLOWED_ORIGINS:-[]}
+
+          ops_email = "${OPS_EMAIL}"
+
+          acs_email_domain   = "${ACS_EMAIL_DOMAIN}"
+          acs_sender_address = "${ACS_SENDER_ADDRESS}"
+
+          jwt_secret_version = "${JWT_SECRET_VERSION:-1}"
+          acs_secret_version = "${ACS_SECRET_VERSION:-1}"
+
+          terraform_principal_type = "ServicePrincipal"
+
+          production_hostname          = "${PRODUCTION_HOSTNAME}"
+          dns_zone_name                = "${DNS_ZONE_NAME}"
+          dns_zone_resource_group_name = "${DNS_ZONE_RESOURCE_GROUP_NAME}"
+
+          slack_webhook_url = "${SLACK_WEBHOOK_URL}"
+          EOF
+
+      - name: Terraform init
+        run: terraform -chdir=iac/${{ inputs.stack }} init -input=false -backend-config="${{ steps.paths.outputs.backend }}"
+
+      - name: Terraform plan
+        run: |
+          set -euo pipefail
+          terraform -chdir=iac/${{ inputs.stack }} plan -input=false -var-file="${{ steps.paths.outputs.tfvars }}" -out=tfplan | tee plan-output.txt
+          {
+            echo "## Terraform plan — ${{ inputs.stack }} (${{ inputs.env }})"
+            echo '```'
+            tail -n 80 plan-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Terraform apply
+        if: inputs.mode == 'apply'
+        run: terraform -chdir=iac/${{ inputs.stack }} apply -input=false tfplan

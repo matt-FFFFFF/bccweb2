@@ -1,0 +1,320 @@
+name: Deploy prod
+
+# Publishing a GitHub release deploys to prod. The release IS the gate — no
+# extra reviewer approval — but the released commit must be reachable from
+# main (verify-release-ancestry), and the terraform drift gate must pass.
+# Azure auth is OIDC via the prod Terraform UMI (no static secrets) — see
+# iac/bootstrap/README.md.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  id-token: write # required for OIDC token issuance
+  contents: read
+
+concurrency:
+  group: deploy-prod
+  cancel-in-progress: false
+
+jobs:
+  verify-release-ancestry:
+    name: Verify release ancestry
+    runs-on: ubuntu-latest
+    environment: prod
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          # Full history — the ancestry check needs every commit on main.
+          fetch-depth: 0
+
+      - name: Check release commit is reachable from main
+        run: |
+          set -euo pipefail
+          echo "Deploying release: ${{ github.event.release.tag_name }}" >> "$GITHUB_STEP_SUMMARY"
+          git fetch origin main
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
+            echo "Release commit not reachable from origin/main" >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Release commit $GITHUB_SHA is not reachable from origin/main. Merge it to main (or retag a main commit) and re-publish."
+            exit 1
+          fi
+          echo "Release commit is on main — proceeding." >> "$GITHUB_STEP_SUMMARY"
+
+  terraform-check:
+    name: Terraform drift gate
+    runs-on: ubuntu-latest
+    environment: prod
+    needs: verify-release-ancestry
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_USE_AZUREAD: "true"
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_IN_AUTOMATION: "true"
+      TF_VAR_round_brief_emails: ${{ secrets.TF_VAR_ROUND_BRIEF_EMAILS }}
+      TF_VAR_puretrack_api_key: ${{ secrets.TF_VAR_PURETRACK_API_KEY }}
+      TF_VAR_puretrack_email: ${{ secrets.TF_VAR_PURETRACK_EMAIL }}
+      TF_VAR_puretrack_password: ${{ secrets.TF_VAR_PURETRACK_PASSWORD }}
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_version: "<2.0.0"
+          terraform_wrapper: false
+
+      - uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # iac/env/prod.tfvars is gitignored — generate the non-sensitive half
+      # from env-scoped GitHub vars; sensitive values ride TF_VAR_* job env.
+      - name: Generate prod tfvars (runtime)
+        env:
+          TFSTATE_SA_NAME: ${{ vars.TFSTATE_SA_NAME }}
+          OPS_EMAIL: ${{ vars.OPS_EMAIL }}
+          ACS_EMAIL_DOMAIN: ${{ vars.ACS_EMAIL_DOMAIN }}
+          ACS_SENDER_ADDRESS: ${{ vars.ACS_SENDER_ADDRESS }}
+          ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
+          PRODUCTION_HOSTNAME: ${{ vars.PRODUCTION_HOSTNAME }}
+          DNS_ZONE_NAME: ${{ vars.DNS_ZONE_NAME }}
+          DNS_ZONE_RESOURCE_GROUP_NAME: ${{ vars.DNS_ZONE_RESOURCE_GROUP_NAME }}
+          JWT_SECRET_VERSION: ${{ vars.JWT_SECRET_VERSION }}
+          ACS_SECRET_VERSION: ${{ vars.ACS_SECRET_VERSION }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          set -euo pipefail
+          echo "Deploying release: ${{ github.event.release.tag_name }}" >> "$GITHUB_STEP_SUMMARY"
+          cat > iac/env/prod.tfvars <<EOF
+          # Generated at workflow runtime from GitHub env-scoped vars — never committed.
+          # Sensitive values (round_brief_emails, puretrack_*) ride TF_VAR_* env vars.
+          stamp_name = "prod"
+          location   = "uksouth"
+
+          tfstate_sa_name = "${TFSTATE_SA_NAME}"
+
+          allowed_origins = ${ALLOWED_ORIGINS:-[]}
+
+          ops_email = "${OPS_EMAIL}"
+
+          acs_email_domain   = "${ACS_EMAIL_DOMAIN}"
+          acs_sender_address = "${ACS_SENDER_ADDRESS}"
+
+          jwt_secret_version = "${JWT_SECRET_VERSION:-1}"
+          acs_secret_version = "${ACS_SECRET_VERSION:-1}"
+
+          terraform_principal_type = "ServicePrincipal"
+
+          production_hostname          = "${PRODUCTION_HOSTNAME}"
+          dns_zone_name                = "${DNS_ZONE_NAME}"
+          dns_zone_resource_group_name = "${DNS_ZONE_RESOURCE_GROUP_NAME}"
+
+          slack_webhook_url = "${SLACK_WEBHOOK_URL}"
+          EOF
+
+      - name: Terraform init (service / prod)
+        run: terraform -chdir=iac/service init -input=false -backend-config=../env/prod.backend.hcl
+
+      # Exit code 2 = drift or pending infra changes. Deploying app code onto
+      # unreconciled infra is unsafe — fail loudly and point at terraform.yml.
+      - name: Terraform plan (drift gate)
+        run: |
+          set -euo pipefail
+          set +e
+          terraform -chdir=iac/service plan -input=false -detailed-exitcode -var-file=../env/prod.tfvars | tee plan-output.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -eq 2 ]; then
+            {
+              echo "## Service Terraform plan shows drift or pending changes"
+              echo "Run the terraform.yml workflow with stack=service env=prod mode=apply to reconcile."
+              echo '```'
+              tail -n 80 plan-output.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Service Terraform plan shows drift or pending changes. Run terraform.yml workflow with mode=apply to reconcile."
+            exit 1
+          elif [ "$rc" -ne 0 ]; then
+            echo "::error::Terraform plan failed (exit $rc)"
+            exit "$rc"
+          fi
+          echo "No infrastructure drift — proceeding to deploy." >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-api:
+    name: Deploy API (Functions)
+    runs-on: ubuntu-latest
+    environment: prod
+    needs: [verify-release-ancestry, terraform-check]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Log release
+        run: |
+          echo "Deploying release: ${{ github.event.release.tag_name }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up mise
+        uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4.1.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Build order matters: types → scoring → api (project references)
+      - name: Build packages/types
+        run: npm run build --workspace packages/types
+
+      - name: Build packages/scoring
+        run: npm run build --workspace packages/scoring
+
+      - name: Build apps/api
+        run: npm run build --workspace apps/api
+
+      - name: Prepare deployment package
+        run: |
+          # Strip devDependencies — build is complete, they are no longer needed.
+          # This shrinks node_modules before we copy it into the deploy package.
+          npm prune --omit=dev
+
+          mkdir -p .deploy
+          cp apps/api/host.json apps/api/package.json .deploy/
+          cp -r apps/api/dist .deploy/dist
+
+          # Copy node_modules into the deploy directory, dereferencing symlinks.
+          # Workspace packages (@bccweb/types, @bccweb/scoring) are symlinks in
+          # the hoisted node_modules; rsync --copy-links replaces them with the
+          # actual compiled package directories so the zip is self-contained.
+          rsync -a --copy-links node_modules/ .deploy/node_modules/
+
+      - uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy to Azure Functions
+        uses: Azure/functions-action@bc63708cc6539760eea18d8a7de4ce8ef5fdf593 # v1.5.6
+        with:
+          # Env-scoped var: the Function App name from Terraform (func-<project>-<env>).
+          app-name: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
+          # The prepared directory — functions-action zips this and deploys via Kudu.
+          # WEBSITE_RUN_FROM_PACKAGE=1 is set in Terraform; the zip is mounted read-only.
+          # No static publish profile — the action reuses the azure/login OIDC session (RBAC).
+          package: .deploy
+
+      # NO auto-rollback: this smoke gate must fail the workflow so the operator
+      # investigates immediately and performs any rollback manually in Azure Portal.
+      - name: Smoke test
+        if: ${{ success() }}
+        env:
+          API_HOST: ${{ vars.API_HOST }}
+        run: |
+          set -euo pipefail
+
+          url="https://${API_HOST}/api/health"
+          ok=0
+          for _ in $(seq 1 24); do
+            body="$(curl -fsS "$url" || true)"
+            if printf '%s' "$body" | jq -e '.status == "ok"' >/dev/null 2>&1; then
+              ok=1
+              break
+            fi
+            sleep 5
+          done
+
+          if [ "$ok" -ne 1 ]; then
+            echo "::error::Post-deploy smoke failed"
+            exit 1
+          fi
+
+          if ! curl -fsS "https://${API_HOST}/api/seasons" | jq -e 'type == "array" and length > 0' >/dev/null; then
+            echo "::error::Post-deploy smoke failed"
+            exit 1
+          fi
+
+  deploy-web:
+    name: Deploy Web (SWA)
+    runs-on: ubuntu-latest
+    environment: prod
+    needs: [verify-release-ancestry, terraform-check]
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+        with:
+          submodules: true
+
+      - name: Log release
+        run: |
+          echo "Deploying release: ${{ github.event.release.tag_name }}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Set up mise
+        uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4.1.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build packages/types
+        run: npm run build --workspace packages/types
+
+      - name: Build apps/web
+        run: npm run build --workspace apps/web
+
+      - uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # The SWA deploy action has no OIDC mode — fetch the deployment token at
+      # runtime via the OIDC session instead of storing it as a static secret.
+      - name: Fetch SWA deployment token
+        id: swa_token
+        env:
+          SWA_NAME: ${{ vars.SWA_NAME }}
+        run: |
+          set -euo pipefail
+          SWA_TOKEN=$(az staticwebapp secrets list --name "$SWA_NAME" --resource-group rg-bccweb-prod --query 'properties.apiKey' -o tsv)
+          echo "::add-mask::$SWA_TOKEN"
+          echo "token=$SWA_TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy to Azure Static Web Apps
+        uses: Azure/static-web-apps-deploy@4d27395796ac319302594769cfe812bd207490b1 # v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.swa_token.outputs.token }}
+          action: upload
+          app_location: "apps/web"
+          output_location: "../../dist/web"
+          skip_app_build: true
+          # The Functions are deployed separately; SWA just proxies /api/*
+          api_location: ""
+
+      # NO auto-rollback: this smoke gate must fail the workflow so the operator
+      # investigates immediately and performs any rollback manually in Azure Portal.
+      - name: Smoke test
+        if: ${{ success() }}
+        env:
+          WEB_HOST: ${{ vars.WEB_HOST }}
+        run: |
+          set -euo pipefail
+
+          url="https://${WEB_HOST}/"
+          headers_ok=0
+          for _ in $(seq 1 24); do
+            headers="$(curl -fsSI "$url" || true)"
+            if printf '%s' "$headers" | grep -qi '^content-type: text/html'; then
+              headers_ok=1
+              break
+            fi
+            sleep 5
+          done
+
+          if [ "$headers_ok" -ne 1 ]; then
+            echo "::error::Post-deploy smoke failed"
+            exit 1
+          fi
+
+          if ! curl -fsS "$url" | grep -Eiq 'BCC'; then
+            echo "::error::Post-deploy smoke failed"
+            exit 1
+          fi
