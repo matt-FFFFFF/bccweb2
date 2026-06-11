@@ -11,6 +11,13 @@ let _container: ContainerClient | null = null;
 let _privateContainer: ContainerClient | null = null;
 let _blobService: BlobServiceClient | null = null;
 
+// TEST-ONLY: clears module-level container/service caches so the next access re-reads BLOB_CONNECTION_STRING / BLOB_CONTAINER_NAME / BLOB_PRIVATE_CONTAINER_NAME from env. Used by helpers/azurite.ts beforeAll to make per-file test container isolation pool-config-proof.
+export function resetBlobSingletons(): void {
+  _container = null;
+  _privateContainer = null;
+  _blobService = null;
+}
+
 interface LeaseRenewingOptions {
   leaseDurationSec?: number;
   renewIntervalMs?: number;
