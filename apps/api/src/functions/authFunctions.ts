@@ -18,11 +18,15 @@ import {
 } from "@azure/functions";
 import { createHash, randomBytes, randomUUID } from "crypto";
 import type { User } from "@bccweb/types";
-import { getPrivateBlobClient, readBlob, writePrivateBlob } from "../lib/blob.js";
+import {
+  getPrivateBlobClient,
+  readBlob,
+  writePrivateBlob,
+  withPrivateLease,
+} from "../lib/blob.js";
 import { getOrCreateUser } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { extractIp } from "../lib/signTofly/ledger.js";
-import { TS_CS_VERSION } from "../lib/termsConstants.js";
 import {
   AuthCredential,
   TokenAlreadyConsumedError,
@@ -247,15 +251,17 @@ async function verifyEmail(
   }
 
   const credPath = `auth/${result.userId}.json`;
-  let cred: AuthCredential;
-  try {
-    cred = await readBlob<AuthCredential>(getPrivateBlobClient(credPath));
-  } catch {
-    throw new HttpError(400, "INVALID_TOKEN", "Invalid token");
-  }
+  await withPrivateLease(credPath, async (leaseId) => {
+    let cred: AuthCredential;
+    try {
+      cred = await readBlob<AuthCredential>(getPrivateBlobClient(credPath));
+    } catch {
+      throw new HttpError(400, "INVALID_TOKEN", "Invalid token");
+    }
 
-  cred.emailVerified = true;
-  await writePrivateBlob(credPath, cred);
+    cred.emailVerified = true;
+    await writePrivateBlob(credPath, cred, leaseId);
+  });
 
   return {
     status: 200,
@@ -496,6 +502,7 @@ async function resetPassword(
   if (!body.newPassword || body.newPassword.length < 8) {
     return badRequest("Password must be at least 8 characters");
   }
+  const newPassword = body.newPassword;
 
   let result: { userId: string };
   try {
@@ -512,15 +519,17 @@ async function resetPassword(
   }
 
   const credPath = `auth/${result.userId}.json`;
-  let cred: AuthCredential;
-  try {
-    cred = await readBlob<AuthCredential>(getPrivateBlobClient(credPath));
-  } catch {
-    throw new HttpError(400, "INVALID_TOKEN", "Invalid token");
-  }
+  await withPrivateLease(credPath, async (leaseId) => {
+    let cred: AuthCredential;
+    try {
+      cred = await readBlob<AuthCredential>(getPrivateBlobClient(credPath));
+    } catch {
+      throw new HttpError(400, "INVALID_TOKEN", "Invalid token");
+    }
 
-  cred.passwordHash = await hashPassword(body.newPassword);
-  await writePrivateBlob(credPath, cred);
+    cred.passwordHash = await hashPassword(newPassword);
+    await writePrivateBlob(credPath, cred, leaseId);
+  });
 
   return {
     status: 200,
