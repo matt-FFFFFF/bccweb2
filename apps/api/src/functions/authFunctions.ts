@@ -112,12 +112,14 @@ async function storeVerificationToken(
   const tokenHash = createHash("sha256").update(rawToken).digest("hex");
   const tokenDoc: VerificationState = { token: rawToken, createdAt, expiresAt };
 
+  // CREATE-ONCE: token path is sha256-keyed, collision means token already issued
   await writePrivateBlob(`auth/tokens/${tokenHash}.json`, {
     userId,
     type: "verify",
     createdAt,
     expiresAt,
   });
+  // CREATE-ONCE: token path is sha256-keyed, collision means token already issued
   await writePrivateBlob(verificationStatePath(userId), tokenDoc);
   return tokenDoc;
 }
@@ -188,7 +190,7 @@ async function register(
       emailVerified: false,
       createdAt: new Date().toISOString(),
     };
-    await writePrivateBlob(`auth/${userId}.json`, credential);
+    await writePrivateBlob(`auth/${userId}.json`, credential, undefined, { ifNoneMatch: "*" });
     const user = await getOrCreateUser(userId, emailLower);
     const acceptedAt = new Date().toISOString();
     await writePrivateBlob(`users/${userId}.json`, {
