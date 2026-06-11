@@ -5,16 +5,13 @@ export default defineConfig({
     include: [
       "src/__tests__/**/*.test.ts",
       "src/functions/__tests__/**/*.test.ts",
-      "src/lib/__tests__/http.test.ts",
-      "src/lib/__tests__/recompute.test.ts",
-      "src/lib/__tests__/rateLimit.test.ts",
-      "src/lib/__tests__/telemetryRedactor.test.ts",
-      "src/lib/__tests__/pdf.test.ts",
-      "src/lib/__tests__/teamCaptain.test.ts",
-      "src/lib/__tests__/puretrack.groupBlob.test.ts",
-      "src/lib/__tests__/puretrackGuard.test.ts",
-      "src/lib/__tests__/auth.concurrency.test.ts",
+      "src/lib/**/__tests__/**/*.test.ts",
       "src/lib/signTofly/__tests__/**/*.test.ts",
+    ],
+    exclude: [
+      "src/lib/__tests__/blob.test.ts", // EXCLUDED: real 60-70s lease-renewal timing tests; run via 'make test-heavy'.
+      "src/lib/__tests__/puretrack.test.ts", // EXCLUDED: stubs global fetch and runs slow; run via 'make test-heavy'.
+      "src/lib/__tests__/telemetry.integration.test.ts", // EXCLUDED: mutates global applicationinsights state; run via 'make test-heavy'.
     ],
     setupFiles: [
       "src/__tests__/helpers/setup.ts",
