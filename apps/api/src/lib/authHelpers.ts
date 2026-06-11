@@ -89,7 +89,15 @@ export function verifyRefreshToken(token: string): string {
 
 // ─── Password ─────────────────────────────────────────────────────────────────
 
-const BCRYPT_COST = 12;
+const BCRYPT_COST = (() => {
+  const def = 12;
+  if (process.env.NODE_ENV !== "test") return def;
+  const raw = process.env.TEST_BCRYPT_COST;
+  if (!raw) return def;
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 4) return def;
+  return Math.min(parsed, def);
+})();
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_COST);

@@ -6,8 +6,11 @@
  * - Mocks external services (email, pdf, puretrack) to prevent real calls
  */
 
-import { beforeEach, vi } from "vitest";
-import { resetAllBuckets } from "../../lib/rateLimit.js";
+process.env["NODE_ENV"] ??= "test";
+process.env["TEST_BCRYPT_COST"] ??= "4";
+
+const { beforeEach, vi } = await import("vitest");
+const { resetAllBuckets } = await import("../../lib/rateLimit.js");
 
 // ─── Environment variables ────────────────────────────────────────────────────
 
@@ -76,7 +79,7 @@ vi.mock("../../lib/email.js", () => ({
 // vi.mock above is hoisted by Vitest above this static import, so the `sendEmail`
 // imported here is the mocked function. Do NOT reorder.
 
-import { sendEmail } from "../../lib/email.js";
+const { sendEmail } = await import("../../lib/email.js");
 
 export interface CapturedEmail {
   to: string[];
