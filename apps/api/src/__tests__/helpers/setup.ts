@@ -6,7 +6,8 @@
  * - Mocks external services (email, pdf, puretrack) to prevent real calls
  */
 
-import { vi } from "vitest";
+import { beforeEach, vi } from "vitest";
+import { resetAllBuckets } from "../../lib/rateLimit.js";
 
 // ─── Environment variables ────────────────────────────────────────────────────
 
@@ -92,3 +93,5 @@ export function getSentEmails(): CapturedEmail[] {
 export function clearSentEmails(): void {
   vi.mocked(sendEmail).mockClear();
 }
+
+beforeEach(() => resetAllBuckets());
