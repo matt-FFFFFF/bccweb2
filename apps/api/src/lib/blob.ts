@@ -80,6 +80,8 @@ export function getPrivateBlockBlobClient(path: string): BlockBlobClient {
 // ─── Read / Write ─────────────────────────────────────────────────────────────
 
 /**
+ * PREFER readJson() — raw read for non-JSON content only.
+ *
  * Read a JSON blob. Throws a BlobStorageError with statusCode 404 if the blob
  * does not exist, which callers can use to detect a missing document.
  */
@@ -90,6 +92,8 @@ export async function readBlob<T>(blobClient: BlobClient): Promise<T> {
 }
 
 /**
+ * PREFER readJson() — raw read for non-JSON content only.
+ *
  * Write a JSON blob to the public container, overwriting any existing content.
  * Optionally pass a leaseId to write under an active blob lease.
  */
@@ -110,6 +114,8 @@ export async function writeBlob<T>(
 }
 
 /**
+ * PREFER readJson() — raw read for non-JSON content only.
+ *
  * Write a JSON blob to the private container, overwriting any existing content.
  * Optionally pass a leaseId to write under an active blob lease.
  *
