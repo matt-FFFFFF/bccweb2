@@ -23,6 +23,7 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 import { recomputeTeamCaptain } from "../lib/teamCaptain.js";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
@@ -72,6 +73,7 @@ async function addTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "addTeam", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
@@ -149,6 +151,7 @@ async function removeTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "removeTeam", "standard");
 
   const { id, teamId } = req.params as { id?: string; teamId?: string };
   if (!id || !teamId) {
@@ -175,6 +178,7 @@ async function addPilot(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "addPilot", "standard");
 
   const { id, teamId } = req.params as { id?: string; teamId?: string };
   if (!id || !teamId) {
@@ -249,6 +253,7 @@ async function removePilot(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "removePilot", "standard");
 
   const { id, teamId, place } = req.params as {
     id?: string;
@@ -291,6 +296,7 @@ async function updateAccounted(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateAccounted", "standard");
 
   const { id, teamId, place } = req.params as {
     id?: string;

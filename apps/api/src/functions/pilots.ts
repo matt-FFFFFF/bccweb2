@@ -40,6 +40,7 @@ import {
   updatePilotEmailIndex,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 
 // ─── GET /api/pilots ──────────────────────────────────────────────────────────
 
@@ -142,6 +143,7 @@ async function createPilot(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!caller.roles.includes("Admin")) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "createPilot", "standard");
 
   let body: CreatePilotBody;
   try {
@@ -232,6 +234,7 @@ async function updatePilot(
   const isSelf = caller.pilotId === id;
 
   if (!isAdmin && !isSelf) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updatePilot", "standard");
 
   let existing: Pilot;
   try {

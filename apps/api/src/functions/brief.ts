@@ -22,6 +22,7 @@ import {
 } from "../lib/blob.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 import { computeBriefHash } from "../lib/signTofly/briefVersion.js";
 import { invalidatePriorSignToFlyFlags } from "../lib/signTofly/invalidate.js";
 import { listSignaturesForRound } from "../lib/signTofly/ledger.js";
@@ -236,6 +237,7 @@ async function updateRoundBrief(
   if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
     throw new HttpError(403, "FORBIDDEN");
   }
+  await mutationRateLimit(req, caller, "updateRoundBrief", "heavy");
 
   const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`)).catch((e) => {
     if ((e as { statusCode?: number }).statusCode === 404) {
@@ -353,6 +355,7 @@ async function uploadBriefImage(
   if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
     throw new HttpError(403, "FORBIDDEN");
   }
+  await mutationRateLimit(req, caller, "uploadBriefImage", "standard");
   if (!caller.roles.includes("Admin") && caller.roles.includes("RoundsCoord") && caller.clubId !== round.organisingClub?.id) {
     throw new HttpError(403, "FORBIDDEN");
   }
@@ -433,6 +436,7 @@ async function deleteBriefImage(
   if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
     throw new HttpError(403, "FORBIDDEN");
   }
+  await mutationRateLimit(req, caller, "deleteBriefImage", "standard");
   if (!caller.roles.includes("Admin") && caller.roles.includes("RoundsCoord") && caller.clubId !== round.organisingClub?.id) {
     throw new HttpError(403, "FORBIDDEN");
   }

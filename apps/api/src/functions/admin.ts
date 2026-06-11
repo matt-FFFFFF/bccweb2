@@ -22,6 +22,7 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 import { recomputeSeason, updateRoundsIndex } from "../lib/recompute.js";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
@@ -109,6 +110,7 @@ async function recomputeRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "recomputeRound", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
@@ -174,6 +176,7 @@ async function updateConfig(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateConfig", "standard");
 
   const body = (await req.json()) as Partial<Config>;
 
@@ -239,6 +242,7 @@ async function setUserRoles(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "setUserRoles", "standard");
 
   const userId = req.params["userId"];
   if (!userId) throw new HttpError(400, "MISSING_USER_ID", "Missing userId");

@@ -21,6 +21,7 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -131,6 +132,7 @@ async function logFlight(
   if (!isCoord(caller.roles) && !isPilotSelf) {
     return forbiddenResponse("You can only log flights for yourself");
   }
+  await mutationRateLimit(req, caller, "logFlight", "flights");
 
   const flight: Flight = {
     id: randomUUID(),
@@ -208,6 +210,7 @@ async function updateFlight(
   if (!isCoord(caller.roles) && !isPilotSelf) {
     return forbiddenResponse("You can only update your own flights");
   }
+  await mutationRateLimit(req, caller, "updateFlight", "flights");
 
   const result = await mutateLocked(roundId, (r) => {
     if (r.status !== "Locked") {
@@ -253,6 +256,7 @@ async function deleteFlight(
   if (!isCoord(caller.roles) && !isAdmin(caller.roles)) {
     return forbiddenResponse();
   }
+  await mutationRateLimit(req, caller, "deleteFlight", "flights");
 
   const { id: roundId, flightId } = req.params as {
     id?: string;

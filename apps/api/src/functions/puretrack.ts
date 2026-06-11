@@ -25,6 +25,7 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 import {
   createPureTrackGroups,
   PureTrackRoundResult,
@@ -82,6 +83,7 @@ async function createPureTrackGroupsHandler(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "createPureTrackGroups", "heavy");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");

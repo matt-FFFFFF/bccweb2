@@ -35,6 +35,7 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 
 function isAdmin(caller: CallerIdentity): boolean {
   return caller.roles.includes("Admin");
@@ -113,6 +114,7 @@ async function createSite(
   if (!isAdmin(caller) && !caller.roles.includes("RoundsCoord")) {
     return forbiddenResponse();
   }
+  await mutationRateLimit(req, caller, "createSite", "standard");
 
   let body: CreateSiteBody;
   try {
@@ -164,6 +166,7 @@ async function updateSite(
 ): Promise<HttpResponseInit> {
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
+  await mutationRateLimit(req, caller, "updateSite", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_SITE_ID", "Missing site id");
@@ -230,6 +233,7 @@ async function deleteSite(
 ): Promise<HttpResponseInit> {
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
+  await mutationRateLimit(req, caller, "deleteSite", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_SITE_ID", "Missing site id");

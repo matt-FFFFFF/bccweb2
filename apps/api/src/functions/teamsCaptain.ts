@@ -28,6 +28,7 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
@@ -41,6 +42,7 @@ async function setTeamCaptain(
   const isAdmin = caller.roles.includes("Admin");
   const isCoord = caller.roles.includes("RoundsCoord");
   if (!isAdmin && !isCoord) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "setTeamCaptain", "standard");
 
   const { id, teamId } = req.params as { id?: string; teamId?: string };
   if (!id || !teamId) {

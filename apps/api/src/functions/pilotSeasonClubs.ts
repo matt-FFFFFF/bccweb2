@@ -18,6 +18,7 @@ import {
   unauthorizedResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 
 interface PilotClubMap {
   [pilotId: string]: string;
@@ -83,6 +84,7 @@ async function assignPilotSeasonClub(
   const isAdmin = caller.roles.includes("Admin");
   const isCoord = caller.roles.includes("RoundsCoord");
   if (!isAdmin && !isCoord) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "assignPilotSeasonClub", "standard");
 
   const reassign = req.query.get("reassign") === "true";
 
@@ -202,6 +204,7 @@ async function deletePilotSeasonClub(
   const isAdmin = caller.roles.includes("Admin");
   const isCoord = caller.roles.includes("RoundsCoord");
   if (!isAdmin && !isCoord) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "deletePilotSeasonClub", "standard");
 
   const pilotId = req.params["pilotId"];
   const seasonYearRaw = req.params["seasonYear"];

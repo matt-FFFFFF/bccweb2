@@ -21,6 +21,7 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 
 // ─── GET /api/clubs ───────────────────────────────────────────────────────────
 
@@ -49,6 +50,7 @@ async function createClub(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!caller.roles.includes("Admin")) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "createClub", "standard");
 
   let body: { name?: string };
   try {
@@ -84,6 +86,7 @@ async function updateClub(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!caller.roles.includes("Admin")) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateClub", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_CLUB_ID", "Missing club id");

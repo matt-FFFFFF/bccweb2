@@ -26,6 +26,7 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -80,6 +81,7 @@ async function createClubTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdminOrCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "createClubTeam", "standard");
 
   let body: { clubId?: string; seasonYear?: number; teamName?: string };
   try {
@@ -160,6 +162,7 @@ async function updateClubTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdminOrCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateClubTeam", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_CLUB_TEAM_ID", "Missing club team id");
@@ -231,6 +234,7 @@ async function deleteClubTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdminOrCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "deleteClubTeam", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_CLUB_TEAM_ID", "Missing club team id");

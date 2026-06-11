@@ -17,6 +17,7 @@ import {
   unauthorizedResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 
 // ─── GET /api/seasons ─────────────────────────────────────────────────────────
 
@@ -100,6 +101,7 @@ async function createSeason(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!caller.roles.includes("Admin")) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "createSeason", "standard");
 
   let body: CreateSeasonBody;
   try {
@@ -151,6 +153,7 @@ async function updateSeason(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!caller.roles.includes("Admin")) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateSeason", "standard");
 
   const yearStr = req.params["year"];
   if (!yearStr || !/^\d{4}$/.test(yearStr)) {
@@ -197,6 +200,7 @@ async function deleteSeason(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!caller.roles.includes("Admin")) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "deleteSeason", "standard");
 
   const yearStr = req.params["year"];
   if (!yearStr || !/^\d{4}$/.test(yearStr)) {

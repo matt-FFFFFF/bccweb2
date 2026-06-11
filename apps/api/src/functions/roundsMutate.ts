@@ -40,6 +40,7 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 import { updateRoundsIndex, recomputeSeason } from "../lib/recompute.js";
 import { createPureTrackGroups, type PureTrackRoundResult } from "../lib/puretrack.js";
 import { generateBriefPdf } from "../lib/pdf.js";
@@ -99,6 +100,7 @@ async function createRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "createRound", "standard");
 
   const body = (await req.json()) as {
     date?: string;
@@ -230,6 +232,7 @@ async function updateRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateRound", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
@@ -387,6 +390,11 @@ async function confirmRound(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "confirmRound", "standard");
+
   const result = await transition(req, id, ["Proposed"], "Confirmed");
   if ("status" in result && "jsonBody" in result) return result as HttpResponseInit;
   const updated = result as Round;
@@ -418,6 +426,11 @@ async function briefCompleteRound(
 ): Promise<HttpResponseInit> {
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
+
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "briefCompleteRound", "standard");
 
   const result = await transition(req, id, ["Confirmed"], "BriefComplete");
   if ("status" in result && "jsonBody" in result) return result as HttpResponseInit;
@@ -636,6 +649,7 @@ async function lockRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "lockRound", "heavy");
 
   const path = `rounds/${id}.json`;
 
@@ -802,6 +816,11 @@ async function unlockRound(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "unlockRound", "standard");
+
   const result = await transition(req, id, ["Locked"], "Confirmed", async (r) => {
     r.isLocked = false;
     // Clear snapshots so they are re-taken at next lock
@@ -834,6 +853,7 @@ async function completeRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "completeRound", "heavy");
 
   const config = await loadConfig();
   const path = `rounds/${id}.json`;
@@ -912,6 +932,7 @@ async function updateNarrative(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateNarrative", "standard");
 
   const body = (await req.json()) as { narrative?: string };
   if (body.narrative === undefined) {

@@ -22,6 +22,7 @@ import {
   unauthorizedResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 
 interface SeasonClubIndexEntry {
   id: string;
@@ -336,6 +337,7 @@ async function createSeasonClub(req: HttpRequest, _ctx: InvocationContext): Prom
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "createSeasonClub", "standard");
   const year = parseYear(req);
 
   let body: CreateSeasonClubBody;
@@ -386,6 +388,7 @@ async function updateSeasonClub(req: HttpRequest, _ctx: InvocationContext): Prom
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateSeasonClub", "standard");
   const year = parseYear(req);
   const seasonClubId = req.params["seasonClubId"];
   if (!seasonClubId) throw new HttpError(400, "MISSING_SEASON_CLUB_ID", "Missing season club id");
@@ -437,6 +440,7 @@ async function deleteSeasonClub(req: HttpRequest, _ctx: InvocationContext): Prom
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "deleteSeasonClub", "standard");
   const year = parseYear(req);
   const seasonClubId = req.params["seasonClubId"];
   if (!seasonClubId) throw new HttpError(400, "MISSING_SEASON_CLUB_ID", "Missing season club id");

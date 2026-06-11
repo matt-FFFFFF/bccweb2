@@ -1,6 +1,7 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { getCallerIdentity, forbiddenResponse, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 import {
   addWordingVersion,
   getActiveWording,
@@ -14,6 +15,7 @@ async function addSignToFlyWording(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!caller.roles.includes("Admin")) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "addSignToFlyWording", "standard");
 
   const body = await readWordingBody(req);
   const wording = await addWordingVersion({
