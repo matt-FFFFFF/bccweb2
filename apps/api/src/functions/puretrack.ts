@@ -96,6 +96,10 @@ async function createPureTrackGroupsHandler(
     throw new HttpError(500, "INTERNAL");
   }
 
+  if (!isAdmin(caller.roles) && round.organisingClub?.id !== caller.clubId) {
+    return forbiddenResponse();
+  }
+
   if (round.status !== "Locked" && round.status !== "Complete") {
     return {
       status: 409,
