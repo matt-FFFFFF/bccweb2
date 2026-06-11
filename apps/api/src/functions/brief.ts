@@ -26,7 +26,7 @@ import { computeBriefHash } from "../lib/signTofly/briefVersion.js";
 import { invalidatePriorSignToFlyFlags } from "../lib/signTofly/invalidate.js";
 import { listSignaturesForRound } from "../lib/signTofly/ledger.js";
 import { generateBriefPdf } from "../lib/pdf.js";
-import type { Round, BriefVersion } from "@bccweb/types";
+import type { Round } from "@bccweb/types";
 
 function contentTypeForPath(path: string): string {
   const lower = path.toLowerCase();
@@ -42,6 +42,18 @@ async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
     chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
   }
   return Buffer.concat(chunks);
+}
+
+function matchesMagicBytes(fileType: string, buffer: Buffer): boolean {
+  if (fileType === "image/png") {
+    return buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  }
+
+  if (fileType === "image/jpeg") {
+    return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  }
+
+  return false;
 }
 
 async function readBrief(id: string): Promise<RoundBrief | null> {
@@ -242,10 +254,6 @@ async function updateRoundBrief(
 
   const body = (await req.json()) as RoundBrief;
   const isDryRun = req.query.get("dryRun") === "true";
-  
-  let materialChanged = false;
-  let invalidatedSignatureCount = 0;
-  let savedBrief: RoundBrief = body;
 
   const result = await withPrivateLeaseRenewing(`round-briefs/${id}.json`, async (leaseId) => {
     const existing = await readBrief(id);
@@ -355,7 +363,7 @@ async function uploadBriefImage(
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
   if (!file) throw new HttpError(400, "BAD_REQUEST", "Missing file");
-  
+
   if (file.size > 5 * 1024 * 1024) {
     throw new HttpError(413, "PAYLOAD_TOO_LARGE", "Max 5MB");
   }
@@ -367,6 +375,18 @@ async function uploadBriefImage(
   const buffer = Buffer.from(await file.arrayBuffer());
   const brief = await readBrief(id);
   if (!brief) throw new HttpError(404, "NOT_FOUND", "Brief not found");
+  if ((brief.imagePaths?.length || 0) >= 10) {
+    return {
+      status: 400,
+      jsonBody: { error: "TOO_MANY_IMAGES", code: "TOO_MANY_IMAGES" },
+    };
+  }
+  if (!matchesMagicBytes(file.type, buffer)) {
+    return {
+      status: 400,
+      jsonBody: { error: "IMAGE_MAGIC_MISMATCH", code: "IMAGE_MAGIC_MISMATCH" },
+    };
+  }
 
   const nextN = (brief.imagePaths?.length || 0) + 1;
   const ext = file.type === "image/png" ? "png" : "jpg";
