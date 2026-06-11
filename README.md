@@ -124,7 +124,7 @@ Three GitHub Actions workflows, all authenticating to Azure via **OIDC**
 - [`deploy-prod.yml`](.github/workflows/deploy-prod.yml) — publishing a GitHub release deploys to prod: release-ancestry check (commit must be on `main`), drift gate, then the same deploy jobs
 - [`terraform.yml`](.github/workflows/terraform.yml) — manual plan/apply for any stack (`common`/`service`) × env (`dev`/`prod`); also the drift-reconcile path
 
-Infrastructure is managed by Terraform in [`iac/`](iac/) — see [iac/README.md](iac/README.md) for the stack layout (`bootstrap/` → `common/` → `service/`). Secrets are seeded declaratively via AzAPI data-plane writes (no shell script). The one-off migration runbooks from the pre-split layout live at [iac/bootstrap/MIGRATION-OPS.md](iac/bootstrap/MIGRATION-OPS.md) and [iac/STATE-MIGRATION.md](iac/STATE-MIGRATION.md).
+Infrastructure is managed by Terraform in [`iac/`](iac/) — see [iac/README.md](iac/README.md) for the stack layout (`bootstrap/` → `common/` → `service/`). Secrets are seeded declaratively via AzAPI data-plane writes (no shell script).
 
 There is **no auto-rollback**. A failed smoke test fails the workflow and
 leaves the deploy in place for operator investigation —

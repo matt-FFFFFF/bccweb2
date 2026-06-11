@@ -18,13 +18,6 @@ Everything is provisioned via **AzAPI v2.10** with HCL-native bodies (no
 JSON-encoded body strings). This config uses **local state** intentionally; see
 "Why local state?" below.
 
-> **Migration from single-UMI bootstrap**: if your local state still holds the
-> old single `id-bccweb-terraform` UMI with subscription-scope Owner, the next
-> apply **DESTROYS** that UMI, its subscription-scope Owner role assignment,
-> and its federated credential, replacing them with per-env UMIs. Existing prod RGs
-> must be imported first — follow [MIGRATION-OPS.md](MIGRATION-OPS.md) end to
-> end before applying.
-
 ---
 
 ## When to run
@@ -72,8 +65,6 @@ cp iac/bootstrap/terraform.tfvars.example iac/bootstrap/terraform.tfvars
 
 # 4. Apply. Other variables have sensible defaults (location=uksouth,
 #    bootstrap_rg_name=rg-bccweb-tfstate, tfstate_container_name=tfstate).
-#    MIGRATING from the single-UMI layout? Run the pre-apply imports in
-#    MIGRATION-OPS.md first.
 terraform -chdir=iac/bootstrap apply
 
 # 5. Capture the backend config snippet for the downstream stacks.
@@ -171,27 +162,6 @@ assignments, GitHub environment, and secrets in one shot. The federated
 subject claim is `repo:<owner/repo>:environment:<name>`, so the
 `github_env` value and the GitHub environment name must match exactly
 (case-sensitive).
-
-### Pre-apply imports
-
-When migrating from the single-UMI layout, the prod RGs already exist in
-Azure (created by the old root `iac/` config). Bootstrap must **adopt** them
-before the first apply of the refactored config — otherwise the apply fails
-with "resource already exists":
-
-```sh
-SUB=$(az account show --query id -o tsv)
-terraform -chdir=iac/bootstrap import \
-  'azapi_resource.pre_created_rg["platform-prod"]' \
-  /subscriptions/$SUB/resourceGroups/rg-bccweb-platform-prod
-terraform -chdir=iac/bootstrap import \
-  'azapi_resource.pre_created_rg["stamp-prod"]' \
-  /subscriptions/$SUB/resourceGroups/rg-bccweb-prod
-```
-
-No imports are needed for dev — those RGs do not exist yet and bootstrap
-creates them. The full migration sequence (backups, imports, expected plan
-delta, verification gates) lives in [MIGRATION-OPS.md](MIGRATION-OPS.md).
 
 ### Populate GitHub secrets
 

@@ -10,7 +10,6 @@ All infrastructure is provisioned using **AzAPI v2.10** with HCL-native bodies.
 - `common/`: Per-env Log Analytics workspace + Application Insights, deployed into the bootstrap-created platform RG. See [common/README.md](common/README.md).
 - `service/`: Per-env application stamp (storage, Function App, SWA, Key Vault, ACS, alerts, optional DNS), instantiating `service/modules/stamp/` once per environment. Reads common's outputs via remote state. See [service/README.md](service/README.md).
 - `env/`: Environment-specific configuration (`<env>.tfvars` + `<env>.backend.hcl` for service; `common-<env>.tfvars` + `common-<env>.backend.hcl` for common).
-- `STATE-MIGRATION.md`: One-off operator runbook that carved `common/` + `service/` out of the old single root config. Historical after execution; see also [bootstrap/MIGRATION-OPS.md](bootstrap/MIGRATION-OPS.md).
 
 State ownership: bootstrap owns ALL resource groups; common owns LAW + App Insights; service owns everything inside the stamp RG. Common and service never create RGs — they reference bootstrap's by interpolated name/ID.
 

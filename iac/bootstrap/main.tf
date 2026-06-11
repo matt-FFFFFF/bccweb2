@@ -14,11 +14,6 @@
 # Local state is intentional — this config provisions its own remote-state
 # target, so it cannot itself live in that target. Re-running is safe; AzAPI
 # resources are idempotent on identical bodies.
-#
-# The `random` provider requirement is retained even though no random
-# resources remain in config: operators migrating from the single-UMI layout
-# still have `random_uuid.tf_owner` in local state, and destroying it on the
-# migration apply needs the provider installed.
 
 terraform {
   required_version = "~> 1.11"
@@ -27,10 +22,6 @@ terraform {
     azapi = {
       source  = "Azure/azapi"
       version = "~> 2.10"
-    }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.6"
     }
     github = {
       source  = "integrations/github"
@@ -163,8 +154,7 @@ resource "azapi_resource" "tfstate_sa_lock" {
 # Bootstrap owns every environment RG so the downstream common + service
 # stacks never need RG-create rights — they reference these by interpolated name/ID.
 # Two RGs per env: the platform RG (observability home, common stack) and the
-# stamp RG (service stack). Existing prod RGs are adopted via `terraform
-# import` before the first apply (see MIGRATION-OPS.md).
+# stamp RG (service stack).
 
 locals {
   pre_created_rgs = merge([

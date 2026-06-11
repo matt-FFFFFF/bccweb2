@@ -2,9 +2,7 @@
 
 Per-environment Log Analytics + Application Insights, deployed separately
 from the service stack so observability survives service-stack churn.
-See [../README.md](../README.md) for the overall layout and
-[../STATE-MIGRATION.md](../STATE-MIGRATION.md) for the one-off migration that
-carved this stack out of the old root config.
+See [../README.md](../README.md) for the overall layout.
 
 ## Purpose
 

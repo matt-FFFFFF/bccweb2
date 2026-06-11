@@ -2,8 +2,7 @@
 
 The application infrastructure for one environment, instantiating
 [`modules/stamp/`](modules/stamp) once per env. See [../README.md](../README.md)
-for the overall layout and [../STATE-MIGRATION.md](../STATE-MIGRATION.md) for
-the one-off migration that scoped the old root config down to this stack.
+for the overall layout.
 
 ## Purpose
 

@@ -8,9 +8,7 @@
 
 data "azapi_client_config" "current" {}
 
-# Tag shape must stay byte-identical to the pre-split root config — the prod
-# LAW/AI were imported from it, and any tag delta would break the
-# plan-is-no-op migration gate (see iac/STATE-MIGRATION.md).
+# Standard project tags, matching the service stack's shape.
 locals {
   platform_rg_name = "rg-bccweb-platform-${var.stamp_name}"
   platform_rg_id   = "/subscriptions/${data.azapi_client_config.current.subscription_id}/resourceGroups/${local.platform_rg_name}"
