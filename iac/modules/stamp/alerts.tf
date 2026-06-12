@@ -288,7 +288,7 @@ resource "azapi_resource" "blob_heal_storm" {
   body = {
     kind = "LogAlert"
     properties = {
-      description                           = "Storm of blob.healed events suggests a schema is too narrow and is silently stripping fields. See docs/runbooks/alerts.md."
+      description                           = "blob.healed events exceed 25 per (path, schema) pair within 30m. See docs/runbooks/alerts.md."
       enabled                               = true
       evaluationFrequency                   = "PT5M"
       windowSize                            = "PT30M"
@@ -303,12 +303,13 @@ resource "azapi_resource" "blob_heal_storm" {
             query           = <<-KQL
       customEvents
       | where name == "blob.healed"
-      | summarize count() by tostring(customDimensions.path), tostring(customDimensions.schema)
+      | summarize healed = count() by tostring(customDimensions.path), tostring(customDimensions.schema)
+      | where healed > 25
             KQL
             timeAggregation = "Count"
             dimensions      = []
             operator        = "GreaterThan"
-            threshold       = 25
+            threshold       = 0
             failingPeriods = {
               minFailingPeriodsToAlert  = 1
               numberOfEvaluationPeriods = 1

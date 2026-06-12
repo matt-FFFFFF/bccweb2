@@ -25,9 +25,7 @@ import {
 import { readJson, writeJson } from "./blobJson.js";
 
 const RoundSummariesSchema = z.array(RoundSummarySchema);
-const PilotIndexEntrySchema = z.array(
-  PilotSummarySchema.pick({ id: true }).extend({ name: z.string() }).strip(),
-);
+const PilotIndexEntrySchema = z.array(PilotSummarySchema);
 
 const STALE_RECOMPUTE_MARKER_MS = 5 * 60 * 1000;
 

@@ -24,12 +24,12 @@ export function healingArray<T extends AnySchema>(
       for (const item of items) {
         try {
           const parsed = elem.safeParse(item);
-        if (parsed.success) {
-          healedItems.push(parsed.data as z.output<T>);
-        }
-      } catch {
+          if (parsed.success) {
+            healedItems.push(parsed.data as z.output<T>);
+          }
+        } catch {
           continue;
-      }
+        }
       }
 
       return healedItems;
