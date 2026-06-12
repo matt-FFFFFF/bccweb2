@@ -43,7 +43,7 @@ test: ## Run all tests (requires Azurite for API tests)
 # Run the heavy/slow API lib tests excluded from 'make test'. Records runtime.
 .PHONY: test-heavy
 test-heavy:
-	npx vitest run --testTimeout=120000 apps/api/src/lib/__tests__/blob.test.ts apps/api/src/lib/__tests__/puretrack.test.ts apps/api/src/lib/__tests__/telemetry.integration.test.ts
+	VITEST_HEAVY=1 npx vitest run --project @bccweb/api
 
 .PHONY: dev
 dev: docker-up ## Start full local dev stack (Docker Compose)

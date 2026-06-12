@@ -3,8 +3,6 @@ import type { Round } from "@bccweb/types";
 
 const fetchMock = vi.fn();
 
-vi.stubGlobal("fetch", fetchMock);
-
 function makeRound(): Round {
   return {
     id: "round-1",
@@ -33,6 +31,7 @@ function makeRound(): Round {
 describe("createPureTrackGroups", () => {
   beforeEach(() => {
     fetchMock.mockReset();
+    vi.stubGlobal("fetch", fetchMock);
     process.env.PURETRACK_API_KEY = "key";
     process.env.PURETRACK_EMAIL = "pilot@example.com";
     process.env.PURETRACK_PASSWORD = "secret";
