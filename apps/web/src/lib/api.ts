@@ -172,7 +172,28 @@ export const api = {
     });
   },
 
-  delete<T>(path: string): Promise<T> {
-    return apiFetch<T>(path, { method: "DELETE" });
+  /**
+   * DELETE that does NOT parse the response body.
+   * Use for endpoints that return 204 No Content (or any empty body).
+   * Resolves to void on any 2xx status.
+   */
+  delete(path: string): Promise<void> {
+    return apiFetch<void>(path, { method: "DELETE" });
+  },
+
+  /**
+   * DELETE that REQUIRES a JSON response body.
+   * Throws if the endpoint returns 204 (use {@link api.delete} for that).
+   */
+  async deleteJson<T>(path: string): Promise<T> {
+    const result = await apiFetch<T | undefined>(path, { method: "DELETE" });
+    if (result === undefined) {
+      throw new ApiError(
+        204,
+        "NO_CONTENT",
+        `DELETE ${path} returned 204 but caller expected JSON body — use api.delete(path)`
+      );
+    }
+    return result;
   },
 };

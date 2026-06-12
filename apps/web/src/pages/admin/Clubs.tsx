@@ -79,7 +79,7 @@ function TeamRow({
     setBusy(true);
     setMsg(null);
     try {
-      await api.delete<{ id: string }>(`club-teams/${team.id}`);
+      await api.deleteJson<{ id: string }>(`club-teams/${team.id}`);
       onDeleted();
     } catch (ex) {
       setMsg(ex instanceof Error ? ex.message : "Failed");

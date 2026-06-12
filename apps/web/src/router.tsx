@@ -1,4 +1,6 @@
 import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useLocation } from "react-router-dom";
+import * as z from "zod/v4";
+import { SeasonSummarySchema } from "@bccweb/schemas";
 import { useAuth, AuthProvider, loginUrl } from "./hooks/useAuth.js";
 import { useBlob } from "./hooks/useBlob.js";
 import type { SeasonSummary } from "@bccweb/types";
@@ -158,7 +160,7 @@ function RequireCoord({ children }: { children: React.ReactNode }) {
 
 /** Redirect /results → /results/:activeYear (or first season year) */
 function ResultsRedirect() {
-  const { data: seasons } = useBlob<SeasonSummary[]>("seasons.json");
+  const { data: seasons } = useBlob<SeasonSummary[]>("seasons.json", z.array(SeasonSummarySchema));
   if (!seasons) return null; // wait for data
   const active = seasons.find((s) => s.active) ?? seasons[seasons.length - 1];
   if (!active) return <Navigate to="/" replace />;

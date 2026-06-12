@@ -93,7 +93,8 @@ export default function Frequencies() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.delete<{ id: string }>(`manage/frequencies/${frequency.id}`);
+      // TODO(T45): this file is removed in Wave 7 Task 45 (Frequency entity deletion).
+      await api.delete(`manage/frequencies/${frequency.id}`);
       setMsg("Frequency deleted.");
       setOk(true);
       await load();

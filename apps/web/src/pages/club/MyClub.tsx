@@ -11,7 +11,9 @@
  */
 
 import { useCallback, useEffect, useState } from "react";
+import * as z from "zod/v4";
 import type { ClubSummary, ClubTeam, ClubTeamSummary, SeasonSummary } from "@bccweb/types";
+import { ClubSummarySchema, SeasonSummarySchema } from "@bccweb/schemas";
 import { useAuth } from "../../hooks/useAuth.js";
 import { api } from "../../lib/api.js";
 import { useBlob } from "../../hooks/useBlob.js";
@@ -91,7 +93,7 @@ function TeamRow({
     setBusy(true);
     setMsg(null);
     try {
-      await api.delete<{ id: string }>(`club-teams/${team.id}`);
+      await api.deleteJson<{ id: string }>(`club-teams/${team.id}`);
       onDeleted();
     } catch (ex) {
       setMsg(ex instanceof Error ? ex.message : "Failed");
@@ -205,8 +207,8 @@ export default function MyClub() {
   const { identity, loading: authLoading } = useAuth();
 
   // Public blobs — seasons (to find the active year) and clubs (for the club name)
-  const { data: seasons, loading: seasonsLoading } = useBlob<SeasonSummary[]>("seasons.json");
-  const { data: clubs, loading: clubsLoading } = useBlob<ClubSummary[]>("clubs.json");
+  const { data: seasons, loading: seasonsLoading } = useBlob<SeasonSummary[]>("seasons.json", z.array(SeasonSummarySchema));
+  const { data: clubs, loading: clubsLoading } = useBlob<ClubSummary[]>("clubs.json", z.array(ClubSummarySchema));
 
   // Teams for this club+season fetched via the authenticated API
   const [myTeams, setMyTeams] = useState<ClubTeamSummary[]>([]);

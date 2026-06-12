@@ -144,7 +144,7 @@ export default function SeasonClubs() {
     setBusy(true);
     setMsg(null);
     try {
-      await api.delete<{ id: string }>(`manage/seasons/${seasonYear}/clubs/${row.id}`);
+      await api.deleteJson<{ id: string }>(`manage/seasons/${seasonYear}/clubs/${row.id}`);
       setMsg("Season club deleted.");
       setMsgOk(true);
       await load();

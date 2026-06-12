@@ -12,6 +12,7 @@
     "lint": "eslint src --ext .ts,.tsx --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
+    "@bccweb/schemas": "*",
     "@bccweb/types": "*",
     "dompurify": "^3.4.8",
     "react": "^18.3.1",
