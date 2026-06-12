@@ -15,11 +15,10 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { Config, Round, User } from "@bccweb/types";
-import { ConfigSchema, UserSchema } from "@bccweb/schemas";
+import { ConfigSchema, RoundSchema, UserSchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
 import {
   getPrivateBlobClient,
-  readBlob,
   withPrivateLease,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
@@ -110,7 +109,11 @@ async function recomputeRound(
 
   let round: Round;
   try {
-    round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
+    round = await readJson(
+      getPrivateBlobClient(`rounds/${id}.json`),
+      RoundSchema,
+      `rounds/${id}.json`,
+    );
   } catch (err: unknown) {
     if (statusCodeOf(err) === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
@@ -252,8 +255,10 @@ async function listUsers(
 
   let index: Record<string, string> = {};
   try {
-    index = await readBlob<Record<string, string>>(
-      getPrivateBlobClient("user-index.json")
+    index = await readJson(
+      getPrivateBlobClient("user-index.json"),
+      z.record(z.string(), z.string()),
+      "user-index.json",
     );
   } catch {
     return { status: 200, jsonBody: [] };
@@ -262,11 +267,15 @@ async function listUsers(
   const userIds = Object.values(index);
   const users = await Promise.all(
     userIds.map((id) =>
-      readBlob<User>(getPrivateBlobClient(`users/${id}.json`)).catch(() => null)
+      readJson(
+        getPrivateBlobClient(`users/${id}.json`),
+        UserSchema,
+        `users/${id}.json`,
+      ).catch(() => null)
     )
   );
 
-  const valid = users.filter((u): u is User => u !== null);
+  const valid = users.flatMap((u) => (u === null ? [] : [u]));
   valid.sort((a, b) => a.email.localeCompare(b.email));
 
   return { status: 200, jsonBody: valid };
