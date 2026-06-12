@@ -124,7 +124,6 @@ async function createSite(
   if (!isAdmin(caller) && !caller.roles.includes("RoundsCoord")) {
     return forbiddenResponse();
   }
-  await mutationRateLimit(req, caller, "createSite", "standard");
 
   let body: CreateSiteBody;
   try {
@@ -143,6 +142,8 @@ async function createSite(
   if (!isAdmin(caller) && !isCoordOfClub(caller, body.clubId)) {
     return forbiddenResponse();
   }
+
+  await mutationRateLimit(req, caller, "createSite", "standard");
 
   const id = randomUUID();
   const site: Site = {
@@ -176,7 +177,6 @@ async function updateSite(
 ): Promise<HttpResponseInit> {
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
-  await mutationRateLimit(req, caller, "updateSite", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_SITE_ID", "Missing site id");
@@ -198,6 +198,8 @@ async function updateSite(
   if (!isAdmin(caller) && !isCoordOfClub(caller, existing.clubId)) {
     return forbiddenResponse();
   }
+
+  await mutationRateLimit(req, caller, "updateSite", "standard");
 
   let body: Partial<Site>;
   try {
@@ -247,7 +249,6 @@ async function deleteSite(
 ): Promise<HttpResponseInit> {
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
-  await mutationRateLimit(req, caller, "deleteSite", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_SITE_ID", "Missing site id");
@@ -269,6 +270,8 @@ async function deleteSite(
   if (!isAdmin(caller) && !isCoordOfClub(caller, existing.clubId)) {
     return forbiddenResponse();
   }
+
+  await mutationRateLimit(req, caller, "deleteSite", "standard");
 
   await getPrivateBlockBlobClient(`sites/${id}.json`).deleteIfExists();
   await removeSiteFromIndex(id);
