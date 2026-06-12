@@ -16,13 +16,19 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type { ClubTeamSummary, Round, Team, PilotSlot } from "@bccweb/types";
-import { getBlobClient, getPrivateBlobClient, readBlob, writePrivateBlob, withPrivateLease } from "../lib/blob.js";
+import { ClubTeamSummarySchema, PilotSchema, RoundSchema } from "@bccweb/schemas";
+import * as z from "zod/v4";
+import { getBlobClient, getPrivateBlobClient, withPrivateLease } from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
+
+const ClubTeamSummariesSchema = z.array(ClubTeamSummarySchema);
 import {
   getCallerIdentity,
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 import { recomputeTeamCaptain } from "../lib/teamCaptain.js";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
@@ -45,14 +51,14 @@ async function mutateLocked(
 
   try {
     return await withPrivateLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getPrivateBlobClient(path));
+      const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
       const err = mutateFn(r);
       if (err) {
         const e = new Error(err);
         (e as { isValidation?: boolean }).isValidation = true;
         throw new HttpError(500, "INTERNAL");
       }
-      await writePrivateBlob(path, r, leaseId);
+      await writePrivateJson(path, RoundSchema, r, leaseId);
       return r;
     });
   } catch (e: unknown) {
@@ -72,6 +78,7 @@ async function addTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "addTeam", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
@@ -83,7 +90,8 @@ async function addTeam(
 
   let round: Round;
   try {
-    round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
+    const roundPath = `rounds/${id}.json`;
+    round = await readJson(getPrivateBlobClient(roundPath), RoundSchema, roundPath);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
@@ -94,7 +102,11 @@ async function addTeam(
   // teamName must match a ClubTeam pre-registered for (clubId, seasonYear); canonical name + clubName come from the matched entry.
   let clubTeams: ClubTeamSummary[] = [];
   try {
-    clubTeams = await readBlob<ClubTeamSummary[]>(getBlobClient("club-teams.json"));
+    clubTeams = await readJson(
+      getBlobClient("club-teams.json"),
+      ClubTeamSummariesSchema,
+      "club-teams.json",
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode !== 404) throw err;
   }
@@ -149,6 +161,7 @@ async function removeTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "removeTeam", "standard");
 
   const { id, teamId } = req.params as { id?: string; teamId?: string };
   if (!id || !teamId) {
@@ -175,6 +188,7 @@ async function addPilot(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "addPilot", "standard");
 
   const { id, teamId } = req.params as { id?: string; teamId?: string };
   if (!id || !teamId) {
@@ -191,7 +205,8 @@ async function addPilot(
 
   // Verify pilot exists
   try {
-    await readBlob(getPrivateBlobClient(`pilots/${body.pilotId}.json`));
+    const pilotPath = `pilots/${body.pilotId}.json`;
+    await readJson(getPrivateBlobClient(pilotPath), PilotSchema, pilotPath);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(400, "INVALID_BODY", "Pilot not found");
@@ -249,6 +264,7 @@ async function removePilot(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "removePilot", "standard");
 
   const { id, teamId, place } = req.params as {
     id?: string;
@@ -291,6 +307,7 @@ async function updateAccounted(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateAccounted", "standard");
 
   const { id, teamId, place } = req.params as {
     id?: string;

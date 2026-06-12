@@ -18,13 +18,16 @@ import {
 } from "@azure/functions";
 import { BlobServiceClient } from "@azure/storage-blob";
 import type { Round, Pilot, PureTrackGroup } from "@bccweb/types";
-import { getPrivateBlobClient, readBlob, writePrivateBlob, withPrivateLease } from "../lib/blob.js";
+import { PilotSchema, RoundSchema } from "@bccweb/schemas";
+import { getPrivateBlobClient, withPrivateLease } from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 import {
   createPureTrackGroups,
   PureTrackRoundResult,
@@ -82,18 +85,24 @@ async function createPureTrackGroupsHandler(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "createPureTrackGroups", "heavy");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   let round: Round;
   try {
-    round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
+    const roundPath = `rounds/${id}.json`;
+    round = await readJson(getPrivateBlobClient(roundPath), RoundSchema, roundPath);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
     throw new HttpError(500, "INTERNAL");
+  }
+
+  if (!isAdmin(caller.roles) && round.organisingClub?.id !== caller.clubId) {
+    return forbiddenResponse();
   }
 
   if (round.status !== "Locked" && round.status !== "Complete") {
@@ -116,8 +125,11 @@ async function createPureTrackGroupsHandler(
   await Promise.all(
     uniquePilotIds.map(async (pilotId) => {
       try {
-        const pilot = await readBlob<Pilot>(
-          getPrivateBlobClient(`pilots/${pilotId}.json`)
+        const pilotPath = `pilots/${pilotId}.json`;
+        const pilot = await readJson(
+          getPrivateBlobClient(pilotPath),
+          PilotSchema,
+          pilotPath,
         );
         if (pilot.pureTrackId != null) {
           pilotPureTrackIds.set(pilotId, pilot.pureTrackId);
@@ -145,7 +157,7 @@ async function createPureTrackGroupsHandler(
   }
   try {
     await withPrivateLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getPrivateBlobClient(path));
+      const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
       r.pureTrackGroupId = result.roundGroupId;
       r.pureTrackGroupName = result.roundGroupName;
       r.pureTrackGroupSlug = result.roundGroupSlug;
@@ -156,7 +168,7 @@ async function createPureTrackGroupsHandler(
           team.pureTrackGroupSlug = teamResult.groupSlug;
         }
       }
-      await writePrivateBlob(path, r, leaseId);
+      await writePrivateJson(path, RoundSchema, r, leaseId);
     });
   } catch (err) {
     // Not fatal — groups were created, IDs just didn't persist; log and continue
@@ -183,7 +195,8 @@ async function listPureTrackGroupsHandler(
     // RoundsCoord: verify they belong to the round's organising club
     let round: Round;
     try {
-      round = await readBlob<Round>(getPrivateBlobClient(`rounds/${roundId}.json`));
+      const roundPath = `rounds/${roundId}.json`;
+      round = await readJson(getPrivateBlobClient(roundPath), RoundSchema, roundPath);
     } catch (err: unknown) {
       if ((err as { statusCode?: number }).statusCode === 404) {
         throw new HttpError(404, "NOT_FOUND", "Round not found");

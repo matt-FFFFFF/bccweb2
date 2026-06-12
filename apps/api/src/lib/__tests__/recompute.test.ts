@@ -81,7 +81,7 @@ describe("recomputeSeason", () => {
 });
 
 async function seedSeason(): Promise<{ year: number; seasonPath: string }> {
-  const year = 2600 + Math.floor(Math.random() * 100_000);
+  const year = 2600 + Math.floor(Math.random() * 7_000);
   const round = makeCompleteRound(year);
   const seasonPath = `seasons/${year}.json`;
   const season: Season = {

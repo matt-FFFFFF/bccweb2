@@ -67,7 +67,7 @@ function SeasonRow({
     setBusy("delete");
     setMsg(null);
     try {
-      await api.delete<void>(`seasons/${season.year}`);
+      await api.delete(`seasons/${season.year}`);
       onChanged();
     } catch (ex) {
       setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Delete failed");

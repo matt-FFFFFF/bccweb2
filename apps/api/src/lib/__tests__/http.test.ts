@@ -1,6 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import type { HttpRequest, InvocationContext } from "@azure/functions";
-import { HttpError, shortErrorMessage, withErrorHandler } from "../http.js";
+import { BlobShapeError, HttpError, shortErrorMessage, withErrorHandler } from "../http.js";
 
 function makeCtx(): InvocationContext {
   return {
@@ -85,5 +85,24 @@ describe("withErrorHandler", () => {
       requestId: "req-123",
     });
     expect(ctx.error).toHaveBeenCalledTimes(1);
+  });
+
+  test("BlobShapeError -> 500 DATA_SHAPE_INVALID body and ctx.error called with issues", async () => {
+    const ctx = makeCtx();
+    const issues = [{ path: ["x"], message: "y" }];
+    const handler = withErrorHandler(async () => {
+      throw new BlobShapeError("foo/bar.json", "FooSchema", issues);
+    });
+
+    const res = await handler(makeReq(), ctx);
+    expect(res.status).toBe(500);
+    expect(res.jsonBody).toEqual({
+      error: "DATA_SHAPE_INVALID",
+      path: "foo/bar.json",
+      schema: "FooSchema",
+    });
+    expect(res.jsonBody).not.toHaveProperty("issues");
+    expect(ctx.error).toHaveBeenCalledTimes(1);
+    expect(ctx.error).toHaveBeenCalledWith("Blob shape invalid at foo/bar.json (schema: FooSchema)", issues);
   });
 });

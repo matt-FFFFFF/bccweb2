@@ -13,20 +13,23 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { RoundBrief } from "@bccweb/types";
+import { BriefSchema, RoundSchema } from "@bccweb/schemas";
 import {
-  getPrivateBlobClient,
   readBlob,
-  writePrivateBlob,
+  getPrivateBlobClient,
   withPrivateLeaseRenewing,
   getPrivateBlockBlobClient,
+  writePrivateBlob,
 } from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 import { computeBriefHash } from "../lib/signTofly/briefVersion.js";
 import { invalidatePriorSignToFlyFlags } from "../lib/signTofly/invalidate.js";
 import { listSignaturesForRound } from "../lib/signTofly/ledger.js";
 import { generateBriefPdf } from "../lib/pdf.js";
-import type { Round, BriefVersion } from "@bccweb/types";
+import type { Round } from "@bccweb/types";
 
 function contentTypeForPath(path: string): string {
   const lower = path.toLowerCase();
@@ -44,11 +47,22 @@ async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+function matchesMagicBytes(fileType: string, buffer: Buffer): boolean {
+  if (fileType === "image/png") {
+    return buffer.length >= 8 && buffer.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+  }
+
+  if (fileType === "image/jpeg") {
+    return buffer.length >= 3 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff;
+  }
+
+  return false;
+}
+
 async function readBrief(id: string): Promise<RoundBrief | null> {
+  const path = `round-briefs/${id}.json`;
   try {
-    return await readBlob<RoundBrief>(
-      getPrivateBlobClient(`round-briefs/${id}.json`)
-    );
+    return await readJson(getPrivateBlobClient(path), BriefSchema, path);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) return null;
     throw new HttpError(500, "INTERNAL");
@@ -93,6 +107,7 @@ async function getRoundBriefPdf(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
+  // Non-JSON pdf binary: use BlobClient.download() not readBlob/readJson (see "PREFER readJson" doc in lib/blob.ts).
   const blobClient = getPrivateBlobClient(`round-briefs/${id}.pdf`);
 
   let downloadRes: Awaited<ReturnType<typeof blobClient.download>>;
@@ -160,6 +175,7 @@ async function getRoundBriefImage(
     return { status: 404, jsonBody: { error: "Brief image not found." } };
   }
 
+  // Non-JSON image binary (.jpg/.png): use BlobClient.download() not readBlob/readJson (see "PREFER readJson" doc in lib/blob.ts).
   const blobClient = getPrivateBlobClient(imagePath);
   let downloadRes: Awaited<ReturnType<typeof blobClient.download>>;
   try {
@@ -224,8 +240,13 @@ async function updateRoundBrief(
   if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
     throw new HttpError(403, "FORBIDDEN");
   }
+  await mutationRateLimit(req, caller, "updateRoundBrief", "heavy");
 
-  const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`)).catch((e) => {
+  const round = await readJson(
+    getPrivateBlobClient(`rounds/${id}.json`),
+    RoundSchema,
+    `rounds/${id}.json`,
+  ).catch((e: unknown) => {
     if ((e as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
@@ -242,10 +263,6 @@ async function updateRoundBrief(
 
   const body = (await req.json()) as RoundBrief;
   const isDryRun = req.query.get("dryRun") === "true";
-  
-  let materialChanged = false;
-  let invalidatedSignatureCount = 0;
-  let savedBrief: RoundBrief = body;
 
   const result = await withPrivateLeaseRenewing(`round-briefs/${id}.json`, async (leaseId) => {
     const existing = await readBrief(id);
@@ -260,7 +277,7 @@ async function updateRoundBrief(
       body.versionHistory = existing.versionHistory;
       
       if (!isDryRun) {
-        await writePrivateBlob(`round-briefs/${id}.json`, body, leaseId);
+        await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, body, leaseId);
       }
       return { brief: body, materialChanged: false, invalidatedSignatureCount: 0 };
     }
@@ -280,7 +297,7 @@ async function updateRoundBrief(
     });
 
     if (!isDryRun) {
-      await writePrivateBlob(`round-briefs/${id}.json`, body, leaseId);
+      await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, body, leaseId);
     }
 
     const signatures = await listSignaturesForRound(id);
@@ -300,7 +317,7 @@ async function updateRoundBrief(
 
     if (!isDryRun && count > 0) {
       await withPrivateLeaseRenewing(`rounds/${id}.json`, async (roundLease) => {
-        await writePrivateBlob(`rounds/${id}.json`, updatedRound, roundLease);
+        await writePrivateJson(`rounds/${id}.json`, RoundSchema, updatedRound, roundLease);
       });
     }
 
@@ -335,7 +352,11 @@ async function uploadBriefImage(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID");
 
-  const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`)).catch((e) => {
+  const round = await readJson(
+    getPrivateBlobClient(`rounds/${id}.json`),
+    RoundSchema,
+    `rounds/${id}.json`,
+  ).catch((e) => {
     if ((e as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
@@ -345,6 +366,7 @@ async function uploadBriefImage(
   if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
     throw new HttpError(403, "FORBIDDEN");
   }
+  await mutationRateLimit(req, caller, "uploadBriefImage", "standard");
   if (!caller.roles.includes("Admin") && caller.roles.includes("RoundsCoord") && caller.clubId !== round.organisingClub?.id) {
     throw new HttpError(403, "FORBIDDEN");
   }
@@ -355,7 +377,7 @@ async function uploadBriefImage(
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
   if (!file) throw new HttpError(400, "BAD_REQUEST", "Missing file");
-  
+
   if (file.size > 5 * 1024 * 1024) {
     throw new HttpError(413, "PAYLOAD_TOO_LARGE", "Max 5MB");
   }
@@ -367,6 +389,18 @@ async function uploadBriefImage(
   const buffer = Buffer.from(await file.arrayBuffer());
   const brief = await readBrief(id);
   if (!brief) throw new HttpError(404, "NOT_FOUND", "Brief not found");
+  if ((brief.imagePaths?.length || 0) >= 10) {
+    return {
+      status: 400,
+      jsonBody: { error: "TOO_MANY_IMAGES", code: "TOO_MANY_IMAGES" },
+    };
+  }
+  if (!matchesMagicBytes(file.type, buffer)) {
+    return {
+      status: 400,
+      jsonBody: { error: "IMAGE_MAGIC_MISMATCH", code: "IMAGE_MAGIC_MISMATCH" },
+    };
+  }
 
   const nextN = (brief.imagePaths?.length || 0) + 1;
   const ext = file.type === "image/png" ? "png" : "jpg";
@@ -384,7 +418,7 @@ async function uploadBriefImage(
     existing.imagePaths = existing.imagePaths || [];
     existing.imagePaths.push(imagePath);
     savedPath = imagePath;
-    await writePrivateBlob(`round-briefs/${id}.json`, existing, leaseId);
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, existing, leaseId);
   });
 
   return { status: 200, jsonBody: { path: savedPath } };
@@ -403,7 +437,11 @@ async function deleteBriefImage(
   const n = Number(req.params["index"]);
   if (!id || !n) throw new HttpError(400, "BAD_REQUEST");
 
-  const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`)).catch((e) => {
+  const round = await readJson(
+    getPrivateBlobClient(`rounds/${id}.json`),
+    RoundSchema,
+    `rounds/${id}.json`,
+  ).catch((e) => {
     if ((e as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
@@ -413,6 +451,7 @@ async function deleteBriefImage(
   if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
     throw new HttpError(403, "FORBIDDEN");
   }
+  await mutationRateLimit(req, caller, "deleteBriefImage", "standard");
   if (!caller.roles.includes("Admin") && caller.roles.includes("RoundsCoord") && caller.clubId !== round.organisingClub?.id) {
     throw new HttpError(403, "FORBIDDEN");
   }
@@ -428,7 +467,7 @@ async function deleteBriefImage(
 
     const imagePath = existing.imagePaths[n - 1];
     existing.imagePaths.splice(n - 1, 1);
-    await writePrivateBlob(`round-briefs/${id}.json`, existing, leaseId);
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, existing, leaseId);
 
     const imageClient = getPrivateBlockBlobClient(imagePath);
     await imageClient.deleteIfExists();

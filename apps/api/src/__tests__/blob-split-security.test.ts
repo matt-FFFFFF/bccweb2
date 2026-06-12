@@ -43,25 +43,25 @@ const privateBlobUrl = (path: string) =>
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("Blob split security — public blobs are anonymously readable", () => {
-  const publicPaths = [
-    "rounds.json",
-    "pilots.json",
-    "clubs.json",
-    "sites.json",
-    "seasons.json",
-    "club-teams.json",
-  ];
+  const publicFixtures: Record<string, unknown> = {
+    "rounds.json": [{ id: "test", name: "Test" }],
+    "pilots.json": [{ id: "test", name: "Test" }],
+    "clubs.json": [{ id: "test", name: "Test" }],
+    "sites.json": [{ id: "test", name: "Test" }],
+    "seasons.json": [{ id: "season-2024", year: 2024, active: true }],
+    "club-teams.json": [{ id: "test", name: "Test" }],
+  };
 
-  for (const path of publicPaths) {
+  for (const [path, fixture] of Object.entries(publicFixtures)) {
     test(`GET ${path} returns 200 anonymously`, async () => {
       // Seed data in public container
-      await writePublicJson(path, [{ id: "test", name: "Test" }]);
+      await writePublicJson(path, fixture);
 
       const response = await fetch(publicBlobUrl(path));
       expect(response.status).toBe(200);
 
       const data = await response.json();
-      expect(data).toEqual([{ id: "test", name: "Test" }]);
+      expect(data).toEqual(fixture);
     });
   }
 });

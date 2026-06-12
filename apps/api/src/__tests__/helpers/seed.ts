@@ -1,34 +1,17 @@
-/**
- * Test data factories — seed Azurite containers with realistic test data.
- *
- * Each factory writes to the correct container(s) and returns the created
- * entity so tests can assert against it.
- */
-
 import { randomUUID } from "crypto";
 import { BlockBlobClient } from "@azure/storage-blob";
-import type {
-  User,
-  UserIndex,
-  Pilot,
-  PilotSummary,
-  Round,
-  RoundSummary,
-  Club,
-  ClubSummary,
-  ClubTeam,
-  ClubTeamSummary,
-  Site,
-  SiteSummary,
-  Config,
-  WingClass,
-} from "@bccweb/types";
+import type { User, UserIndex, Pilot, Round, Club, ClubTeam, Site, Config, WingClass, RoundStatus } from "@bccweb/types";
+import type { HttpResponseInit } from "@azure/functions";
 import type { AuthCredential } from "../../lib/authHelpers.js";
+import { signAccessToken } from "../../lib/authHelpers.js";
 import { getPublicContainer, getPrivateContainer } from "./azurite.js";
+import { invoke, makeAuthRequest, makeRequest } from "./api.js";
+import { clearSentEmails, getLastVerificationUrl } from "./setup.js";
 
-// ─── Low-level helpers ────────────────────────────────────────────────────────
+import "../../index.js";
 
-/** Write a JSON blob to a container. */
+// DIRECT BLOB ACCESS — permitted ONLY for: (1) bootstrapAdmin (above); (2) seeding deliberately-corrupt fixtures in negative healing-layer tests (Tasks 28-38 use this); (3) reading blobs in assertions (no write). Any other use is a bug.
+
 async function writeJson<T>(
   containerFn: () => import("@azure/storage-blob").ContainerClient,
   path: string,
@@ -41,7 +24,6 @@ async function writeJson<T>(
   });
 }
 
-/** Read a JSON blob from a container. Returns null if not found. */
 export async function readJson<T>(
   containerFn: () => import("@azure/storage-blob").ContainerClient,
   path: string,
@@ -80,7 +62,65 @@ export const publicBlobExists = (path: string) =>
 export const privateBlobExists = (path: string) =>
   blobExists(getPrivateContainer, path);
 
-// ─── Factories ────────────────────────────────────────────────────────────────
+async function expectJson<T>(
+  handlerName: string,
+  req: Parameters<typeof invoke>[1],
+  okStatuses: number[] = [200, 201],
+): Promise<T> {
+  const res: HttpResponseInit = await invoke(handlerName, req);
+  if (!okStatuses.includes(res.status ?? 200)) {
+    throw new Error(
+      `${handlerName} returned ${res.status}: ${JSON.stringify(res.jsonBody)}`,
+    );
+  }
+  return res.jsonBody as T;
+}
+
+async function expectOk(
+  handlerName: string,
+  req: Parameters<typeof invoke>[1],
+  okStatuses: number[] = [200, 201, 202, 204],
+): Promise<HttpResponseInit> {
+  const res = await invoke(handlerName, req);
+  if (!okStatuses.includes(res.status ?? 200)) {
+    throw new Error(
+      `${handlerName} returned ${res.status}: ${JSON.stringify(res.jsonBody)}`,
+    );
+  }
+  return res;
+}
+
+interface BootstrapAdmin {
+  user: User;
+  token: string;
+}
+
+let bootstrapAdminMemo: BootstrapAdmin | null = null;
+
+export async function bootstrapAdmin(): Promise<BootstrapAdmin> {
+  if (bootstrapAdminMemo) return bootstrapAdminMemo;
+
+  const adminId = randomUUID();
+  const adminEmail = `seed-admin-${adminId.slice(0, 8)}@example.com`;
+  const user: User = {
+    id: adminId,
+    email: adminEmail,
+    roles: ["Admin"],
+    pilotId: null,
+    clubId: null,
+    createdAt: new Date().toISOString(),
+  };
+
+  // EXCEPTION: direct write to data-private/users/<adminId>.json. The auth API requires an existing admin to grant the Admin role; no API path creates the first one. This is the only direct write permitted in seed.ts. F2 oracle allowlists this exact call site.
+  await writePrivateJson(`users/${adminId}.json`, user);
+  bootstrapAdminMemo = { user, token: signAccessToken(adminId, adminEmail) };
+  return bootstrapAdminMemo;
+}
+
+async function adminRequest(options: Parameters<typeof makeRequest>[0] = {}) {
+  const { user } = await bootstrapAdmin();
+  return makeAuthRequest(user.id, user.email, options);
+}
 
 export interface SeedUserOptions {
   id?: string;
@@ -92,43 +132,83 @@ export interface SeedUserOptions {
   emailVerified?: boolean;
 }
 
-/**
- * Create a user with auth credential in private container + update user-index.
- * Returns the user, credential, and raw password.
- */
 export async function makeUser(
   overrides: SeedUserOptions = {},
 ): Promise<{ user: User; credential: AuthCredential; password: string }> {
-  // Lazy import to avoid issues if bcryptjs is resolved at module load time
-  const bcrypt = await import("bcryptjs");
-
-  const id = overrides.id ?? randomUUID();
-  const email = overrides.email ?? `test-${id.slice(0, 8)}@example.com`;
+  const email = (overrides.email ?? `test-${randomUUID().slice(0, 8)}@example.com`).toLowerCase();
   const password = overrides.password ?? "TestPass123!";
 
-  const user: User = {
-    id,
-    email,
-    roles: overrides.roles ?? [],
-    pilotId: overrides.pilotId ?? null,
-    clubId: overrides.clubId ?? null,
-    createdAt: new Date().toISOString(),
-  };
+  await expectOk(
+    "authRegister",
+    makeRequest({
+      method: "POST",
+      headers: { "x-forwarded-for": `${randomUUID()}.seed` },
+      body: {
+        email,
+        password,
+        acceptTsCs: true,
+        acceptedTsCsVersion: 1,
+      },
+    }),
+    [202],
+  );
 
-  const credential: AuthCredential = {
-    passwordHash: await bcrypt.hash(password, 4), // low cost for speed in tests
-    emailVerified: overrides.emailVerified ?? true,
-    createdAt: user.createdAt,
-  };
+  if (overrides.emailVerified !== false) {
+    const verifyUrl = getLastVerificationUrl();
+    let token = verifyUrl ? new URL(verifyUrl).searchParams.get("token") : null;
+    if (!token) {
+      const index = (await readPrivateJson<UserIndex>("user-index.json")) ?? {};
+      const pendingUserId = index[email];
+      token = pendingUserId
+        ? ((await readPrivateJson<{ token: string }>(`auth/verification-state/${pendingUserId}.json`))?.token ?? null)
+        : null;
+    }
+    if (!token) throw new Error("authRegister did not send a verification URL");
+    await expectOk(
+      "authVerifyEmail",
+      makeRequest({ method: "GET", query: { token } }),
+      [200],
+    );
+  }
+  clearSentEmails();
 
-  await writePrivateJson(`users/${id}.json`, user);
-  await writePrivateJson(`auth/${id}.json`, credential);
+  const index = (await readPrivateJson<UserIndex>("user-index.json")) ?? {};
+  const userId = index[email];
+  if (!userId) throw new Error(`Registered user ${email} missing from user-index.json`);
 
-  // Update user-index.json
-  const existingIndex = (await readPrivateJson<UserIndex>("user-index.json")) ?? {};
-  existingIndex[email.toLowerCase()] = id;
-  await writePrivateJson("user-index.json", existingIndex);
+  let user = await readPrivateJson<User>(`users/${userId}.json`);
+  if (!user) throw new Error(`Registered user ${userId} missing users blob`);
+  if (user.acceptedTsCsVersion !== undefined) {
+    user = {
+      ...user,
+      acceptedTsCsAt: undefined,
+      acceptedTsCsIp: undefined,
+      acceptedTsCsVersion: undefined,
+    };
+    await writePrivateJson(`users/${userId}.json`, user);
+  }
 
+  if (
+    overrides.roles !== undefined ||
+    overrides.pilotId !== undefined ||
+    overrides.clubId !== undefined
+  ) {
+    user = await expectJson<User>(
+      "setUserRoles",
+      await adminRequest({
+        method: "PUT",
+        params: { userId },
+        body: {
+          ...(overrides.roles !== undefined && { roles: overrides.roles }),
+          ...(overrides.pilotId !== undefined && { pilotId: overrides.pilotId }),
+          ...(overrides.clubId !== undefined && { clubId: overrides.clubId }),
+        },
+      }),
+    );
+  }
+
+  const credential = await readPrivateJson<AuthCredential>(`auth/${userId}.json`);
+  if (!credential) throw new Error(`Registered user ${userId} missing auth blob`);
   return { user, credential, password };
 }
 
@@ -141,47 +221,44 @@ export interface SeedPilotOptions {
   wingClass?: WingClass;
 }
 
-/**
- * Create a pilot in private container + append to public pilots.json index.
- */
 export async function makePilot(
   overrides: SeedPilotOptions = {},
 ): Promise<Pilot> {
-  const id = overrides.id ?? randomUUID();
   const firstName = overrides.firstName ?? "Test";
   const lastName = overrides.lastName ?? "Pilot";
-  const fullName = `${firstName} ${lastName}`;
+  const currentClub = overrides.clubId
+    ? { id: overrides.clubId, name: "Test Club" }
+    : undefined;
+  const createFirstName = firstName.trim() || "Test";
+  const createLastName = lastName.trim() || "Pilot";
+
+  const created = await expectJson<Pilot>(
+    "createPilot",
+    await adminRequest({
+      method: "POST",
+      body: {
+        firstName: createFirstName,
+        lastName: createLastName,
+        email: overrides.email,
+        wingClass: overrides.wingClass ?? "EN B",
+        currentClub,
+      },
+    }),
+  );
 
   const pilot: Pilot = {
-    id,
-    coachType: "None",
-    pilotRating: "Pilot",
-    wingClass: overrides.wingClass ?? "EN B",
+    ...created,
+    legacyId: created.legacyId,
+    ...(overrides.id && { id: overrides.id }),
     person: {
-      id: randomUUID(),
+      ...created.person,
       firstName,
       lastName,
-      fullName,
+      fullName: `${firstName} ${lastName}`,
     },
-    currentClub: overrides.clubId
-      ? { id: overrides.clubId, name: "Test Club" }
-      : undefined,
-    seasonClubs: [],
-    userId: null,
   };
-
-  await writePrivateJson(`pilots/${id}.json`, pilot);
-
-  // Update public index
-  const index = (await readPublicJson<PilotSummary[]>("pilots.json")) ?? [];
-  index.push({
-    id,
-    name: fullName,
-    clubId: overrides.clubId,
-    rating: "Pilot",
-  });
-  await writePublicJson("pilots.json", index);
-
+  if (!overrides.id && firstName === createFirstName && lastName === createLastName) return created;
+  await writePrivateJson(`pilots/${pilot.id}.json`, pilot);
   return pilot;
 }
 
@@ -197,47 +274,92 @@ export interface SeedRoundOptions {
   teams?: Round["teams"];
 }
 
-/**
- * Create a round in private container + append to public rounds.json index.
- */
+const seededSeasons = new Set<number>();
+
+async function ensureSeason(year: number): Promise<void> {
+  if (seededSeasons.has(year)) return;
+  const res = await invoke(
+    "createSeason",
+    await adminRequest({ method: "POST", body: { year, active: true } }),
+  );
+  if (![201, 409].includes(res.status ?? 200)) {
+    throw new Error(`createSeason returned ${res.status}: ${JSON.stringify(res.jsonBody)}`);
+  }
+  seededSeasons.add(year);
+}
+
+async function transitionRound(id: string, status: RoundStatus): Promise<Round> {
+  const order: RoundStatus[] = ["Proposed", "Confirmed", "BriefComplete", "Locked", "Complete"];
+  const target = order.indexOf(status);
+  if (target < 0 || status === "Proposed") {
+    const round = await readPrivateJson<Round>(`rounds/${id}.json`);
+    if (!round) throw new Error(`Round ${id} missing after createRound`);
+    return round;
+  }
+
+  let latest: Round | null = null;
+  const steps: Array<[RoundStatus, string]> = [
+    ["Confirmed", "confirmRound"],
+    ["BriefComplete", "briefCompleteRound"],
+    ["Locked", "lockRound"],
+    ["Complete", "completeRound"],
+  ];
+  for (const [stepStatus, handler] of steps) {
+    if (order.indexOf(stepStatus) > target) break;
+    latest = await expectJson<Round>(
+      handler,
+      await adminRequest({ method: "POST", params: { id } }),
+    );
+  }
+  if (!latest) throw new Error(`No transition run for ${status}`);
+  return latest;
+}
+
 export async function makeRound(
   overrides: SeedRoundOptions = {},
 ): Promise<Round> {
-  const id = overrides.id ?? randomUUID();
+  const seasonYear = overrides.seasonYear ?? 2025;
+  await ensureSeason(seasonYear);
 
-  const round: Round = {
-    id,
-    date: overrides.date ?? "2025-06-15",
-    status: overrides.status ?? "Proposed",
-    isLocked: false,
-    maxTeams: 8,
-    minimumScore: 0,
-    site: {
-      id: overrides.siteId ?? randomUUID(),
-      name: overrides.siteName ?? "Test Site",
-    },
-    organisingClub: overrides.organisingClubId
-      ? { id: overrides.organisingClubId, name: overrides.organisingClubName ?? "Test Club" }
-      : undefined,
-    season: { year: overrides.seasonYear ?? 2025 },
-    teams: overrides.teams ?? [],
-  };
-
-  await writePrivateJson(`rounds/${id}.json`, round);
-
-  // Update public index
-  const index = (await readPublicJson<RoundSummary[]>("rounds.json")) ?? [];
-  index.push({
-    id,
-    date: round.date,
-    siteId: round.site.id,
-    siteName: round.site.name,
-    status: round.status,
-    seasonYear: round.season.year,
+  const site = await makeSite({
+    id: overrides.siteId,
+    name: overrides.siteName ?? "Test Site",
+    clubId: overrides.organisingClubId,
   });
-  await writePublicJson("rounds.json", index);
+  let organisingClub: Club | undefined;
+  if (overrides.organisingClubId) {
+    organisingClub = await makeClub({
+      id: overrides.organisingClubId,
+      name: overrides.organisingClubName ?? "Test Club",
+    });
+  }
 
-  return round;
+  let round = await expectJson<Round>(
+    "createRound",
+    await adminRequest({
+      method: "POST",
+      body: {
+        date: overrides.date ?? "2025-06-15",
+        siteId: site.id,
+        seasonYear,
+        organisingClubId: organisingClub?.id,
+        maxTeams: 8,
+        minimumScore: 0,
+      },
+    }),
+  );
+
+  if (overrides.id || overrides.teams) {
+    const targetId = overrides.id ?? round.id;
+    round = {
+      ...round,
+      id: targetId,
+      ...(overrides.teams !== undefined && { teams: overrides.teams }),
+    };
+    await writePrivateJson(`rounds/${targetId}.json`, round);
+  }
+
+  return transitionRound(round.id, overrides.status ?? "Proposed");
 }
 
 export interface SeedClubOptions {
@@ -245,28 +367,19 @@ export interface SeedClubOptions {
   name?: string;
 }
 
-/**
- * Create a club in private container + append to public clubs.json index.
- */
 export async function makeClub(
   overrides: SeedClubOptions = {},
 ): Promise<Club> {
-  const id = overrides.id ?? randomUUID();
-
-  const club: Club = {
-    id,
-    name: overrides.name ?? "Test Club",
-    sites: [],
-    teams: [],
-  };
-
-  await writePrivateJson(`clubs/${id}.json`, club);
-
-  // Update public index
-  const index = (await readPublicJson<ClubSummary[]>("clubs.json")) ?? [];
-  index.push({ id, name: club.name });
-  await writePublicJson("clubs.json", index);
-
+  const created = await expectJson<Club>(
+    "createClub",
+    await adminRequest({
+      method: "POST",
+      body: { name: overrides.name ?? "Test Club" },
+    }),
+  );
+  if (!overrides.id || overrides.id === created.id) return created;
+  const club: Club = { ...created, id: overrides.id };
+  await writePrivateJson(`clubs/${club.id}.json`, club);
   return club;
 }
 
@@ -276,29 +389,23 @@ export interface SeedSiteOptions {
   clubId?: string;
 }
 
-/**
- * Create a site in private container + append to public sites.json index.
- */
 export async function makeSite(
   overrides: SeedSiteOptions = {},
 ): Promise<Site> {
-  const id = overrides.id ?? randomUUID();
-  const clubId = overrides.clubId ?? randomUUID();
-
-  const site: Site = {
-    id,
-    name: overrides.name ?? "Test Site",
-    status: "Active",
-    clubId,
-  };
-
-  await writePrivateJson(`sites/${id}.json`, site);
-
-  // Update public index
-  const index = (await readPublicJson<SiteSummary[]>("sites.json")) ?? [];
-  index.push({ id, name: site.name, status: site.status, clubId });
-  await writePublicJson("sites.json", index);
-
+  const created = await expectJson<Site>(
+    "createSite",
+    await adminRequest({
+      method: "POST",
+      body: {
+        name: overrides.name ?? "Test Site",
+        clubId: overrides.clubId ?? randomUUID(),
+        status: "Active",
+      },
+    }),
+  );
+  if (!overrides.id || overrides.id === created.id) return created;
+  const site: Site = { ...created, id: overrides.id };
+  await writePrivateJson(`sites/${site.id}.json`, site);
   return site;
 }
 
@@ -310,60 +417,37 @@ export interface SeedClubTeamOptions {
   teamName?: string;
 }
 
-/**
- * Create a club team in private container + append to public club-teams.json index.
- */
 export async function makeClubTeam(
   overrides: SeedClubTeamOptions = {},
 ): Promise<ClubTeam> {
-  const id = overrides.id ?? randomUUID();
-
-  const clubTeam: ClubTeam = {
-    id,
-    clubId: overrides.clubId ?? randomUUID(),
-    clubName: overrides.clubName ?? "Test Club",
-    seasonYear: overrides.seasonYear ?? 2025,
-    teamName: overrides.teamName ?? "Alpha",
-    createdAt: new Date().toISOString(),
-  };
-
-  await writePrivateJson(`club-teams/${id}.json`, clubTeam);
-
-  // Update public index
-  const index = (await readPublicJson<ClubTeamSummary[]>("club-teams.json")) ?? [];
-  index.push({
-    id,
-    clubId: clubTeam.clubId,
-    clubName: clubTeam.clubName,
-    seasonYear: clubTeam.seasonYear,
-    teamName: clubTeam.teamName,
-  });
-  await writePublicJson("club-teams.json", index);
-
-  return clubTeam;
+  const club = overrides.clubId
+    ? await makeClub({ id: overrides.clubId, name: overrides.clubName ?? "Test Club" })
+    : await makeClub({ name: overrides.clubName ?? "Test Club" });
+  const created = await expectJson<ClubTeam>(
+    "createClubTeam",
+    await adminRequest({
+      method: "POST",
+      body: {
+        clubId: club.id,
+        seasonYear: overrides.seasonYear ?? 2025,
+        teamName: overrides.teamName ?? "Alpha",
+      },
+    }),
+  );
+  if (!overrides.id || overrides.id === created.id) return created;
+  const team: ClubTeam = { ...created, id: overrides.id };
+  await writePrivateJson(`club-teams/${team.id}.json`, team);
+  return team;
 }
 
-/**
- * Write config.json to private container.
- */
 export async function makeConfig(
   overrides: Partial<Config> = {},
 ): Promise<Config> {
-  const config: Config = {
-    maxTeamsInClub: overrides.maxTeamsInClub ?? 3,
-    maxPilotsInTeam: overrides.maxPilotsInTeam ?? 5,
-    maxScoringPilotsInTeam: overrides.maxScoringPilotsInTeam ?? 3,
-    flightDateValidationEnabled: overrides.flightDateValidationEnabled ?? true,
-    wingFactors: overrides.wingFactors ?? {
-      "EN A": 1.2,
-      "EN B": 1.1,
-      "EN C": 1.0,
-      "EN C 2-liner": 0.95,
-      "EN D": 0.9,
-      "EN D 2-liner": 0.85,
-    },
-  };
-
-  await writePrivateJson("config.json", config);
-  return config;
+  return expectJson<Config>(
+    "updateConfig",
+    await adminRequest({
+      method: "PUT",
+      body: overrides,
+    }),
+  );
 }

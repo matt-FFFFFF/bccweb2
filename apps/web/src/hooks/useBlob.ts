@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import type * as z from "zod/v4";
 import { readPublicBlob, BlobNotFoundError } from "../lib/blobClient.js";
 
 export interface BlobState<T> {
@@ -14,10 +15,20 @@ export interface BlobState<T> {
  * Pass `null` as `path` to skip fetching (returns loading: false, data: null).
  * Re-fetches whenever `path` changes.
  *
+ * If `schema` is provided, the response is validated/healed via Zod's safeParse
+ * (see {@link readPublicBlob}). In DEV, shape mismatches warn and still return
+ * the raw cast; in PROD they throw `DATA_SHAPE_INVALID:<path>`.
+ *
  * @example
- * const { data, loading, error } = useBlob<RoundSummary[]>("rounds.json");
+ * const { data, loading, error } = useBlob<RoundSummary[]>(
+ *   "rounds.json",
+ *   z.array(RoundSummarySchema),
+ * );
  */
-export function useBlob<T>(path: string | null): BlobState<T> {
+export function useBlob<T>(
+  path: string | null,
+  schema?: z.ZodType<T>
+): BlobState<T> {
   const [state, setState] = useState<BlobState<T>>({
     data: null,
     loading: path !== null,
@@ -34,7 +45,7 @@ export function useBlob<T>(path: string | null): BlobState<T> {
     let cancelled = false;
     setState({ data: null, loading: true, error: null, notFound: false });
 
-    readPublicBlob<T>(path)
+    readPublicBlob<T>(path, schema)
       .then((data) => {
         if (!cancelled)
           setState({ data, loading: false, error: null, notFound: false });

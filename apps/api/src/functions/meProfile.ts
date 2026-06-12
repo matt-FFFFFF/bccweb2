@@ -23,13 +23,18 @@ import type {
   WingClass,
 } from "@bccweb/types";
 import {
+  PilotSchema,
+  PilotSummarySchema,
+  UserSchema,
+} from "@bccweb/schemas";
+import * as z from "zod/v4";
+import {
   getBlobClient,
   getBlockBlobClient,
   getPrivateBlobClient,
-  readBlob,
-  writePrivateBlob,
   withLease,
 } from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -37,6 +42,22 @@ import {
 } from "../lib/auth.js";
 import type { AuthCredential } from "../lib/authHelpers.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+
+const PilotsIndexSchema = z.array(PilotSummarySchema);
+
+// AuthCredential lives in apps/api/src/lib/authHelpers.ts and has no shared
+// Wave 5 schema; this read is verification-gated so the failure mode (treat
+// as unverified) is safe. Inline schema mirrors the AuthCredential interface
+// so observe-mode never strips a real field.
+const AuthCredentialSchema = z
+  .object({
+    passwordHash: z.string().min(1),
+    emailVerified: z.boolean(),
+    createdAt: z.string().min(1),
+  })
+  .strip();
+
+AuthCredentialSchema satisfies z.ZodType<AuthCredential>;
 
 interface CreateMyPilotBody {
   firstName: string;
@@ -68,8 +89,10 @@ async function createMyPilot(
   // before verification can never create a pilot record.
   let cred: AuthCredential | null = null;
   try {
-    cred = await readBlob<AuthCredential>(
-      getPrivateBlobClient(`auth/${caller.userId}.json`)
+    cred = await readJson(
+      getPrivateBlobClient(`auth/${caller.userId}.json`),
+      AuthCredentialSchema,
+      `auth/${caller.userId}.json`,
     );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode !== 404) throw err;
@@ -111,6 +134,7 @@ async function createMyPilot(
   const now = new Date().toISOString();
   const pilot: Pilot = {
     id,
+    legacyId: null,
     bhpaNumber: body.bhpaNumber,
     coachType: "None",
     pilotRating: body.pilotRating ?? "Pilot",
@@ -140,7 +164,7 @@ async function createMyPilot(
     profileUpdatedAt: now,
   };
 
-  await writePrivateBlob(`pilots/${id}.json`, pilot);
+  await writePrivateJson(`pilots/${id}.json`, PilotSchema, pilot);
   await upsertPilotInIndex(pilot);
   await updatePilotEmailIndex(caller.email, id);
   await linkUserToPilot(caller.userId, id, body.currentClub?.id ?? null);
@@ -154,14 +178,18 @@ async function linkUserToPilot(
   clubId: string | null
 ): Promise<void> {
   const userPath = `users/${userId}.json`;
-  const user = await readBlob<User>(getPrivateBlobClient(userPath));
+  const user: User = await readJson(
+    getPrivateBlobClient(userPath),
+    UserSchema,
+    userPath,
+  );
   const updated: User = {
     ...user,
     pilotId,
     clubId: clubId ?? user.clubId,
     roles: user.roles.includes("Pilot") ? user.roles : [...user.roles, "Pilot"],
   };
-  await writePrivateBlob(userPath, updated);
+  await writePrivateJson(userPath, UserSchema, updated);
 }
 
 async function upsertPilotInIndex(pilot: Pilot): Promise<void> {
@@ -169,12 +197,17 @@ async function upsertPilotInIndex(pilot: Pilot): Promise<void> {
   await withLeaseRetry("pilots.json", async (leaseId) => {
     let index: PilotSummary[] = [];
     try {
-      index = await readBlob<PilotSummary[]>(getBlobClient("pilots.json"));
+      index = await readJson(
+        getBlobClient("pilots.json"),
+        PilotsIndexSchema,
+        "pilots.json",
+      );
     } catch (err: unknown) {
       if ((err as { statusCode?: number }).statusCode !== 404) throw err;
     }
     const entry: PilotSummary = {
       id: pilot.id,
+      legacyId: pilot.legacyId,
       name: pilot.person.fullName,
       clubId: pilot.currentClub?.id,
       rating: pilot.pilotRating,
@@ -188,6 +221,9 @@ async function upsertPilotInIndex(pilot: Pilot): Promise<void> {
     index.sort(
       (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
     );
+    // Lease-coupled write retains the raw BlockBlobClient.uploadData path —
+    // writeJson/writeBlob do not currently expose ifMatch/leaseId conditions
+    // for this index slot. Schema healing applies through the readJson above.
     const content = JSON.stringify(index, null, 2);
     await getBlockBlobClient("pilots.json").uploadData(Buffer.from(content), {
       blobHTTPHeaders: { blobContentType: "application/json" },

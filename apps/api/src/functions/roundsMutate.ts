@@ -25,6 +25,7 @@ import type {
   Site,
   Config,
   Pilot,
+  PilotSummary,
   PilotSnapshot,
   WingClass,
   RoundBrief,
@@ -32,13 +33,32 @@ import type {
 } from "@bccweb/types";
 import { normalizeStatus } from "@bccweb/types";
 import { scoreRound } from "@bccweb/scoring";
-import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob, withLease, withPrivateLease, withPrivateLeaseRenewing, getBlockBlobClient, getPrivateBlockBlobClient } from "../lib/blob.js";
+import {
+  BriefSchema,
+  ConfigSchema,
+  PilotSchema,
+  PilotSummarySchema,
+  RoundSchema,
+  SeasonSchema,
+  SiteSchema,
+} from "@bccweb/schemas";
+import * as z from "zod/v4";
+import {
+  getBlobClient,
+  getPrivateBlobClient,
+  withLease,
+  withPrivateLease,
+  withPrivateLeaseRenewing,
+  getPrivateBlockBlobClient,
+} from "../lib/blob.js";
+import { readJson, writeJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 import { updateRoundsIndex, recomputeSeason } from "../lib/recompute.js";
 import { createPureTrackGroups, type PureTrackRoundResult } from "../lib/puretrack.js";
 import { generateBriefPdf } from "../lib/pdf.js";
@@ -55,22 +75,11 @@ function isCoord(roles: string[]): boolean {
   return roles.includes("RoundsCoord") || roles.includes("Admin");
 }
 
-// ─── Default config ───────────────────────────────────────────────────────────
-
-const DEFAULT_CONFIG: Config = {
-  maxTeamsInClub: 2,
-  maxPilotsInTeam: 12,
-  maxScoringPilotsInTeam: 6,
-  flightDateValidationEnabled: true,
-  wingFactors: {
-    "EN A": 1.0,
-    "EN B": 0.9,
-    "EN C": 0.8,
-    "EN C 2-liner": 0.7,
-    "EN D": 0.6,
-    "EN D 2-liner": 0.5,
-  },
-};
+// Schemas for blobs without dedicated re-exports.
+const PilotSummariesSchema = z.array(PilotSummarySchema);
+const ClubRefSchema = z
+  .object({ id: z.string().min(1), name: z.string().min(1) })
+  .strip();
 
 type RoundWithBriefMetadata = Round & {
   brief?: {
@@ -83,9 +92,15 @@ type RoundWithBriefMetadata = Round & {
 
 async function loadConfig(): Promise<Config> {
   try {
-    return await readBlob<Config>(getPrivateBlobClient("config.json"));
+    return await readJson(
+      getPrivateBlobClient("config.json"),
+      ConfigSchema,
+      "config.json",
+    );
   } catch {
-    return DEFAULT_CONFIG;
+    // Virgin store: ConfigSchema.parse({}) yields the canonical defaults that
+    // Task 20 centralised on the schema.
+    return ConfigSchema.parse({});
   }
 }
 
@@ -98,6 +113,7 @@ async function createRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "createRound", "standard");
 
   const body = (await req.json()) as {
     date?: string;
@@ -123,7 +139,8 @@ async function createRound(
   // Load site
   let site: Site;
   try {
-    site = await readBlob<Site>(getPrivateBlobClient(`sites/${siteId}.json`));
+    const sitePath = `sites/${siteId}.json`;
+    site = await readJson(getPrivateBlobClient(sitePath), SiteSchema, sitePath);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(400, "INVALID_BODY", "Site not found");
@@ -134,9 +151,8 @@ async function createRound(
   // Load season (must exist)
   let season: Season;
   try {
-    season = await readBlob<Season>(
-      getBlobClient(`seasons/${seasonYear}.json`)
-    );
+    const seasonPath = `seasons/${seasonYear}.json`;
+    season = await readJson(getBlobClient(seasonPath), SeasonSchema, seasonPath);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(400, "INVALID_BODY", "Season not found");
@@ -148,9 +164,8 @@ async function createRound(
   let organisingClub: { id: string; name: string } | undefined;
   if (body.organisingClubId) {
     try {
-      const club = await readBlob<{ id: string; name: string }>(
-        getPrivateBlobClient(`clubs/${body.organisingClubId}.json`)
-      );
+      const clubPath = `clubs/${body.organisingClubId}.json`;
+      const club = await readJson(getPrivateBlobClient(clubPath), ClubRefSchema, clubPath);
       organisingClub = { id: club.id, name: club.name };
     } catch {
       // optional — ignore if not found
@@ -195,23 +210,22 @@ async function createRound(
   };
 
   // Write primary round blob
-  await writePrivateBlob(`rounds/${id}.json`, round);
+  await writePrivateJson(`rounds/${id}.json`, RoundSchema, round);
 
   // Append round ID to season (with lease for atomicity)
   try {
     await withLease(`seasons/${seasonYear}.json`, async (leaseId) => {
-      const s = await readBlob<Season>(
-        getBlobClient(`seasons/${seasonYear}.json`)
-      );
+      const seasonPath = `seasons/${seasonYear}.json`;
+      const s = await readJson(getBlobClient(seasonPath), SeasonSchema, seasonPath);
       if (!s.rounds.includes(id)) {
         s.rounds.push(id);
       }
-      await writeBlob(`seasons/${seasonYear}.json`, s, leaseId);
+      await writeJson(seasonPath, SeasonSchema, s, leaseId);
     });
   } catch {
     // Season blob just checked to exist — this should not fail; best-effort
     season.rounds.push(id);
-    await writeBlob(`seasons/${seasonYear}.json`, season);
+    await writeJson(`seasons/${seasonYear}.json`, SeasonSchema, season);
   }
 
   // Update rounds.json index
@@ -229,6 +243,7 @@ async function updateRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateRound", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
@@ -250,7 +265,7 @@ async function updateRound(
 
   try {
     updated = await withPrivateLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getPrivateBlobClient(path));
+      const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
 
       if (r.isLocked) {
         const err = new Error("Round is locked — unlock before editing");
@@ -281,9 +296,8 @@ async function updateRound(
       if (body.siteId && body.siteId !== r.site.id) {
         let site: Site;
         try {
-          site = await readBlob<Site>(
-            getPrivateBlobClient(`sites/${body.siteId}.json`)
-          );
+          const sitePath = `sites/${body.siteId}.json`;
+          site = await readJson(getPrivateBlobClient(sitePath), SiteSchema, sitePath);
         } catch {
           const err = new Error("Site not found");
           (err as { isValidation?: boolean }).isValidation = true;
@@ -300,16 +314,15 @@ async function updateRound(
 
       if (body.organisingClubId) {
         try {
-          const club = await readBlob<{ id: string; name: string }>(
-            getPrivateBlobClient(`clubs/${body.organisingClubId}.json`)
-          );
+          const clubPath = `clubs/${body.organisingClubId}.json`;
+          const club = await readJson(getPrivateBlobClient(clubPath), ClubRefSchema, clubPath);
           r.organisingClub = { id: club.id, name: club.name };
         } catch {
           // best-effort
         }
       }
 
-      await writePrivateBlob(path, r, leaseId);
+      await writePrivateJson(path, RoundSchema, r, leaseId);
       return r;
     });
   } catch (err: unknown) {
@@ -351,7 +364,7 @@ async function transition(
 
   try {
     updated = await withPrivateLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getPrivateBlobClient(path));
+      const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
 
       if (!allowedFrom.includes(r.status)) {
         const err = new Error(
@@ -364,7 +377,7 @@ async function transition(
       r.status = to;
       if (extra) await extra(r);
 
-      await writePrivateBlob(path, r, leaseId);
+      await writePrivateJson(path, RoundSchema, r, leaseId);
       return r;
     });
   } catch (err: unknown) {
@@ -386,6 +399,11 @@ async function confirmRound(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "confirmRound", "standard");
+
   const result = await transition(req, id, ["Proposed"], "Confirmed");
   if ("status" in result && "jsonBody" in result) return result as HttpResponseInit;
   const updated = result as Round;
@@ -396,8 +414,9 @@ async function confirmRound(
   // brief blob (Azure returns HTTP 412, which we treat as a no-op here).
   try {
     const brief = await buildRoundBrief(updated);
-    await writePrivateBlob(
+    await writePrivateJson(
       `round-briefs/${updated.id}.json`,
+      BriefSchema,
       brief,
       undefined,
       { ifNoneMatch: "*" }
@@ -417,6 +436,11 @@ async function briefCompleteRound(
 ): Promise<HttpResponseInit> {
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
+
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "briefCompleteRound", "standard");
 
   const result = await transition(req, id, ["Confirmed"], "BriefComplete");
   if ("status" in result && "jsonBody" in result) return result as HttpResponseInit;
@@ -438,8 +462,11 @@ async function loadPilotPureTrackIds(round: Round): Promise<Map<string, number>>
   await Promise.all(
     uniquePilotIds.map(async (pilotId) => {
       try {
-        const pilot = await readBlob<Pilot>(
-          getPrivateBlobClient(`pilots/${pilotId}.json`)
+        const pilotPath = `pilots/${pilotId}.json`;
+        const pilot = await readJson(
+          getPrivateBlobClient(pilotPath),
+          PilotSchema,
+          pilotPath,
         );
         if (pilot.pureTrackId != null) pilotPureTrackIds.set(pilotId, pilot.pureTrackId);
       } catch {
@@ -469,17 +496,18 @@ function applyPureTrackResult(round: Round, ptResult: PureTrackRoundResult): Rou
 async function buildRoundBrief(round: Round): Promise<RoundBrief> {
   let siteGuideUrl: string | undefined;
   try {
-    const site = await readBlob<Site>(
-      getPrivateBlobClient(`sites/${round.site.id}.json`)
-    );
+    const sitePath = `sites/${round.site.id}.json`;
+    const site = await readJson(getPrivateBlobClient(sitePath), SiteSchema, sitePath);
     siteGuideUrl = site.guideUrl;
   } catch {
     siteGuideUrl = undefined;
   }
 
-  const pilotsIndex = await readBlob<Array<{ id: string; name: string; bhpaNumber?: number; pureTrackId?: number }>>(
-    getBlobClient("pilots.json")
-  ).catch(() => [] as Array<{ id: string; name: string; bhpaNumber?: number; pureTrackId?: number }>);
+  const pilotsIndex = await readJson(
+    getBlobClient("pilots.json"),
+    PilotSummariesSchema,
+    "pilots.json",
+  ).catch(() => [] as PilotSummary[]);
   const pilotNameMap = new Map(pilotsIndex.map((p) => [p.id, p]));
 
   const teams: BriefTeamEntry[] = await Promise.all(
@@ -495,25 +523,32 @@ async function buildRoundBrief(round: Round): Promise<RoundBrief> {
             .filter((s) => s.status === "Filled" && s.pilotId && s.snapshot)
             .map(async (s) => {
               const pilotMeta = pilotNameMap.get(s.pilotId!);
-              let wingManufacturer;
-              try {
-                const pilotDoc = await readBlob<Pilot>(
-                  getPrivateBlobClient(`pilots/${s.pilotId!}.json`)
-                );
-                wingManufacturer = pilotDoc.wingManufacturer;
-              } catch {
-                wingManufacturer = undefined;
-              }
-              return {
-                placeInTeam: s.placeInTeam,
-                pilotId: s.pilotId!,
-                name: pilotMeta?.name ?? s.pilotId!,
-                bhpaNumber: pilotMeta?.bhpaNumber,
-                pureTrackId: pilotMeta?.pureTrackId,
-                ...(wingManufacturer ? { wingManufacturer } : {}),
-                isScoring: s.isScoring,
-                snapshot: s.snapshot!,
-              };
+               let wingManufacturer;
+               let bhpaNumber;
+               let pureTrackId;
+               try {
+                 const pilotPath = `pilots/${s.pilotId!}.json`;
+                 const pilotDoc = await readJson(
+                   getPrivateBlobClient(pilotPath),
+                   PilotSchema,
+                   pilotPath,
+                 );
+                 wingManufacturer = pilotDoc.wingManufacturer;
+                 bhpaNumber = pilotDoc.bhpaNumber;
+                 pureTrackId = pilotDoc.pureTrackId;
+               } catch {
+                 wingManufacturer = undefined;
+               }
+               return {
+                 placeInTeam: s.placeInTeam,
+                 pilotId: s.pilotId!,
+                 name: pilotMeta?.name ?? s.pilotId!,
+                 bhpaNumber,
+                 pureTrackId,
+                 ...(wingManufacturer ? { wingManufacturer } : {}),
+                 isScoring: s.isScoring,
+                 snapshot: s.snapshot!,
+               };
             })
         ),
       }))
@@ -539,7 +574,7 @@ async function buildRoundBrief(round: Round): Promise<RoundBrief> {
 }
 
 async function uploadBriefArtifacts(brief: RoundBrief): Promise<Buffer> {
-  await writePrivateBlob(`round-briefs/${brief.roundId}.json`, brief);
+  await writePrivateJson(`round-briefs/${brief.roundId}.json`, BriefSchema, brief);
   const pdfBuffer = await generateBriefPdf(brief);
   const pdfBlobClient = getPrivateBlockBlobClient(`round-briefs/${brief.roundId}.pdf`);
   await pdfBlobClient.upload(pdfBuffer, pdfBuffer.length, {
@@ -553,10 +588,9 @@ async function uploadBriefArtifacts(brief: RoundBrief): Promise<Buffer> {
 }
 
 async function readExistingBriefForLock(id: string): Promise<RoundBrief | null> {
+  const path = `round-briefs/${id}.json`;
   try {
-    return await readBlob<RoundBrief>(
-      getPrivateBlobClient(`round-briefs/${id}.json`)
-    );
+    return await readJson(getPrivateBlobClient(path), BriefSchema, path);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) return null;
     throw new HttpError(500, "INTERNAL");
@@ -631,13 +665,14 @@ async function lockRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "lockRound", "heavy");
 
   const path = `rounds/${id}.json`;
 
   // Read round first (outside lease) to gather pilot IDs
   let round: Round;
   try {
-    round = await readBlob<Round>(getPrivateBlobClient(path));
+    round = await readJson(getPrivateBlobClient(path), RoundSchema, path);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
@@ -664,8 +699,11 @@ async function lockRound(
   await Promise.all(
     uniquePilotIds.map(async (pilotId) => {
       try {
-        const pilot = await readBlob<Pilot>(
-          getPrivateBlobClient(`pilots/${pilotId}.json`)
+        const pilotPath = `pilots/${pilotId}.json`;
+        const pilot = await readJson(
+          getPrivateBlobClient(pilotPath),
+          PilotSchema,
+          pilotPath,
         );
         snapshotMap.set(pilotId, {
           wingClass: (pilot.wingClass ?? "EN B") as WingClass,
@@ -735,7 +773,11 @@ async function lockRound(
   let updated: Round;
   try {
     updated = await withPrivateLeaseRenewing(path, async (leaseId) => {
-      const r = await readBlob<RoundWithBriefMetadata>(getPrivateBlobClient(path));
+      const r = (await readJson(
+        getPrivateBlobClient(path),
+        RoundSchema,
+        path,
+      )) as RoundWithBriefMetadata;
 
       if (r.status !== "BriefComplete") {
         const err = new Error("Round status changed concurrently");
@@ -776,7 +818,7 @@ async function lockRound(
         generatedAt: briefPaths.generatedAt,
       };
 
-      await writePrivateBlob(path, r, leaseId);
+      await writePrivateJson(path, RoundSchema, r, leaseId);
       return r;
     });
   } catch (err: unknown) {
@@ -796,6 +838,11 @@ async function unlockRound(
 ): Promise<HttpResponseInit> {
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
+
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "unlockRound", "standard");
 
   const result = await transition(req, id, ["Locked"], "Confirmed", async (r) => {
     r.isLocked = false;
@@ -829,13 +876,14 @@ async function completeRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "completeRound", "heavy");
 
   const config = await loadConfig();
   const path = `rounds/${id}.json`;
   let current: Round;
 
   try {
-    current = await readBlob<Round>(getPrivateBlobClient(path));
+    current = await readJson(getPrivateBlobClient(path), RoundSchema, path);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
@@ -857,7 +905,7 @@ async function completeRound(
 
   try {
     updated = await withPrivateLeaseRenewing(path, async (leaseId) => {
-      const r = await readBlob<Round>(getPrivateBlobClient(path));
+      const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
 
       if (r.status !== "Locked") {
         const err = new Error(
@@ -871,7 +919,7 @@ async function completeRound(
       scored.status = "Complete";
       scored.isLocked = false;
 
-      await writePrivateBlob(path, scored, leaseId);
+      await writePrivateJson(path, RoundSchema, scored, leaseId);
       return scored;
     });
   } catch (err: unknown) {
@@ -907,6 +955,7 @@ async function updateNarrative(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateNarrative", "standard");
 
   const body = (await req.json()) as { narrative?: string };
   if (body.narrative === undefined) {
@@ -918,9 +967,9 @@ async function updateNarrative(
 
   try {
     updated = await withPrivateLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getPrivateBlobClient(path));
+      const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
       r.narrative = body.narrative;
-      await writePrivateBlob(path, r, leaseId);
+      await writePrivateJson(path, RoundSchema, r, leaseId);
       return r;
     });
   } catch (err: unknown) {

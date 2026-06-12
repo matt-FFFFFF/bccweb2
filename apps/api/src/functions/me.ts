@@ -1,9 +1,14 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import type { Pilot, SeasonSummary, User } from "@bccweb/types";
+import { PilotSchema, SeasonSummarySchema, UserSchema } from "@bccweb/schemas";
+import * as z from "zod/v4";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
-import { getBlobClient, getPrivateBlobClient, readBlob } from "../lib/blob.js";
+import { getBlobClient, getPrivateBlobClient } from "../lib/blob.js";
+import { readJson } from "../lib/blobJson.js";
 import { withErrorHandler } from "../lib/http.js";
 import { TS_CS_VERSION } from "../lib/termsConstants.js";
+
+const SeasonsIndexSchema = z.array(SeasonSummarySchema);
 
 async function meHandler(
   req: HttpRequest,
@@ -22,7 +27,11 @@ async function meHandler(
     try {
       let seasons: SeasonSummary[] = [];
       try {
-        seasons = await readBlob<SeasonSummary[]>(getBlobClient("seasons.json"));
+        seasons = await readJson(
+          getBlobClient("seasons.json"),
+          SeasonsIndexSchema,
+          "seasons.json",
+        );
       } catch (e: unknown) {
         if ((e as { statusCode?: number }).statusCode !== 404) throw e;
       }
@@ -32,7 +41,11 @@ async function meHandler(
         activeSeasonYear = activeSeason.year;
       }
 
-       const pilot = await readBlob<Pilot>(getPrivateBlobClient(`pilots/${identity.pilotId}.json`));
+        const pilot: Pilot = await readJson(
+          getPrivateBlobClient(`pilots/${identity.pilotId}.json`),
+          PilotSchema,
+          `pilots/${identity.pilotId}.json`,
+        );
 
        const hasSeasonClub = pilot.seasonClubs?.some((sc) => sc.seasonYear === activeSeasonYear);
        const profileUpdatedYear = pilot.profileUpdatedAt ? new Date(pilot.profileUpdatedAt).getFullYear() : 0;
@@ -45,7 +58,11 @@ async function meHandler(
 
   let tsCsAcceptanceRequired = false;
   try {
-    const user = await readBlob<User>(getPrivateBlobClient(`users/${identity.userId}.json`));
+    const user: User = await readJson(
+      getPrivateBlobClient(`users/${identity.userId}.json`),
+      UserSchema,
+      `users/${identity.userId}.json`,
+    );
     tsCsAcceptanceRequired = (user.acceptedTsCsVersion ?? 0) < TS_CS_VERSION;
   } catch {
     tsCsAcceptanceRequired = false;

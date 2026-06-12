@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { SignToFlyWording } from "@bccweb/types";
 import { getPrivateBlockBlobClient } from "../../blob.js";
@@ -55,7 +55,7 @@ describe("Sign-to-Fly wording registry", () => {
     expect(active.version).toBe(2);
   });
 
-  it("addWordingVersion under concurrent calls: only one version is incremented; runs in serial via lease", async () => {
+  it("addWordingVersion under concurrent calls: lease retry produces sequential versions", async () => {
     await seedVersion1("<p>v1 concurrent</p>");
 
     const attempts = await Promise.allSettled([
@@ -66,10 +66,11 @@ describe("Sign-to-Fly wording registry", () => {
       (result): result is PromiseFulfilledResult<SignToFlyWording> => result.status === "fulfilled",
     );
 
-    expect(fulfilled).toHaveLength(1);
-    expect(fulfilled[0].value.version).toBe(2);
+    expect(fulfilled).toHaveLength(2);
+    const versions = fulfilled.map((result) => result.value.version).sort((a, b) => a - b);
+    expect(versions).toEqual([2, 3]);
     expect(await blobExists("sign-to-fly/wording/2.json")).toBe(true);
-    expect(await blobExists("sign-to-fly/wording/3.json")).toBe(false);
+    expect(await blobExists("sign-to-fly/wording/3.json")).toBe(true);
   });
 });
 

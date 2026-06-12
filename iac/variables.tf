@@ -100,6 +100,17 @@ variable "acs_secret_version" {
   default     = "1"
 }
 
+variable "blob_schema_mode" {
+  description = "Blob schema mode for public/private JSON writes."
+  type        = string
+  default     = "observe"
+
+  validation {
+    condition     = contains(["observe", "enforce"], var.blob_schema_mode)
+    error_message = "blob_schema_mode must be either \"observe\" or \"enforce\"."
+  }
+}
+
 locals {
   prefix = "bccweb-${var.stamp_name}"
   tags = {

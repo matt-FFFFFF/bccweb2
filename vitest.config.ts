@@ -5,6 +5,7 @@ export default defineConfig({
     projects: [
       "packages/scoring",
       "packages/types",
+      "packages/schemas",
       "apps/api",
       "apps/web",
     ],

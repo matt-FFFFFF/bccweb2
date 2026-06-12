@@ -11,6 +11,13 @@ let _container: ContainerClient | null = null;
 let _privateContainer: ContainerClient | null = null;
 let _blobService: BlobServiceClient | null = null;
 
+// TEST-ONLY: clears module-level container/service caches so the next access re-reads BLOB_CONNECTION_STRING / BLOB_CONTAINER_NAME / BLOB_PRIVATE_CONTAINER_NAME from env. Used by helpers/azurite.ts beforeAll to make per-file test container isolation pool-config-proof.
+export function resetBlobSingletons(): void {
+  _container = null;
+  _privateContainer = null;
+  _blobService = null;
+}
+
 interface LeaseRenewingOptions {
   leaseDurationSec?: number;
   renewIntervalMs?: number;
@@ -73,16 +80,20 @@ export function getPrivateBlockBlobClient(path: string): BlockBlobClient {
 // ─── Read / Write ─────────────────────────────────────────────────────────────
 
 /**
+ * PREFER readJson() — raw read for non-JSON content only.
+ *
  * Read a JSON blob. Throws a BlobStorageError with statusCode 404 if the blob
  * does not exist, which callers can use to detect a missing document.
  */
-export async function readBlob<T>(blobClient: BlobClient): Promise<T> {
+export async function readBlob(blobClient: BlobClient): Promise<unknown> {
   const response = await blobClient.download();
   const body = await streamToString(response.readableStreamBody!);
-  return JSON.parse(body) as T;
+  return JSON.parse(body);
 }
 
 /**
+ * PREFER readJson() — raw read for non-JSON content only.
+ *
  * Write a JSON blob to the public container, overwriting any existing content.
  * Optionally pass a leaseId to write under an active blob lease.
  */
@@ -103,6 +114,8 @@ export async function writeBlob<T>(
 }
 
 /**
+ * PREFER readJson() — raw read for non-JSON content only.
+ *
  * Write a JSON blob to the private container, overwriting any existing content.
  * Optionally pass a leaseId to write under an active blob lease.
  *

@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
+import * as z from "zod/v4";
 import type { ClubSummary, User, UserRole } from "@bccweb/types";
+import { ClubSummarySchema } from "@bccweb/schemas";
 import { useAuth } from "../../hooks/useAuth.js";
 import { api } from "../../lib/api.js";
 import { useBlob } from "../../hooks/useBlob.js";
@@ -58,7 +60,7 @@ export default function AdminUsers() {
   const [error, setError] = useState<string | null>(null);
 
   // Load clubs for the dropdown — public blob, no auth needed
-  const { data: clubs } = useBlob<ClubSummary[]>("clubs.json");
+  const { data: clubs } = useBlob<ClubSummary[]>("clubs.json", z.array(ClubSummarySchema));
 
   const isAdmin = identity?.roles.includes("Admin");
 

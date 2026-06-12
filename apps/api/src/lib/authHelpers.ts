@@ -8,7 +8,11 @@
 import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { getPrivateBlobClient, getPrivateBlockBlobClient, readBlob, writePrivateBlob } from "./blob.js";
+import * as z from "zod/v4";
+import { getPrivateBlobClient, getPrivateBlockBlobClient, writePrivateBlob } from "./blob.js";
+import { readJson } from "./blobJson.js";
+
+const StringRecordSchema = z.record(z.string(), z.string());
 
 // ─── Internal types ───────────────────────────────────────────────────────────
 
@@ -89,7 +93,15 @@ export function verifyRefreshToken(token: string): string {
 
 // ─── Password ─────────────────────────────────────────────────────────────────
 
-const BCRYPT_COST = 12;
+const BCRYPT_COST = (() => {
+  const def = 12;
+  if (process.env.NODE_ENV !== "test") return def;
+  const raw = process.env.TEST_BCRYPT_COST;
+  if (!raw) return def;
+  const parsed = parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed < 4) return def;
+  return Math.min(parsed, def);
+})();
 
 export async function hashPassword(password: string): Promise<string> {
   return bcrypt.hash(password, BCRYPT_COST);
@@ -182,8 +194,10 @@ export async function consumeShortLivedToken(
 /** Returns the userId for an email, or null if not registered. */
 export async function lookupUserByEmail(email: string): Promise<string | null> {
   try {
-    const index = await readBlob<Record<string, string>>(
-      getPrivateBlobClient("user-index.json")
+    const index = await readJson(
+      getPrivateBlobClient("user-index.json"),
+      StringRecordSchema,
+      "user-index.json",
     );
     return index[email.toLowerCase()] ?? null;
   } catch {

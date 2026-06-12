@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { useLocation, Link, useNavigate } from "react-router-dom";
+import * as z from "zod/v4";
+import { ClubSummarySchema } from "@bccweb/schemas";
 import { useAuth } from "../hooks/useAuth.js";
 import { api } from "../lib/api.js";
 import { useBlob } from "../hooks/useBlob.js";
@@ -19,7 +21,7 @@ export default function FirstLoginOfSeasonGate({ children }: { children: React.R
   const [error, setError] = useState("");
   const [localDismiss, setLocalDismiss] = useState(false);
   
-  const { data: clubs } = useBlob<ClubSummary[]>("clubs.json");
+  const { data: clubs } = useBlob<ClubSummary[]>("clubs.json", z.array(ClubSummarySchema));
 
   // Determine if modal should be shown
   const firstLoginOfSeason = identity?.firstLoginOfSeason ?? false;

@@ -9,14 +9,23 @@ import type {
 import { normalizeStatus } from "@bccweb/types";
 import { computeLeague } from "@bccweb/scoring";
 import {
+  PilotSummarySchema,
+  RoundSchema,
+  RoundSummarySchema,
+  SeasonSchema,
+} from "@bccweb/schemas";
+import * as z from "zod/v4";
+import {
   getBlobClient,
   getBlockBlobClient,
   getPrivateBlobClient,
-  readBlob,
-  writeBlob,
   withLease,
   withLeaseRenewing,
 } from "./blob.js";
+import { readJson, writeJson } from "./blobJson.js";
+
+const RoundSummariesSchema = z.array(RoundSummarySchema);
+const PilotIndexEntrySchema = z.array(PilotSummarySchema);
 
 const STALE_RECOMPUTE_MARKER_MS = 5 * 60 * 1000;
 
@@ -45,14 +54,14 @@ export async function updateRoundsIndex(round: Round): Promise<void> {
   const applyUpdate = async (leaseId?: string) => {
     let rounds: RoundSummary[] = [];
     try {
-      rounds = await readBlob<RoundSummary[]>(getBlobClient(path));
+      rounds = await readJson(getBlobClient(path), RoundSummariesSchema, path);
     } catch {
       // may not exist yet — start with empty array
     }
     const idx = rounds.findIndex((r) => r.id === round.id);
     if (idx >= 0) rounds[idx] = summary;
     else rounds.push(summary);
-    await writeBlob(path, rounds, leaseId);
+    await writeJson(path, RoundSummariesSchema, rounds, leaseId);
   };
 
   try {
@@ -93,28 +102,32 @@ export async function recomputeSeason(seasonYear: number): Promise<void> {
 
 async function recomputeSeasonUncached(seasonYear: number): Promise<void> {
   const seasonPath = `seasons/${seasonYear}.json`;
-  const season = await readBlob<Season>(getBlobClient(seasonPath));
+  const season = await readJson(getBlobClient(seasonPath), SeasonSchema, seasonPath);
 
   // Load all rounds in parallel; skip rounds that fail to load
   const maybeRounds = await Promise.all(
-    season.rounds.map((id) =>
-      readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`)).catch(() => null)
-    )
+    season.rounds.map((id) => {
+      const path = `rounds/${id}.json`;
+      return readJson(getPrivateBlobClient(path), RoundSchema, path).catch(() => null);
+    })
   );
-  const rounds = maybeRounds
-    .filter((r): r is Round => r !== null)
-    .map(normalizeRoundForRecompute)
-    .sort(compareRounds);
+  const normalizedRounds: Round[] = [];
+  for (const round of maybeRounds) {
+    if (round !== null) normalizedRounds.push(normalizeRoundForRecompute(round as Round));
+  }
+  normalizedRounds.sort(compareRounds);
 
   // Compute league table
-  const leagueTable = stableLeagueTable(computeLeague(rounds));
+  const leagueTable = stableLeagueTable(computeLeague(normalizedRounds));
   const seasonPayload: Season = stableSeason({ ...season, leagueTable });
 
   // Load pilot index for name resolution in results
   let pilotNameMap: Record<string, string> = {};
   try {
-    const idx = await readBlob<Array<{ id: string; name: string }>>(
-      getBlobClient("pilots.json")
+    const idx = await readJson(
+      getBlobClient("pilots.json"),
+      PilotIndexEntrySchema,
+      "pilots.json",
     );
     pilotNameMap = Object.fromEntries(idx.map((p) => [p.id, p.name]));
   } catch {
@@ -122,7 +135,7 @@ async function recomputeSeasonUncached(seasonYear: number): Promise<void> {
   }
 
   // Compute and persist per-round results
-  const results = stableSeasonResults(buildSeasonResults(rounds, pilotNameMap));
+  const results = stableSeasonResults(buildSeasonResults(normalizedRounds, pilotNameMap));
   const roundsIndex = await buildRoundsIndex();
 
   await ensureRecomputeLockBlob(seasonYear);
@@ -213,15 +226,20 @@ function normalizeRoundForRecompute(round: Round): Round {
 async function buildRoundsIndex(): Promise<RoundSummary[]> {
   let existing: RoundSummary[] = [];
   try {
-    existing = await readBlob<RoundSummary[]>(getBlobClient("rounds.json"));
+    existing = await readJson(
+      getBlobClient("rounds.json"),
+      RoundSummariesSchema,
+      "rounds.json",
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode !== 404) throw err;
   }
 
   const loaded = await Promise.all(
-    existing.map((summary) =>
-      readBlob<Round>(getPrivateBlobClient(`rounds/${summary.id}.json`)).catch(() => null)
-    )
+    existing.map((summary) => {
+      const path = `rounds/${summary.id}.json`;
+      return readJson(getPrivateBlobClient(path), RoundSchema, path).catch(() => null);
+    })
   );
 
   return loaded

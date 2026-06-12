@@ -79,6 +79,38 @@ A PR-gated [privacy scanner](file:///Volumes/code/bccweb2/scripts/privacy-scan.m
 runs in CI and fails if PII leaks into the public container. **Never put PII fields
 in `data/`-container blobs.**
 
+### Schema layer
+
+Every blob family has exactly one schema in `packages/schemas`. Reads go through
+`readJson(client, Schema)`, and writes go through `writeJson` / `writePrivateJson`.
+Use raw `readBlob` / `writeBlob` only for non-JSON artifacts: PDF, image, `.lock`,
+and audit-log files.
+
+### BLOB_SCHEMA_MODE
+
+`BLOB_SCHEMA_MODE` is a Function App env setting. `observe` is the default: it heals
+in memory and emits telemetry only. `enforce` strips dead keys on write. Migration PRs
+deploy in `observe`; flip to `enforce` only after the KQL is clean per
+`docs/runbooks/alerts.md`. Flipping back to `observe` is an app-setting change and
+does not require a redeploy.
+
+### WingClass break-glass
+
+Adding a `WingClass` requires this order: types → schema → API deploy → admin UI emits
+the new key. Reversing that order causes `enforce` mode to reject or strip the new field.
+
+### bootstrapAdmin exception
+
+`apps/api/src/__tests__/helpers/seed.ts:bootstrapAdmin` is the single permitted direct
+`readBlob` / `writeBlob` call site in the repo. The API itself cannot create the first
+admin, so the F2 oracle allowlists this exception.
+
+### DATA_SHAPE_INVALID error
+
+`DATA_SHAPE_INVALID` is a server-side data invariant violation. Its response body is
+`{error, path, schema}` and never includes field values. Issues are logged server-side
+only.
+
 ## API (`apps/api`)
 
 Entry: [src/index.ts](file:///Volumes/code/bccweb2/apps/api/src/index.ts) imports
@@ -88,13 +120,14 @@ function file is dead unless added to `src/index.ts`.**
 Current function modules: `health`, `me`, `authFunctions`, `rounds`, `roundsMutate`,
 `seasons`, `pilots`, `clubs`, `sites`, `teams`, `flights`, `admin`, `adminWording`,
 `brief`, `puretrack`, `signatures`, `roundRegistration`, `clubTeams`, `seasonClubs`,
-`pilotSeasonClubs`, `frequencies`, `teamsCaptain`.
+`pilotSeasonClubs`, `teamsCaptain`.
 
 Lib helpers: `blob` (storage + lease), `auth` + `authHelpers` (HS256 JWT),
 `email` (ACS), `http`, `pdf` (puppeteer-core + @sparticuz/chromium),
 `rateLimit`, `recompute`, `puretrack`, `teamCaptain`, `telemetry` +
 `telemetryRedactor` (App Insights PII scrubber set up BEFORE function imports),
 `signTofly/*` (signature ledger).
+See `docs/runbooks/alerts.md#blobhealed-events--blob-heal-storm-alert` for `blob.healed` / blob-heal-storm triage.
 
 **Auth**: bespoke HS256 JWT (`JWT_SECRET` env). Access token 1h, refresh 30d.
 Roles: `Admin`, `RoundsCoord`, `Pilot`. `getCallerIdentity(req)` returns
@@ -105,6 +138,10 @@ Roles: `Admin`, `RoundsCoord`, `Pilot`. `getCallerIdentity(req)` returns
 (`data-private`), `JWT_SECRET` (≥32 chars), `ACS_CONNECTION_STRING`,
 `ACS_SENDER_ADDRESS`, `ROUND_BRIEF_EMAILS`, `PURETRACK_*`. Copy
 `local.settings.example.json` → `local.settings.json`.
+
+## Feature Completeness Rule
+
+Any new feature or endpoint MUST ship with the UI for the people who operate it — in the same PR or an explicitly linked follow-up merged in the same release. In particular, admin-managed data (config, wording, reference data) MUST have an admin page; an API without an operator UI is not done. Exceptions require a documented rationale in the PR description and an entry here.
 
 ## Web (`apps/web`)
 
@@ -146,24 +183,17 @@ in `src/bcc-theme.css`.
 
 **API tests** ([apps/api/vitest.config.ts](file:///Volumes/code/bccweb2/apps/api/vitest.config.ts)):
 
-- **Require a running Azurite** (`docker compose up azurite`). Setup files
-  ([helpers/setup.ts](file:///Volumes/code/bccweb2/apps/api/src/__tests__/helpers/setup.ts),
-  [helpers/azurite.ts](file:///Volumes/code/bccweb2/apps/api/src/__tests__/helpers/azurite.ts))
-  default `BLOB_CONNECTION_STRING` to Azurite's well-known dev string and create
-  both `data` + `data-private` containers in `beforeAll`.
-- `@azure/functions` is **mocked** in setup — `app.http()` calls populate a
-  handler registry; tests invoke handlers via `getRegisteredHandler(name)`.
+- **Per-file Azurite containers**: each test file gets its own `test-data-<rand>` / `test-priv-<rand>` containers (Task 24). They are deleted in `afterAll`, and stale `test-*` containers older than 1h are best-effort swept from `127.0.0.1` only.
+- Isolation must **not** depend on vitest fresh-worker-per-file behavior. `helpers/setup.ts` calls `resetBlobSingletons()` before container creation so even `pool: 'threads'` with `singleThread: true` still produces correct per-file containers.
+- `@azure/functions` is **mocked** in setup — `app.http()` calls populate a handler registry; tests invoke handlers via `getRegisteredHandler(name)`.
   `email`, `pdf`, `puretrack` modules are also mocked to prevent real calls.
-- `fileParallelism: false` + `sequence.concurrent: false` — tests run
-  sequentially for stable blob state. **Do not assume parallel execution.**
-- No `afterEach` blob cleanup — each test uses `crypto.randomUUID()` for
-  unique IDs to avoid collisions across files.
-- The `include` array is partly explicit, not pure-glob: `src/__tests__/**`
-  and `src/functions/__tests__/**` are globbed, but individual `src/lib/__tests__/*.test.ts`
-  files are listed by name. **New lib test files often need to be added to
-  the `include` array** or they will silently not run. (Several heavier tests
-  like `lib/__tests__/puretrack.test.ts`, `blob.test.ts`,
-  `telemetry.integration.test.ts` are deliberately excluded.)
+- `helpers/seed.ts` seeds via registered handlers (API-based seeding), not direct blob writes. The one documented exception is `bootstrapAdmin` — annotated inline and allowlisted by F2. Adding any new direct-write exception requires updating both the seed.ts banner and this section.
+- `fileParallelism: false` + `sequence.concurrent: false` — tests run sequentially for stable blob state.
+- `TEST_BCRYPT_COST` is honored only when `NODE_ENV === "test"`; outside test env it is ignored and the cost stays 12. It cannot be used to weaken production hashing.
+- Include is glob-based as of Task 7. Three heavy tests are deliberately excluded (`blob.test.ts`, `puretrack.test.ts`, `telemetry.integration.test.ts`) — each with a reason comment in `vitest.config.ts`. Run them via `make test-heavy`.
+- Cross-link the `BLOB_SCHEMA_MODE` behavior in [Data Storage (Azure Blob)](#data-storage-azure-blob); do not duplicate it here.
+
+**Why per-file, not shared with UUID**: a test file crashing mid-lease can leave a shared container holding a lease, and the next file would wait 30s for timeout. Per-file containers contain that blast radius, so cleanup is safe and scoped.
 
 **Web tests** ([apps/web/vitest.config.ts](file:///Volumes/code/bccweb2/apps/web/vitest.config.ts)):
 `jsdom` env, `@testing-library/react`. Aliases `@bccweb/types` to

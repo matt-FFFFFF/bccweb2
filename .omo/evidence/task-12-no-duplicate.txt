@@ -1,0 +1,18 @@
+Task 12 QA: duplicate reset implementation check
+
+Command:
+grep "resetAllBuckets" apps/api/src/__tests__/helpers/setup.ts
+
+Output:
+import { resetAllBuckets } from "../../lib/rateLimit.js";
+beforeEach(() => resetAllBuckets());
+
+Command:
+grep -rn "function resetAllBuckets" apps/api/src --include="*.ts"
+
+Output:
+apps/api/src/lib/rateLimit.ts:73:export function resetAllBuckets(): void {
+
+Counts:
+- setup.ts matches: 2
+- function definition matches: 1

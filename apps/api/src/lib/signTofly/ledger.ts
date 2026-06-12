@@ -1,11 +1,12 @@
 import type { HttpRequest } from "@azure/functions";
 import type { RoundBrief, Signature, SignToFlyWording } from "@bccweb/types";
 import { BlobServiceClient, ContainerClient } from "@azure/storage-blob";
+import { SignatureLedgerSchema } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
   getPrivateBlockBlobClient,
-  readBlob,
 } from "../blob.js";
+import { readJson } from "../blobJson.js";
 import { computeBriefHash } from "./briefVersion.js";
 
 let privateContainer: ContainerClient | null = null;
@@ -51,9 +52,12 @@ export async function readSignature(
   place: number,
   briefVersion: number,
 ): Promise<Signature | null> {
+  const path = signaturePath(roundId, teamId, place, briefVersion);
   try {
-    return await readBlob<Signature>(
-      getPrivateBlobClient(signaturePath(roundId, teamId, place, briefVersion)),
+    return await readJson(
+      getPrivateBlobClient(path),
+      SignatureLedgerSchema,
+      path,
     );
   } catch (err: unknown) {
     if (isMissingBlob(err)) return null;
@@ -66,7 +70,13 @@ export async function listSignaturesForRound(roundId: string): Promise<Signature
   const signatures: Signature[] = [];
 
   for await (const item of getPrivateContainer().listBlobsFlat({ prefix })) {
-    signatures.push(await readBlob<Signature>(getPrivateBlobClient(item.name)));
+    signatures.push(
+      await readJson(
+        getPrivateBlobClient(item.name),
+        SignatureLedgerSchema,
+        item.name,
+      ),
+    );
   }
 
   return signatures;
@@ -86,7 +96,11 @@ export async function getLatestSignature(
     if (latest?.briefVersion !== null && latest?.briefVersion !== undefined && latest.briefVersion >= version) {
       continue;
     }
-    latest = await readBlob<Signature>(getPrivateBlobClient(item.name));
+    latest = await readJson(
+      getPrivateBlobClient(item.name),
+      SignatureLedgerSchema,
+      item.name,
+    );
   }
 
   return latest;

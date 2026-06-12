@@ -6,22 +6,31 @@ import {
 } from "@azure/functions";
 import { BlobServiceClient, ContainerClient } from "@azure/storage-blob";
 import { createHash } from "crypto";
-import type { Club, ClubTeam, ClubTeamSummary, Config, Frequency, Round, SeasonClub } from "@bccweb/types";
+import type { Club, ClubTeam, ClubTeamSummary, Config, Round, SeasonClub } from "@bccweb/types";
+import {
+  ClubSchema,
+  ClubTeamSchema,
+  ClubTeamSummarySchema,
+  ConfigSchema,
+  RoundSchema,
+  RoundSummarySchema,
+  SeasonClubSchema,
+} from "@bccweb/schemas";
+import * as z from "zod/v4";
 import {
   getBlobClient,
   getPrivateBlobClient,
   getPrivateBlockBlobClient,
-  readBlob,
-  writeBlob,
-  writePrivateBlob,
   withPrivateLeaseRenewing,
 } from "../lib/blob.js";
+import { readJson, writeJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   forbiddenResponse,
   getCallerIdentity,
   unauthorizedResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 
 interface SeasonClubIndexEntry {
   id: string;
@@ -29,23 +38,40 @@ interface SeasonClubIndexEntry {
   clubId: string;
   clubName: string;
   numTeams: number;
-  frequencyId?: string;
-  frequencyLabel?: string;
   acceptedTsCs: boolean;
   acceptedTsCsAt?: string;
 }
 
+// SeasonClubIndexEntry is a denormalised view local to this module — no schema
+// in @bccweb/schemas. Defined inline as a strict superset of every field the
+// writer (toIndexEntry) emits so observe-mode logs are clean.
+const SeasonClubIndexEntrySchema = z
+  .object({
+    id: z.string().min(1),
+    seasonYear: z.number().int(),
+    clubId: z.string().min(1),
+    clubName: z.string().min(1),
+    numTeams: z.number().int(),
+    acceptedTsCs: z.boolean(),
+    acceptedTsCsAt: z.string().min(1).optional(),
+  })
+  .strip();
+
+SeasonClubIndexEntrySchema satisfies z.ZodType<SeasonClubIndexEntry>;
+
+const SeasonClubIndexSchema = z.array(SeasonClubIndexEntrySchema);
+const ClubTeamsIndexSchema = z.array(ClubTeamSummarySchema);
+const RoundsIndexSchema = z.array(RoundSummarySchema);
+
 interface CreateSeasonClubBody {
   clubId?: string;
   numTeams?: number;
-  frequencyId?: string | null;
   acceptTsCs?: boolean;
   acceptedBy?: string;
 }
 
 interface UpdateSeasonClubBody {
   numTeams?: number;
-  frequencyId?: string | null;
   acceptedTsCs?: boolean;
 }
 
@@ -95,23 +121,14 @@ function teamSuffix(index: number): string {
 
 async function readConfig(): Promise<Config> {
   try {
-    return await readBlob<Config>(getPrivateBlobClient("config.json"));
+    return await readJson(
+      getPrivateBlobClient("config.json"),
+      ConfigSchema,
+      "config.json",
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return {
-        maxTeamsInClub: 2,
-        maxPilotsInTeam: 12,
-        maxScoringPilotsInTeam: 6,
-        flightDateValidationEnabled: true,
-        wingFactors: {
-          "EN A": 1,
-          "EN B": 0.9,
-          "EN C": 0.8,
-          "EN C 2-liner": 0.7,
-          "EN D": 0.6,
-          "EN D 2-liner": 0.5,
-        },
-      };
+      return ConfigSchema.parse({});
     }
     throw err;
   }
@@ -119,21 +136,16 @@ async function readConfig(): Promise<Config> {
 
 async function readClub(clubId: string): Promise<Club> {
   try {
-    return await readBlob<Club>(getPrivateBlobClient(`clubs/${clubId}.json`));
+    return await readJson(
+      getPrivateBlobClient(`clubs/${clubId}.json`),
+      ClubSchema,
+      `clubs/${clubId}.json`,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(400, "INVALID_CLUB", "clubId does not exist");
     }
     throw new HttpError(500, "INTERNAL");
-  }
-}
-
-async function readFrequencies(): Promise<Frequency[]> {
-  try {
-    return await readBlob<Frequency[]>(getPrivateBlobClient("frequencies.json"));
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) return [];
-    throw err;
   }
 }
 
@@ -151,16 +163,13 @@ async function ensurePrivateSentinel(path: string): Promise<void> {
   }
 }
 
-async function requireFrequency(frequencyId: string | null | undefined): Promise<Frequency | undefined> {
-  if (!frequencyId) return undefined;
-  const frequency = (await readFrequencies()).find((f) => f.id === frequencyId);
-  if (!frequency) throw new HttpError(400, "INVALID_FREQUENCY", "frequencyId does not exist");
-  return frequency;
-}
-
 async function readIndex(year: number): Promise<SeasonClubIndexEntry[]> {
   try {
-    return await readBlob<SeasonClubIndexEntry[]>(getBlobClient(`season-clubs/${year}/index.json`));
+    return await readJson(
+      getBlobClient(`season-clubs/${year}/index.json`),
+      SeasonClubIndexSchema,
+      `season-clubs/${year}/index.json`,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) return [];
     throw err;
@@ -168,18 +177,18 @@ async function readIndex(year: number): Promise<SeasonClubIndexEntry[]> {
 }
 
 async function writeIndex(year: number, index: SeasonClubIndexEntry[]): Promise<void> {
-  index.sort((a, b) => {
-    const frequencyOrder = (a.frequencyLabel ?? "").localeCompare(b.frequencyLabel ?? "");
-    if (frequencyOrder !== 0) return frequencyOrder;
-    return a.clubName.localeCompare(b.clubName);
-  });
-  await writeBlob(`season-clubs/${year}/index.json`, index);
+  index.sort((a, b) => a.clubName.localeCompare(b.clubName));
+  await writeJson(`season-clubs/${year}/index.json`, SeasonClubIndexSchema, index);
 }
 
 async function readSeasonClub(year: number, clubIdOrSeasonClubId: string): Promise<SeasonClub> {
   const byClubPath = `season-clubs/${year}/${clubIdOrSeasonClubId}.json`;
   try {
-    return await readBlob<SeasonClub>(getPrivateBlobClient(byClubPath));
+    return await readJson(
+      getPrivateBlobClient(byClubPath),
+      SeasonClubSchema,
+      byClubPath,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode !== 404) throw err;
   }
@@ -187,8 +196,13 @@ async function readSeasonClub(year: number, clubIdOrSeasonClubId: string): Promi
   const index = await readIndex(year);
   const entry = index.find((item) => item.id === clubIdOrSeasonClubId);
   if (!entry) throw new HttpError(404, "NOT_FOUND", "Season club not found");
+  const fallbackPath = `season-clubs/${year}/${entry.clubId}.json`;
   try {
-    return await readBlob<SeasonClub>(getPrivateBlobClient(`season-clubs/${year}/${entry.clubId}.json`));
+    return await readJson(
+      getPrivateBlobClient(fallbackPath),
+      SeasonClubSchema,
+      fallbackPath,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Season club not found");
@@ -208,7 +222,13 @@ async function listSeasonClubs(year: number): Promise<SeasonClub[]> {
   const prefix = `season-clubs/${year}/`;
   for await (const item of getPrivateContainer().listBlobsFlat({ prefix })) {
     if (!item.name.endsWith(".json") || item.name.endsWith("index.json")) continue;
-    docs.push(await readBlob<SeasonClub>(getPrivateBlobClient(item.name)));
+    docs.push(
+      await readJson(
+        getPrivateBlobClient(item.name),
+        SeasonClubSchema,
+        item.name,
+      ),
+    );
   }
   docs.sort((a, b) => (a.clubId === b.clubId ? a.id.localeCompare(b.id) : a.clubId.localeCompare(b.clubId)));
   return docs;
@@ -221,7 +241,6 @@ function toIndexEntry(seasonClub: SeasonClub, clubName: string): SeasonClubIndex
     clubId: seasonClub.clubId,
     clubName,
     numTeams: seasonClub.numTeams,
-    ...(seasonClub.frequency ? { frequencyId: seasonClub.frequency.id, frequencyLabel: seasonClub.frequency.label } : {}),
     acceptedTsCs: seasonClub.acceptedTsCs,
     ...(seasonClub.acceptedTsCsAt ? { acceptedTsCsAt: seasonClub.acceptedTsCsAt } : {}),
   };
@@ -242,7 +261,11 @@ async function removeIndexEntry(year: number, seasonClubId: string): Promise<voi
 
 async function readClubTeamIndex(): Promise<ClubTeamSummary[]> {
   try {
-    return await readBlob<ClubTeamSummary[]>(getBlobClient("club-teams.json"));
+    return await readJson(
+      getBlobClient("club-teams.json"),
+      ClubTeamsIndexSchema,
+      "club-teams.json",
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) return [];
     throw err;
@@ -255,7 +278,7 @@ async function writeClubTeamIndex(index: ClubTeamSummary[]): Promise<void> {
     if (a.clubName !== b.clubName) return a.clubName.localeCompare(b.clubName);
     return a.teamName.localeCompare(b.teamName);
   });
-  await writeBlob("club-teams.json", index);
+  await writeJson("club-teams.json", ClubTeamsIndexSchema, index);
 }
 
 function clubTeamPath(year: number, clubId: string, teamNumber: number): string {
@@ -278,7 +301,11 @@ async function writeTeams(year: number, club: Club, count: number): Promise<Club
   const teams = Array.from({ length: count }, (_, i) => makeClubTeam(year, club, i + 1));
   const index = (await readClubTeamIndex()).filter((team) => !(team.seasonYear === year && team.clubId === club.id));
   for (const team of teams) {
-    await writePrivateBlob(clubTeamPath(year, club.id, teams.indexOf(team) + 1), team);
+    await writePrivateJson(
+      clubTeamPath(year, club.id, teams.indexOf(team) + 1),
+      ClubTeamSchema,
+      team,
+    );
     index.push({
       id: team.id,
       clubId: team.clubId,
@@ -307,14 +334,24 @@ async function deleteTeams(year: number, clubId: string, from: number, to: numbe
 async function hasRoundAssignments(year: number, clubId: string): Promise<boolean> {
   let rounds: Array<{ id: string; seasonYear: number }> = [];
   try {
-    rounds = await readBlob<Array<{ id: string; seasonYear: number }>>(getBlobClient("rounds.json"));
+    // rounds.json is the public RoundSummary[] index; we only need id + seasonYear.
+    const summaries = await readJson(
+      getBlobClient("rounds.json"),
+      RoundsIndexSchema,
+      "rounds.json",
+    );
+    rounds = summaries.map((summary) => ({ id: summary.id, seasonYear: summary.seasonYear }));
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) return false;
     throw err;
   }
   for (const summary of rounds.filter((round) => round.seasonYear === year)) {
     try {
-      const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${summary.id}.json`));
+      const round: Round = await readJson(
+        getPrivateBlobClient(`rounds/${summary.id}.json`),
+        RoundSchema,
+        `rounds/${summary.id}.json`,
+      );
       if (round.teams.some((team) => team.club.id === clubId)) return true;
     } catch {
     }
@@ -336,6 +373,7 @@ async function createSeasonClub(req: HttpRequest, _ctx: InvocationContext): Prom
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "createSeasonClub", "standard");
   const year = parseYear(req);
 
   let body: CreateSeasonClubBody;
@@ -352,7 +390,6 @@ async function createSeasonClub(req: HttpRequest, _ctx: InvocationContext): Prom
     throw new HttpError(400, "INVALID_NUM_TEAMS", `numTeams must be between 1 and ${config.maxTeamsInClub}`);
   }
   const club = await readClub(body.clubId.trim());
-  const frequency = await requireFrequency(body.frequencyId);
   const lockPath = `season-clubs/${year}/index.json.lock`;
   await ensurePrivateSentinel(lockPath);
 
@@ -370,12 +407,15 @@ async function createSeasonClub(req: HttpRequest, _ctx: InvocationContext): Prom
       acceptedTsCs: true,
       acceptedTsCsAt: now,
       acceptedTsCsBy: body.acceptedBy?.trim() || caller.email || caller.userId,
-      ...(frequency ? { frequency } : {}),
       createdAt: now,
       updatedAt: now,
       updatedBy: caller.userId,
     };
-    await writePrivateBlob(`season-clubs/${year}/${club.id}.json`, seasonClub);
+    await writePrivateJson(
+      `season-clubs/${year}/${club.id}.json`,
+      SeasonClubSchema,
+      seasonClub,
+    );
     const teams = await writeTeams(year, club, body.numTeams!);
     await upsertIndexEntry(year, toIndexEntry(seasonClub, club.name));
     return { status: 201, jsonBody: { seasonClub, teams } };
@@ -386,6 +426,7 @@ async function updateSeasonClub(req: HttpRequest, _ctx: InvocationContext): Prom
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateSeasonClub", "standard");
   const year = parseYear(req);
   const seasonClubId = req.params["seasonClubId"];
   if (!seasonClubId) throw new HttpError(400, "MISSING_SEASON_CLUB_ID", "Missing season club id");
@@ -401,7 +442,6 @@ async function updateSeasonClub(req: HttpRequest, _ctx: InvocationContext): Prom
   if (body.numTeams !== undefined && (!Number.isInteger(body.numTeams) || body.numTeams < 1 || body.numTeams > config.maxTeamsInClub)) {
     throw new HttpError(400, "INVALID_NUM_TEAMS", `numTeams must be between 1 and ${config.maxTeamsInClub}`);
   }
-  const frequency = await requireFrequency(body.frequencyId);
   const lockPath = `season-clubs/${year}/index.json.lock`;
   await ensurePrivateSentinel(lockPath);
 
@@ -415,14 +455,16 @@ async function updateSeasonClub(req: HttpRequest, _ctx: InvocationContext): Prom
     const updated: SeasonClub = {
       ...existing,
       numTeams: nextNumTeams,
-      ...(body.frequencyId === null ? { frequency: undefined } : frequency ? { frequency } : {}),
       ...(body.acceptedTsCs !== undefined ? { acceptedTsCs: body.acceptedTsCs } : {}),
       updatedAt: new Date().toISOString(),
       updatedBy: caller.userId,
     };
-    if (body.frequencyId === null) delete updated.frequency;
 
-    await writePrivateBlob(`season-clubs/${year}/${existing.clubId}.json`, updated);
+    await writePrivateJson(
+      `season-clubs/${year}/${existing.clubId}.json`,
+      SeasonClubSchema,
+      updated,
+    );
     if (nextNumTeams > existing.numTeams) {
       await writeTeams(year, club, nextNumTeams);
     } else if (nextNumTeams < existing.numTeams) {
@@ -437,6 +479,7 @@ async function deleteSeasonClub(req: HttpRequest, _ctx: InvocationContext): Prom
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "deleteSeasonClub", "standard");
   const year = parseYear(req);
   const seasonClubId = req.params["seasonClubId"];
   if (!seasonClubId) throw new HttpError(400, "MISSING_SEASON_CLUB_ID", "Missing season club id");

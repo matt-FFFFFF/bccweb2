@@ -6,18 +6,32 @@ import {
 } from "@azure/functions";
 import type { Config, Pilot, PilotSnapshot, PilotSlot, Round, RoundSummary, Team } from "@bccweb/types";
 import {
+  ConfigSchema,
+  PilotSchema,
+  RoundSchema,
+  RoundSummarySchema,
+} from "@bccweb/schemas";
+import * as z from "zod/v4";
+import {
   getBlobClient,
   getPrivateBlobClient,
-  readBlob,
-  writePrivateBlob,
   withPrivateLease,
 } from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
-import { HttpError, withErrorHandler } from "../lib/http.js";
+import { HttpError, BlobShapeError, withErrorHandler } from "../lib/http.js";
 import { rateLimit } from "../lib/rateLimit.js";
 import { getLatestSignature } from "../lib/signTofly/ledger.js";
 
+// RegistrationConfig widens ConfigSchema with autoAllocatePilotsToRoundClub —
+// a runtime-only field that the registration flow reads but Config (and
+// ConfigSchema's .strip()) would otherwise drop on read.
+const RegistrationConfigSchema = ConfigSchema.extend({
+  autoAllocatePilotsToRoundClub: z.boolean().optional(),
+}).strip();
 type RegistrationConfig = Config & { autoAllocatePilotsToRoundClub?: boolean };
+
+const RoundSummariesSchema = z.array(RoundSummarySchema);
 
 interface RegisterSelfBody {
   teamId?: unknown;
@@ -85,7 +99,7 @@ async function registerSelf(
 
     const slot = getOrCreateSlot(lockedTeam, place);
     fillSlot(slot, pilot.id, pilotSnapshot);
-    await writePrivateBlob(`rounds/${roundId}.json`, lockedRound, leaseId);
+    await writePrivateJson(`rounds/${roundId}.json`, RoundSchema, lockedRound, leaseId);
   });
 
   return { status: 200, jsonBody: { roundId, teamId: body.teamId, place, pilotSnapshot } };
@@ -141,7 +155,7 @@ async function unregisterSelf(
     }
 
     clearSlot(lockedSlot.slot);
-    await writePrivateBlob(`rounds/${roundId}.json`, lockedRound, leaseId);
+    await writePrivateJson(`rounds/${roundId}.json`, RoundSchema, lockedRound, leaseId);
   });
 
   return {
@@ -176,8 +190,9 @@ async function parseRegisterBody(req: HttpRequest): Promise<{ teamId: string; pr
 }
 
 async function readRound(roundId: string): Promise<Round> {
+  const path = `rounds/${roundId}.json`;
   try {
-    return await readBlob<Round>(getPrivateBlobClient(`rounds/${roundId}.json`));
+    return await readJson(getPrivateBlobClient(path), RoundSchema, path);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
@@ -187,10 +202,17 @@ async function readRound(roundId: string): Promise<Round> {
 }
 
 async function readPilot(pilotId: string): Promise<Pilot> {
+  const path = `pilots/${pilotId}.json`;
   try {
-    return await readBlob<Pilot>(getPrivateBlobClient(`pilots/${pilotId}.json`));
+    return await readJson(getPrivateBlobClient(path), PilotSchema, path);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(422, "PROFILE_INCOMPLETE", "Complete your profile first");
+    }
+    // A pilot blob whose required schema fields are blank/missing is the
+    // observable form of an incomplete profile (e.g. firstName === ""), so
+    // surface the same 422 the runtime check below would have raised.
+    if (err instanceof BlobShapeError) {
       throw new HttpError(422, "PROFILE_INCOMPLETE", "Complete your profile first");
     }
     throw err;
@@ -199,7 +221,11 @@ async function readPilot(pilotId: string): Promise<Pilot> {
 
 async function readConfig(): Promise<RegistrationConfig> {
   try {
-    return await readBlob<RegistrationConfig>(getPrivateBlobClient("config.json"));
+    return await readJson(
+      getPrivateBlobClient("config.json"),
+      RegistrationConfigSchema,
+      "config.json",
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return {
@@ -266,7 +292,7 @@ async function ensurePilotClubForSeason(
         lockedPilot.seasonClubs.push(allocated);
       }
       lockedPilot.currentClub = roundClub;
-      await writePrivateBlob(`pilots/${pilotId}.json`, lockedPilot, leaseId);
+      await writePrivateJson(`pilots/${pilotId}.json`, PilotSchema, lockedPilot, leaseId);
     });
     return allocated;
   }
@@ -286,7 +312,11 @@ function findTeamForPilotClub(round: Round, teamId: string, clubId: string): Tea
 async function ensureNotDoubleBooked(pilotId: string, targetRound: Round): Promise<void> {
   let summaries: RoundSummary[] = [];
   try {
-    summaries = await readBlob<RoundSummary[]>(getBlobClient("rounds.json"));
+    summaries = await readJson(
+      getBlobClient("rounds.json"),
+      RoundSummariesSchema,
+      "rounds.json",
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode !== 404) throw err;
   }
