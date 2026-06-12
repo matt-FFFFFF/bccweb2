@@ -14,7 +14,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import type { HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import type { User } from "@bccweb/types";
-import { afterAll, describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it, vi } from "vitest";
 
 // Ensure the mutating function modules register before we look up handlers
 import "../admin.js";
@@ -123,38 +123,45 @@ describe("Task 11 mutationRateLimit evidence harness", () => {
   });
 
   it("standard tier: 31x PUT updateConfig produces ≥1 429", async () => {
-    resetAllBuckets();
-    const adminId = randomUUID();
-    const email = `admin-${adminId}@example.test`;
-    await seedAdminUser(adminId, email);
-    const token = signAccessToken(adminId, email);
+    vi.useFakeTimers({ shouldAdvanceTime: false });
+    vi.setSystemTime(new Date(0));
 
-    // Seed a valid config so updateConfig succeeds with 200 on the happy path.
-    await writePrivateBlob("config.json", {
-      maxTeamsInClub: 2,
-      maxPilotsInTeam: 12,
-      maxScoringPilotsInTeam: 6,
-      flightDateValidationEnabled: true,
-      wingFactors: {
-        "EN A": 1.0,
-        "EN B": 0.9,
-        "EN C": 0.8,
-        "EN C 2-liner": 0.7,
-        "EN D": 0.6,
-        "EN D 2-liner": 0.5,
-      },
-    });
+    try {
+      resetAllBuckets();
+      const adminId = randomUUID();
+      const email = `admin-${adminId}@example.test`;
+      await seedAdminUser(adminId, email);
+      const token = signAccessToken(adminId, email);
 
-    for (let i = 1; i <= 31; i += 1) {
-      const req = makeReq("PUT", { maxTeamsInClub: 2 }, token);
-      const { status } = await invoke("updateConfig", req);
-      sequenceStandard.push(status);
+      // Seed a valid config so updateConfig succeeds with 200 on the happy path.
+      await writePrivateBlob("config.json", {
+        maxTeamsInClub: 2,
+        maxPilotsInTeam: 12,
+        maxScoringPilotsInTeam: 6,
+        flightDateValidationEnabled: true,
+        wingFactors: {
+          "EN A": 1.0,
+          "EN B": 0.9,
+          "EN C": 0.8,
+          "EN C 2-liner": 0.7,
+          "EN D": 0.6,
+          "EN D 2-liner": 0.5,
+        },
+      });
+
+      for (let i = 1; i <= 31; i += 1) {
+        const req = makeReq("PUT", { maxTeamsInClub: 2 }, token);
+        const { status } = await invoke("updateConfig", req);
+        sequenceStandard.push(status);
+      }
+
+      expect(sequenceStandard.filter((s) => s === 429).length).toBeGreaterThanOrEqual(1);
+      // Sanity: at least one early request must have succeeded (proves the gate
+      // doesn't 429 on the first request).
+      expect(sequenceStandard.slice(0, 30).filter((s) => s === 200).length).toBeGreaterThanOrEqual(1);
+    } finally {
+      vi.useRealTimers();
     }
-
-    expect(sequenceStandard.filter((s) => s === 429).length).toBeGreaterThanOrEqual(1);
-    // Sanity: at least one early request must have succeeded (proves the gate
-    // doesn't 429 on the first request).
-    expect(sequenceStandard.slice(0, 30).filter((s) => s === 200).length).toBeGreaterThanOrEqual(1);
   });
 
   it("heavy tier: 6x POST lockRound produces ≥1 429", async () => {
