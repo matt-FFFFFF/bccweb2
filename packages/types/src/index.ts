@@ -475,6 +475,7 @@ export interface RoundBrief {
   NOTAMs?: string;
   BENO_LineDescription?: string;
   briefersNotes?: string;
+  frequencyMhz?: number;
   briefer?: {
     name?: string;
     bhpaCoachLevel?: string;

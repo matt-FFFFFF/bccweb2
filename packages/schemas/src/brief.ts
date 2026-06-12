@@ -148,6 +148,7 @@ export const BriefSchema = z
     NOTAMs: lenientOptional(z.string()),
     BENO_LineDescription: lenientOptional(z.string()),
     briefersNotes: lenientOptional(z.string()),
+    frequencyMhz: lenientOptional(z.number().positive().lt(1000)),
     briefer: lenientOptional(
       z
         .object({

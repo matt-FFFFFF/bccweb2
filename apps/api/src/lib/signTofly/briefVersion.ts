@@ -13,6 +13,7 @@ export const MATERIAL_BRIEF_FIELDS = [
   "NOTAMs",
   "BENO_LineDescription",
   "briefersNotes",
+  "frequencyMhz",
   "site.parkingW3W",
   "site.briefingW3W",
   "site.takeOffW3W",

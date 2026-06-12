@@ -585,6 +585,12 @@ export default function RoundBrief() {
               </a>
             </div>
           )}
+          {brief.frequencyMhz !== undefined && (
+            <div>
+              <span style={{ fontSize: "0.8rem", color: "#666", fontWeight: 600 }}>Frequency: </span>
+              <span>{brief.frequencyMhz} MHz</span>
+            </div>
+          )}
         </div>
         <div style={{ marginTop: "0.75rem" }}>
           <W3WLink value={brief.parkingW3W} label="Parking" />
