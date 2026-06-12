@@ -145,7 +145,11 @@ export type MutationRateLimitTier = keyof typeof MUTATION_TIERS;
  * 4. Call `mutationRateLimit(req, caller, endpoint, tier)` only after those
  *    checks; exhausted tiers throw HttpError(429, "RATE_LIMITED") with a
  *    Retry-After header.
- * 5. Perform input validation / mutation after the rate-limit gate.
+ * 5. Perform input validation / mutation after the rate-limit gate, except for
+ *    validation needed to determine scope (e.g. reading `body.clubId`) or an
+ *    unavoidable body parse in "slide" handlers. Step 5 refers only to
+ *    validation that is NOT required to determine scope; the firm invariant is
+ *    that a forbidden caller must get 403, never 429.
  *
  * MUST be called AFTER the auth (401) and role/scope (403) checks. A forbidden
  * caller must receive 403, never 429, and must not consume bucket capacity. If
