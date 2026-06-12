@@ -1,8 +1,108 @@
-import { describe, expect, test, beforeEach } from "vitest";
+import { describe, expect, test } from "vitest";
+import { randomUUID } from "crypto";
 import { makeAuthRequest, invoke } from "../../__tests__/helpers/api.js";
 import { makeUser, makePilot, writePrivateJson, readPrivateJson } from "../../__tests__/helpers/seed.js";
-import type { PilotSeasonClub, Pilot } from "@bccweb/types";
+import type { Pilot } from "@bccweb/types";
 import "../pilotSeasonClubs.js"; // register handlers
+
+function randomForwardedFor(): string {
+  return `10.42.${Math.floor(Math.random() * 250) + 1}.${Math.floor(Math.random() * 250) + 1}`;
+}
+
+function authReq(
+  user: { id: string; email: string },
+  options: NonNullable<Parameters<typeof makeAuthRequest>[2]>,
+) {
+  return makeAuthRequest(user.id, user.email, {
+    ...options,
+    headers: {
+      ...options.headers,
+      "x-forwarded-for": randomForwardedFor(),
+    },
+  });
+}
+
+function retryAfterHeader(res: Awaited<ReturnType<typeof invoke>>): string | undefined {
+  const headers = res.headers as Headers | Record<string, string> | undefined;
+  if (!headers) return undefined;
+  if (headers instanceof Headers) return headers.get("Retry-After") ?? undefined;
+  return headers["Retry-After"] ?? headers["retry-after"];
+}
+
+async function writePilotSeasonClubFixture(
+  pilotId: string,
+  seasonYear: number,
+  clubId: string,
+  pilotFixture?: Pilot,
+): Promise<void> {
+  const pilot = pilotFixture
+    ? { ...pilotFixture, id: pilotId }
+    : await makePilot({ id: pilotId });
+  pilot.seasonClubs = [{ seasonYear, clubId, clubName: clubId }];
+  await writePrivateJson(`pilots/${pilotId}.json`, pilot);
+  await writePrivateJson(`season-clubs/${seasonYear}/${clubId}.json`, {
+    id: `sc-${randomUUID()}`,
+    seasonYear,
+    clubId,
+  });
+  await writePrivateJson(`seasons/${seasonYear}/pilot-club-map.json`, { [pilotId]: clubId });
+}
+
+async function exhaustAssignPilotSeasonClubBucket(user: { id: string; email: string }): Promise<void> {
+  const drainPilot = await makePilot({ id: "pilot-rate-assign-drain" });
+  drainPilot.seasonClubs = [{ seasonYear: 2026, clubId: "club-rate-assign-a", clubName: "Club Rate Assign A" }];
+  await writePrivateJson("pilots/pilot-rate-assign-drain.json", drainPilot);
+  await writePrivateJson("clubs/club-rate-assign-a.json", { id: "club-rate-assign-a", name: "Club Rate Assign A" });
+  await writePrivateJson("season-clubs/2026/club-rate-assign-a.json", {
+    id: "sc-rate-assign-a",
+    seasonYear: 2026,
+    clubId: "club-rate-assign-a",
+  });
+
+  let exhausted = false;
+  for (let i = 0; i < 60; i += 1) {
+    const drainRes = await invoke(
+      "assignPilotSeasonClub",
+      authReq(user, {
+        method: "POST",
+        query: { reassign: "true" },
+        body: {
+          pilotId: "pilot-rate-assign-drain",
+          clubId: "club-rate-assign-a",
+          seasonYear: 2026,
+        },
+      }),
+    );
+    if (drainRes.status === 429) {
+      exhausted = true;
+      break;
+    }
+    expect(drainRes.status).toBe(201);
+  }
+  expect(exhausted).toBe(true);
+}
+
+async function exhaustDeletePilotSeasonClubBucket(user: { id: string; email: string }): Promise<void> {
+  const pilotFixture = await makePilot({ id: "pilot-rate-delete-template" });
+  let exhausted = false;
+  for (let i = 0; i < 60; i += 1) {
+    const pilotId = `pilot-rate-delete-drain-${i}`;
+    await writePilotSeasonClubFixture(pilotId, 2026, "club-rate-delete-a", pilotFixture);
+    const drainRes = await invoke(
+      "deletePilotSeasonClub",
+      authReq(user, {
+        method: "DELETE",
+        params: { pilotId, seasonYear: "2026" },
+      }),
+    );
+    if (drainRes.status === 429) {
+      exhausted = true;
+      break;
+    }
+    expect(drainRes.status).toBe(204);
+  }
+  expect(exhausted).toBe(true);
+}
 
 describe("pilotSeasonClubs API", () => {
   test("admin lists assignments -> 200 + array", async () => {
@@ -28,7 +128,7 @@ describe("pilotSeasonClubs API", () => {
 
   test("admin assigns pilot to registered club -> 201; pilot.seasonClubs updated; denorm map updated", async () => {
     const { user } = await makeUser({ roles: ["Admin"] });
-    const pilot = await makePilot({ id: "pilot-1" });
+    await makePilot({ id: "pilot-1" });
     await writePrivateJson("clubs/club-a.json", { id: "club-a", name: "Club A" });
     await writePrivateJson("season-clubs/2026/club-a.json", { id: "sc-a", seasonYear: 2026, clubId: "club-a" });
 
@@ -60,6 +160,26 @@ describe("pilotSeasonClubs API", () => {
     expect(res.status).toBe(409);
     const body = res.jsonBody as any;
     expect(body.code).toBe("CLUB_NOT_REGISTERED_FOR_SEASON");
+  });
+
+  test("assign to unregistered season-club preserves 409 CLUB_NOT_REGISTERED_FOR_SEASON", async () => {
+    const { user } = await makeUser({ roles: ["RoundsCoord"], clubId: "club-unregistered-coord" });
+    await makePilot({ id: "pilot-unregistered-coord" });
+
+    const res = await invoke(
+      "assignPilotSeasonClub",
+      authReq(user, {
+        method: "POST",
+        body: {
+          pilotId: "pilot-unregistered-coord",
+          clubId: "club-unregistered-coord",
+          seasonYear: 2026,
+        },
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code?: string }).code).toBe("CLUB_NOT_REGISTERED_FOR_SEASON");
   });
 
   test("assign duplicate (year, pilot) -> 409", async () => {
@@ -128,6 +248,29 @@ describe("pilotSeasonClubs API", () => {
     expect(res.status).toBe(403);
   });
 
+  test("RoundsCoord reassign from another club returns 403 before exhausted assign rate limit", async () => {
+    const { user } = await makeUser({ roles: ["RoundsCoord"], clubId: "club-rate-assign-a" });
+    await writePilotSeasonClubFixture("pilot-rate-assign-forbidden", 2026, "club-rate-assign-b");
+    await exhaustAssignPilotSeasonClubBucket(user);
+
+    const res = await invoke(
+      "assignPilotSeasonClub",
+      authReq(user, {
+        method: "POST",
+        query: { reassign: "true" },
+        body: {
+          pilotId: "pilot-rate-assign-forbidden",
+          clubId: "club-rate-assign-a",
+          seasonYear: 2026,
+        },
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    expect((res.jsonBody as { code?: string }).code).toBe("FORBIDDEN");
+    expect(retryAfterHeader(res)).toBeUndefined();
+  });
+
   test("DELETE removes from both pilot.seasonClubs and denorm map", async () => {
     const { user } = await makeUser({ roles: ["Admin"] });
     const pilot = await makePilot({ id: "pilot-delete" });
@@ -149,5 +292,23 @@ describe("pilotSeasonClubs API", () => {
     const map = await readPrivateJson<Record<string, string>>("seasons/2026/pilot-club-map.json");
     expect(map!["pilot-delete"]).toBeUndefined();
     expect(map!["pilot-delete-2"]).toBe("club-b");
+  });
+
+  test("RoundsCoord delete from another club returns 403 before exhausted delete rate limit", async () => {
+    const { user } = await makeUser({ roles: ["RoundsCoord"], clubId: "club-rate-delete-a" });
+    await writePilotSeasonClubFixture("pilot-rate-delete-forbidden", 2026, "club-rate-delete-b");
+    await exhaustDeletePilotSeasonClubBucket(user);
+
+    const res = await invoke(
+      "deletePilotSeasonClub",
+      authReq(user, {
+        method: "DELETE",
+        params: { pilotId: "pilot-rate-delete-forbidden", seasonYear: "2026" },
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    expect((res.jsonBody as { code?: string }).code).toBe("FORBIDDEN");
+    expect(retryAfterHeader(res)).toBeUndefined();
   });
 });
