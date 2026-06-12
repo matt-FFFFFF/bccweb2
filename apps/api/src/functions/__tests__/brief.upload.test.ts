@@ -10,6 +10,7 @@ vi.mock("../../lib/auth.js", () => ({
 
 const mockReadBlob = vi.fn();
 const mockUpload = vi.fn();
+const mockWritePrivateJson = vi.fn();
 const mockGetPrivateBlockBlobClient = vi.fn();
 
 vi.mock("../../lib/blob.js", () => ({
@@ -18,6 +19,12 @@ vi.mock("../../lib/blob.js", () => ({
   readBlob: (client: any) => mockReadBlob(client),
   writePrivateBlob: vi.fn(),
   withPrivateLeaseRenewing: async (_path: string, fn: any) => fn("mock-lease"),
+}));
+
+vi.mock("../../lib/blobJson.js", () => ({
+  readJson: (client: string) => mockReadBlob(client),
+  writePrivateJson: (path: string, _schema: unknown, data: unknown, leaseId?: string) =>
+    mockWritePrivateJson(path, data, leaseId),
 }));
 
 import { getCallerIdentity } from "../../lib/auth.js";

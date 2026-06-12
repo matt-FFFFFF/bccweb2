@@ -4,7 +4,6 @@ import type * as z from "zod/v4";
 
 import { readBlob, writeBlob, writePrivateBlob } from "./blob.js";
 import { BlobShapeError } from "./http.js";
-import { getTelemetryClient } from "./telemetry.js";
 
 type CreateOnlyOptions = { ifNoneMatch?: "*" };
 type BlobSchemaMode = "observe" | "enforce";
@@ -110,6 +109,7 @@ export async function readJson<T>(
 
   if (!isJsonDeepEqual(raw, result.data)) {
     const { healedKeys, droppedKeys } = topLevelShapeDiff(raw, result.data);
+    const { getTelemetryClient } = await import("./telemetry.js");
     getTelemetryClient()?.trackEvent({
       name: "blob.healed",
       properties: { path, schema: schemaName, healedKeys, droppedKeys },

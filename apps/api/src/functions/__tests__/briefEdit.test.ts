@@ -19,7 +19,13 @@ vi.mock("../../lib/blob.js", () => ({
   getPrivateBlockBlobClient: (path: string) => mockGetPrivateBlockBlobClient(path),
   readBlob: (client: any) => mockReadBlob(client),
   writePrivateBlob: (path: string, data: any, leaseId: string) => mockWritePrivateBlob(path, data, leaseId),
-  withPrivateLeaseRenewing: async (path: string, fn: any) => fn("mock-lease"),
+  withPrivateLeaseRenewing: async (_path: string, fn: any) => fn("mock-lease"),
+}));
+
+vi.mock("../../lib/blobJson.js", () => ({
+  readJson: (client: string) => mockReadBlob(client),
+  writePrivateJson: (path: string, _schema: unknown, data: unknown, leaseId?: string) =>
+    mockWritePrivateBlob(path, data, leaseId),
 }));
 
 vi.mock("../../lib/signTofly/ledger.js", () => ({
@@ -35,6 +41,7 @@ import { listSignaturesForRound } from "../../lib/signTofly/ledger.js";
 describe("RoundBrief Edit API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetPrivateBlockBlobClient.mockReturnValue({ upload: vi.fn(), deleteIfExists: vi.fn() });
   });
 
   const baseRound = { id: "round-1", organisingClub: { id: "club-1", name: "Club 1" }, status: "Draft", teams: [{ id: "t1", pilots: [{ placeInTeam: 1, signToFly: true }] }] };
