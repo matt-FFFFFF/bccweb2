@@ -42,18 +42,40 @@ async function setTeamCaptain(
   const isAdmin = caller.roles.includes("Admin");
   const isCoord = caller.roles.includes("RoundsCoord");
   if (!isAdmin && !isCoord) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "setTeamCaptain", "standard");
 
   const { id, teamId } = req.params as { id?: string; teamId?: string };
   if (!id || !teamId) {
     throw new HttpError(400, "MISSING_IDS", "Missing round or team id");
   }
 
+  const path = `rounds/${id}.json`;
+
+  // Authorization-only pre-read; the leased read below remains authoritative, so club-reassignment races fail closed at worst.
+  let authRound: Round;
+  try {
+    authRound = await readJson(getPrivateBlobClient(path), RoundSchema, path);
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
+    }
+    throw new HttpError(500, "INTERNAL");
+  }
+
+  if (isCoord && !isAdmin) {
+    if (
+      !caller.clubId ||
+      !authRound.organisingClub?.id ||
+      caller.clubId !== authRound.organisingClub.id
+    ) {
+      throw new HttpError(403, "FORBIDDEN", "Not your round");
+    }
+  }
+
+  await mutationRateLimit(req, caller, "setTeamCaptain", "standard");
+
   const body = (await req.json()) as { pilotId?: string | null };
   // undefined body.pilotId means caller omitted the field → treat as null
   const newCaptainId: string | null = body.pilotId ?? null;
-
-  const path = `rounds/${id}.json`;
 
   const updatedTeam = await withPrivateLease(path, async (leaseId) => {
     let round: Round;
