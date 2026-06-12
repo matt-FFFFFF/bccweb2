@@ -17,8 +17,8 @@ The action group `ag-bccweb-prod-ops` is the single fan-out point. To rotate the
 
 ```bash
 # Update terraform.tfvars (NOT this file) and re-apply:
-terraform -chdir=iac init -backend-config=env/prod.backend.hcl
-terraform -chdir=iac apply -var-file=env/prod.tfvars -target=module.stamp.azapi_resource.ops
+terraform -chdir=iac/service init -backend-config=../env/prod.backend.hcl
+terraform -chdir=iac/service apply -var-file=../env/prod.tfvars -target=module.stamp.azapi_resource.ops
 ```
 
 To add an additional receiver (PagerDuty, OpsGenie, etc.), add a new `*_receiver` block inside the action group resource — never create a second action group, the per-alert `action_group_id` references would diverge.
@@ -88,8 +88,8 @@ The Function App's HTTP 5xx response rate exceeded 1% of total requests over the
 3. If the regression maps to a recent deploy, roll back the Function App package via Azure CLI:
    ```bash
    az functionapp deployment list-publishing-credentials \
-      --name "$(terraform -chdir=iac output -var-file=env/prod.tfvars -raw function_app_name)" \
-      --resource-group "$(terraform -chdir=iac output -var-file=env/prod.tfvars -raw resource_group_name)"
+      --name "$(terraform -chdir=iac/service output -raw function_app_name)" \
+      --resource-group "$(terraform -chdir=iac/service output -raw resource_group_name)"
    # then use the previous WEBSITE_RUN_FROM_PACKAGE URL stored in CI artifacts
    ```
 
@@ -168,8 +168,8 @@ The storage account returned more than 5 transactions tagged `ServerBusyError` (
 1. Confirm the storage account is healthy:
    ```bash
    az storage account show \
-      --name "$(terraform -chdir=iac output -var-file=env/prod.tfvars -raw storage_account_name)" \
-      --resource-group "$(terraform -chdir=iac output -var-file=env/prod.tfvars -raw resource_group_name)" \
+      --name "$(terraform -chdir=iac/service output -raw storage_account_name)" \
+      --resource-group "$(terraform -chdir=iac/service output -raw resource_group_name)" \
      --query "{provisioning: provisioningState, status: statusOfPrimary, sku: sku.name}"
    ```
 
@@ -330,7 +330,7 @@ This is intentional — the alert resource is in place so that the emitter can b
    az storage blob show \
      --container data \
      --name "seasons/<year>.json" \
-      --account-name "$(terraform -chdir=iac output -var-file=env/prod.tfvars -raw storage_account_name)" \
+      --account-name "$(terraform -chdir=iac/service output -raw storage_account_name)" \
      --query "properties.lastModified"
    ```
 
@@ -352,8 +352,8 @@ If stuck after one manual recompute attempt: escalate to project owner and inspe
 2. Add a section to this runbook with the same five subsections (What it means / Likely causes / Immediate response / Page vs investigate-async / Escalation).
 3. Verify the plan:
    ```bash
-    terraform -chdir=iac init -backend-config=env/prod.backend.hcl
-    terraform -chdir=iac plan -var-file=env/prod.tfvars
+    terraform -chdir=iac/service init -backend-config=../env/prod.backend.hcl
+    terraform -chdir=iac/service plan -var-file=../env/prod.tfvars
     ```
 4. Append the chosen metric / KQL query to `.omo/notepads/bccweb2-go-live-gap-closure/learnings.md`.
 
@@ -364,7 +364,7 @@ Use Azure Monitor action rules (suppression) at the subscription level rather th
 ```bash
 az monitor action-rule create \
   --name "maintenance-$(date +%Y%m%d-%H%M)" \
-  --resource-group "$(terraform -chdir=iac output -raw resource_group_name)" \
+  --resource-group "$(terraform -chdir=iac/service output -raw resource_group_name)" \
   --rule-type Suppression \
   --suppression-recurrence-type Once \
   --suppression-start-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \

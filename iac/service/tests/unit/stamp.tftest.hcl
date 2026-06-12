@@ -221,6 +221,7 @@ run "alerts_use_passed_in_app_insights_id" {
       azapi_resource.auth_lockout_spike.body.properties.scopes == [var.app_insights_id] &&
       azapi_resource.lockround_p95_duration.body.properties.scopes == [var.app_insights_id] &&
       azapi_resource.recompute_marker_stale.body.properties.scopes == [var.app_insights_id] &&
+      azapi_resource.blob_heal_storm.body.properties.scopes == [var.app_insights_id] &&
       length(azapi_resource.storage_server_errors.body.properties.scopes) == 1
     )
     error_message = "All scheduled-query alerts and the metric alert should scope to the passed-in App Insights ID sentinel."
@@ -263,6 +264,7 @@ run "no_diagnostic_settings" {
         azapi_resource.auth_lockout_spike.type,
         azapi_resource.lockround_p95_duration.type,
         azapi_resource.recompute_marker_stale.type,
+        azapi_resource.blob_heal_storm.type,
       ] : resource_type
       if strcontains(resource_type, "Microsoft.Insights/diagnosticSettings")
     ]) == 0

@@ -59,6 +59,7 @@ jobs:
           DNS_ZONE_RESOURCE_GROUP_NAME: ${{ vars.DNS_ZONE_RESOURCE_GROUP_NAME }}
           JWT_SECRET_VERSION: ${{ vars.JWT_SECRET_VERSION }}
           ACS_SECRET_VERSION: ${{ vars.ACS_SECRET_VERSION }}
+          BLOB_SCHEMA_MODE: ${{ vars.BLOB_SCHEMA_MODE }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           set -euo pipefail
@@ -78,6 +79,7 @@ jobs:
 
           jwt_secret_version = "${JWT_SECRET_VERSION:-1}"
           acs_secret_version = "${ACS_SECRET_VERSION:-1}"
+          blob_schema_mode   = "${BLOB_SCHEMA_MODE:-observe}"
 
           terraform_principal_type = "ServicePrincipal"
 
