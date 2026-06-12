@@ -1,8 +1,10 @@
 # Inputs for the bccweb2 tfstate bootstrap.
 #
-# Only `tfstate_storage_account_name` has no default — Azure storage account
+# `tfstate_storage_account_name` has no default — Azure storage account
 # names must be globally unique, so the operator must supply one (lowercase,
-# 3–24 chars, letters and digits only).
+# 3–24 chars, letters and digits only). `terraform_umis` has no default —
+# the operator supplies the canonical per-env map via terraform.tfvars
+# (see terraform.tfvars.example).
 
 variable "location" {
   type        = string
@@ -33,13 +35,14 @@ variable "tfstate_container_name" {
   default     = "tfstate"
 }
 
-# ─── Terraform UMI + GitHub OIDC federation ──────────────────────────────────
+# ─── Terraform UMIs + GitHub OIDC federation ─────────────────────────────────
 #
-# The bootstrap provisions a single user-assigned managed identity (UMI) that
-# CI uses to run Terraform. One federated identity credential is created per
-# GitHub environment name in `github_environments`, scoped to
-# `repo:<github_repo>:environment:<env>`. Adding a new env is a one-line
-# variable bump + re-apply.
+# One UMI per environment; each UMI gets Owner on its env's pre-created
+# platform RG and stamp RG (never subscription scope). Each UMI carries one
+# federated identity credential scoped to
+# `repo:<github_repo>:environment:<github_env>`. Adding a new env is a new
+# `terraform_umis` map entry (plus the matching `github_environments` entry)
+# + re-apply.
 
 variable "github_repo" {
   type        = string
@@ -49,8 +52,8 @@ variable "github_repo" {
 
 variable "github_environments" {
   type        = list(string)
-  description = "GitHub environment names that need OIDC federation to the Terraform UMI. One federated credential is created per entry."
-  default     = ["prod"]
+  description = "GitHub environment names that receive the per-env Azure OIDC secrets. Every `terraform_umis` entry's `github_env` must appear in this list."
+  default     = ["dev", "prod"]
 
   validation {
     condition     = alltrue([for e in var.github_environments : can(regex("^[a-z0-9-]+$", e))])
@@ -58,10 +61,24 @@ variable "github_environments" {
   }
 }
 
-variable "terraform_umi_name" {
-  type        = string
-  description = "Name of the user-assigned managed identity that Terraform uses (created in the bootstrap RG)."
-  default     = "id-bccweb-terraform"
+variable "terraform_umis" {
+  type = map(object({
+    platform_rg = string
+    stamp_rg    = string
+    github_env  = string
+  }))
+  description = "Per-environment Terraform UMIs, keyed by env name (e.g. dev, prod). Each entry names the two pre-created RGs the UMI owns (platform + stamp) and the GitHub environment whose OIDC subject the UMI trusts. The UMI is named id-bccweb-terraform-<key>. No default — supply via terraform.tfvars (see terraform.tfvars.example)."
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for k, v in var.terraform_umis : can(regex("^[a-z0-9-]+$", k))])
+    error_message = "Each terraform_umis key must match ^[a-z0-9-]+$ (lowercase letters, digits, hyphens)."
+  }
+
+  validation {
+    condition     = alltrue([for k, v in var.terraform_umis : contains(var.github_environments, v.github_env)])
+    error_message = "Each terraform_umis entry's github_env must be listed in github_environments."
+  }
 }
 
 variable "manage_github_secrets" {

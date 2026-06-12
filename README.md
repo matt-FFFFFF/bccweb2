@@ -117,12 +117,14 @@ Tokens live in `localStorage` (`bcc_access_token`, `bcc_refresh_token`,
 
 ## Deployment
 
-Two GitHub Actions workflows deploy on push to `main`:
+Three GitHub Actions workflows, all authenticating to Azure via **OIDC**
+(per-env managed identities — no static credentials in the repo):
 
-- [`deploy-api.yml`](.github/workflows/deploy-api.yml) — Functions zip-deploy + `/api/health` smoke test
-- [`deploy-web.yml`](.github/workflows/deploy-web.yml) — SWA deploy + root smoke test
+- [`deploy-dev.yml`](.github/workflows/deploy-dev.yml) — every merge to `main` deploys to dev: terraform drift gate, then Functions zip-deploy + SWA deploy with smoke tests
+- [`deploy-prod.yml`](.github/workflows/deploy-prod.yml) — publishing a GitHub release deploys to prod: release-ancestry check (commit must be on `main`), drift gate, then the same deploy jobs
+- [`terraform.yml`](.github/workflows/terraform.yml) — manual plan/apply for any stack (`common`/`service`) × env (`dev`/`prod`); also the drift-reconcile path
 
-Infrastructure is managed by Terraform in [`iac/`](iac/) — see [iac/README.md](iac/README.md) for bootstrap order (separate `iac/bootstrap/` config → root `terraform apply -var-file=env/<env>.tfvars`). Secrets are seeded declaratively via AzAPI data-plane writes (no shell script).
+Infrastructure is managed by Terraform in [`iac/`](iac/) — see [iac/README.md](iac/README.md) for the stack layout (`bootstrap/` → `common/` → `service/`). Secrets are seeded declaratively via AzAPI data-plane writes (no shell script).
 
 There is **no auto-rollback**. A failed smoke test fails the workflow and
 leaves the deploy in place for operator investigation —

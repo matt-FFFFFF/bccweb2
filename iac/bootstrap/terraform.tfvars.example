@@ -1,0 +1,24 @@
+# COMMITTED TEMPLATE. Copy to terraform.tfvars (gitignored) and adjust:
+#   cp iac/bootstrap/terraform.tfvars.example iac/bootstrap/terraform.tfvars
+#
+# `tfstate_storage_account_name` must be globally unique (3–24 chars,
+# lowercase letters and digits). The canonical `terraform_umis` map below is
+# the dev + prod model: one UMI per environment, each owning exactly its
+# env's pre-created platform RG and stamp RG.
+
+tfstate_storage_account_name = "stbccwebtfstate813afe"
+
+github_environments = ["dev", "prod"]
+
+terraform_umis = {
+  dev = {
+    platform_rg = "rg-bccweb-platform-dev"
+    stamp_rg    = "rg-bccweb-dev"
+    github_env  = "dev"
+  }
+  prod = {
+    platform_rg = "rg-bccweb-platform-prod"
+    stamp_rg    = "rg-bccweb-prod"
+    github_env  = "prod"
+  }
+}

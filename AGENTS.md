@@ -204,9 +204,9 @@ in `src/bcc-theme.css`.
 
 ## Infra / Deploy (`iac/`)
 
-Terraform manages: RG, storage, Function App, SWA, ACS, Key Vault.
+Terraform is split into three stacks (see `iac/README.md`): `bootstrap/` (tfstate storage, per-env UMIs/RGs, GitHub OIDC secrets), `common/` (per-env LAW + App Insights + ACS email domain), `service/` (storage, Function App, SWA, ACS, Key Vault — the stamp).
 
-**Bootstrap order (first deploy)**: `terraform -chdir=iac/bootstrap init && terraform -chdir=iac/bootstrap apply` (provisions tfstate storage) → populate `iac/env/<env>.backend.hcl` from bootstrap outputs → `terraform -chdir=iac init -backend-config=env/<env>.backend.hcl` → `terraform -chdir=iac apply -var-file=env/<env>.tfvars`. KV secrets are seeded declaratively via AzAPI data-plane writes; first-apply may 403 on RBAC propagation — re-apply to recover.
+**Bootstrap order (first deploy)**: `terraform -chdir=iac/bootstrap init && terraform -chdir=iac/bootstrap apply` (provisions tfstate storage + per-env identities/RGs/secrets) → `terraform -chdir=iac/common init -backend-config=../env/common-<env>.backend.hcl && terraform -chdir=iac/common apply -var-file=../env/common-<env>.tfvars` → `terraform -chdir=iac/service init -backend-config=../env/<env>.backend.hcl && terraform -chdir=iac/service apply -var-file=../env/<env>.tfvars`. KV secrets are seeded declaratively via AzAPI data-plane writes; first-apply may 403 on RBAC propagation — re-apply to recover.
 
 `jwt-secret` is generated declaratively (ephemeral `random_password` → KV write-only) and rotated via the `jwt_secret_version` per-stamp variable.
 

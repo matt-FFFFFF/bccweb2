@@ -1,13 +1,18 @@
 # iac/bootstrap — Terraform remote state bootstrap
 
 One-shot Terraform config that provisions the Azure resources backing the
-**remote state** for the root `iac/` configuration:
+**remote state** and the **CI identities** for the `iac/common/` and
+`iac/service/` stacks:
 
 - Bootstrap resource group
 - Storage account (StorageV2 + LRS, public blob access disabled, TLS 1.2)
 - Blob service with 30-day soft-delete + container soft-delete
 - `tfstate` blob container (private)
 - `CanNotDelete` management lock on the storage account
+- **Per-environment resource groups** (platform + stamp per env) consumed by
+  the common and service stacks by interpolated name/ID
+- **Per-environment Terraform UMIs** with RG-scoped Owner, GitHub OIDC
+  federation, and per-env GitHub Actions secrets
 
 Everything is provisioned via **AzAPI v2.10** with HCL-native bodies (no
 JSON-encoded body strings). This config uses **local state** intentionally; see
@@ -23,9 +28,11 @@ JSON-encoded body strings). This config uses **local state** intentionally; see
   different storage account. The AzAPI resources are idempotent on identical
   bodies — re-applying with the same variables is a no-op.
 
-You do **not** re-run this for new stamps/environments. One bootstrap storage
-account hosts a tfstate blob per environment (`prod.tfstate`, `staging.tfstate`,
-etc.).
+You **do** re-run this when adding a new environment: add a `terraform_umis`
+entry (and the matching `github_environments` name) and re-apply to provision
+the env's UMI, its two RGs, and its GitHub secrets. One bootstrap storage
+account hosts a tfstate blob per stack × environment (`prod.tfstate`,
+`common-prod.tfstate`, `dev.tfstate`, `common-dev.tfstate`, etc.).
 
 ## Prerequisites
 
@@ -52,13 +59,15 @@ terraform -chdir=iac/bootstrap init -backend=false
 # 2. Validate.
 terraform -chdir=iac/bootstrap validate
 
-# 3. Apply. Supply the unique storage account name; other variables have
-#    sensible defaults (location=uksouth, bootstrap_rg_name=rg-bccweb-tfstate,
-#    tfstate_container_name=tfstate).
-terraform -chdir=iac/bootstrap apply \
-  -var 'tfstate_storage_account_name=stbccwebtfstate0001'
+# 3. Prepare tfvars. `tfstate_storage_account_name` and `terraform_umis`
+#    have no defaults; copy the committed template and adjust.
+cp iac/bootstrap/terraform.tfvars.example iac/bootstrap/terraform.tfvars
 
-# 4. Capture the backend config snippet for the root config.
+# 4. Apply. Other variables have sensible defaults (location=uksouth,
+#    bootstrap_rg_name=rg-bccweb-tfstate, tfstate_container_name=tfstate).
+terraform -chdir=iac/bootstrap apply
+
+# 5. Capture the backend config snippet for the downstream stacks.
 terraform -chdir=iac/bootstrap output -raw backend_config_hcl
 ```
 
@@ -73,14 +82,18 @@ terraform -chdir=iac/bootstrap output -raw backend_config_hcl \
   | sed "s/<env>/prod/g" > iac/env/prod.backend.hcl
 ```
 
-Then initialise the root config against the remote backend:
+Each stack × env pairing gets its own backend file with a distinct `key`:
+`iac/env/<env>.backend.hcl` (service stack, `key = "<env>.tfstate"`) and
+`iac/env/common-<env>.backend.hcl` (common stack, `key =
+"common-<env>.tfstate"`). Then initialise a stack against its backend:
 
 ```sh
-terraform -chdir=iac init -backend-config=env/prod.backend.hcl
+terraform -chdir=iac/service init -backend-config=../env/prod.backend.hcl
+terraform -chdir=iac/common init -backend-config=../env/common-prod.backend.hcl
 ```
 
-The root config sets `backend "azurerm" {}` (empty); all of its config is
-supplied at `init` time from this file.
+Both stacks set `backend "azurerm" {}` (empty); all of their config is
+supplied at `init` time from these files.
 
 ## Outputs
 
@@ -90,45 +103,64 @@ supplied at `init` time from this file.
 | `storage_account_name` | Name of the storage account hosting tfstate blobs. |
 | `container_name` | Name of the tfstate blob container. |
 | `backend_config_hcl` | Copy-pasteable HCL for `iac/env/<env>.backend.hcl`. |
-| `terraform_umi_client_id` | App (client) ID of the Terraform UMI. Pass as `AZURE_CLIENT_ID` to `azure/login@v2`. Not a secret — OIDC binds it to the federated subject. |
-| `terraform_umi_principal_id` | Object (principal) ID of the Terraform UMI. For downstream RBAC. |
-| `terraform_umi_resource_id` | Full Azure resource ID of the Terraform UMI. |
+| `terraform_umi_client_ids` | Map env → app (client) ID of that env's Terraform UMI. Pass as `AZURE_CLIENT_ID` to `azure/login@v3`. Not secrets — OIDC binds each to its federated subject. |
+| `terraform_umi_principal_ids` | Map env → object (principal) ID of that env's Terraform UMI. For downstream RBAC. |
+| `terraform_umi_resource_ids` | Map env → full Azure resource ID of that env's Terraform UMI. |
+| `pre_created_rg_names` | Map `platform-<env>`/`stamp-<env>` → RG name consumed by the common/service stacks. |
+| `pre_created_rg_ids` | Map `platform-<env>`/`stamp-<env>` → RG Azure resource ID. |
 | `tenant_id` | Azure AD tenant ID. Pass as `AZURE_TENANT_ID`. |
-| `subscription_id` | Azure subscription ID (also the scope of the UMI's Owner role assignment). Pass as `AZURE_SUBSCRIPTION_ID`. |
+| `subscription_id` | Azure subscription ID. Pass as `AZURE_SUBSCRIPTION_ID`. |
 | `github_actions_setup` | Operator runbook (multi-line). Run `terraform -chdir=iac/bootstrap output -raw github_actions_setup` to print. |
 | `github_environments_created` | List of GitHub environment names Terraform created/adopted (empty when `manage_github_secrets = false`). |
 
 ## GitHub Actions OIDC setup
 
-The bootstrap also provisions a **single user-assigned managed identity (UMI)**
-that GitHub Actions assumes via OIDC — no client secrets stored anywhere. One
-federated identity credential is created per GitHub environment listed in
-`var.github_environments` (default `["prod"]`), scoped to
-`repo:<github_repo>:environment:<env>`.
+The bootstrap provisions **one user-assigned managed identity (UMI) per
+environment** (`id-bccweb-terraform-dev`, `id-bccweb-terraform-prod`) that
+GitHub Actions assumes via OIDC — no client secrets stored anywhere. Each UMI
+carries exactly one federated identity credential, scoped to
+`repo:<github_repo>:environment:<github_env>` per its `terraform_umis` entry.
 
-**Security note**: The UMI is granted **Owner at subscription scope** (not
-just at the bootstrap RG) because Terraform must create per-stamp resource
-groups, role assignments, and Key Vault data-plane permissions across the
-subscription. Restrict who can edit `github_environments` and `github_repo` —
-adding a value here grants that GitHub environment subscription-Owner via
-OIDC. If you ever need tighter scoping, split into per-env UMIs and narrow
-each one's role assignment.
+**Security note**: Each UMI is granted **RG-scoped Owner** on exactly the two
+pre-created resource groups for its environment — never at subscription
+scope:
+
+- `id-bccweb-terraform-dev` → Owner on `rg-bccweb-platform-dev` + `rg-bccweb-dev`
+- `id-bccweb-terraform-prod` → Owner on `rg-bccweb-platform-prod` + `rg-bccweb-prod`
+
+plus **Storage Blob Data Contributor** on the tfstate storage account (the
+azurerm backend uses Azure AD auth). A compromised dev pipeline therefore
+cannot touch prod resources and vice versa. Restrict who can edit
+`terraform_umis` and `github_repo` — adding an entry grants that GitHub
+environment Owner over its named RGs via OIDC.
 
 ### Adding a new GitHub environment
 
-```sh
-# Option A: bump terraform.tfvars (preferred — checked in).
-echo 'github_environments = ["prod", "dev"]' >> iac/bootstrap/terraform.tfvars
+Add a `terraform_umis` entry and the matching `github_environments` name in
+`iac/bootstrap/terraform.tfvars`, then re-apply:
 
-# Option B: one-off override.
-terraform -chdir=iac/bootstrap apply \
-  -var 'github_environments=["prod","dev"]' \
-  -var 'tfstate_storage_account_name=<existing-name>'
+```hcl
+# iac/bootstrap/terraform.tfvars
+github_environments = ["dev", "prod", "staging"]
+
+terraform_umis = {
+  # ... existing dev + prod entries ...
+  staging = {
+    platform_rg = "rg-bccweb-platform-staging"
+    stamp_rg    = "rg-bccweb-staging"
+    github_env  = "staging"
+  }
+}
 ```
 
-Then create a matching GitHub environment (Settings → Environments → New
-environment) with the same name. The federated subject claim is
-`repo:<owner/repo>:environment:<name>`, so the names must match exactly
+```sh
+terraform -chdir=iac/bootstrap apply
+```
+
+The apply creates the env's UMI, federated credential, two RGs, role
+assignments, GitHub environment, and secrets in one shot. The federated
+subject claim is `repo:<owner/repo>:environment:<name>`, so the
+`github_env` value and the GitHub environment name must match exactly
 (case-sensitive).
 
 ### Populate GitHub secrets
@@ -144,13 +176,14 @@ apply` completes, verify in the GitHub UI at:
 https://github.com/<owner/repo>/settings/environments/<env>
 ```
 
-Each environment receives the following secrets:
+Each environment receives the following secrets — note `AZURE_CLIENT_ID`
+**differs per environment** (each env trusts only its own UMI):
 
-| Secret | Source |
-|---|---|
-| `AZURE_CLIENT_ID` | `azapi_resource.tf_umi.output.properties.clientId` |
-| `AZURE_TENANT_ID` | `data.azapi_client_config.current.tenant_id` |
-| `AZURE_SUBSCRIPTION_ID` | `data.azapi_client_config.current.subscription_id` |
+| Secret | Source | Per-env? |
+|---|---|---|
+| `AZURE_CLIENT_ID` | `azapi_resource.tf_umi["<env>"].output.properties.clientId` | **Yes — different value per env** |
+| `AZURE_TENANT_ID` | `data.azapi_client_config.current.tenant_id` | No (shared) |
+| `AZURE_SUBSCRIPTION_ID` | `data.azapi_client_config.current.subscription_id` | No (shared) |
 
 None of these are real secrets — `clientId` is bound to the federated
 subject by OIDC (so even disclosed it cannot be used outside the
@@ -181,25 +214,23 @@ Or pass `-var 'manage_github_secrets=false'` on the command line. With this
 flag, neither `github_repository_environment` nor
 `github_actions_environment_secret` is created — the `for_each` evaluates to
 an empty set/map and the github provider is never invoked. You still get the
-UMI + federated credentials + subscription-Owner grant; just print the three
+UMIs + federated credentials + RG-scoped Owner grants; just print the
 identifiers from the outputs and paste them manually:
 
 ```sh
-terraform -chdir=iac/bootstrap output -raw terraform_umi_client_id
+terraform -chdir=iac/bootstrap output -json terraform_umi_client_ids
 terraform -chdir=iac/bootstrap output -raw tenant_id
 terraform -chdir=iac/bootstrap output -raw subscription_id
 ```
 
-Add them as **repo-level** secrets (or environment-level if you prefer):
+Add them as **environment-level** secrets (repo-level cannot work — each
+environment needs its own clientId):
 
 | Secret | Value |
 |---|---|
-| `AZURE_CLIENT_ID` | `terraform_umi_client_id` output |
+| `AZURE_CLIENT_ID` | `terraform_umi_client_ids["<env>"]` output (per env) |
 | `AZURE_TENANT_ID` | `tenant_id` output |
 | `AZURE_SUBSCRIPTION_ID` | `subscription_id` output |
-
-Repo-level is fine when every environment shares the same UMI (current
-design). Use environment-level if you split into per-env UMIs later.
 
 ### Workflow requirements
 
@@ -215,7 +246,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: prod   # must match a federated env name
     steps:
-      - uses: azure/login@v2
+      - uses: azure/login@v3
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -224,7 +255,9 @@ jobs:
 
 Without `environment: <name>`, GitHub issues an OIDC token whose `sub` claim
 is `repo:<owner/repo>:ref:refs/heads/<branch>` (or similar), which no
-federated credential here trusts — `azure/login` will fail with a 400.
+federated credential here trusts — `azure/login` will fail with a 400. The
+`environment` also selects which env-scoped `AZURE_CLIENT_ID` the job reads,
+binding the job to that env's UMI and its RG-scoped permissions.
 
 Print the full operator runbook (including the resolved client-id, tenant-id,
 subscription-id, and the list of currently-federated environments):
@@ -259,4 +292,9 @@ Local state for the bootstrap is the standard pattern:
 
 - No AzureRM provider resources or data sources are used. AzAPI only.
 - No JSON-encoded bodies — all HCL-native objects.
-- No `for_each` / `count` on bootstrap resources — single-instance only.
+- The tfstate storage resources (RG, SA, blob service, container, lock) are
+  single-instance — no `for_each` / `count`. Per-env fan-out (`for_each`) is
+  deliberate and limited to UMIs, federated credentials, pre-created RGs,
+  and role assignments keyed by `terraform_umis`.
+- No subscription-scoped role assignments — RG-scoped Owner plus
+  storage-account-scoped Blob Data Contributor only.

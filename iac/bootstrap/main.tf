@@ -6,6 +6,10 @@
 #   * Blob service with 30-day soft-delete
 #   * `tfstate` blob container (private)
 #   * CanNotDelete management lock on the storage account
+#   * Per-environment RGs (platform + stamp) consumed by the common and
+#     service stacks by interpolated name/ID
+#   * Per-environment Terraform UMIs with RG-scoped Owner + GitHub OIDC
+#     federation + per-env GitHub Actions secrets
 #
 # Local state is intentional — this config provisions its own remote-state
 # target, so it cannot itself live in that target. Re-running is safe; AzAPI
@@ -18,10 +22,6 @@ terraform {
     azapi = {
       source  = "Azure/azapi"
       version = "~> 2.10"
-    }
-    random = {
-      source  = "hashicorp/random"
-      version = "~> 3.6"
     }
     github = {
       source  = "integrations/github"
@@ -149,18 +149,53 @@ resource "azapi_resource" "tfstate_sa_lock" {
   depends_on = [azapi_resource.tfstate_sa]
 }
 
-# ─── Terraform UMI + GitHub OIDC federated credentials ───────────────────────
+# ─── Pre-created resource groups ─────────────────────────────────────────────
 #
-# Single user-assigned managed identity that GitHub Actions assumes via OIDC
-# (no client secrets stored anywhere). One federated credential per GitHub
-# environment in `var.github_environments`, scoped to
-# `repo:<owner/repo>:environment:<env>`. The UMI is granted Owner at
-# subscription scope (sub-scope, not RG) so a single identity can manage the
-# bootstrap RG + every per-stamp RG the root config creates.
+# Bootstrap owns every environment RG so the downstream common + service
+# stacks never need RG-create rights — they reference these by interpolated name/ID.
+# Two RGs per env: the platform RG (observability home, common stack) and the
+# stamp RG (service stack).
+
+locals {
+  pre_created_rgs = merge([
+    for env, cfg in var.terraform_umis : {
+      "platform-${env}" = cfg.platform_rg
+      "stamp-${env}"    = cfg.stamp_rg
+    }
+  ]...)
+}
+
+resource "azapi_resource" "pre_created_rg" {
+  for_each = local.pre_created_rgs
+
+  type     = "Microsoft.Resources/resourceGroups@2020-06-01"
+  name     = each.value
+  location = var.location
+
+  body = {
+    tags = {
+      project     = "bccweb"
+      environment = split("-", each.key)[1]
+      managed_by  = "terraform"
+    }
+  }
+
+  response_export_values = ["id", "name"]
+}
+
+# ─── Terraform UMIs + GitHub OIDC federated credentials ──────────────────────
+#
+# One user-assigned managed identity per environment that GitHub Actions
+# assumes via OIDC (no client secrets stored anywhere). Each UMI carries one
+# federated credential scoped to `repo:<owner/repo>:environment:<github_env>`
+# and is granted Owner ONLY on its env's two pre-created RGs — never at
+# subscription scope.
 
 resource "azapi_resource" "tf_umi" {
+  for_each = var.terraform_umis
+
   type      = "Microsoft.ManagedIdentity/userAssignedIdentities@2023-01-31"
-  name      = var.terraform_umi_name
+  name      = "id-bccweb-terraform-${each.key}"
   parent_id = azapi_resource.bootstrap_rg.id
   location  = var.location
 
@@ -170,34 +205,66 @@ resource "azapi_resource" "tf_umi" {
 }
 
 resource "azapi_resource" "tf_umi_fed_cred" {
-  for_each = toset(var.github_environments)
+  for_each = var.terraform_umis
 
   type      = "Microsoft.ManagedIdentity/userAssignedIdentities/federatedIdentityCredentials@2023-01-31"
-  name      = "github-${each.key}"
-  parent_id = azapi_resource.tf_umi.id
+  name      = "github-${each.value.github_env}"
+  parent_id = azapi_resource.tf_umi[each.key].id
 
   body = {
     properties = {
       issuer    = "https://token.actions.githubusercontent.com"
-      subject   = "repo:${var.github_repo}:environment:${each.key}"
+      subject   = "repo:${var.github_repo}:environment:${each.value.github_env}"
       audiences = ["api://AzureADTokenExchange"]
     }
   }
 }
 
-resource "random_uuid" "tf_owner" {}
+# One Owner assignment per (UMI, RG) pair — 2 RGs per env. Role-assignment
+# names must be GUIDs; uuidv5 derives a stable one from the pair key so
+# re-applies are no-ops (no random provider state involved).
+locals {
+  umi_rg_owner_pairs = merge([
+    for env, cfg in var.terraform_umis : {
+      "${env}-platform" = { env = env, rg_key = "platform-${env}" }
+      "${env}-stamp"    = { env = env, rg_key = "stamp-${env}" }
+    }
+  ]...)
+}
 
 # Owner role definition GUID is a well-known constant — see
 # https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#owner
 resource "azapi_resource" "tf_owner_role" {
+  for_each = local.umi_rg_owner_pairs
+
   type      = "Microsoft.Authorization/roleAssignments@2022-04-01"
-  name      = random_uuid.tf_owner.result
-  parent_id = "/subscriptions/${data.azapi_client_config.current.subscription_id}"
+  name      = uuidv5("url", "bccweb-tf-owner-${each.key}-${azapi_resource.pre_created_rg[each.value.rg_key].id}")
+  parent_id = azapi_resource.pre_created_rg[each.value.rg_key].id
 
   body = {
     properties = {
       roleDefinitionId = "/subscriptions/${data.azapi_client_config.current.subscription_id}/providers/Microsoft.Authorization/roleDefinitions/8e3af657-a8ff-443c-a75c-2fe8c4bcb635"
-      principalId      = azapi_resource.tf_umi.output.properties.principalId
+      principalId      = azapi_resource.tf_umi[each.value.env].output.properties.principalId
+      principalType    = "ServicePrincipal"
+    }
+  }
+}
+
+# Each UMI also needs data-plane access to the tfstate blobs (the azurerm
+# backend uses Azure AD auth — `use_azuread_auth = true`). Storage Blob Data
+# Contributor GUID is a well-known constant — see
+# https://learn.microsoft.com/en-us/azure/role-based-access-control/built-in-roles#storage-blob-data-contributor
+resource "azapi_resource" "tf_tfstate_blob_role" {
+  for_each = var.terraform_umis
+
+  type      = "Microsoft.Authorization/roleAssignments@2022-04-01"
+  name      = uuidv5("url", "bccweb-tf-tfstate-blob-${each.key}-${azapi_resource.tfstate_sa.id}")
+  parent_id = azapi_resource.tfstate_sa.id
+
+  body = {
+    properties = {
+      roleDefinitionId = "/subscriptions/${data.azapi_client_config.current.subscription_id}/providers/Microsoft.Authorization/roleDefinitions/ba92f5b4-2d11-453d-a403-e96b0029c9fe"
+      principalId      = azapi_resource.tf_umi[each.key].output.properties.principalId
       principalType    = "ServicePrincipal"
     }
   }
@@ -226,6 +293,14 @@ locals {
     for pair in setproduct(var.github_environments, ["AZURE_CLIENT_ID", "AZURE_TENANT_ID", "AZURE_SUBSCRIPTION_ID"]) :
     "${pair[0]}/${pair[1]}" => { env = pair[0], name = pair[1] }
   }
+
+  # GitHub env name → that env's UMI clientId. Every github_environments
+  # entry must have a matching terraform_umis entry (indexing fails loudly at
+  # plan time otherwise — a deliberate configuration guard).
+  env_client_ids = {
+    for k, cfg in var.terraform_umis :
+    cfg.github_env => azapi_resource.tf_umi[k].output.properties.clientId
+  }
 }
 
 resource "github_repository_environment" "envs" {
@@ -251,13 +326,13 @@ resource "github_actions_environment_secret" "azure" {
   # values themselves are not real secrets — clientId/tenantId/subscriptionId
   # are public identifiers (OIDC binds clientId to the federated subject).
   plaintext_value = (
-    each.value.name == "AZURE_CLIENT_ID" ? azapi_resource.tf_umi.output.properties.clientId :
+    each.value.name == "AZURE_CLIENT_ID" ? local.env_client_ids[each.value.env] :
     each.value.name == "AZURE_TENANT_ID" ? data.azapi_client_config.current.tenant_id :
     each.value.name == "AZURE_SUBSCRIPTION_ID" ? data.azapi_client_config.current.subscription_id :
     "" # unreachable — local.env_secrets only constructs the three names above
   )
 
-  # Defensive: ensure the subscription-Owner grant lands first so that the
-  # UMI is fully usable the moment CI reads these secrets.
-  depends_on = [azapi_resource.tf_owner_role]
+  # Defensive: ensure the RG-scoped Owner + tfstate blob grants land first so
+  # that each UMI is fully usable the moment CI reads these secrets.
+  depends_on = [azapi_resource.tf_owner_role, azapi_resource.tf_tfstate_blob_role]
 }
