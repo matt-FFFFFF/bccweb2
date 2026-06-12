@@ -106,6 +106,14 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # scripts/migrate is a standalone package (own lockfile) outside the root
+      # npm workspaces, so root `npm ci` does not install it. The API migration
+      # unit tests dynamically import scripts/migrate/migrate.mjs, which imports
+      # `mssql` — install those deps here or the tests fail with ERR_MODULE_NOT_FOUND.
+      - name: Install migration script dependencies
+        run: npm ci
+        working-directory: scripts/migrate
+
       # Built dist/ is required: API tests resolve @bccweb/* from dist/.
       - name: Build all packages
         run: make build
