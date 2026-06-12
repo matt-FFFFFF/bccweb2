@@ -195,13 +195,6 @@ export interface PilotSeasonClub {
   clubName: string;
 }
 
-export interface Frequency {
-  id: string;
-  label: string;
-  position: number;
-  legacyId?: number;
-}
-
 export interface SeasonClub {
   id: string;
   seasonYear: number;
@@ -210,7 +203,6 @@ export interface SeasonClub {
   acceptedTsCs: boolean;
   acceptedTsCsAt?: string;
   acceptedTsCsBy?: string;
-  frequency?: Frequency;
   createdAt?: string;
   updatedAt?: string;
   updatedBy?: string;

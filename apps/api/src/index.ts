@@ -40,7 +40,6 @@ import "./functions/roundRegistration.js";
 import "./functions/clubTeams.js";
 import "./functions/seasonClubs.js";
 import "./functions/pilotSeasonClubs.js";
-import "./functions/frequencies.js";
 
 // Phase 6 — Captain management
 import "./functions/teamsCaptain.js";

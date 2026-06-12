@@ -120,7 +120,7 @@ function file is dead unless added to `src/index.ts`.**
 Current function modules: `health`, `me`, `authFunctions`, `rounds`, `roundsMutate`,
 `seasons`, `pilots`, `clubs`, `sites`, `teams`, `flights`, `admin`, `adminWording`,
 `brief`, `puretrack`, `signatures`, `roundRegistration`, `clubTeams`, `seasonClubs`,
-`pilotSeasonClubs`, `frequencies`, `teamsCaptain`.
+`pilotSeasonClubs`, `teamsCaptain`.
 
 Lib helpers: `blob` (storage + lease), `auth` + `authHelpers` (HS256 JWT),
 `email` (ACS), `http`, `pdf` (puppeteer-core + @sparticuz/chromium),

@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 
-import { FrequencySchema, SeasonClubSchema } from "../seasonClub.js";
+import { SeasonClubSchema } from "../seasonClub.js";
 
 const validSeasonClub = {
   id: "season-club-2026-club-1",
@@ -10,27 +10,10 @@ const validSeasonClub = {
   acceptedTsCs: true,
   acceptedTsCsAt: "2026-06-11T00:00:00.000Z",
   acceptedTsCsBy: "admin@example.com",
-  frequency: {
-    id: "freq-a",
-    label: "A",
-    position: 1,
-  },
   createdAt: "2026-06-11T00:00:00.000Z",
   updatedAt: "2026-06-11T00:00:00.000Z",
   updatedBy: "user-1",
 } as const;
-
-describe("FrequencySchema", () => {
-  test("round-trips a valid Frequency", () => {
-    expect(FrequencySchema.parse(validSeasonClub.frequency)).toEqual(validSeasonClub.frequency);
-  });
-
-  test("preserves legacyId", () => {
-    const frequency = { ...validSeasonClub.frequency, legacyId: 12 };
-
-    expect(FrequencySchema.parse(frequency)).toEqual(frequency);
-  });
-});
 
 describe("SeasonClubSchema", () => {
   test("round-trips a valid SeasonClub", () => {
@@ -53,26 +36,16 @@ describe("SeasonClubSchema", () => {
     }
   });
 
-  test("preserves current frequency field without id until Wave 7 removes it", () => {
+  test("strips unknown SeasonClub keys (including legacy frequency)", () => {
     const parsed = SeasonClubSchema.parse({
       ...validSeasonClub,
-      frequency: { label: "A", position: 1 },
+      obsolete: true,
+      frequency: { id: "freq-a", label: "A", position: 1 },
     });
-
-    expect(parsed.frequency).toEqual({ id: "", label: "A", position: 1 });
-  });
-
-  test("accepts SeasonClub without optional frequency", () => {
-    const { frequency: _frequency, ...withoutFrequency } = validSeasonClub;
-
-    expect(SeasonClubSchema.parse(withoutFrequency)).toEqual(withoutFrequency);
-  });
-
-  test("strips unknown SeasonClub keys", () => {
-    const parsed = SeasonClubSchema.parse({ ...validSeasonClub, obsolete: true });
 
     expect(parsed).toEqual(validSeasonClub);
     expect(parsed).not.toHaveProperty("obsolete");
+    expect(parsed).not.toHaveProperty("frequency");
   });
 
   test("preserves optional legacyId", () => {

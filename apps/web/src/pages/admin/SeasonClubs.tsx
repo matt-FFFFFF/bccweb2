@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import type { ClubSummary, Frequency, SeasonClub } from "@bccweb/types";
+import { useParams } from "react-router-dom";
+import type { ClubSummary, SeasonClub } from "@bccweb/types";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
 import { useAuth } from "../../hooks/useAuth.js";
 import { useBlob } from "../../hooks/useBlob.js";
@@ -52,7 +52,6 @@ export default function SeasonClubs() {
   const { identity, loading: authLoading } = useAuth();
   const { data: clubs, loading: clubsLoading } = useBlob<ClubSummary[]>("clubs.json");
   const [seasonClubs, setSeasonClubs] = useState<SeasonClubRow[]>([]);
-  const [frequencies, setFrequencies] = useState<Frequency[]>([]);
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
   const [msgOk, setMsgOk] = useState(false);
@@ -60,7 +59,6 @@ export default function SeasonClubs() {
   const [busy, setBusy] = useState(false);
   const [clubId, setClubId] = useState("");
   const [numTeams, setNumTeams] = useState(1);
-  const [frequencyId, setFrequencyId] = useState("");
   const [accepted, setAccepted] = useState(false);
 
   const clubNameById = useMemo(() => new Map((clubs ?? []).map((club) => [club.id, club.name])), [clubs]);
@@ -71,12 +69,8 @@ export default function SeasonClubs() {
     if (!Number.isInteger(seasonYear)) return;
     setLoading(true);
     try {
-      const [seasonClubRows, frequencyRows] = await Promise.all([
-        api.get<SeasonClub[]>(`manage/seasons/${seasonYear}/clubs`),
-        isAdmin ? api.get<Frequency[]>("manage/frequencies") : Promise.resolve([]),
-      ]);
+      const seasonClubRows = await api.get<SeasonClub[]>(`manage/seasons/${seasonYear}/clubs`);
       setSeasonClubs(seasonClubRows.map((row) => ({ ...row, clubName: clubNameById.get(row.clubId) })));
-      setFrequencies(frequencyRows);
     } catch (ex) {
       setMsg(ex instanceof Error ? ex.message : "Failed to load season clubs");
       setMsgOk(false);
@@ -97,7 +91,6 @@ export default function SeasonClubs() {
       await api.post<RegisterResult>(`manage/seasons/${seasonYear}/clubs`, {
         clubId,
         numTeams,
-        frequencyId: frequencyId || undefined,
         acceptTsCs: accepted,
         acceptedBy: identity?.email ?? identity?.userId,
       });
@@ -106,7 +99,6 @@ export default function SeasonClubs() {
       setShowRegister(false);
       setClubId("");
       setNumTeams(1);
-      setFrequencyId("");
       setAccepted(false);
       await load();
     } catch (ex) {
@@ -120,13 +112,11 @@ export default function SeasonClubs() {
   async function update(row: SeasonClubRow) {
     const nextTeamsRaw = window.prompt("Number of teams", String(row.numTeams));
     if (!nextTeamsRaw) return;
-    const nextFrequency = window.prompt("Frequency id (blank for none)", row.frequency?.id ?? "");
     setBusy(true);
     setMsg(null);
     try {
       await api.put<SeasonClub>(`manage/seasons/${seasonYear}/clubs/${row.id}`, {
         numTeams: Number.parseInt(nextTeamsRaw, 10),
-        frequencyId: nextFrequency?.trim() || null,
       });
       setMsg("Season club updated.");
       setMsgOk(true);
@@ -168,7 +158,6 @@ export default function SeasonClubs() {
           <p style={{ margin: "0.35rem 0 0", color: "#6c757d" }}>Annual club registration, team allocation and T&C acceptance.</p>
         </div>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-          <Link to="/admin/frequencies" style={{ ...btnStyle("#223", "#e9ecef"), textDecoration: "none" }}>Frequencies</Link>
           {isAdmin && <button onClick={() => setShowRegister(true)} style={btnStyle("#fff", "#0a6640")}>Register Club</button>}
         </div>
       </div>
@@ -184,10 +173,6 @@ export default function SeasonClubs() {
           </select>
           <select value={numTeams} onChange={(e) => setNumTeams(Number.parseInt(e.target.value, 10))} style={inputStyle}>
             {Array.from({ length: 8 }, (_, i) => i + 1).map((n) => <option key={n} value={n}>{n} team{n === 1 ? "" : "s"}</option>)}
-          </select>
-          <select value={frequencyId} onChange={(e) => setFrequencyId(e.target.value)} style={inputStyle}>
-            <option value="">No frequency assigned</option>
-            {frequencies.map((frequency) => <option key={frequency.id} value={frequency.id}>{frequency.label}</option>)}
           </select>
           <label style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
             <input type="checkbox" checked={accepted} onChange={(e) => setAccepted(e.target.checked)} />
@@ -208,7 +193,6 @@ export default function SeasonClubs() {
               <th style={{ textAlign: "left", padding: "0.7rem" }}>Teams</th>
               <th style={{ textAlign: "left", padding: "0.7rem" }}>Accepted by</th>
               <th style={{ textAlign: "left", padding: "0.7rem" }}>Accepted at</th>
-              <th style={{ textAlign: "left", padding: "0.7rem" }}>Frequency</th>
               {isAdmin && <th style={{ textAlign: "right", padding: "0.7rem" }}>Actions</th>}
             </tr>
           </thead>
@@ -219,7 +203,6 @@ export default function SeasonClubs() {
                 <td style={{ padding: "0.7rem" }}>{row.numTeams}</td>
                 <td style={{ padding: "0.7rem" }}>{row.acceptedTsCsBy ?? "Not recorded"}</td>
                 <td style={{ padding: "0.7rem" }}>{formatDate(row.acceptedTsCsAt)}</td>
-                <td style={{ padding: "0.7rem" }}>{row.frequency?.label ?? "None"}</td>
                 {isAdmin && (
                   <td style={{ padding: "0.7rem", textAlign: "right", display: "flex", gap: "0.4rem", justifyContent: "flex-end" }}>
                     <button disabled={busy} onClick={() => { void update(row); }} style={btnStyle("#333", "#e9ecef")}>Edit</button>
@@ -229,7 +212,7 @@ export default function SeasonClubs() {
               </tr>
             ))}
             {seasonClubs.length === 0 && (
-              <tr><td colSpan={isAdmin ? 6 : 5} style={{ padding: "1rem", color: "#6c757d" }}>No clubs registered for this season.</td></tr>
+              <tr><td colSpan={isAdmin ? 5 : 4} style={{ padding: "1rem", color: "#6c757d" }}>No clubs registered for this season.</td></tr>
             )}
           </tbody>
         </table>
