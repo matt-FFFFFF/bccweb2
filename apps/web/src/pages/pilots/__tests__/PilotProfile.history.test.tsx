@@ -34,6 +34,7 @@ vi.mock("../../../hooks/useAuth.js", () => ({
 
 const mockPilot: Pilot = {
   id: "pilot-123",
+  legacyId: null,
   coachType: "None",
   pilotRating: "Pilot",
   person: {
