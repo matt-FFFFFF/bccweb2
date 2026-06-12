@@ -1,20 +1,19 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
-import { getCallerIdentity, forbiddenResponse, unauthorizedResponse } from "../lib/auth.js";
+import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 import {
   addWordingVersion,
   getActiveWording,
   getWording,
+  listWordingVersions,
 } from "../lib/signTofly/wording.js";
 
 async function addSignToFlyWording(
   req: HttpRequest,
   _ctx: InvocationContext,
 ): Promise<HttpResponseInit> {
-  const caller = await getCallerIdentity(req);
-  if (!caller) return unauthorizedResponse();
-  if (!caller.roles.includes("Admin")) return forbiddenResponse();
+  const caller = await requireRole(req, "Admin");
   await mutationRateLimit(req, caller, "addSignToFlyWording", "standard");
 
   const body = await readWordingBody(req);
@@ -30,9 +29,7 @@ async function getSignToFlyWordingVersion(
   req: HttpRequest,
   _ctx: InvocationContext,
 ): Promise<HttpResponseInit> {
-  const caller = await getCallerIdentity(req);
-  if (!caller) return unauthorizedResponse();
-  if (!caller.roles.includes("Admin")) return forbiddenResponse();
+  await requireRole(req, "Admin");
 
   const versionParam = req.params["version"];
   const version = Number(versionParam);
@@ -41,6 +38,15 @@ async function getSignToFlyWordingVersion(
   }
 
   return { status: 200, jsonBody: await getWording(version) };
+}
+
+async function listSignToFlyWording(
+  req: HttpRequest,
+  _ctx: InvocationContext,
+): Promise<HttpResponseInit> {
+  await requireRole(req, "Admin");
+
+  return { status: 200, jsonBody: await listWordingVersions() };
 }
 
 async function getActiveSignToFlyWording(
@@ -73,11 +79,25 @@ async function readWordingBody(req: HttpRequest): Promise<{ html: string; plainT
   return { html, plainText };
 }
 
+async function requireRole(req: HttpRequest, role: "Admin") {
+  const caller = await getCallerIdentity(req);
+  if (!caller) throw new HttpError(401, "UNAUTHORIZED");
+  if (!caller.roles.includes(role)) throw new HttpError(403, "FORBIDDEN");
+  return caller;
+}
+
 app.http("addSignToFlyWording", {
   methods: ["POST"],
   authLevel: "anonymous",
   route: "manage/sign-to-fly/wording",
   handler: withErrorHandler(addSignToFlyWording),
+});
+
+app.http("listSignToFlyWording", {
+  methods: ["GET"],
+  authLevel: "anonymous",
+  route: "manage/sign-to-fly/wording",
+  handler: withErrorHandler(listSignToFlyWording),
 });
 
 app.http("getSignToFlyWordingVersion", {
