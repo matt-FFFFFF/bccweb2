@@ -79,6 +79,38 @@ A PR-gated [privacy scanner](file:///Volumes/code/bccweb2/scripts/privacy-scan.m
 runs in CI and fails if PII leaks into the public container. **Never put PII fields
 in `data/`-container blobs.**
 
+### Schema layer
+
+Every blob family has exactly one schema in `packages/schemas`. Reads go through
+`readJson(client, Schema)`, and writes go through `writeJson` / `writePrivateJson`.
+Use raw `readBlob` / `writeBlob` only for non-JSON artifacts: PDF, image, `.lock`,
+and audit-log files.
+
+### BLOB_SCHEMA_MODE
+
+`BLOB_SCHEMA_MODE` is a Function App env setting. `observe` is the default: it heals
+in memory and emits telemetry only. `enforce` strips dead keys on write. Migration PRs
+deploy in `observe`; flip to `enforce` only after the KQL is clean per
+`docs/runbooks/alerts.md`. Flipping back to `observe` is an app-setting change and
+does not require a redeploy.
+
+### WingClass break-glass
+
+Adding a `WingClass` requires this order: types → schema → API deploy → admin UI emits
+the new key. Reversing that order causes `enforce` mode to reject or strip the new field.
+
+### bootstrapAdmin exception
+
+`apps/api/src/__tests__/helpers/seed.ts:bootstrapAdmin` is the single permitted direct
+`readBlob` / `writeBlob` call site in the repo. The API itself cannot create the first
+admin, so the F2 oracle allowlists this exception.
+
+### DATA_SHAPE_INVALID error
+
+`DATA_SHAPE_INVALID` is a server-side data invariant violation. Its response body is
+`{error, path, schema}` and never includes field values. Issues are logged server-side
+only.
+
 ## API (`apps/api`)
 
 Entry: [src/index.ts](file:///Volumes/code/bccweb2/apps/api/src/index.ts) imports
