@@ -244,9 +244,10 @@ describe("account lockout", () => {
 
     await recordLoginSuccess(userId);
 
-    const cred = await readBlob<{ failedAttempts: string[]; lockedUntil: string | null }>(
-      getPrivateBlobClient(`auth/${userId}.json`)
-    );
+    const cred = (await readBlob(getPrivateBlobClient(`auth/${userId}.json`))) as {
+      failedAttempts: string[];
+      lockedUntil: string | null;
+    };
     expect(cred.failedAttempts).toEqual([]);
     expect(cred.lockedUntil).toBeNull();
   });

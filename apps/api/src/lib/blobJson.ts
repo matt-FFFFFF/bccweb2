@@ -99,7 +99,7 @@ export async function readJson<T>(
   schema: z.ZodType<T>,
   path: string,
 ): Promise<T> {
-  const raw = await readBlob<unknown>(client);
+  const raw = await readBlob(client);
   const schemaName = schemaNameFor(schema);
   const result = schema.safeParse(raw);
 

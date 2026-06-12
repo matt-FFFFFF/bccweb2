@@ -85,10 +85,10 @@ export function getPrivateBlockBlobClient(path: string): BlockBlobClient {
  * Read a JSON blob. Throws a BlobStorageError with statusCode 404 if the blob
  * does not exist, which callers can use to detect a missing document.
  */
-export async function readBlob<T>(blobClient: BlobClient): Promise<T> {
+export async function readBlob(blobClient: BlobClient): Promise<unknown> {
   const response = await blobClient.download();
   const body = await streamToString(response.readableStreamBody!);
-  return JSON.parse(body) as T;
+  return JSON.parse(body);
 }
 
 /**
