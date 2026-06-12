@@ -240,7 +240,6 @@ async function updateRoundBrief(
   if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
     throw new HttpError(403, "FORBIDDEN");
   }
-  await mutationRateLimit(req, caller, "updateRoundBrief", "heavy");
 
   const round = await readJson(
     getPrivateBlobClient(`rounds/${id}.json`),
@@ -256,6 +255,8 @@ async function updateRoundBrief(
   if (!caller.roles.includes("Admin") && caller.roles.includes("RoundsCoord") && caller.clubId !== round.organisingClub?.id) {
     throw new HttpError(403, "FORBIDDEN");
   }
+
+  await mutationRateLimit(req, caller, "updateRoundBrief", "heavy");
 
   if (round.status === "Locked" || round.status === "Complete") {
     throw new HttpError(409, "BRIEF_LOCKED", "Round is locked or complete.");
@@ -366,10 +367,10 @@ async function uploadBriefImage(
   if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
     throw new HttpError(403, "FORBIDDEN");
   }
-  await mutationRateLimit(req, caller, "uploadBriefImage", "standard");
   if (!caller.roles.includes("Admin") && caller.roles.includes("RoundsCoord") && caller.clubId !== round.organisingClub?.id) {
     throw new HttpError(403, "FORBIDDEN");
   }
+  await mutationRateLimit(req, caller, "uploadBriefImage", "standard");
   if (round.status === "Locked" || round.status === "Complete") {
     throw new HttpError(409, "BRIEF_LOCKED", "Round is locked or complete.");
   }
@@ -451,10 +452,10 @@ async function deleteBriefImage(
   if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
     throw new HttpError(403, "FORBIDDEN");
   }
-  await mutationRateLimit(req, caller, "deleteBriefImage", "standard");
   if (!caller.roles.includes("Admin") && caller.roles.includes("RoundsCoord") && caller.clubId !== round.organisingClub?.id) {
     throw new HttpError(403, "FORBIDDEN");
   }
+  await mutationRateLimit(req, caller, "deleteBriefImage", "standard");
   if (round.status === "Locked" || round.status === "Complete") {
     throw new HttpError(409, "BRIEF_LOCKED", "Round is locked or complete.");
   }
