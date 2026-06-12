@@ -56,6 +56,21 @@ describe("season club admin endpoints", () => {
     expect(res.status).toBe(403);
   });
 
+  it("non-admin DELETE -> 403 FORBIDDEN before rate-limit", async () => {
+    const { user } = await makeUser({ roles: ["RoundsCoord"] });
+
+    const res = await invoke("deleteSeasonClub", makeAuthRequest(user.id, user.email, {
+      method: "DELETE",
+      params: { year: "2030", seasonClubId: randomUUID() },
+      headers: {
+        "x-forwarded-for": `10.42.${Math.floor(Math.random() * 250) + 1}.${Math.floor(Math.random() * 250) + 1}`,
+      },
+    }));
+
+    expect(res.status).toBe(403);
+    expect((res.jsonBody as { code: string }).code).toBe("FORBIDDEN");
+  });
+
   it("delete when teams have round assignments -> 409 IN_USE_BY_ROUND", async () => {
     await makeConfig({ maxTeamsInClub: 3 });
     const club = await makeClub({ name: "Round Club" });
