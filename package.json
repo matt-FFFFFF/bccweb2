@@ -3,8 +3,7 @@
   "private": true,
   "workspaces": [
     "apps/*",
-    "packages/*",
-    "packages/schemas"
+    "packages/*"
   ],
   "scripts": {
     "build": "npm run build --workspaces --if-present",

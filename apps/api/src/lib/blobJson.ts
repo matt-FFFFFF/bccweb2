@@ -18,7 +18,11 @@ interface ValidationIssueSummary {
   path: PropertyKey[];
 }
 
-function schemaNameFor<T>(schema: z.ZodType<T>): string {
+function schemaNameFor(schema: z.ZodType<unknown>): string {
+  // Prefer schema description (set via .describe('...')) for actionable telemetry;
+  // constructor.name fallback produces generic names like 'ZodObject' / 'ZodPipe'.
+  const description = (schema as { description?: string }).description;
+  if (description && description.trim() !== "") return description;
   return schema.constructor.name;
 }
 
@@ -124,7 +128,6 @@ export async function writeJson<T>(
   schema: z.ZodType<T>,
   data: T,
   leaseId?: string,
-  opts?: CreateOnlyOptions,
 ): Promise<void> {
   const output = currentSchemaMode() === "enforce"
     ? parseForWrite(path, schema, data)
@@ -134,7 +137,6 @@ export async function writeJson<T>(
     observeBeforeWrite(path, schema, data);
   }
 
-  void opts;
   await writeBlob(path, output, leaseId);
 }
 

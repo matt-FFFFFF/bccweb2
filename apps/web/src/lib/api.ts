@@ -173,9 +173,12 @@ export const api = {
   },
 
   /**
-   * DELETE that does NOT parse the response body.
-   * Use for endpoints that return 204 No Content (or any empty body).
-   * Resolves to void on any 2xx status.
+   * DELETE wrapper for endpoints that return 204 No Content.
+   *
+   * If you call this on an endpoint that returns a JSON body (200 + payload),
+   * the underlying apiFetch() will attempt response.json() and the promise
+   * resolves to that parsed value (not void) — use `deleteJson<T>()` instead
+   * for typed access to that body.
    */
   delete(path: string): Promise<void> {
     return apiFetch<void>(path, { method: "DELETE" });
