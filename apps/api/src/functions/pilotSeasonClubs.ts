@@ -122,23 +122,25 @@ async function assignPilotSeasonClub(
     throw new HttpError(409, "CLUB_NOT_REGISTERED_FOR_SEASON", "Club is not registered for this season");
   }
 
-  let pilotForScope: Pilot;
-  try {
-    pilotForScope = await readJson(
-      getPrivateBlobClient(`pilots/${body.pilotId}.json`),
-      PilotSchema,
-      `pilots/${body.pilotId}.json`,
-    );
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(404, "PILOT_NOT_FOUND", "Pilot not found");
+  if (reassign && isCoord && !isAdmin) {
+    let pilotForScope: Pilot;
+    try {
+      pilotForScope = await readJson(
+        getPrivateBlobClient(`pilots/${body.pilotId}.json`),
+        PilotSchema,
+        `pilots/${body.pilotId}.json`,
+      );
+    } catch (err: unknown) {
+      if ((err as { statusCode?: number }).statusCode === 404) {
+        throw new HttpError(404, "PILOT_NOT_FOUND", "Pilot not found");
+      }
+      throw err;
     }
-    throw err;
-  }
 
-  const existingForScope = pilotForScope.seasonClubs.find(sc => sc.seasonYear === body.seasonYear);
-  if (existingForScope && reassign && !isAdmin && existingForScope.clubId !== caller.clubId) {
-    throw new HttpError(403, "FORBIDDEN", "Cannot reassign pilot from another club");
+    const existingForScope = pilotForScope.seasonClubs.find(sc => sc.seasonYear === body.seasonYear);
+    if (existingForScope && existingForScope.clubId !== caller.clubId) {
+      throw new HttpError(403, "FORBIDDEN", "Cannot reassign pilot from another club");
+    }
   }
 
   await mutationRateLimit(req, caller, "assignPilotSeasonClub", "standard");
@@ -257,25 +259,27 @@ async function deletePilotSeasonClub(
   if (!pilotId || !seasonYearRaw) throw new HttpError(400, "BAD_REQUEST", "Missing params");
   const seasonYear = Number.parseInt(seasonYearRaw, 10);
 
-  let pilotForScope: Pilot;
-  try {
-    pilotForScope = await readJson(
-      getPrivateBlobClient(`pilots/${pilotId}.json`),
-      PilotSchema,
-      `pilots/${pilotId}.json`,
-    );
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(404, "PILOT_NOT_FOUND", "Pilot not found");
+  if (isCoord && !isAdmin) {
+    let pilotForScope: Pilot;
+    try {
+      pilotForScope = await readJson(
+        getPrivateBlobClient(`pilots/${pilotId}.json`),
+        PilotSchema,
+        `pilots/${pilotId}.json`,
+      );
+    } catch (err: unknown) {
+      if ((err as { statusCode?: number }).statusCode === 404) {
+        throw new HttpError(404, "PILOT_NOT_FOUND", "Pilot not found");
+      }
+      throw err;
     }
-    throw err;
-  }
 
-  const existingForScope = pilotForScope.seasonClubs.find(sc => sc.seasonYear === seasonYear);
-  if (!existingForScope) return { status: 204 };
+    const existingForScope = pilotForScope.seasonClubs.find(sc => sc.seasonYear === seasonYear);
+    if (!existingForScope) return { status: 204 };
 
-  if (isCoord && !isAdmin && existingForScope.clubId !== caller.clubId) {
-    return forbiddenResponse();
+    if (existingForScope.clubId !== caller.clubId) {
+      return forbiddenResponse();
+    }
   }
 
   await mutationRateLimit(req, caller, "deletePilotSeasonClub", "standard");

@@ -50,18 +50,18 @@ async function setTeamCaptain(
 
   const path = `rounds/${id}.json`;
 
-  // Authorization-only pre-read; the leased read below remains authoritative, so club-reassignment races fail closed at worst.
-  let authRound: Round;
-  try {
-    authRound = await readJson(getPrivateBlobClient(path), RoundSchema, path);
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(404, "NOT_FOUND", "Round not found");
-    }
-    throw new HttpError(500, "INTERNAL");
-  }
-
   if (isCoord && !isAdmin) {
+    // Authorization-only pre-read; the leased read below remains authoritative, so club-reassignment races fail closed at worst.
+    let authRound: Round;
+    try {
+      authRound = await readJson(getPrivateBlobClient(path), RoundSchema, path);
+    } catch (err: unknown) {
+      if ((err as { statusCode?: number }).statusCode === 404) {
+        throw new HttpError(404, "NOT_FOUND", "Round not found");
+      }
+      throw new HttpError(500, "INTERNAL");
+    }
+
     if (
       !caller.clubId ||
       !authRound.organisingClub?.id ||

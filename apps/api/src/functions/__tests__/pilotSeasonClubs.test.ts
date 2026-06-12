@@ -271,6 +271,27 @@ describe("pilotSeasonClubs API", () => {
     expect(retryAfterHeader(res)).toBeUndefined();
   });
 
+  test("RoundsCoord non-reassign missing pilot is rate-limited before pilot read", async () => {
+    const { user } = await makeUser({ roles: ["RoundsCoord"], clubId: "club-rate-assign-a" });
+    await exhaustAssignPilotSeasonClubBucket(user);
+
+    const res = await invoke(
+      "assignPilotSeasonClub",
+      authReq(user, {
+        method: "POST",
+        body: {
+          pilotId: "pilot-rate-assign-missing",
+          clubId: "club-rate-assign-a",
+          seasonYear: 2026,
+        },
+      }),
+    );
+
+    expect(res.status).toBe(429);
+    expect((res.jsonBody as { code?: string }).code).toBe("RATE_LIMITED");
+    expect(retryAfterHeader(res)).toBe("2");
+  });
+
   test("DELETE removes from both pilot.seasonClubs and denorm map", async () => {
     const { user } = await makeUser({ roles: ["Admin"] });
     const pilot = await makePilot({ id: "pilot-delete" });
@@ -292,6 +313,21 @@ describe("pilotSeasonClubs API", () => {
     const map = await readPrivateJson<Record<string, string>>("seasons/2026/pilot-club-map.json");
     expect(map!["pilot-delete"]).toBeUndefined();
     expect(map!["pilot-delete-2"]).toBe("club-b");
+  });
+
+  test("Admin delete of missing season assignment remains idempotent 204", async () => {
+    const { user } = await makeUser({ roles: ["Admin"] });
+    await makePilot({ id: "pilot-delete-missing-assignment" });
+
+    const res = await invoke(
+      "deletePilotSeasonClub",
+      authReq(user, {
+        method: "DELETE",
+        params: { pilotId: "pilot-delete-missing-assignment", seasonYear: "2026" },
+      }),
+    );
+
+    expect(res.status).toBe(204);
   });
 
   test("RoundsCoord delete from another club returns 403 before exhausted delete rate limit", async () => {
