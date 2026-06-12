@@ -4,13 +4,14 @@ import {
   HttpResponseInit,
   InvocationContext,
 } from "@azure/functions";
-import type { SeasonSummary, Season, SeasonResults } from "@bccweb/types";
+import type { SeasonSummary, Season } from "@bccweb/types";
+import { SeasonSchema, SeasonSummarySchema } from "@bccweb/schemas";
+import * as z from "zod/v4";
 import {
   getBlobClient,
   getBlockBlobClient,
-  readBlob,
-  writeBlob,
 } from "../lib/blob.js";
+import { readJson, writeJson } from "../lib/blobJson.js";
 import {
   forbiddenResponse,
   getCallerIdentity,
@@ -19,6 +20,14 @@ import {
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 
+const SeasonsIndexSchema = z.array(SeasonSummarySchema);
+
+// `results/{year}.json` is a derived RoundResult[] computed by recomputeSeason.
+// No SeasonResultsSchema lives in @bccweb/schemas (see Task 40 pre-flight
+// audit); use a permissive array passthrough so observe-mode never strips the
+// nested teamResults/pilots shape. Tighten when a real schema lands.
+const SeasonResultsPassthroughSchema = z.array(z.unknown());
+
 // ─── GET /api/seasons ─────────────────────────────────────────────────────────
 
 async function getSeasons(
@@ -26,8 +35,10 @@ async function getSeasons(
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   try {
-    const seasons = await readBlob<SeasonSummary[]>(
-      getBlobClient("seasons.json")
+    const seasons = await readJson(
+      getBlobClient("seasons.json"),
+      SeasonsIndexSchema,
+      "seasons.json",
     );
     seasons.sort((a, b) => b.year - a.year);
     return { status: 200, jsonBody: seasons };
@@ -51,8 +62,10 @@ async function getSeasonByYear(
   }
 
   try {
-    const season = await readBlob<Season>(
-      getBlobClient(`seasons/${year}.json`)
+    const season = await readJson(
+      getBlobClient(`seasons/${year}.json`),
+      SeasonSchema,
+      `seasons/${year}.json`,
     );
     return { status: 200, jsonBody: season };
   } catch (err: unknown) {
@@ -75,8 +88,10 @@ async function getSeasonResults(
   }
 
   try {
-    const results = await readBlob<SeasonResults>(
-      getBlobClient(`results/${year}.json`)
+    const results = await readJson(
+      getBlobClient(`results/${year}.json`),
+      SeasonResultsPassthroughSchema,
+      `results/${year}.json`,
     );
     return { status: 200, jsonBody: results };
   } catch (err: unknown) {
@@ -134,7 +149,7 @@ async function createSeason(
     leagueTable: [],
   };
 
-  await writeBlob(seasonPath, season);
+  await writeJson(seasonPath, SeasonSchema, season);
   await upsertSeasonInIndex({ id: season.id, year, active: wantActive });
 
   return { status: 201, jsonBody: season };
@@ -170,7 +185,11 @@ async function updateSeason(
 
   let season: Season;
   try {
-    season = await readBlob<Season>(getBlobClient(`seasons/${year}.json`));
+    season = await readJson(
+      getBlobClient(`seasons/${year}.json`),
+      SeasonSchema,
+      `seasons/${year}.json`,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Season not found");
@@ -185,7 +204,7 @@ async function updateSeason(
     season.active = body.active;
   }
 
-  await writeBlob(`seasons/${year}.json`, season);
+  await writeJson(`seasons/${year}.json`, SeasonSchema, season);
   await upsertSeasonInIndex({ id: season.id, year, active: season.active });
 
   return { status: 200, jsonBody: season };
@@ -210,7 +229,11 @@ async function deleteSeason(
 
   let season: Season;
   try {
-    season = await readBlob<Season>(getBlobClient(`seasons/${year}.json`));
+    season = await readJson(
+      getBlobClient(`seasons/${year}.json`),
+      SeasonSchema,
+      `seasons/${year}.json`,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       await removeSeasonFromIndex(year);
@@ -239,7 +262,11 @@ async function deleteSeason(
 async function upsertSeasonInIndex(summary: SeasonSummary): Promise<void> {
   let index: SeasonSummary[] = [];
   try {
-    index = await readBlob<SeasonSummary[]>(getBlobClient("seasons.json"));
+    index = await readJson(
+      getBlobClient("seasons.json"),
+      SeasonsIndexSchema,
+      "seasons.json",
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode !== 404) throw err;
   }
@@ -250,27 +277,35 @@ async function upsertSeasonInIndex(summary: SeasonSummary): Promise<void> {
     index.push(summary);
   }
   index.sort((a, b) => b.year - a.year);
-  await writeBlob("seasons.json", index);
+  await writeJson("seasons.json", SeasonsIndexSchema, index);
 }
 
 async function removeSeasonFromIndex(year: number): Promise<void> {
   let index: SeasonSummary[] = [];
   try {
-    index = await readBlob<SeasonSummary[]>(getBlobClient("seasons.json"));
+    index = await readJson(
+      getBlobClient("seasons.json"),
+      SeasonsIndexSchema,
+      "seasons.json",
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) return;
     throw err;
   }
   const filtered = index.filter((s) => s.year !== year);
   if (filtered.length === index.length) return;
-  await writeBlob("seasons.json", filtered);
+  await writeJson("seasons.json", SeasonsIndexSchema, filtered);
 }
 
 // Active flag is mutually exclusive across all seasons; flips every other to false.
 async function deactivateAllSeasons(exceptYear?: number): Promise<void> {
   let index: SeasonSummary[] = [];
   try {
-    index = await readBlob<SeasonSummary[]>(getBlobClient("seasons.json"));
+    index = await readJson(
+      getBlobClient("seasons.json"),
+      SeasonsIndexSchema,
+      "seasons.json",
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) return;
     throw err;
@@ -282,18 +317,20 @@ async function deactivateAllSeasons(exceptYear?: number): Promise<void> {
     summary.active = false;
     mutated = true;
     try {
-      const full = await readBlob<Season>(
-        getBlobClient(`seasons/${summary.year}.json`)
+      const full = await readJson(
+        getBlobClient(`seasons/${summary.year}.json`),
+        SeasonSchema,
+        `seasons/${summary.year}.json`,
       );
       full.active = false;
-      await writeBlob(`seasons/${summary.year}.json`, full);
+      await writeJson(`seasons/${summary.year}.json`, SeasonSchema, full);
     } catch (err: unknown) {
       if ((err as { statusCode?: number }).statusCode !== 404) throw err;
     }
   }
   if (mutated) {
     index.sort((a, b) => b.year - a.year);
-    await writeBlob("seasons.json", index);
+    await writeJson("seasons.json", SeasonsIndexSchema, index);
   }
 }
 

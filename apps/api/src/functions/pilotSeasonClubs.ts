@@ -5,13 +5,14 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { Pilot, PilotSeasonClub } from "@bccweb/types";
+import { ClubSchema, PilotSchema } from "@bccweb/schemas";
+import * as z from "zod/v4";
 import {
   getPrivateBlobClient,
   getPrivateBlockBlobClient,
-  readBlob,
-  writePrivateBlob,
   withPrivateLease,
 } from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   forbiddenResponse,
   getCallerIdentity,
@@ -23,6 +24,11 @@ import { mutationRateLimit } from "../lib/rateLimit.js";
 interface PilotClubMap {
   [pilotId: string]: string;
 }
+
+// PilotClubMap is a denormalised pilotId→clubId index private to the API.
+// No schema in @bccweb/schemas; defined inline so observe-mode validates
+// the shape without stripping unknown pilot ids.
+const PilotClubMapSchema = z.record(z.string().min(1), z.string().min(1));
 
 interface AssignBody {
   pilotId: string;
@@ -54,8 +60,13 @@ async function getPilotSeasonClubs(
   const year = parseYear(req);
   
   let map: PilotClubMap;
+  const mapPath = `seasons/${year}/pilot-club-map.json`;
   try {
-    map = await readBlob<PilotClubMap>(getPrivateBlobClient(`seasons/${year}/pilot-club-map.json`));
+    map = await readJson(
+      getPrivateBlobClient(mapPath),
+      PilotClubMapSchema,
+      mapPath,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       _ctx.warn(`[pilotSeasonClubs] pilot-club-map.json not found for ${year}, returning empty or scanning`);
@@ -103,21 +114,24 @@ async function assignPilotSeasonClub(
     return forbiddenResponse();
   }
 
-  // Validate SeasonClub exists
-  try {
-    await readBlob(getPrivateBlobClient(`season-clubs/${body.seasonYear}/${body.clubId}.json`));
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(409, "CLUB_NOT_REGISTERED_FOR_SEASON", "Club is not registered for this season");
-    }
-    throw err;
+  // Validate SeasonClub exists. We only need existence here, not the parsed
+  // shape — keep this an existence check rather than a schema read so seed
+  // fixtures with a partial SeasonClub document (legitimate during migration)
+  // still light up the assignment path.
+  const seasonClubPath = `season-clubs/${body.seasonYear}/${body.clubId}.json`;
+  if (!(await getPrivateBlobClient(seasonClubPath).exists())) {
+    throw new HttpError(409, "CLUB_NOT_REGISTERED_FOR_SEASON", "Club is not registered for this season");
   }
 
   // We need pilot lease to check and update pilot
   return withPrivateLease(`pilots/${body.pilotId}.json`, async (pilotLease) => {
     let pilot: Pilot;
     try {
-      pilot = await readBlob<Pilot>(getPrivateBlobClient(`pilots/${body.pilotId}.json`));
+      pilot = await readJson(
+        getPrivateBlobClient(`pilots/${body.pilotId}.json`),
+        PilotSchema,
+        `pilots/${body.pilotId}.json`,
+      );
     } catch (err: unknown) {
       if ((err as { statusCode?: number }).statusCode === 404) {
         throw new HttpError(404, "PILOT_NOT_FOUND", "Pilot not found");
@@ -146,7 +160,11 @@ async function assignPilotSeasonClub(
     // Get club name (we can get it from clubs or just from seasonClub, wait, seasonClub doesn't have clubName. Let's read club)
     let clubName = body.clubId;
     try {
-      const club = await readBlob<{ name: string }>(getPrivateBlobClient(`clubs/${body.clubId}.json`));
+      const club = await readJson(
+        getPrivateBlobClient(`clubs/${body.clubId}.json`),
+        ClubSchema,
+        `clubs/${body.clubId}.json`,
+      );
       clubName = club.name;
     } catch {
       // ignore
@@ -161,7 +179,12 @@ async function assignPilotSeasonClub(
     pilot.seasonClubs.push(newAssignment);
     
     // Update Pilot
-    await writePrivateBlob(`pilots/${body.pilotId}.json`, pilot, pilotLease);
+    await writePrivateJson(
+      `pilots/${body.pilotId}.json`,
+      PilotSchema,
+      pilot,
+      pilotLease,
+    );
 
     // Update denorm map
     const mapPath = `seasons/${body.seasonYear}/pilot-club-map.json`;
@@ -169,13 +192,17 @@ async function assignPilotSeasonClub(
     await withPrivateLease(mapPath, async (mapLease) => {
       let map: PilotClubMap = {};
       try {
-        map = await readBlob<PilotClubMap>(getPrivateBlobClient(mapPath));
+        map = await readJson(
+          getPrivateBlobClient(mapPath),
+          PilotClubMapSchema,
+          mapPath,
+        );
       } catch (err: unknown) {
         if ((err as { statusCode?: number }).statusCode !== 404) throw err;
       }
       map[body.pilotId] = body.clubId;
       
-      await writePrivateBlob(mapPath, map, mapLease);
+      await writePrivateJson(mapPath, PilotClubMapSchema, map, mapLease);
     });
 
     return { status: 201, jsonBody: newAssignment };
@@ -214,7 +241,11 @@ async function deletePilotSeasonClub(
   return withPrivateLease(`pilots/${pilotId}.json`, async (pilotLease) => {
     let pilot: Pilot;
     try {
-      pilot = await readBlob<Pilot>(getPrivateBlobClient(`pilots/${pilotId}.json`));
+      pilot = await readJson(
+        getPrivateBlobClient(`pilots/${pilotId}.json`),
+        PilotSchema,
+        `pilots/${pilotId}.json`,
+      );
     } catch (err: unknown) {
       if ((err as { statusCode?: number }).statusCode === 404) {
         throw new HttpError(404, "PILOT_NOT_FOUND", "Pilot not found");
@@ -231,21 +262,30 @@ async function deletePilotSeasonClub(
 
     pilot.seasonClubs = pilot.seasonClubs.filter(sc => sc.seasonYear !== seasonYear);
     
-    await writePrivateBlob(`pilots/${pilotId}.json`, pilot, pilotLease);
+    await writePrivateJson(
+      `pilots/${pilotId}.json`,
+      PilotSchema,
+      pilot,
+      pilotLease,
+    );
 
     const mapPath = `seasons/${seasonYear}/pilot-club-map.json`;
     await ensureSentinel(mapPath);
     await withPrivateLease(mapPath, async (mapLease) => {
       let map: PilotClubMap = {};
       try {
-        map = await readBlob<PilotClubMap>(getPrivateBlobClient(mapPath));
+        map = await readJson(
+          getPrivateBlobClient(mapPath),
+          PilotClubMapSchema,
+          mapPath,
+        );
       } catch (err: unknown) {
         if ((err as { statusCode?: number }).statusCode !== 404) throw err;
       }
       
       delete map[pilotId];
       
-      await writePrivateBlob(mapPath, map, mapLease);
+      await writePrivateJson(mapPath, PilotClubMapSchema, map, mapLease);
     });
 
     return { status: 204 };

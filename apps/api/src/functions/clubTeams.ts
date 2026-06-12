@@ -19,7 +19,14 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type { Club, ClubTeam, ClubTeamSummary } from "@bccweb/types";
-import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob } from "../lib/blob.js";
+import {
+  ClubSchema,
+  ClubTeamSchema,
+  ClubTeamSummarySchema,
+} from "@bccweb/schemas";
+import * as z from "zod/v4";
+import { getBlobClient, getPrivateBlobClient } from "../lib/blob.js";
+import { readJson, writeJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -27,6 +34,8 @@ import {
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
+
+const ClubTeamsIndexSchema = z.array(ClubTeamSummarySchema);
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -53,7 +62,11 @@ async function getClubTeams(
 ): Promise<HttpResponseInit> {
   let index: ClubTeamSummary[] = [];
   try {
-    index = await readBlob<ClubTeamSummary[]>(getBlobClient("club-teams.json"));
+    index = await readJson(
+      getBlobClient("club-teams.json"),
+      ClubTeamsIndexSchema,
+      "club-teams.json",
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 200, jsonBody: [] };
@@ -107,7 +120,11 @@ async function createClubTeam(
   // Load club to get name
   let clubName: string;
   try {
-    const club = await readBlob<Club>(getPrivateBlobClient(`clubs/${body.clubId}.json`));
+    const club = await readJson(
+      getPrivateBlobClient(`clubs/${body.clubId}.json`),
+      ClubSchema,
+      `clubs/${body.clubId}.json`,
+    );
     clubName = club.name;
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
@@ -119,7 +136,11 @@ async function createClubTeam(
   // Guard: duplicate team name for same club+season
   let existingIndex: ClubTeamSummary[] = [];
   try {
-    existingIndex = await readBlob<ClubTeamSummary[]>(getBlobClient("club-teams.json"));
+    existingIndex = await readJson(
+      getBlobClient("club-teams.json"),
+      ClubTeamsIndexSchema,
+      "club-teams.json",
+    );
   } catch {
     // index may not exist yet
   }
@@ -147,7 +168,7 @@ async function createClubTeam(
     createdAt: new Date().toISOString(),
   };
 
-  await writePrivateBlob(`club-teams/${id}.json`, team);
+  await writePrivateJson(`club-teams/${id}.json`, ClubTeamSchema, team);
   await upsertTeamInIndex(team);
 
   return { status: 201, jsonBody: team };
@@ -169,7 +190,11 @@ async function updateClubTeam(
 
   let existing: ClubTeam;
   try {
-    existing = await readBlob<ClubTeam>(getPrivateBlobClient(`club-teams/${id}.json`));
+    existing = await readJson(
+      getPrivateBlobClient(`club-teams/${id}.json`),
+      ClubTeamSchema,
+      `club-teams/${id}.json`,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Club team not found");
@@ -195,7 +220,11 @@ async function updateClubTeam(
   // Guard: duplicate name for same club+season (excluding self)
   let index: ClubTeamSummary[] = [];
   try {
-    index = await readBlob<ClubTeamSummary[]>(getBlobClient("club-teams.json"));
+    index = await readJson(
+      getBlobClient("club-teams.json"),
+      ClubTeamsIndexSchema,
+      "club-teams.json",
+    );
   } catch {
     // ignore
   }
@@ -219,7 +248,7 @@ async function updateClubTeam(
     teamName: body.teamName.trim(),
   };
 
-  await writePrivateBlob(`club-teams/${id}.json`, updated);
+  await writePrivateJson(`club-teams/${id}.json`, ClubTeamSchema, updated);
   await upsertTeamInIndex(updated);
 
   return { status: 200, jsonBody: updated };
@@ -241,7 +270,11 @@ async function deleteClubTeam(
 
   let existing: ClubTeam;
   try {
-    existing = await readBlob<ClubTeam>(getPrivateBlobClient(`club-teams/${id}.json`));
+    existing = await readJson(
+      getPrivateBlobClient(`club-teams/${id}.json`),
+      ClubTeamSchema,
+      `club-teams/${id}.json`,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Club team not found");
@@ -273,7 +306,11 @@ async function upsertTeamInIndex(team: ClubTeam): Promise<void> {
 
   let index: ClubTeamSummary[] = [];
   try {
-    index = await readBlob<ClubTeamSummary[]>(getBlobClient("club-teams.json"));
+    index = await readJson(
+      getBlobClient("club-teams.json"),
+      ClubTeamsIndexSchema,
+      "club-teams.json",
+    );
   } catch {
     // index may not exist yet
   }
@@ -292,18 +329,22 @@ async function upsertTeamInIndex(team: ClubTeam): Promise<void> {
     return a.teamName.localeCompare(b.teamName);
   });
 
-  await writeBlob("club-teams.json", index);
+  await writeJson("club-teams.json", ClubTeamsIndexSchema, index);
 }
 
 async function removeTeamFromIndex(id: string): Promise<void> {
   let index: ClubTeamSummary[] = [];
   try {
-    index = await readBlob<ClubTeamSummary[]>(getBlobClient("club-teams.json"));
+    index = await readJson(
+      getBlobClient("club-teams.json"),
+      ClubTeamsIndexSchema,
+      "club-teams.json",
+    );
   } catch {
     return;
   }
   const filtered = index.filter((t) => t.id !== id);
-  await writeBlob("club-teams.json", filtered);
+  await writeJson("club-teams.json", ClubTeamsIndexSchema, filtered);
 }
 
 // ─── Registration ─────────────────────────────────────────────────────────────

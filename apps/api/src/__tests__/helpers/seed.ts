@@ -248,6 +248,7 @@ export async function makePilot(
 
   const pilot: Pilot = {
     ...created,
+    legacyId: created.legacyId,
     ...(overrides.id && { id: overrides.id }),
     person: {
       ...created.person,

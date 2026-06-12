@@ -21,14 +21,14 @@ import type {
   SiteSummary,
   SiteStatus,
 } from "@bccweb/types";
+import { SiteSchema, SiteSummarySchema } from "@bccweb/schemas";
+import * as z from "zod/v4";
 import {
   getBlobClient,
   getPrivateBlobClient,
   getPrivateBlockBlobClient,
-  readBlob,
-  writeBlob,
-  writePrivateBlob,
 } from "../lib/blob.js";
+import { readJson, writeJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -36,6 +36,8 @@ import {
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
+
+const SitesIndexSchema = z.array(SiteSummarySchema);
 
 function isAdmin(caller: CallerIdentity): boolean {
   return caller.roles.includes("Admin");
@@ -52,7 +54,11 @@ async function getSites(
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   try {
-    const sites = await readBlob<SiteSummary[]>(getBlobClient("sites.json"));
+    const sites = await readJson(
+      getBlobClient("sites.json"),
+      SitesIndexSchema,
+      "sites.json",
+    );
     sites.sort((a, b) => a.name.localeCompare(b.name));
     return { status: 200, jsonBody: sites };
   } catch (err: unknown) {
@@ -77,7 +83,11 @@ async function getSiteById(
 
   let site: Site;
   try {
-    site = await readBlob<Site>(getPrivateBlobClient(`sites/${id}.json`));
+    site = await readJson(
+      getPrivateBlobClient(`sites/${id}.json`),
+      SiteSchema,
+      `sites/${id}.json`,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Site not found");
@@ -147,7 +157,7 @@ async function createSite(
     contactInfo: body.contactInfo,
   };
 
-  await writePrivateBlob(`sites/${id}.json`, site);
+  await writePrivateJson(`sites/${id}.json`, SiteSchema, site);
   await upsertSiteInIndex({
     id,
     name: site.name,
@@ -173,7 +183,11 @@ async function updateSite(
 
   let existing: Site;
   try {
-    existing = await readBlob<Site>(getPrivateBlobClient(`sites/${id}.json`));
+    existing = await readJson(
+      getPrivateBlobClient(`sites/${id}.json`),
+      SiteSchema,
+      `sites/${id}.json`,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Site not found");
@@ -214,7 +228,7 @@ async function updateSite(
     id: existing.id,
   };
 
-  await writePrivateBlob(`sites/${id}.json`, updated);
+  await writePrivateJson(`sites/${id}.json`, SiteSchema, updated);
   await upsertSiteInIndex({
     id,
     name: updated.name,
@@ -240,7 +254,11 @@ async function deleteSite(
 
   let existing: Site;
   try {
-    existing = await readBlob<Site>(getPrivateBlobClient(`sites/${id}.json`));
+    existing = await readJson(
+      getPrivateBlobClient(`sites/${id}.json`),
+      SiteSchema,
+      `sites/${id}.json`,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       return { status: 204 };
@@ -263,7 +281,11 @@ async function deleteSite(
 async function upsertSiteInIndex(summary: SiteSummary): Promise<void> {
   let index: SiteSummary[] = [];
   try {
-    index = await readBlob<SiteSummary[]>(getBlobClient("sites.json"));
+    index = await readJson(
+      getBlobClient("sites.json"),
+      SitesIndexSchema,
+      "sites.json",
+    );
   } catch {
     // index may not exist yet
   }
@@ -276,19 +298,23 @@ async function upsertSiteInIndex(summary: SiteSummary): Promise<void> {
   }
 
   index.sort((a, b) => a.name.localeCompare(b.name));
-  await writeBlob("sites.json", index);
+  await writeJson("sites.json", SitesIndexSchema, index);
 }
 
 async function removeSiteFromIndex(id: string): Promise<void> {
   let index: SiteSummary[] = [];
   try {
-    index = await readBlob<SiteSummary[]>(getBlobClient("sites.json"));
+    index = await readJson(
+      getBlobClient("sites.json"),
+      SitesIndexSchema,
+      "sites.json",
+    );
   } catch {
     return;
   }
   const filtered = index.filter((s) => s.id !== id);
   if (filtered.length === index.length) return;
-  await writeBlob("sites.json", filtered);
+  await writeJson("sites.json", SitesIndexSchema, filtered);
 }
 
 // ─── Registration ─────────────────────────────────────────────────────────────

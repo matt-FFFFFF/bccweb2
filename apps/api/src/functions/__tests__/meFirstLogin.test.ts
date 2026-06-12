@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { app } from "@azure/functions";
 import { getCallerIdentity } from "../../lib/auth.js";
-import { readBlob } from "../../lib/blob.js";
+import { readJson } from "../../lib/blobJson.js";
 import type { Pilot } from "@bccweb/types";
 
 vi.mock("@azure/functions", () => ({
@@ -19,6 +19,12 @@ vi.mock("../../lib/blob.js", () => ({
   getBlobClient: vi.fn((path) => ({ name: path })),
   getPrivateBlobClient: vi.fn((path) => ({ name: path })),
   readBlob: vi.fn(),
+}));
+
+vi.mock("../../lib/blobJson.js", () => ({
+  readJson: vi.fn(),
+  writeJson: vi.fn(),
+  writePrivateJson: vi.fn(),
 }));
 
 vi.mock("../../lib/http.js", () => ({
@@ -44,9 +50,9 @@ describe("GET /me - First Login of Season logic", () => {
   it("non-Pilot caller -> firstLoginOfSeason: false", async () => {
     vi.mocked(getCallerIdentity).mockResolvedValue({ roles: ["Admin"], userId: "u1" } as any);
     
-    vi.mocked(readBlob).mockImplementation(async (client: any) => {
-      if (client?.name === "users/u1.json") return { acceptedTsCsVersion: 999 };
-      return {};
+    vi.mocked(readJson).mockImplementation(async (client: any) => {
+      if (client?.name === "users/u1.json") return { acceptedTsCsVersion: 999 } as any;
+      return {} as any;
     });
     
     const req = { method: "GET", url: "http://localhost/me" };
@@ -60,16 +66,18 @@ describe("GET /me - First Login of Season logic", () => {
   it("pilot with no seasonClubs for active year -> firstLoginOfSeason: true", async () => {
     vi.mocked(getCallerIdentity).mockResolvedValue({ roles: ["Pilot"], pilotId: "p1", userId: "u1" } as any);
     
-    vi.mocked(readBlob).mockImplementation(async (client: any) => {
-      if (client === undefined || client === null) return []; // Fallback 
-      if (client?.name === "users/u1.json") return { acceptedTsCsVersion: 999 };
-      if (client?.name === "users/u1.json") return { acceptedTsCsVersion: 999 };
-      if (client?.name === "seasons.json") return [{ year: 2026, active: true }];
+    vi.mocked(readJson).mockImplementation(async (client: any) => {
+      if (client?.name === "users/u1.json") return { acceptedTsCsVersion: 999 } as any;
+      if (client?.name === "seasons.json") return [{ id: "season-2026", year: 2026, active: true }] as any;
       if (client?.name === "pilots/p1.json") return {
+        id: "p1",
+        coachType: "None",
+        pilotRating: "Pilot",
+        person: { id: "person-1", firstName: "Test", lastName: "Pilot", fullName: "Test Pilot" },
         profileUpdatedAt: new Date("2026-05-01T00:00:00Z").toISOString(),
-        seasonClubs: [{ seasonYear: 2025 }] // Not for 2026
-      } as Partial<Pilot>;
-      return {};
+        seasonClubs: [{ seasonYear: 2025, clubId: "c1", clubName: "C1" }]
+      } as Partial<Pilot> as any;
+      return {} as any;
     });
 
     const req = { method: "GET", url: "http://localhost/me" };
@@ -84,14 +92,18 @@ describe("GET /me - First Login of Season logic", () => {
   it("pilot with profileUpdatedAt < season start -> firstLoginOfSeason: true", async () => {
     vi.mocked(getCallerIdentity).mockResolvedValue({ roles: ["Pilot"], pilotId: "p1", userId: "u1" } as any);
     
-    vi.mocked(readBlob).mockImplementation(async (client: any) => {
-      if (client?.name === "users/u1.json") return { acceptedTsCsVersion: 999 };
-      if (client?.name === "seasons.json") return [{ year: 2026, active: true }];
+    vi.mocked(readJson).mockImplementation(async (client: any) => {
+      if (client?.name === "users/u1.json") return { acceptedTsCsVersion: 999 } as any;
+      if (client?.name === "seasons.json") return [{ id: "season-2026", year: 2026, active: true }] as any;
       if (client?.name === "pilots/p1.json") return {
+        id: "p1",
+        coachType: "None",
+        pilotRating: "Pilot",
+        person: { id: "person-1", firstName: "Test", lastName: "Pilot", fullName: "Test Pilot" },
         profileUpdatedAt: new Date("2025-12-01T00:00:00Z").toISOString(),
-        seasonClubs: [{ seasonYear: 2026 }]
-      } as Partial<Pilot>;
-      return {};
+        seasonClubs: [{ seasonYear: 2026, clubId: "c1", clubName: "C1" }]
+      } as Partial<Pilot> as any;
+      return {} as any;
     });
 
     const req = { method: "GET", url: "http://localhost/me" };
@@ -105,14 +117,18 @@ describe("GET /me - First Login of Season logic", () => {
   it("pilot with profileUpdatedAt in current year AND has seasonClub -> firstLoginOfSeason: false", async () => {
     vi.mocked(getCallerIdentity).mockResolvedValue({ roles: ["Pilot"], pilotId: "p1", userId: "u1" } as any);
     
-    vi.mocked(readBlob).mockImplementation(async (client: any) => {
-      if (client?.name === "users/u1.json") return { acceptedTsCsVersion: 999 };
-      if (client?.name === "seasons.json") return [{ year: 2026, active: true }];
+    vi.mocked(readJson).mockImplementation(async (client: any) => {
+      if (client?.name === "users/u1.json") return { acceptedTsCsVersion: 999 } as any;
+      if (client?.name === "seasons.json") return [{ id: "season-2026", year: 2026, active: true }] as any;
       if (client?.name === "pilots/p1.json") return {
+        id: "p1",
+        coachType: "None",
+        pilotRating: "Pilot",
+        person: { id: "person-1", firstName: "Test", lastName: "Pilot", fullName: "Test Pilot" },
         profileUpdatedAt: new Date("2026-06-01T00:00:00Z").toISOString(),
-        seasonClubs: [{ seasonYear: 2026 }]
-      } as Partial<Pilot>;
-      return {};
+        seasonClubs: [{ seasonYear: 2026, clubId: "c1", clubName: "C1" }]
+      } as Partial<Pilot> as any;
+      return {} as any;
     });
 
     const req = { method: "GET", url: "http://localhost/me" };

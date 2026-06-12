@@ -26,13 +26,18 @@ import type {
   ClubRef,
 } from "@bccweb/types";
 import {
+  PilotSchema,
+  PilotSummarySchema,
+  SeasonSummarySchema,
+} from "@bccweb/schemas";
+import * as z from "zod/v4";
+import {
   getBlobClient,
   getBlockBlobClient,
   getPrivateBlobClient,
-  readBlob,
-  writePrivateBlob,
   withLease,
 } from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -41,6 +46,16 @@ import {
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
+
+const PilotsIndexSchema = z.array(PilotSummarySchema);
+const SeasonsIndexSchema = z.array(SeasonSummarySchema);
+
+// PilotClubMembership has no dedicated schema in @bccweb/schemas; the API
+// only reads (never writes) this blob here. Permissive array passthrough so
+// observe-mode does not strip future legacy migration fields.
+const PilotClubHistorySchema = z.array(z.unknown()).transform(
+  (rows) => rows as PilotClubMembership[],
+);
 
 // ─── GET /api/pilots ──────────────────────────────────────────────────────────
 
@@ -58,7 +73,11 @@ async function getPilots(
   if (!isAdmin && !isCoord) return forbiddenResponse();
 
   try {
-    let pilots = await readBlob<PilotSummary[]>(getBlobClient("pilots.json"));
+    let pilots = await readJson(
+      getBlobClient("pilots.json"),
+      PilotsIndexSchema,
+      "pilots.json",
+    );
     pilots.sort((a, b) => a.name.localeCompare(b.name));
 
     // RoundsCoord sees only pilots from their own club
@@ -95,7 +114,11 @@ async function getPilotById(
   if (!isAdmin && !isCoord && !isSelf) return forbiddenResponse();
 
   try {
-    const pilot = await readBlob<Pilot>(getPrivateBlobClient(`pilots/${id}.json`));
+    const pilot = await readJson(
+      getPrivateBlobClient(`pilots/${id}.json`),
+      PilotSchema,
+      `pilots/${id}.json`,
+    );
 
     // RoundsCoord can only view pilots in their own club
     if (isCoord && !isAdmin && pilot.currentClub?.id !== caller.clubId) {
@@ -161,6 +184,7 @@ async function createPilot(
 
   const pilot: Pilot = {
     id,
+    legacyId: null,
     bhpaNumber: body.bhpaNumber,
     coachType: body.coachType ?? "None",
     pilotRating: body.pilotRating ?? "Pilot",
@@ -188,7 +212,7 @@ async function createPilot(
     userId: null,
   };
 
-  await writePrivateBlob(`pilots/${id}.json`, pilot);
+  await writePrivateJson(`pilots/${id}.json`, PilotSchema, pilot);
   await upsertPilotInIndex(pilot, body.email);
 
   return { status: 201, jsonBody: pilot };
@@ -238,7 +262,11 @@ async function updatePilot(
 
   let existing: Pilot;
   try {
-    existing = await readBlob<Pilot>(getPrivateBlobClient(`pilots/${id}.json`));
+    existing = await readJson(
+      getPrivateBlobClient(`pilots/${id}.json`),
+      PilotSchema,
+      `pilots/${id}.json`,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Pilot not found");
@@ -306,7 +334,7 @@ async function updatePilot(
     profileUpdatedAt: new Date().toISOString(),
   };
 
-  await writePrivateBlob(`pilots/${id}.json`, updated);
+  await writePrivateJson(`pilots/${id}.json`, PilotSchema, updated);
   await upsertPilotInIndex(updated, isAdmin ? body.email : undefined);
 
   return { status: 200, jsonBody: updated };
@@ -323,7 +351,11 @@ async function upsertPilotInIndex(
   await withLeaseRetry("pilots.json", async (leaseId) => {
     let index: PilotSummary[] = [];
     try {
-      index = await readBlob<PilotSummary[]>(getBlobClient("pilots.json"));
+      index = await readJson(
+        getBlobClient("pilots.json"),
+        PilotsIndexSchema,
+        "pilots.json",
+      );
     } catch (err: unknown) {
       if ((err as { statusCode?: number }).statusCode !== 404) throw err;
     }
@@ -344,6 +376,10 @@ async function upsertPilotInIndex(
     }
 
     index.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+    // Raw uploadData with lease conditions: writeBlob does not currently accept
+    // ETag/lease guards alongside If-None-Match for the pilots.json index slot,
+    // so the lease-coupled write stays on the BlockBlobClient API. Schema
+    // healing for the array elements still applies through the readJson above.
     const content = JSON.stringify(index, null, 2);
     await getBlockBlobClient("pilots.json").uploadData(Buffer.from(content), {
       blobHTTPHeaders: { blobContentType: "application/json" },
@@ -395,7 +431,11 @@ async function ensurePilotsIndexBlob(): Promise<void> {
 
 async function getActiveSeasonYear(): Promise<number> {
   try {
-    const seasons = await readBlob<SeasonSummary[]>(getBlobClient("seasons.json"));
+    const seasons = await readJson(
+      getBlobClient("seasons.json"),
+      SeasonsIndexSchema,
+      "seasons.json",
+    );
     const active = seasons.find((s) => s.active) ?? seasons[seasons.length - 1];
     return active?.year ?? new Date().getFullYear();
   } catch (err: unknown) {
@@ -424,8 +464,10 @@ async function getPilotClubHistory(
   if (!isAdmin && !isSelf) return forbiddenResponse();
 
   try {
-    const history = await readBlob<PilotClubMembership[]>(
-      getPrivateBlobClient(`pilots/${id}/club-history.json`)
+    const history = await readJson(
+      getPrivateBlobClient(`pilots/${id}/club-history.json`),
+      PilotClubHistorySchema,
+      `pilots/${id}/club-history.json`,
     );
     return { status: 200, jsonBody: history };
   } catch (err: unknown) {
