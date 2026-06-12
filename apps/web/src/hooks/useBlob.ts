@@ -64,10 +64,6 @@ export function useBlob<T>(
     return () => {
       cancelled = true;
     };
-    // schema is intentionally NOT in deps — call sites pass a literal schema
-    // each render; including it would refetch on every render. Identity of
-    // the schema is bound to the path in practice.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [path]);
 
   return state;

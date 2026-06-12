@@ -62,7 +62,6 @@ export function setup(): void {
   //   3. Wire the build pipeline to surface VITE_APP_INSIGHTS_CONNECTION_STRING from the
   //      same Key Vault secret seeded by scripts/iac/seed-secrets.sh.
   // See .omo/notepads/bccweb2-go-live-gap-closure/learnings.md (Task 46) for rationale.
-  // eslint-disable-next-line no-console
   console.info(
     "[telemetry] VITE_APP_INSIGHTS_CONNECTION_STRING is set but SPA RUM is currently stubbed — see apps/web/src/lib/telemetry.ts"
   );
