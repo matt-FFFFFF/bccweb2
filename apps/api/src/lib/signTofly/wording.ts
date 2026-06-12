@@ -1,11 +1,12 @@
 import { createHash } from "node:crypto";
 import type { SignToFlyWording } from "@bccweb/types";
+import { ActiveWordingPointerSchema, SignToFlyWordingSchema } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
   getPrivateBlockBlobClient,
-  readBlob,
   withPrivateLease,
 } from "../blob.js";
+import { readJson } from "../blobJson.js";
 import { HttpError } from "../http.js";
 
 export interface ActiveWording {
@@ -20,9 +21,12 @@ export async function getActiveWording(): Promise<SignToFlyWording> {
 }
 
 export async function getWording(version: number): Promise<SignToFlyWording> {
+  const path = wordingVersionPath(version);
   try {
-    return await readBlob<SignToFlyWording>(
-      getPrivateBlobClient(wordingVersionPath(version)),
+    return await readJson(
+      getPrivateBlobClient(path),
+      SignToFlyWordingSchema,
+      path,
     );
   } catch (err: unknown) {
     if (isMissingBlob(err)) {
@@ -78,7 +82,11 @@ function hashHtml(html: string): string {
 
 async function readActiveWordingPointer(): Promise<ActiveWording> {
   try {
-    return await readBlob<ActiveWording>(getPrivateBlobClient(ACTIVE_WORDING_PATH));
+    return await readJson(
+      getPrivateBlobClient(ACTIVE_WORDING_PATH),
+      ActiveWordingPointerSchema,
+      ACTIVE_WORDING_PATH,
+    );
   } catch (err: unknown) {
     if (isMissingBlob(err)) {
       throw new HttpError(503, "WORDING_NOT_SEEDED");

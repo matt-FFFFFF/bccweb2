@@ -16,12 +16,12 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { Round } from "@bccweb/types";
+import { RoundSchema } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
-  readBlob,
-  writePrivateBlob,
   withPrivateLease,
 } from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -58,7 +58,7 @@ async function setTeamCaptain(
   const updatedTeam = await withPrivateLease(path, async (leaseId) => {
     let round: Round;
     try {
-      round = await readBlob<Round>(getPrivateBlobClient(path));
+      round = await readJson(getPrivateBlobClient(path), RoundSchema, path);
     } catch (err: unknown) {
       if ((err as { statusCode?: number }).statusCode === 404) {
         throw new HttpError(404, "NOT_FOUND", "Round not found");
@@ -100,7 +100,7 @@ async function setTeamCaptain(
     team.captainPilotId = newCaptainId;
     round.teams[teamIdx] = team;
 
-    await writePrivateBlob(path, round, leaseId);
+    await writePrivateJson(path, RoundSchema, round, leaseId);
     return team;
   });
 

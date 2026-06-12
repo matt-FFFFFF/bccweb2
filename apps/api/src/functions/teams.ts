@@ -16,7 +16,12 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type { ClubTeamSummary, Round, Team, PilotSlot } from "@bccweb/types";
-import { getBlobClient, getPrivateBlobClient, readBlob, writePrivateBlob, withPrivateLease } from "../lib/blob.js";
+import { ClubTeamSummarySchema, PilotSchema, RoundSchema } from "@bccweb/schemas";
+import * as z from "zod/v4";
+import { getBlobClient, getPrivateBlobClient, withPrivateLease } from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
+
+const ClubTeamSummariesSchema = z.array(ClubTeamSummarySchema);
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -46,14 +51,14 @@ async function mutateLocked(
 
   try {
     return await withPrivateLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getPrivateBlobClient(path));
+      const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
       const err = mutateFn(r);
       if (err) {
         const e = new Error(err);
         (e as { isValidation?: boolean }).isValidation = true;
         throw new HttpError(500, "INTERNAL");
       }
-      await writePrivateBlob(path, r, leaseId);
+      await writePrivateJson(path, RoundSchema, r, leaseId);
       return r;
     });
   } catch (e: unknown) {
@@ -85,7 +90,8 @@ async function addTeam(
 
   let round: Round;
   try {
-    round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
+    const roundPath = `rounds/${id}.json`;
+    round = await readJson(getPrivateBlobClient(roundPath), RoundSchema, roundPath);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
@@ -96,7 +102,11 @@ async function addTeam(
   // teamName must match a ClubTeam pre-registered for (clubId, seasonYear); canonical name + clubName come from the matched entry.
   let clubTeams: ClubTeamSummary[] = [];
   try {
-    clubTeams = await readBlob<ClubTeamSummary[]>(getBlobClient("club-teams.json"));
+    clubTeams = await readJson(
+      getBlobClient("club-teams.json"),
+      ClubTeamSummariesSchema,
+      "club-teams.json",
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode !== 404) throw err;
   }
@@ -195,7 +205,8 @@ async function addPilot(
 
   // Verify pilot exists
   try {
-    await readBlob(getPrivateBlobClient(`pilots/${body.pilotId}.json`));
+    const pilotPath = `pilots/${body.pilotId}.json`;
+    await readJson(getPrivateBlobClient(pilotPath), PilotSchema, pilotPath);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(400, "INVALID_BODY", "Pilot not found");

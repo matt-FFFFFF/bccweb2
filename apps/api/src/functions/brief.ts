@@ -13,13 +13,15 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { RoundBrief } from "@bccweb/types";
+import { BriefSchema, RoundSchema } from "@bccweb/schemas";
 import {
-  getPrivateBlobClient,
   readBlob,
-  writePrivateBlob,
+  getPrivateBlobClient,
   withPrivateLeaseRenewing,
   getPrivateBlockBlobClient,
+  writePrivateBlob,
 } from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
@@ -58,10 +60,9 @@ function matchesMagicBytes(fileType: string, buffer: Buffer): boolean {
 }
 
 async function readBrief(id: string): Promise<RoundBrief | null> {
+  const path = `round-briefs/${id}.json`;
   try {
-    return await readBlob<RoundBrief>(
-      getPrivateBlobClient(`round-briefs/${id}.json`)
-    );
+    return await readJson(getPrivateBlobClient(path), BriefSchema, path);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) return null;
     throw new HttpError(500, "INTERNAL");
@@ -106,6 +107,7 @@ async function getRoundBriefPdf(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
+  // Non-JSON pdf binary: use BlobClient.download() not readBlob/readJson (see "PREFER readJson" doc in lib/blob.ts).
   const blobClient = getPrivateBlobClient(`round-briefs/${id}.pdf`);
 
   let downloadRes: Awaited<ReturnType<typeof blobClient.download>>;
@@ -173,6 +175,7 @@ async function getRoundBriefImage(
     return { status: 404, jsonBody: { error: "Brief image not found." } };
   }
 
+  // Non-JSON image binary (.jpg/.png): use BlobClient.download() not readBlob/readJson (see "PREFER readJson" doc in lib/blob.ts).
   const blobClient = getPrivateBlobClient(imagePath);
   let downloadRes: Awaited<ReturnType<typeof blobClient.download>>;
   try {
@@ -239,7 +242,11 @@ async function updateRoundBrief(
   }
   await mutationRateLimit(req, caller, "updateRoundBrief", "heavy");
 
-  const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`)).catch((e) => {
+  const round = await readJson(
+    getPrivateBlobClient(`rounds/${id}.json`),
+    RoundSchema,
+    `rounds/${id}.json`,
+  ).catch((e: unknown) => {
     if ((e as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
@@ -270,7 +277,7 @@ async function updateRoundBrief(
       body.versionHistory = existing.versionHistory;
       
       if (!isDryRun) {
-        await writePrivateBlob(`round-briefs/${id}.json`, body, leaseId);
+        await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, body, leaseId);
       }
       return { brief: body, materialChanged: false, invalidatedSignatureCount: 0 };
     }
@@ -290,7 +297,7 @@ async function updateRoundBrief(
     });
 
     if (!isDryRun) {
-      await writePrivateBlob(`round-briefs/${id}.json`, body, leaseId);
+      await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, body, leaseId);
     }
 
     const signatures = await listSignaturesForRound(id);
@@ -310,7 +317,7 @@ async function updateRoundBrief(
 
     if (!isDryRun && count > 0) {
       await withPrivateLeaseRenewing(`rounds/${id}.json`, async (roundLease) => {
-        await writePrivateBlob(`rounds/${id}.json`, updatedRound, roundLease);
+        await writePrivateJson(`rounds/${id}.json`, RoundSchema, updatedRound, roundLease);
       });
     }
 
@@ -345,7 +352,11 @@ async function uploadBriefImage(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID");
 
-  const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`)).catch((e) => {
+  const round = await readJson(
+    getPrivateBlobClient(`rounds/${id}.json`),
+    RoundSchema,
+    `rounds/${id}.json`,
+  ).catch((e) => {
     if ((e as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
@@ -407,7 +418,7 @@ async function uploadBriefImage(
     existing.imagePaths = existing.imagePaths || [];
     existing.imagePaths.push(imagePath);
     savedPath = imagePath;
-    await writePrivateBlob(`round-briefs/${id}.json`, existing, leaseId);
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, existing, leaseId);
   });
 
   return { status: 200, jsonBody: { path: savedPath } };
@@ -426,7 +437,11 @@ async function deleteBriefImage(
   const n = Number(req.params["index"]);
   if (!id || !n) throw new HttpError(400, "BAD_REQUEST");
 
-  const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`)).catch((e) => {
+  const round = await readJson(
+    getPrivateBlobClient(`rounds/${id}.json`),
+    RoundSchema,
+    `rounds/${id}.json`,
+  ).catch((e) => {
     if ((e as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
@@ -452,7 +467,7 @@ async function deleteBriefImage(
 
     const imagePath = existing.imagePaths[n - 1];
     existing.imagePaths.splice(n - 1, 1);
-    await writePrivateBlob(`round-briefs/${id}.json`, existing, leaseId);
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, existing, leaseId);
 
     const imageClient = getPrivateBlockBlobClient(imagePath);
     await imageClient.deleteIfExists();
