@@ -1,0 +1,141 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Cancel superseded runs on the same ref (e.g. rapid pushes to a PR branch).
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ── 0. Typecheck ──────────────────────────────────────────────────────────────
+  # tsc --noEmit across all workspaces. Dependents resolve @bccweb/* from dist/,
+  # so the shared packages must be built first (types → schemas → scoring).
+  typecheck:
+    name: Typecheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up mise
+        uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4.1.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared packages
+        run: make build-types build-schemas build-scoring
+
+      - name: Typecheck
+        run: make typecheck
+
+  # ── Lint ──────────────────────────────────────────────────────────────────────
+  # Only apps/web has a lint script (eslint). Build the shared packages first so
+  # the @bccweb/* type declarations resolve for type-aware rules.
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up mise
+        uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4.1.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build shared packages
+        run: make build-types build-schemas
+
+      - name: Lint web
+        run: npm run lint --workspace apps/web
+
+  # ── 2. Build ──────────────────────────────────────────────────────────────────
+  # Full build in dependency order (types → schemas → scoring → api; types → web).
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Set up mise
+        uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4.1.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build all packages
+        run: make build
+
+  # ── 1. Tests ───────────────────────────────────────────────────────────────────
+  # API integration tests talk to Azurite on 127.0.0.1:10000 (the connection
+  # string is defaulted in apps/api/src/__tests__/helpers/setup.ts). Each API test
+  # file provisions its own per-file containers, so no seeding is required here.
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Start Azurite
+        run: |
+          docker rm -f azurite >/dev/null 2>&1 || true
+          docker run -d --name azurite -p 10000:10000 \
+            mcr.microsoft.com/azure-storage/azurite \
+            azurite --blobHost 0.0.0.0 --skipApiVersionCheck
+
+      - name: Wait for Azurite
+        run: |
+          for i in {1..30}; do
+            if curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:10000/devstoreaccount1?comp=list 2>/dev/null | grep -qE "^(200|403|400)$"; then
+              echo "Azurite ready after ${i} attempts"
+              exit 0
+            fi
+            echo "Attempt $i: Azurite not ready, sleeping 2s..."
+            sleep 2
+          done
+          echo "::error::Azurite failed to become ready after 60s"
+          exit 1
+
+      - name: Set up mise
+        uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4.1.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      # scripts/migrate is a standalone package (own lockfile) outside the root
+      # npm workspaces, so root `npm ci` does not install it. The API migration
+      # unit tests dynamically import scripts/migrate/migrate.mjs, which imports
+      # `mssql` — install those deps here or the tests fail with ERR_MODULE_NOT_FOUND.
+      - name: Install migration script dependencies
+        run: npm ci
+        working-directory: scripts/migrate
+
+      # Built dist/ is required: API tests resolve @bccweb/* from dist/.
+      - name: Build all packages
+        run: make build
+
+      - name: Run tests
+        run: make test
+
+      # The three heavy/slow API lib tests are excluded from `make test`; CI can
+      # afford the extra minute, so cover them here while Azurite is already up.
+      - name: Run heavy tests
+        run: make test-heavy
+
+  # ── 3. Docker builds ────────────────────────────────────────────────────────────
+  # Build every image that docker-compose builds locally (apps/api/Dockerfile.dev
+  # and apps/web/Dockerfile.dev). `docker compose build` builds exactly the
+  # services that declare a `build:` context, keeping this in lockstep with
+  # docker-compose.yml. Azurite / init images are pulled, not built.
+  docker:
+    name: Docker builds
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+
+      - name: Build compose images
+        run: docker compose build

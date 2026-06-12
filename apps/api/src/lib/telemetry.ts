@@ -52,7 +52,7 @@ export function setup(): void {
 }
 
 export function getTelemetryClient(): appInsights.TelemetryClient | undefined {
-  return appInsights.defaultClient;
+  return appInsights.defaultClient ?? undefined;
 }
 
 export function resetForTests(): void {
