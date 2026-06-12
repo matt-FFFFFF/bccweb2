@@ -1,14 +1,12 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
-import DOMPurify from "dompurify";
 import { api, ApiError } from "../../lib/api.js";
-import { useAuth } from "../../hooks/useAuth.js";
+import { sanitizeWordingHtml } from "../../lib/sanitize.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
 import type { SignToFlyWording, Round, RoundBrief } from "@bccweb/types";
 
 export default function SignToFly() {
   const { roundId, teamId, place } = useParams<{ roundId: string; teamId: string; place: string }>();
-  const { identity } = useAuth();
 
   const [wording, setWording] = useState<SignToFlyWording | null>(null);
   const [brief, setBrief] = useState<RoundBrief & { version?: number } | null>(null);
@@ -125,10 +123,7 @@ export default function SignToFly() {
     );
   }
 
-  const sanitizedHtml = DOMPurify.sanitize(wording.html, {
-    ALLOWED_TAGS: ["p", "strong", "em", "ul", "ol", "li", "br", "h2", "h3", "span"],
-    ALLOWED_ATTR: []
-  });
+  const sanitizedHtml = sanitizeWordingHtml(wording.html);
 
   return (
     <div style={{ maxWidth: 800, margin: "0 auto", paddingBottom: "3rem" }}>
