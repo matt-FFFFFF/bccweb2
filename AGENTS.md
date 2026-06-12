@@ -183,19 +183,17 @@ in `src/bcc-theme.css`.
 
 **API tests** ([apps/api/vitest.config.ts](file:///Volumes/code/bccweb2/apps/api/vitest.config.ts)):
 
-- **Require a running Azurite** (`docker compose up azurite`). Setup files
-  ([helpers/setup.ts](file:///Volumes/code/bccweb2/apps/api/src/__tests__/helpers/setup.ts),
-  [helpers/azurite.ts](file:///Volumes/code/bccweb2/apps/api/src/__tests__/helpers/azurite.ts))
-  default `BLOB_CONNECTION_STRING` to Azurite's well-known dev string and create
-  both `data` + `data-private` containers in `beforeAll`.
-- `@azure/functions` is **mocked** in setup — `app.http()` calls populate a
-  handler registry; tests invoke handlers via `getRegisteredHandler(name)`.
+- **Per-file Azurite containers**: each test file gets its own `test-data-<rand>` / `test-priv-<rand>` containers (Task 24). They are deleted in `afterAll`, and stale `test-*` containers older than 1h are best-effort swept from `127.0.0.1` only.
+- Isolation must **not** depend on vitest fresh-worker-per-file behavior. `helpers/setup.ts` calls `resetBlobSingletons()` before container creation so even `pool: 'threads'` with `singleThread: true` still produces correct per-file containers.
+- `@azure/functions` is **mocked** in setup — `app.http()` calls populate a handler registry; tests invoke handlers via `getRegisteredHandler(name)`.
   `email`, `pdf`, `puretrack` modules are also mocked to prevent real calls.
-- `fileParallelism: false` + `sequence.concurrent: false` — tests run
-  sequentially for stable blob state. **Do not assume parallel execution.**
-- No `afterEach` blob cleanup — each test uses `crypto.randomUUID()` for
-  unique IDs to avoid collisions across files.
+- `helpers/seed.ts` seeds via registered handlers (API-based seeding), not direct blob writes. The one documented exception is `bootstrapAdmin` — annotated inline and allowlisted by F2. Adding any new direct-write exception requires updating both the seed.ts banner and this section.
+- `fileParallelism: false` + `sequence.concurrent: false` — tests run sequentially for stable blob state.
+- `TEST_BCRYPT_COST` is honored only when `NODE_ENV === "test"`; outside test env it is ignored and the cost stays 12. It cannot be used to weaken production hashing.
 - Include is glob-based as of Task 7. Three heavy tests are deliberately excluded (`blob.test.ts`, `puretrack.test.ts`, `telemetry.integration.test.ts`) — each with a reason comment in `vitest.config.ts`. Run them via `make test-heavy`.
+- Cross-link the `BLOB_SCHEMA_MODE` behavior in [Data Storage (Azure Blob)](#data-storage-azure-blob); do not duplicate it here.
+
+**Why per-file, not shared with UUID**: a test file crashing mid-lease can leave a shared container holding a lease, and the next file would wait 30s for timeout. Per-file containers contain that blast radius, so cleanup is safe and scoped.
 
 **Web tests** ([apps/web/vitest.config.ts](file:///Volumes/code/bccweb2/apps/web/vitest.config.ts)):
 `jsdom` env, `@testing-library/react`. Aliases `@bccweb/types` to
