@@ -14,14 +14,21 @@ import {
   HttpResponseInit,
   InvocationContext,
 } from "@azure/functions";
-import type { Config, Round, User, UserRole } from "@bccweb/types";
-import { getPrivateBlobClient, readBlob, writePrivateBlob } from "../lib/blob.js";
+import type { Config, Round, User } from "@bccweb/types";
+import { ConfigSchema, RoundSchema, UserSchema } from "@bccweb/schemas";
+import * as z from "zod/v4";
+import {
+  getPrivateBlobClient,
+  withPrivateLease,
+} from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 import { recomputeSeason, updateRoundsIndex } from "../lib/recompute.js";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
@@ -30,70 +37,56 @@ function isAdmin(roles: string[]): boolean {
   return roles.includes("Admin");
 }
 
-// ─── Config defaults / heal ───────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
-const DEFAULT_CONFIG: Config = {
-  maxTeamsInClub: 2,
-  maxPilotsInTeam: 12,
-  maxScoringPilotsInTeam: 6,
-  flightDateValidationEnabled: true,
-  wingFactors: {
-    "EN A": 1.0,
-    "EN B": 0.9,
-    "EN C": 0.8,
-    "EN C 2-liner": 0.7,
-    "EN D": 0.6,
-    "EN D 2-liner": 0.5,
-  },
-};
+function statusCodeOf(err: unknown): number | undefined {
+  return (err as { statusCode?: number }).statusCode;
+}
 
-// Returns a complete Config, filling defaults for any missing/invalid fields. `healed` flags whether the caller should persist the repair.
-function healConfig(stored: Partial<Config> | null | undefined): {
-  config: Config;
-  healed: boolean;
-} {
-  let healed = false;
-
-  function pickNumber(v: unknown, fallback: number): number {
-    if (typeof v === "number" && Number.isFinite(v)) return v;
-    healed = true;
-    return fallback;
+/**
+ * Convert Azure blob-lease conflict (HTTP 409 LeaseAlreadyPresent) into a
+ * 503 surfaced through `withErrorHandler`. Concurrent writers retry-later.
+ */
+function rethrowLeaseConflict(err: unknown): never {
+  const status = statusCodeOf(err);
+  if (status === 409) {
+    throw new HttpError(503, "LEASE_HELD", "Resource locked; retry shortly");
   }
-  function pickBool(v: unknown, fallback: boolean): boolean {
-    if (typeof v === "boolean") return v;
-    healed = true;
-    return fallback;
+  if (status === 412) {
+    // Mid-flight lease lost or precondition failure.
+    throw new HttpError(503, "LEASE_LOST", "Resource lease lost; retry shortly");
   }
+  throw err;
+}
 
-  const wingFactors = { ...DEFAULT_CONFIG.wingFactors };
-  if (stored?.wingFactors && typeof stored.wingFactors === "object") {
-    for (const wc of Object.keys(wingFactors) as Array<keyof typeof wingFactors>) {
-      const v = stored.wingFactors[wc];
-      if (typeof v === "number" && Number.isFinite(v)) {
-        wingFactors[wc] = v;
-      } else {
-        healed = true;
-      }
+/**
+ * Ensure-create a private blob (no overwrite) using `ifNoneMatch: "*"`.
+ * Mirrors the `ensurePilotsIndexBlob` pattern at pilots.ts:374-390 but for
+ * `data-private` and routed through writePrivateJson so BLOB_SCHEMA_MODE is
+ * honoured.
+ */
+async function ensurePrivateBlob<T>(
+  path: string,
+  schema: z.ZodType<T>,
+  defaults: T,
+): Promise<void> {
+  const maxAttempts = 10;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await writePrivateJson(path, schema, defaults, undefined, {
+        ifNoneMatch: "*",
+      });
+      return;
+    } catch (err: unknown) {
+      const status = statusCodeOf(err);
+      // 409 = blob already exists; nothing to do.
+      if (status === 409) return;
+      // 412 = ifNoneMatch failed (also "already exists"); nothing to do.
+      if (status === 412) return;
+      if (attempt === maxAttempts) throw err;
+      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
     }
-  } else {
-    healed = true;
   }
-
-  const config: Config = {
-    maxTeamsInClub: pickNumber(stored?.maxTeamsInClub, DEFAULT_CONFIG.maxTeamsInClub),
-    maxPilotsInTeam: pickNumber(stored?.maxPilotsInTeam, DEFAULT_CONFIG.maxPilotsInTeam),
-    maxScoringPilotsInTeam: pickNumber(
-      stored?.maxScoringPilotsInTeam,
-      DEFAULT_CONFIG.maxScoringPilotsInTeam,
-    ),
-    flightDateValidationEnabled: pickBool(
-      stored?.flightDateValidationEnabled,
-      DEFAULT_CONFIG.flightDateValidationEnabled,
-    ),
-    wingFactors,
-  };
-
-  return { config, healed };
 }
 
 // ─── POST /api/admin/rounds/{id}/recompute ────────────────────────────────────
@@ -109,15 +102,20 @@ async function recomputeRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "recomputeRound", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   let round: Round;
   try {
-    round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
+    round = await readJson(
+      getPrivateBlobClient(`rounds/${id}.json`),
+      RoundSchema,
+      `rounds/${id}.json`,
+    );
   } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
+    if (statusCodeOf(err) === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
     throw new HttpError(500, "INTERNAL");
@@ -129,7 +127,7 @@ async function recomputeRound(
   // Recompute season derived blobs
   try {
     await recomputeSeason(round.season.year);
-  } catch (err: unknown) {
+  } catch (_err: unknown) {
     throw new HttpError(500, "RECOMPUTE_FAILED");
   }
 
@@ -149,20 +147,23 @@ async function getConfig(
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
 
-  let stored: Partial<Config> | null = null;
   try {
-    stored = await readBlob<Partial<Config>>(getPrivateBlobClient("config.json"));
+    const config = await readJson(
+      getPrivateBlobClient("config.json"),
+      ConfigSchema,
+      "config.json",
+    );
+    return { status: 200, jsonBody: config };
   } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode !== 404) {
-      throw new HttpError(500, "INTERNAL");
-    }
+    if (statusCodeOf(err) !== 404) throw err;
   }
 
-  const { config, healed } = healConfig(stored);
-  if (healed) {
-    await writePrivateBlob("config.json", config);
-  }
-  return { status: 200, jsonBody: config };
+  // Virgin store: parse {} → ConfigSchema yields full defaults; persist for
+  // next reader. ensure-create (ifNoneMatch:"*") tolerates concurrent virgin
+  // creates.
+  const defaults = ConfigSchema.parse({});
+  await ensurePrivateBlob("config.json", ConfigSchema, defaults);
+  return { status: 200, jsonBody: defaults };
 }
 
 // ─── PUT /api/admin/config ────────────────────────────────────────────────────
@@ -174,28 +175,72 @@ async function updateConfig(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateConfig", "standard");
 
-  const body = (await req.json()) as Partial<Config>;
-
-  let stored: Partial<Config> | null = null;
+  let body: unknown;
   try {
-    stored = await readBlob<Partial<Config>>(getPrivateBlobClient("config.json"));
+    body = await req.json();
   } catch {
-    /* missing blob → use defaults */
+    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
-  const existing = healConfig(stored).config;
 
-  const updated: Config = {
-    ...existing,
-    ...body,
-    wingFactors: {
-      ...existing.wingFactors,
-      ...(body.wingFactors ?? {}),
-    },
-  };
+  // Client-input validation: reject obviously bad shapes with 400 (don't
+  // route through BlobShapeError → 500, which is reserved for storage shape
+  // drift). ConfigSchema is `.strict()` on wingFactors so unknown wing keys
+  // are rejected here.
+  const parsed = ConfigSchema.partial().safeParse(body);
+  if (!parsed.success) {
+    throw new HttpError(
+      400,
+      "INVALID_CONFIG",
+      `Invalid config: ${JSON.stringify(parsed.error.issues)}`,
+    );
+  }
+  const patch: Partial<Config> = parsed.data;
 
-  await writePrivateBlob("config.json", updated);
-  return { status: 200, jsonBody: updated };
+  let merged: Config = ConfigSchema.parse({});
+  try {
+    await runConfigRmw(patch, (m) => { merged = m; });
+  } catch (err: unknown) {
+    if (statusCodeOf(err) === 404) {
+      // Virgin store: seed defaults so the lease has a blob to attach to,
+      // then retry the RMW once. ensure-create tolerates concurrent virgins.
+      const defaults = ConfigSchema.parse({});
+      await ensurePrivateBlob("config.json", ConfigSchema, defaults);
+      try {
+        await runConfigRmw(patch, (m) => { merged = m; });
+      } catch (retryErr: unknown) {
+        rethrowLeaseConflict(retryErr);
+      }
+    } else {
+      rethrowLeaseConflict(err);
+    }
+  }
+
+  return { status: 200, jsonBody: merged };
+}
+
+async function runConfigRmw(
+  patch: Partial<Config>,
+  onMerged: (merged: Config) => void,
+): Promise<void> {
+  await withPrivateLease("config.json", async (leaseId) => {
+    const existing = await readJson(
+      getPrivateBlobClient("config.json"),
+      ConfigSchema,
+      "config.json",
+    );
+    const merged: Config = {
+      ...existing,
+      ...patch,
+      wingFactors: {
+        ...existing.wingFactors,
+        ...(patch.wingFactors ?? {}),
+      },
+    };
+    await writePrivateJson("config.json", ConfigSchema, merged, leaseId);
+    onMerged(merged);
+  });
 }
 
 // ─── GET /api/admin/users ─────────────────────────────────────────────────────
@@ -210,8 +255,10 @@ async function listUsers(
 
   let index: Record<string, string> = {};
   try {
-    index = await readBlob<Record<string, string>>(
-      getPrivateBlobClient("user-index.json")
+    index = await readJson(
+      getPrivateBlobClient("user-index.json"),
+      z.record(z.string(), z.string()),
+      "user-index.json",
     );
   } catch {
     return { status: 200, jsonBody: [] };
@@ -220,17 +267,32 @@ async function listUsers(
   const userIds = Object.values(index);
   const users = await Promise.all(
     userIds.map((id) =>
-      readBlob<User>(getPrivateBlobClient(`users/${id}.json`)).catch(() => null)
+      readJson(
+        getPrivateBlobClient(`users/${id}.json`),
+        UserSchema,
+        `users/${id}.json`,
+      ).catch(() => null)
     )
   );
 
-  const valid = users.filter((u): u is User => u !== null);
+  const valid = users.flatMap((u) => (u === null ? [] : [u]));
   valid.sort((a, b) => a.email.localeCompare(b.email));
 
   return { status: 200, jsonBody: valid };
 }
 
 // ─── PUT /api/admin/users/{userId}/roles ─────────────────────────────────────
+
+// Client-input role validation (inline). UserSchema's `roles` field uses
+// preprocess+normalisation for stored-blob healing; this stricter schema
+// rejects unknown roles outright on the API edge.
+const RolesPayloadSchema = z
+  .object({
+    roles: z.array(z.enum(["Admin", "RoundsCoord", "Pilot"])).optional(),
+    pilotId: z.string().nullable().optional(),
+    clubId: z.string().nullable().optional(),
+  })
+  .strict();
 
 async function setUserRoles(
   req: HttpRequest,
@@ -239,35 +301,70 @@ async function setUserRoles(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "setUserRoles", "standard");
 
   const userId = req.params["userId"];
   if (!userId) throw new HttpError(400, "MISSING_USER_ID", "Missing userId");
 
-  let body: { roles?: UserRole[]; pilotId?: string | null; clubId?: string | null };
+  let rawBody: unknown;
   try {
-    body = (await req.json()) as typeof body;
+    rawBody = await req.json();
   } catch {
     throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
-  let user: User;
+  const parsed = RolesPayloadSchema.safeParse(rawBody);
+  if (!parsed.success) {
+    throw new HttpError(
+      400,
+      "INVALID_ROLES_PAYLOAD",
+      `Invalid roles payload: ${JSON.stringify(parsed.error.issues)}`,
+    );
+  }
+  const body = parsed.data;
+
+  let updated: User | null = null;
   try {
-    user = await readBlob<User>(getPrivateBlobClient(`users/${userId}.json`));
+    await withPrivateLease(`users/${userId}.json`, async (leaseId) => {
+      let user: User;
+      try {
+        user = await readJson(
+          getPrivateBlobClient(`users/${userId}.json`),
+          UserSchema,
+          `users/${userId}.json`,
+        );
+      } catch (err: unknown) {
+        if (statusCodeOf(err) === 404) {
+          throw new HttpError(404, "NOT_FOUND", "User not found");
+        }
+        throw err;
+      }
+
+      updated = {
+        ...user,
+        ...(body.roles !== undefined && { roles: body.roles }),
+        ...(body.pilotId !== undefined && { pilotId: body.pilotId }),
+        ...(body.clubId !== undefined && { clubId: body.clubId }),
+      };
+
+      await writePrivateJson(
+        `users/${userId}.json`,
+        UserSchema,
+        updated,
+        leaseId,
+      );
+    });
   } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
+    if (err instanceof HttpError) throw err;
+    // Lease acquire on a non-existent blob 404s; surface that as NOT_FOUND.
+    if (statusCodeOf(err) === 404) {
       throw new HttpError(404, "NOT_FOUND", "User not found");
     }
-    throw new HttpError(500, "INTERNAL");
+    rethrowLeaseConflict(err);
   }
 
-  const updated: User = {
-    ...user,
-    ...(body.roles !== undefined && { roles: body.roles }),
-    ...(body.pilotId !== undefined && { pilotId: body.pilotId }),
-    ...(body.clubId !== undefined && { clubId: body.clubId }),
-  };
-
-  await writePrivateBlob(`users/${userId}.json`, updated);
+  // Unreachable on success: withPrivateLease always populates `updated`.
+  if (!updated) throw new HttpError(500, "INTERNAL");
   return { status: 200, jsonBody: updated };
 }
 

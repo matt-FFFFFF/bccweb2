@@ -42,6 +42,7 @@ module "stamp" {
   puretrack_password           = var.puretrack_password
   jwt_secret_version           = var.jwt_secret_version
   acs_secret_version           = var.acs_secret_version
+  blob_schema_mode             = var.blob_schema_mode
   tags                         = local.tags
 
   app_insights_id                = data.terraform_remote_state.common.outputs.app_insights_id

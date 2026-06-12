@@ -4,13 +4,17 @@ import {
   HttpResponseInit,
   InvocationContext,
 } from "@azure/functions";
-import type { RoundSummary, Round } from "@bccweb/types";
-import { getBlobClient, getPrivateBlobClient, readBlob } from "../lib/blob.js";
+import { RoundSchema, RoundSummarySchema } from "@bccweb/schemas";
+import * as z from "zod/v4";
+import { getBlobClient, getPrivateBlobClient } from "../lib/blob.js";
+import { readJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+
+const RoundsIndexSchema = z.array(RoundSummarySchema);
 
 // ─── GET /api/rounds ──────────────────────────────────────────────────────────
 
@@ -19,7 +23,11 @@ async function getRounds(
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   try {
-    const rounds = await readBlob<RoundSummary[]>(getBlobClient("rounds.json"));
+    const rounds = await readJson(
+      getBlobClient("rounds.json"),
+      RoundsIndexSchema,
+      "rounds.json",
+    );
     // Sort newest first
     rounds.sort(
       (a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()
@@ -46,7 +54,11 @@ async function getRoundById(
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   try {
-    const round = await readBlob<Round>(getPrivateBlobClient(`rounds/${id}.json`));
+    const round = await readJson(
+      getPrivateBlobClient(`rounds/${id}.json`),
+      RoundSchema,
+      `rounds/${id}.json`,
+    );
     return { status: 200, jsonBody: round };
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {

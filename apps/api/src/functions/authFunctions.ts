@@ -17,12 +17,24 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import { createHash, randomBytes, randomUUID } from "crypto";
+import * as z from "zod/v4";
 import type { User } from "@bccweb/types";
-import { getPrivateBlobClient, readBlob, writePrivateBlob } from "../lib/blob.js";
+import { AuthCredentialSchema, UserSchema } from "@bccweb/schemas";
+import {
+  getPrivateBlobClient,
+  writePrivateBlob,
+  withPrivateLease,
+} from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
+
+const VerificationStateSchema = z.object({
+  token: z.string(),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+});
 import { getOrCreateUser } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { extractIp } from "../lib/signTofly/ledger.js";
-import { TS_CS_VERSION } from "../lib/termsConstants.js";
 import {
   AuthCredential,
   TokenAlreadyConsumedError,
@@ -108,12 +120,14 @@ async function storeVerificationToken(
   const tokenHash = createHash("sha256").update(rawToken).digest("hex");
   const tokenDoc: VerificationState = { token: rawToken, createdAt, expiresAt };
 
+  // CREATE-ONCE: token path is sha256-keyed, collision means token already issued
   await writePrivateBlob(`auth/tokens/${tokenHash}.json`, {
     userId,
     type: "verify",
     createdAt,
     expiresAt,
   });
+  // CREATE-ONCE: token path is sha256-keyed, collision means token already issued
   await writePrivateBlob(verificationStatePath(userId), tokenDoc);
   return tokenDoc;
 }
@@ -124,8 +138,9 @@ async function createVerificationToken(userId: string, ttlHours: number): Promis
 }
 
 async function loadVerificationState(userId: string): Promise<VerificationState | null> {
+  const path = verificationStatePath(userId);
   try {
-    return await readBlob<VerificationState>(getPrivateBlobClient(verificationStatePath(userId)));
+    return await readJson(getPrivateBlobClient(path), VerificationStateSchema, path);
   } catch {
     return null;
   }
@@ -184,10 +199,16 @@ async function register(
       emailVerified: false,
       createdAt: new Date().toISOString(),
     };
-    await writePrivateBlob(`auth/${userId}.json`, credential);
+    await writePrivateJson(
+      `auth/${userId}.json`,
+      AuthCredentialSchema,
+      credential,
+      undefined,
+      { ifNoneMatch: "*" },
+    );
     const user = await getOrCreateUser(userId, emailLower);
     const acceptedAt = new Date().toISOString();
-    await writePrivateBlob(`users/${userId}.json`, {
+    await writePrivateJson(`users/${userId}.json`, UserSchema, {
       ...user,
       acceptedTsCsAt: acceptedAt,
       acceptedTsCsIp: extractIp(req),
@@ -199,7 +220,12 @@ async function register(
   } else {
     let cred: AuthCredential | null = null;
     try {
-      cred = await readBlob<AuthCredential>(getPrivateBlobClient(`auth/${existing}.json`));
+      const credPath = `auth/${existing}.json`;
+      cred = await readJson(
+        getPrivateBlobClient(credPath),
+        AuthCredentialSchema,
+        credPath,
+      );
     } catch {
       cred = null;
     }
@@ -247,15 +273,21 @@ async function verifyEmail(
   }
 
   const credPath = `auth/${result.userId}.json`;
-  let cred: AuthCredential;
-  try {
-    cred = await readBlob<AuthCredential>(getPrivateBlobClient(credPath));
-  } catch {
-    throw new HttpError(400, "INVALID_TOKEN", "Invalid token");
-  }
+  await withPrivateLease(credPath, async (leaseId) => {
+    let cred: AuthCredential;
+    try {
+      cred = await readJson(
+        getPrivateBlobClient(credPath),
+        AuthCredentialSchema,
+        credPath,
+      );
+    } catch {
+      throw new HttpError(400, "INVALID_TOKEN", "Invalid token");
+    }
 
-  cred.emailVerified = true;
-  await writePrivateBlob(credPath, cred);
+    cred.emailVerified = true;
+    await writePrivateJson(credPath, AuthCredentialSchema, cred, leaseId);
+  });
 
   return {
     status: 200,
@@ -294,7 +326,12 @@ async function resendVerification(
 
   let cred: AuthCredential;
   try {
-    cred = await readBlob<AuthCredential>(getPrivateBlobClient(`auth/${userId}.json`));
+    const credPath = `auth/${userId}.json`;
+    cred = await readJson(
+      getPrivateBlobClient(credPath),
+      AuthCredentialSchema,
+      credPath,
+    );
   } catch {
     return silentOk;
   }
@@ -358,8 +395,11 @@ async function login(
 
   let cred: AuthCredential;
   try {
-    cred = await readBlob<AuthCredential>(
-      getPrivateBlobClient(`auth/${userId}.json`)
+    const credPath = `auth/${userId}.json`;
+    cred = await readJson(
+      getPrivateBlobClient(credPath),
+      AuthCredentialSchema,
+      credPath,
     );
   } catch {
     return invalidCreds;
@@ -418,7 +458,8 @@ async function refresh(
   // Confirm user still exists and get their email
   let user: User;
   try {
-    user = await readBlob<User>(getPrivateBlobClient(`users/${userId}.json`));
+    const userPath = `users/${userId}.json`;
+    user = await readJson(getPrivateBlobClient(userPath), UserSchema, userPath);
   } catch {
     return { status: 401, jsonBody: { error: "User not found" } };
   }
@@ -456,7 +497,8 @@ async function forgotPassword(
   if (!userId) return silentOk;
 
   try {
-    await readBlob<AuthCredential>(getPrivateBlobClient(`auth/${userId}.json`));
+    const credPath = `auth/${userId}.json`;
+    await readJson(getPrivateBlobClient(credPath), AuthCredentialSchema, credPath);
   } catch {
     return silentOk; // account not fully set up
   }
@@ -496,6 +538,7 @@ async function resetPassword(
   if (!body.newPassword || body.newPassword.length < 8) {
     return badRequest("Password must be at least 8 characters");
   }
+  const newPassword = body.newPassword;
 
   let result: { userId: string };
   try {
@@ -512,15 +555,21 @@ async function resetPassword(
   }
 
   const credPath = `auth/${result.userId}.json`;
-  let cred: AuthCredential;
-  try {
-    cred = await readBlob<AuthCredential>(getPrivateBlobClient(credPath));
-  } catch {
-    throw new HttpError(400, "INVALID_TOKEN", "Invalid token");
-  }
+  await withPrivateLease(credPath, async (leaseId) => {
+    let cred: AuthCredential;
+    try {
+      cred = await readJson(
+        getPrivateBlobClient(credPath),
+        AuthCredentialSchema,
+        credPath,
+      );
+    } catch {
+      throw new HttpError(400, "INVALID_TOKEN", "Invalid token");
+    }
 
-  cred.passwordHash = await hashPassword(body.newPassword);
-  await writePrivateBlob(credPath, cred);
+    cred.passwordHash = await hashPassword(newPassword);
+    await writePrivateJson(credPath, AuthCredentialSchema, cred, leaseId);
+  });
 
   return {
     status: 200,

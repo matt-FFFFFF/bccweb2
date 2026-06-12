@@ -29,6 +29,7 @@ puretrack_password = "<REQUIRED: see TF_VAR_puretrack_password>" # REQUIRED
 
 jwt_secret_version = "1"
 acs_secret_version = "1"
+blob_schema_mode   = "observe"
 
 # Principal type for the identity running Terraform. Default is ServicePrincipal
 # because CI (GitHub Actions → Terraform UMI via OIDC) is the primary path.

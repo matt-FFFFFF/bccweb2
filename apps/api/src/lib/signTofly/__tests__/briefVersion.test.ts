@@ -24,6 +24,17 @@ describe("brief version hashing", () => {
     expect(computeBriefHash(after)).toBe(computeBriefHash(before));
   });
 
+  it("computeBriefHash changes when frequencyMhz changes (material) and invalidates prior signatures", () => {
+    const briefV1 = makeBrief({ frequencyMhz: 143.925 });
+    const briefV2 = makeBrief({ frequencyMhz: 144.150 });
+
+    const hashV1 = computeBriefHash(briefV1);
+    const hashV2 = computeBriefHash(briefV2);
+
+    expect(hashV2).not.toBe(hashV1);
+    expect(diffMaterialFields(briefV1, briefV2)).toEqual(["frequencyMhz"]);
+  });
+
   it("diffMaterialFields returns only material diffs", () => {
     const before = makeBrief({
       NOTAMs: "None",

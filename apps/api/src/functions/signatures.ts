@@ -6,12 +6,12 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { Round, RoundBrief, Signature } from "@bccweb/types";
+import { BriefSchema, RoundSchema } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
-  readBlob,
-  writePrivateBlob,
   withPrivateLease,
 } from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { getActiveWording } from "../lib/signTofly/wording.js";
@@ -218,8 +218,9 @@ async function getRoundSignatures(
 }
 
 async function readRound(roundId: string): Promise<Round> {
+  const path = `rounds/${roundId}.json`;
   try {
-    return await readBlob<Round>(getPrivateBlobClient(`rounds/${roundId}.json`));
+    return await readJson(getPrivateBlobClient(path), RoundSchema, path);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
@@ -229,10 +230,9 @@ async function readRound(roundId: string): Promise<Round> {
 }
 
 async function readRoundBrief(roundId: string): Promise<RoundBriefWithVersion> {
+  const path = `round-briefs/${roundId}.json`;
   try {
-    return await readBlob<RoundBriefWithVersion>(
-      getPrivateBlobClient(`round-briefs/${roundId}.json`),
-    );
+    return await readJson(getPrivateBlobClient(path), BriefSchema, path);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "BRIEF_NOT_FOUND", "Round brief not found");
@@ -257,12 +257,12 @@ async function reflectCurrentSignature(
 
   const path = `rounds/${roundId}.json`;
   await withPrivateLease(path, async (leaseId) => {
-    const round = await readBlob<Round>(getPrivateBlobClient(path));
+    const round = await readJson(getPrivateBlobClient(path), RoundSchema, path);
     const slot = findSlot(round, teamId, place);
     if (!slot) throw new HttpError(404, "NOT_FOUND", "Pilot slot not found");
     if (!slot.signToFly) {
       slot.signToFly = true;
-      await writePrivateBlob(path, round, leaseId);
+      await writePrivateJson(path, RoundSchema, round, leaseId);
     }
   });
 }

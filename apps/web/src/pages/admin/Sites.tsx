@@ -162,7 +162,7 @@ function SiteEditRow({
     setBusy(true);
     setMsg(null);
     try {
-      await api.delete<void>(`sites/${site.id}`);
+      await api.delete(`sites/${site.id}`);
       onDeleted();
     } catch (ex) {
       setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Delete failed");

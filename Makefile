@@ -10,22 +10,26 @@ install: ## Install npm dependencies
 	npm install
 
 .PHONY: build
-build: build-types build-scoring build-api build-web ## Build all packages in dependency order
+build: build-types build-schemas build-scoring build-api build-web ## Build all packages in dependency order
 
 .PHONY: build-types
 build-types: ## Build shared types package
 	npm run build --workspace=packages/types
+
+.PHONY: build-schemas
+build-schemas: build-types ## Build schemas package
+	npm run build --workspace=packages/schemas
 
 .PHONY: build-scoring
 build-scoring: build-types ## Build scoring package
 	npm run build --workspace=packages/scoring
 
 .PHONY: build-api
-build-api: build-types build-scoring ## Build Azure Functions API
+build-api: build-types build-schemas build-scoring ## Build Azure Functions API
 	npm run build --workspace=apps/api
 
 .PHONY: build-web
-build-web: build-types ## Build React SPA
+build-web: build-types build-schemas ## Build React SPA
 	npm run build --workspace=apps/web
 
 .PHONY: typecheck
@@ -35,6 +39,11 @@ typecheck: ## Typecheck all workspaces
 .PHONY: test
 test: ## Run all tests (requires Azurite for API tests)
 	npx vitest run
+
+# Run the heavy/slow API lib tests excluded from 'make test'. Records runtime.
+.PHONY: test-heavy
+test-heavy:
+	npx vitest run --testTimeout=120000 apps/api/src/lib/__tests__/blob.test.ts apps/api/src/lib/__tests__/puretrack.test.ts apps/api/src/lib/__tests__/telemetry.integration.test.ts
 
 .PHONY: dev
 dev: docker-up ## Start full local dev stack (Docker Compose)
@@ -95,5 +104,5 @@ loadtest: loadtest-prepare loadtest-register loadtest-transition loadtest-sign l
 
 .PHONY: clean
 clean: ## Remove all dist/ directories and tsbuildinfo files
-	rm -rf apps/api/dist apps/web/dist packages/types/dist packages/scoring/dist
-	rm -f packages/types/tsconfig.tsbuildinfo packages/scoring/tsconfig.tsbuildinfo
+	rm -rf apps/api/dist apps/web/dist packages/types/dist packages/schemas/dist packages/scoring/dist
+	rm -f packages/types/tsconfig.tsbuildinfo packages/schemas/tsconfig.tsbuildinfo packages/scoring/tsconfig.tsbuildinfo packages/schemas/dist/*.tsbuildinfo

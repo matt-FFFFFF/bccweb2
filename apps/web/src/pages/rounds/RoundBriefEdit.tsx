@@ -185,6 +185,26 @@ export default function RoundBriefEdit() {
               <input type="text" className="w-full border rounded p-2" value={brief.directionOfFlight || ""} onChange={e => handleChange("directionOfFlight", e.target.value)} />
             </div>
             <div>
+              <label className="block text-sm font-medium mb-1">Frequency (MHz)</label>
+              <input
+                type="number"
+                step="0.025"
+                min="0"
+                max="999.999"
+                className="w-full border rounded p-2"
+                value={brief.frequencyMhz ?? ""}
+                onChange={e => {
+                  const raw = e.target.value;
+                  if (raw === "") {
+                    handleChange("frequencyMhz", undefined);
+                  } else {
+                    const parsed = Number(raw);
+                    handleChange("frequencyMhz", Number.isFinite(parsed) ? parsed : undefined);
+                  }
+                }}
+              />
+            </div>
+            <div>
               <label className="block text-sm font-medium mb-1">Expected Landing Area</label>
               <textarea className="w-full border rounded p-2" value={brief.expectedLandingArea || ""} onChange={e => handleChange("expectedLandingArea", e.target.value)} />
             </div>

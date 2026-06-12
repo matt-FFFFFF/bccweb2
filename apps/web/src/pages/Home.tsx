@@ -1,6 +1,12 @@
 import { Link } from "react-router-dom";
 import { useState, useEffect, useRef } from "react";
+import * as z from "zod/v4";
 import { useBlob } from "../hooks/useBlob.js";
+import {
+  RoundSummarySchema,
+  SeasonSchema,
+  SeasonSummarySchema,
+} from "@bccweb/schemas";
 import type { RoundSummary, Season, SeasonSummary } from "@bccweb/types";
 import { LoadingSpinner, ErrorMessage } from "../components/LoadingSpinner.js";
 import { StatusBadge } from "../components/StatusBadge.js";
@@ -68,7 +74,7 @@ function HeroCarousel() {
 }
 
 function HomeLeagueTable({ year }: { year: number }) {
-  const { data: season, loading, error, notFound } = useBlob<Season>(`seasons/${year}.json`);
+  const { data: season, loading, error, notFound } = useBlob<Season>(`seasons/${year}.json`, SeasonSchema);
 
   if (loading) return <LoadingSpinner />;
   if (notFound) return null;
@@ -175,8 +181,8 @@ function HomeRoundsList({ rounds }: { rounds: RoundSummary[] }) {
 }
 
 export default function Home() {
-  const { data: rounds, loading: roundsLoading, error: roundsError } = useBlob<RoundSummary[]>("rounds.json");
-  const { data: seasons } = useBlob<SeasonSummary[]>("seasons.json");
+  const { data: rounds, loading: roundsLoading, error: roundsError } = useBlob<RoundSummary[]>("rounds.json", z.array(RoundSummarySchema));
+  const { data: seasons } = useBlob<SeasonSummary[]>("seasons.json", z.array(SeasonSummarySchema));
 
   const activeYear = seasons?.find((s) => s.active)?.year ?? seasons?.[seasons.length - 1]?.year;
 

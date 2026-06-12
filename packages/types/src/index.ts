@@ -195,13 +195,6 @@ export interface PilotSeasonClub {
   clubName: string;
 }
 
-export interface Frequency {
-  id: string;
-  label: string;
-  position: number;
-  legacyId?: number;
-}
-
 export interface SeasonClub {
   id: string;
   seasonYear: number;
@@ -210,7 +203,6 @@ export interface SeasonClub {
   acceptedTsCs: boolean;
   acceptedTsCsAt?: string;
   acceptedTsCsBy?: string;
-  frequency?: Frequency;
   createdAt?: string;
   updatedAt?: string;
   updatedBy?: string;
@@ -219,7 +211,7 @@ export interface SeasonClub {
 
 export interface PilotSummary {
   id: string;
-  legacyId?: number;
+  legacyId: number | null;
   name: string; // fullName for index lookups
   clubId?: string;
   rating?: PilotRatingValue;
@@ -234,7 +226,7 @@ export type PilotEmailIndex = Record<string, string>;
 
 export interface Pilot {
   id: string;
-  legacyId?: number;
+  legacyId: number | null;
   bhpaNumber?: number;
   coachType: CoachType;
   pilotRating: PilotRatingValue;
@@ -475,6 +467,7 @@ export interface RoundBrief {
   NOTAMs?: string;
   BENO_LineDescription?: string;
   briefersNotes?: string;
+  frequencyMhz?: number;
   briefer?: {
     name?: string;
     bhpaCoachLevel?: string;

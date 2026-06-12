@@ -14,13 +14,16 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type { Round, Flight, ScoringType, PilotSlot } from "@bccweb/types";
-import { getPrivateBlobClient, readBlob, writePrivateBlob, withPrivateLease } from "../lib/blob.js";
+import { RoundSchema } from "@bccweb/schemas";
+import { getPrivateBlobClient, withPrivateLease } from "../lib/blob.js";
+import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -41,14 +44,14 @@ async function mutateLocked(
   const path = `rounds/${roundId}.json`;
   try {
     return await withPrivateLease(path, async (leaseId) => {
-      const r = await readBlob<Round>(getPrivateBlobClient(path));
+      const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
       const err = fn(r);
       if (err) {
         const e = new Error(err);
         (e as { isValidation?: boolean }).isValidation = true;
         throw new HttpError(500, "INTERNAL");
       }
-      await writePrivateBlob(path, r, leaseId);
+      await writePrivateJson(path, RoundSchema, r, leaseId);
       return r;
     });
   } catch (e: unknown) {
@@ -131,6 +134,7 @@ async function logFlight(
   if (!isCoord(caller.roles) && !isPilotSelf) {
     return forbiddenResponse("You can only log flights for yourself");
   }
+  await mutationRateLimit(req, caller, "logFlight", "flights");
 
   const flight: Flight = {
     id: randomUUID(),
@@ -191,7 +195,8 @@ async function updateFlight(
   // Pre-read to find the slot and check auth
   let ownerPilotId: string | null = null;
   try {
-    const r = await readBlob<Round>(getPrivateBlobClient(`rounds/${roundId}.json`));
+    const preReadPath = `rounds/${roundId}.json`;
+    const r = await readJson(getPrivateBlobClient(preReadPath), RoundSchema, preReadPath);
     const slot = findSlotByFlight(r, flightId);
     if (!slot) throw new HttpError(404, "NOT_FOUND", "Flight not found");
     ownerPilotId = slot.pilotId;
@@ -208,6 +213,7 @@ async function updateFlight(
   if (!isCoord(caller.roles) && !isPilotSelf) {
     return forbiddenResponse("You can only update your own flights");
   }
+  await mutationRateLimit(req, caller, "updateFlight", "flights");
 
   const result = await mutateLocked(roundId, (r) => {
     if (r.status !== "Locked") {
@@ -253,6 +259,7 @@ async function deleteFlight(
   if (!isCoord(caller.roles) && !isAdmin(caller.roles)) {
     return forbiddenResponse();
   }
+  await mutationRateLimit(req, caller, "deleteFlight", "flights");
 
   const { id: roundId, flightId } = req.params as {
     id?: string;

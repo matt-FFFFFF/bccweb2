@@ -1,11 +1,13 @@
 import { randomUUID } from "crypto";
 import { describe, expect, test, vi } from "vitest";
 import type { HttpRequest } from "@azure/functions";
+import type { CallerIdentity } from "@bccweb/types";
 import { getPrivateBlobClient, readBlob, writePrivateBlob } from "../blob.js";
 import { HttpError } from "../http.js";
 import {
   TokenBucket,
   checkAccountLockout,
+  mutationRateLimit,
   rateLimit,
   recordLoginFailure,
   recordLoginSuccess,
@@ -126,6 +128,90 @@ describe("rateLimit", () => {
   });
 });
 
+// ─── mutationRateLimit() ─────────────────────────────────────────────────────
+
+function makeCaller(userId: string = randomUUID()): CallerIdentity {
+  return {
+    userId,
+    email: `${userId}@example.test`,
+    roles: ["Admin"],
+    pilotId: null,
+    clubId: null,
+  };
+}
+
+describe("mutationRateLimit", () => {
+  test("standard tier: 30 calls pass, 31st throws HttpError 429 RATE_LIMITED", async () => {
+    resetAllBuckets();
+    const req = makeReq("10.0.1.1");
+    const caller = makeCaller();
+    for (let i = 0; i < 30; i++) {
+      await mutationRateLimit(req, caller, "standard-boundary", "standard");
+    }
+    let caught: unknown;
+    try {
+      await mutationRateLimit(req, caller, "standard-boundary", "standard");
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(HttpError);
+    expect((caught as HttpError).status).toBe(429);
+    expect((caught as HttpError).code).toBe("RATE_LIMITED");
+  });
+
+  test("heavy tier: 5 calls pass, 6th throws HttpError 429 RATE_LIMITED", async () => {
+    resetAllBuckets();
+    const req = makeReq("10.0.1.2");
+    const caller = makeCaller();
+    for (let i = 0; i < 5; i++) {
+      await mutationRateLimit(req, caller, "heavy-boundary", "heavy");
+    }
+    let caught: unknown;
+    try {
+      await mutationRateLimit(req, caller, "heavy-boundary", "heavy");
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(HttpError);
+    expect((caught as HttpError).status).toBe(429);
+    expect((caught as HttpError).code).toBe("RATE_LIMITED");
+  });
+
+  test("flights tier: 60 calls pass, 61st throws HttpError 429 RATE_LIMITED", async () => {
+    resetAllBuckets();
+    const req = makeReq("10.0.1.3");
+    const caller = makeCaller();
+    for (let i = 0; i < 60; i++) {
+      await mutationRateLimit(req, caller, "flights-boundary", "flights");
+    }
+    let caught: unknown;
+    try {
+      await mutationRateLimit(req, caller, "flights-boundary", "flights");
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(HttpError);
+    expect((caught as HttpError).status).toBe(429);
+    expect((caught as HttpError).code).toBe("RATE_LIMITED");
+  });
+
+  test("buckets are keyed by caller.userId, not by IP", async () => {
+    resetAllBuckets();
+    const req = makeReq("10.0.1.4");
+    const callerA = makeCaller();
+    const callerB = makeCaller();
+    for (let i = 0; i < 5; i++) {
+      await mutationRateLimit(req, callerA, "heavy-isolation", "heavy");
+    }
+    await expect(
+      mutationRateLimit(req, callerA, "heavy-isolation", "heavy")
+    ).rejects.toBeInstanceOf(HttpError);
+    await expect(
+      mutationRateLimit(req, callerB, "heavy-isolation", "heavy")
+    ).resolves.toBeUndefined();
+  });
+});
+
 // ─── Account lockout helpers ──────────────────────────────────────────────────
 
 describe("account lockout", () => {
@@ -158,9 +244,10 @@ describe("account lockout", () => {
 
     await recordLoginSuccess(userId);
 
-    const cred = await readBlob<{ failedAttempts: string[]; lockedUntil: string | null }>(
-      getPrivateBlobClient(`auth/${userId}.json`)
-    );
+    const cred = (await readBlob(getPrivateBlobClient(`auth/${userId}.json`))) as {
+      failedAttempts: string[];
+      lockedUntil: string | null;
+    };
     expect(cred.failedAttempts).toEqual([]);
     expect(cred.lockedUntil).toBeNull();
   });

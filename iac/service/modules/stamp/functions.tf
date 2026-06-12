@@ -7,6 +7,7 @@ locals {
     { name = "BLOB_CONNECTION_STRING", value = local.storage_primary_connection_string },
     { name = "BLOB_CONTAINER_NAME", value = "data" },
     { name = "BLOB_PRIVATE_CONTAINER_NAME", value = "data-private" },
+    { name = "BLOB_SCHEMA_MODE", value = var.blob_schema_mode },
     { name = "JWT_SECRET", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/jwt-secret/)" },
     { name = "ACS_CONNECTION_STRING", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/acs-connection-string/)" },
     { name = "APPLICATIONINSIGHTS_CONNECTION_STRING", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/appinsights-connection-string/)" },

@@ -23,6 +23,31 @@ terraform -chdir=iac apply -var-file=env/prod.tfvars -target=module.stamp.azapi_
 
 To add an additional receiver (PagerDuty, OpsGenie, etc.), add a new `*_receiver` block inside the action group resource — never create a second action group, the per-alert `action_group_id` references would diverge.
 
+## blob.healed events / blob-heal-storm alert
+
+### Saved KQL
+
+```kql
+customEvents
+| where name == "blob.healed"
+| summarize count() by tostring(customDimensions.path), tostring(customDimensions.schema)
+```
+
+### Triage steps
+
+1. Run KQL via `az monitor log-analytics query --analytics-query "..."`. Identify which schemas are healing most.
+2. Confirm current mode: `az functionapp config appsettings list --name <app> --query "[?name=='BLOB_SCHEMA_MODE'].value"`. If anything other than `observe`, **first flip to observe**: `az functionapp config appsettings set --name <app> --settings BLOB_SCHEMA_MODE=observe`.
+3. For each (path, schema) reported: open the schema file, compare its fields to the local interface extensions in the module that owns that path. The schema must be a superset. If a field is missing, widen the schema.
+4. Once schemas widened and deployed, re-run KQL; expect zero events from those paths over the next observation window.
+5. **Only after** the heal storm is silenced may you consider flipping back to `enforce`.
+
+### Restore from blob versioning
+
+```bash
+az storage blob list --account-name <acct> --container-name data-private --prefix <path> --include v -o table
+az storage blob copy start --account-name <acct> --destination-blob <path> --source-uri "https://<acct>.blob.core.windows.net/data-private/<path>?versionId=<v>"
+```
+
 ---
 
 ## api-5xx-rate

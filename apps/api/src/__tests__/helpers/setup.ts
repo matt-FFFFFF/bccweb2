@@ -6,7 +6,11 @@
  * - Mocks external services (email, pdf, puretrack) to prevent real calls
  */
 
-import { vi } from "vitest";
+process.env["NODE_ENV"] ??= "test";
+process.env["TEST_BCRYPT_COST"] ??= "4";
+
+const { beforeEach, vi } = await import("vitest");
+const { resetAllBuckets } = await import("../../lib/rateLimit.js");
 
 // ─── Environment variables ────────────────────────────────────────────────────
 
@@ -63,8 +67,8 @@ export function getRegisteredHandlers() {
 // Mock email module — prevent real ACS email calls
 vi.mock("../../lib/email.js", () => ({
   sendEmail: vi.fn().mockResolvedValue(undefined),
-  verificationEmailHtml: vi.fn().mockReturnValue("<p>verify</p>"),
-  verificationEmailText: vi.fn().mockReturnValue("verify"),
+  verificationEmailHtml: vi.fn((url: string) => `<p>verify ${url}</p>`),
+  verificationEmailText: vi.fn((url: string) => `verify ${url}`),
   passwordResetEmailHtml: vi.fn().mockReturnValue("<p>reset</p>"),
   passwordResetEmailText: vi.fn().mockReturnValue("reset"),
   getBriefRecipients: vi.fn().mockReturnValue([]),
@@ -75,7 +79,7 @@ vi.mock("../../lib/email.js", () => ({
 // vi.mock above is hoisted by Vitest above this static import, so the `sendEmail`
 // imported here is the mocked function. Do NOT reorder.
 
-import { sendEmail } from "../../lib/email.js";
+const { sendEmail } = await import("../../lib/email.js");
 
 export interface CapturedEmail {
   to: string[];
@@ -89,6 +93,17 @@ export function getSentEmails(): CapturedEmail[] {
   return calls.map(([opts]) => opts);
 }
 
+export function getLastVerificationUrl(): string | null {
+  for (const email of getSentEmails().toReversed()) {
+    const content = `${email.html ?? ""}\n${email.text ?? ""}`;
+    const match = content.match(/https?:\/\/\S+\/verify-email\?token=[^\s<"]+/);
+    if (match) return match[0];
+  }
+  return null;
+}
+
 export function clearSentEmails(): void {
   vi.mocked(sendEmail).mockClear();
 }
+
+beforeEach(() => resetAllBuckets());

@@ -54,6 +54,7 @@ describe("PilotSnapshot parity: lockRound vs migration", () => {
   it("identical pilot input produces identical snapshot from both code paths", () => {
     const pilot: Pilot = {
       id: "pilot-1",
+      legacyId: null,
       coachType: "None",
       pilotRating: "Pilot",
       wingClass: "EN B",
@@ -102,6 +103,7 @@ describe("PilotSnapshot parity: lockRound vs migration", () => {
   it("wingManufacturer is the manufacturer name string (not UUID) in both code paths", () => {
     const pilot: Pilot = {
       id: "pilot-2",
+      legacyId: null,
       coachType: "None",
       pilotRating: "Advanced Pilot",
       wingClass: "EN C",
@@ -128,6 +130,7 @@ describe("PilotSnapshot parity: lockRound vs migration", () => {
   it("pilot with no manufacturer produces undefined wingManufacturer in both paths", () => {
     const pilot: Pilot = {
       id: "pilot-3",
+      legacyId: null,
       coachType: "None",
       pilotRating: "Pilot",
       wingClass: "EN A",

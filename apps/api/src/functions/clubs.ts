@@ -14,13 +14,19 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type { Club, ClubSummary } from "@bccweb/types";
-import { getBlobClient, getPrivateBlobClient, readBlob, writeBlob, writePrivateBlob } from "../lib/blob.js";
+import { ClubSchema, ClubSummarySchema } from "@bccweb/schemas";
+import * as z from "zod/v4";
+import { getBlobClient, getPrivateBlobClient } from "../lib/blob.js";
+import { readJson, writeJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
+
+const ClubsIndexSchema = z.array(ClubSummarySchema);
 
 // ─── GET /api/clubs ───────────────────────────────────────────────────────────
 
@@ -29,7 +35,11 @@ async function getClubs(
   _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   try {
-    const clubs = await readBlob<ClubSummary[]>(getBlobClient("clubs.json"));
+    const clubs = await readJson(
+      getBlobClient("clubs.json"),
+      ClubsIndexSchema,
+      "clubs.json",
+    );
     clubs.sort((a, b) => a.name.localeCompare(b.name));
     return { status: 200, jsonBody: clubs };
   } catch (err: unknown) {
@@ -49,6 +59,7 @@ async function createClub(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!caller.roles.includes("Admin")) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "createClub", "standard");
 
   let body: { name?: string };
   try {
@@ -69,7 +80,7 @@ async function createClub(
     teams: [],
   };
 
-  await writePrivateBlob(`clubs/${id}.json`, club);
+  await writePrivateJson(`clubs/${id}.json`, ClubSchema, club);
   await upsertClubInIndex({ id, name: club.name });
 
   return { status: 201, jsonBody: club };
@@ -84,13 +95,18 @@ async function updateClub(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!caller.roles.includes("Admin")) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateClub", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_CLUB_ID", "Missing club id");
 
   let existing: Club;
   try {
-    existing = await readBlob<Club>(getPrivateBlobClient(`clubs/${id}.json`));
+    existing = await readJson(
+      getPrivateBlobClient(`clubs/${id}.json`),
+      ClubSchema,
+      `clubs/${id}.json`,
+    );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Club not found");
@@ -113,7 +129,7 @@ async function updateClub(
     id: existing.id, // immutable
   };
 
-  await writePrivateBlob(`clubs/${id}.json`, updated);
+  await writePrivateJson(`clubs/${id}.json`, ClubSchema, updated);
   await upsertClubInIndex({ id, name: updated.name });
 
   return { status: 200, jsonBody: updated };
@@ -124,7 +140,11 @@ async function updateClub(
 async function upsertClubInIndex(summary: ClubSummary): Promise<void> {
   let index: ClubSummary[] = [];
   try {
-    index = await readBlob<ClubSummary[]>(getBlobClient("clubs.json"));
+    index = await readJson(
+      getBlobClient("clubs.json"),
+      ClubsIndexSchema,
+      "clubs.json",
+    );
   } catch {
     // index may not exist yet
   }
@@ -137,7 +157,7 @@ async function upsertClubInIndex(summary: ClubSummary): Promise<void> {
   }
 
   index.sort((a, b) => a.name.localeCompare(b.name));
-  await writeBlob("clubs.json", index);
+  await writeJson("clubs.json", ClubsIndexSchema, index);
 }
 
 // ─── Registration ─────────────────────────────────────────────────────────────

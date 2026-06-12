@@ -19,7 +19,13 @@ vi.mock("../../lib/blob.js", () => ({
   getPrivateBlockBlobClient: (path: string) => mockGetPrivateBlockBlobClient(path),
   readBlob: (client: any) => mockReadBlob(client),
   writePrivateBlob: (path: string, data: any, leaseId: string) => mockWritePrivateBlob(path, data, leaseId),
-  withPrivateLeaseRenewing: async (path: string, fn: any) => fn("mock-lease"),
+  withPrivateLeaseRenewing: async (_path: string, fn: any) => fn("mock-lease"),
+}));
+
+vi.mock("../../lib/blobJson.js", () => ({
+  readJson: (client: string) => mockReadBlob(client),
+  writePrivateJson: (path: string, _schema: unknown, data: unknown, leaseId?: string) =>
+    mockWritePrivateBlob(path, data, leaseId),
 }));
 
 vi.mock("../../lib/signTofly/ledger.js", () => ({
@@ -35,6 +41,7 @@ import { listSignaturesForRound } from "../../lib/signTofly/ledger.js";
 describe("RoundBrief Edit API", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockGetPrivateBlockBlobClient.mockReturnValue({ upload: vi.fn(), deleteIfExists: vi.fn() });
   });
 
   const baseRound = { id: "round-1", organisingClub: { id: "club-1", name: "Club 1" }, status: "Draft", teams: [{ id: "t1", pilots: [{ placeInTeam: 1, signToFly: true }] }] };
@@ -136,7 +143,11 @@ describe("RoundBrief Edit API", () => {
     // Inject formData manually on the req object
     (req as any).formData = async () => {
       const fd = new FormData();
-      fd.append("file", new File([new Uint8Array(1024)], "test.png", { type: "image/png" }));
+      // Valid PNG magic bytes (89 50 4E 47 0D 0A 1A 0A) padded to 1024 bytes.
+      // Required by T5's magic-byte check (apps/api/src/functions/brief.ts).
+      const buf = new Uint8Array(1024);
+      buf.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+      fd.append("file", new File([buf], "test.png", { type: "image/png" }));
       return fd;
     };
 
@@ -146,11 +157,13 @@ describe("RoundBrief Edit API", () => {
     expect(mockUpload).toHaveBeenCalled();
     expect(mockWritePrivateBlob).toHaveBeenCalledWith("round-briefs/round-1.json", expect.objectContaining({ imagePaths: [(res.jsonBody as any).path] }), "mock-lease");
 
-    // >5MB
+    // >5MB — also needs valid magic so it reaches the size check
     const reqBig = makeRequest({ params: { id: "round-1" } });
     (reqBig as any).formData = async () => {
       const fd = new FormData();
-      fd.append("file", new File([new Uint8Array(6 * 1024 * 1024)], "test.png", { type: "image/png" }));
+      const big = new Uint8Array(6 * 1024 * 1024);
+      big.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a], 0);
+      fd.append("file", new File([big], "test.png", { type: "image/png" }));
       return fd;
     };
 

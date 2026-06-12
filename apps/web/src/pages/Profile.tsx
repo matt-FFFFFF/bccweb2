@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { Navigate, useNavigate } from "react-router-dom";
+import * as z from "zod/v4";
 import type { ClubSummary, Pilot } from "@bccweb/types";
+import { ClubSummarySchema } from "@bccweb/schemas";
 import { useAuth } from "../hooks/useAuth.js";
 import { useBlob } from "../hooks/useBlob.js";
 import { api, ApiError } from "../lib/api.js";
@@ -46,7 +48,7 @@ const emptyForm: CreateForm = {
 export default function Profile() {
   const { identity, loading, refreshIdentity } = useAuth();
   const navigate = useNavigate();
-  const { data: clubs } = useBlob<ClubSummary[]>("clubs.json");
+  const { data: clubs } = useBlob<ClubSummary[]>("clubs.json", z.array(ClubSummarySchema));
 
   const [form, setForm] = useState<CreateForm>(emptyForm);
   const [busy, setBusy] = useState(false);

@@ -66,6 +66,7 @@ function renderPage() {
 function makePilot(overrides: Partial<Pilot> = {}): Pilot {
   return {
     id: "pilot-1",
+    legacyId: null,
     coachType: "None",
     pilotRating: "Pilot",
     person: { id: "person-1", firstName: "Pat", lastName: "Pilot", fullName: "Pat Pilot" },

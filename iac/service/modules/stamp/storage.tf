@@ -70,11 +70,11 @@ resource "azapi_resource" "blob_service" {
       }
       deleteRetentionPolicy = {
         enabled = true
-        days    = 30
+        days    = 7
       }
       containerDeleteRetentionPolicy = {
         enabled = true
-        days    = 30
+        days    = 7
       }
       cors = {
         corsRules = [

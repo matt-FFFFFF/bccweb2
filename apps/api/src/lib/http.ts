@@ -1,5 +1,19 @@
 import type { HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 
+export class BlobShapeError extends Error {
+  readonly path: string;
+  readonly schemaName: string;
+  readonly issues: unknown[];
+
+  constructor(path: string, schemaName: string, issues: unknown[]) {
+    super(`Blob shape invalid at ${path} (schema: ${schemaName})`);
+    this.name = "BlobShapeError";
+    this.path = path;
+    this.schemaName = schemaName;
+    this.issues = issues;
+  }
+}
+
 export class HttpError extends Error {
   public headers?: Record<string, string>;
 
@@ -86,6 +100,18 @@ export function withErrorHandler(handler: HttpHandler): HttpHandler {
       }
       return response;
     } catch (err) {
+      if (err instanceof BlobShapeError) {
+        ctx.error(err.message, err.issues);
+        return {
+          status: 500,
+          jsonBody: {
+            error: "DATA_SHAPE_INVALID",
+            path: err.path,
+            schema: err.schemaName,
+          },
+        };
+      }
+
       if (err instanceof HttpError) {
         return {
           status: err.status,
