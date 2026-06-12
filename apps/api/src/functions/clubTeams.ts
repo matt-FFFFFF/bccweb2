@@ -94,7 +94,6 @@ async function createClubTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdminOrCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "createClubTeam", "standard");
 
   let body: { clubId?: string; seasonYear?: number; teamName?: string };
   try {
@@ -116,6 +115,8 @@ async function createClubTeam(
   if (!canManageClub(caller.roles, caller.clubId, body.clubId)) {
     return forbiddenResponse();
   }
+
+  await mutationRateLimit(req, caller, "createClubTeam", "standard");
 
   // Load club to get name
   let clubName: string;
@@ -183,7 +184,6 @@ async function updateClubTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdminOrCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "updateClubTeam", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_CLUB_TEAM_ID", "Missing club team id");
@@ -205,6 +205,8 @@ async function updateClubTeam(
   if (!canManageClub(caller.roles, caller.clubId, existing.clubId)) {
     return forbiddenResponse();
   }
+
+  await mutationRateLimit(req, caller, "updateClubTeam", "standard");
 
   let body: { teamName?: string };
   try {
@@ -263,7 +265,6 @@ async function deleteClubTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isAdminOrCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "deleteClubTeam", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_CLUB_TEAM_ID", "Missing club team id");
@@ -285,6 +286,8 @@ async function deleteClubTeam(
   if (!canManageClub(caller.roles, caller.clubId, existing.clubId)) {
     return forbiddenResponse();
   }
+
+  await mutationRateLimit(req, caller, "deleteClubTeam", "standard");
 
   // Soft delete: remove from index and delete the blob
   await removeTeamFromIndex(id);
