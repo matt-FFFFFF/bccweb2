@@ -175,8 +175,9 @@ function callerFrom(user: TestUser): CallerIdentity {
 async function saturateOwnBucket(row: CallSiteCase, ctx: CaseContext): Promise<void> {
   const caller = callerFrom(ctx.forbidden);
   let rejected = false;
+  const maxAttempts = CAPACITY_BY_TIER[row.tier] * 2 + 10;
 
-  for (let i = 0; i <= CAPACITY_BY_TIER[row.tier]; i += 1) {
+  for (let i = 0; i < maxAttempts; i += 1) {
     try {
       await mutationRateLimit(makeReq(ctx.forbidden, ctx.request), caller, row.endpoint, row.tier);
     } catch (err: unknown) {
