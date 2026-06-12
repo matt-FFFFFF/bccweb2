@@ -29,9 +29,9 @@ import AdminClubs from "./pages/admin/Clubs.js";
 import AdminSeasons from "./pages/admin/Seasons.js";
 import SeasonClubs from "./pages/admin/SeasonClubs.js";
 import PilotSeasonClubs from "./pages/admin/PilotSeasonClubs.js";
-import Frequencies from "./pages/admin/Frequencies.js";
 import AdminSites from "./pages/admin/Sites.js";
 import AdminConfig from "./pages/admin/Config.js";
+import SignToFlyWording from "./pages/admin/SignToFlyWording.js";
 import MyClub from "./pages/club/MyClub.js";
 import FirstLoginOfSeasonGate from "./components/FirstLoginOfSeasonGate.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
@@ -90,8 +90,8 @@ function Nav() {
             <NavLink to="/admin/seasons" className={({ isActive }) => isActive ? "active" : ""}>
               Seasons
             </NavLink>
-            <NavLink to="/admin/frequencies" className={({ isActive }) => isActive ? "active" : ""}>
-              Frequencies
+            <NavLink to="/admin/sign-to-fly-wording" className={({ isActive }) => isActive ? "active" : ""}>
+              Sign-to-fly wording
             </NavLink>
             <NavLink to="/admin/config" className={({ isActive }) => isActive ? "active" : ""}>
               Config
@@ -229,7 +229,7 @@ function RoutedContent() {
           <Route path="/admin/seasons" element={<RequireAuth><Page><AdminSeasons /></Page></RequireAuth>} />
           <Route path="/admin/seasons/:year/clubs" element={<RequireAuth><Page><SeasonClubs /></Page></RequireAuth>} />
           <Route path="/admin/pilot-season-clubs" element={<RequireAuth><Page><PilotSeasonClubs /></Page></RequireAuth>} />
-          <Route path="/admin/frequencies" element={<RequireAuth><Page><Frequencies /></Page></RequireAuth>} />
+          <Route path="/admin/sign-to-fly-wording" element={<RequireAuth><Page><SignToFlyWording /></Page></RequireAuth>} />
           <Route path="/admin/sites" element={<RequireCoord><Page><AdminSites /></Page></RequireCoord>} />
           <Route path="/admin/config" element={<RequireAuth><Page><AdminConfig /></Page></RequireAuth>} />
 
