@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { randomUUID } from "crypto";
 import type { Round, Team } from "@bccweb/types";
 import { makeAuthRequest, invoke } from "../../__tests__/helpers/api.js";
+import { resetAllBuckets } from "../../lib/rateLimit.js";
 import {
   makeUser,
   makeRound,
@@ -52,6 +53,24 @@ async function seedRoundWithTeam(overrides: {
   return { round, team, pilot, clubId };
 }
 
+function randomForwardedFor(): string {
+  return `10.42.${Math.floor(Math.random() * 250) + 1}.${Math.floor(Math.random() * 250) + 1}`;
+}
+
+function makeSetCaptainRequest(
+  user: { id: string; email: string },
+  round: Round,
+  team: Team,
+  pilotId: string | null,
+) {
+  return makeAuthRequest(user.id, user.email, {
+    method: "PUT",
+    params: { id: round.id, teamId: team.id },
+    headers: { "x-forwarded-for": randomForwardedFor() },
+    body: { pilotId },
+  });
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("PUT /api/rounds/{id}/teams/{teamId}/captain", () => {
@@ -75,6 +94,7 @@ describe("PUT /api/rounds/{id}/teams/{teamId}/captain", () => {
   });
 
   it("RoundsCoord with matching club: 200 + captainPilotId updated", async () => {
+    resetAllBuckets();
     const { round, team, pilot, clubId } = await seedRoundWithTeam();
     const { user } = await makeUser({ roles: ["RoundsCoord"], clubId });
 
@@ -88,6 +108,33 @@ describe("PUT /api/rounds/{id}/teams/{teamId}/captain", () => {
 
     expect(res.status).toBe(200);
     expect((res.jsonBody as Team).captainPilotId).toBe(pilot.id);
+
+    const stored = await readPrivateJson<Round>(`rounds/${round.id}.json`);
+    expect(stored?.teams[0].captainPilotId).toBe(pilot.id);
+  });
+
+  it("RoundsCoord with wrong club: exhausted bucket still returns 403 without Retry-After", async () => {
+    resetAllBuckets();
+    const { round, team, pilot } = await seedRoundWithTeam();
+    const { user } = await makeUser({
+      roles: ["RoundsCoord"],
+      clubId: randomUUID(),
+    });
+
+    let res = await invoke(
+      "setTeamCaptain",
+      makeSetCaptainRequest(user, round, team, pilot.id),
+    );
+    for (let i = 0; i < 30; i += 1) {
+      res = await invoke(
+        "setTeamCaptain",
+        makeSetCaptainRequest(user, round, team, pilot.id),
+      );
+    }
+
+    expect(res.status).toBe(403);
+    expect((res.jsonBody as { code: string }).code).toBe("FORBIDDEN");
+    expect((res.headers as Record<string, string> | undefined)?.["Retry-After"]).toBeUndefined();
   });
 
   it("RoundsCoord with wrong club: 403", async () => {

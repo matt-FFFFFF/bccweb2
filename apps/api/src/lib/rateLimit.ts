@@ -137,10 +137,29 @@ export type MutationRateLimitTier = keyof typeof MUTATION_TIERS;
 /**
  * Per-identity mutation rate limiter for authenticated write endpoints.
  *
- * MUST be called AFTER the auth/role check — `caller.userId` is the bucket key
- * via the existing `identityKey` option, so unauthenticated callers (with no
- * userId) must never reach this point. Throws HttpError(429, "RATE_LIMITED")
- * with a Retry-After header when the per-tier bucket is exhausted.
+ * 5-step ordering contract:
+ * 1. Call `getCallerIdentity(req)` first; return 401 if it yields null.
+ * 2. Apply the coarse role check next; return 403 before any rate-limit call.
+ * 3. If scope needs a resource, read it before calling this, then resolve fine
+ *    scope checks with 403/404/409 as appropriate.
+ * 4. Call `mutationRateLimit(req, caller, endpoint, tier)` only after those
+ *    checks; exhausted tiers throw HttpError(429, "RATE_LIMITED") with a
+ *    Retry-After header.
+ * 5. Perform input validation / mutation after the rate-limit gate, except for
+ *    validation needed to determine scope (e.g. reading `body.clubId`) or an
+ *    unavoidable body parse in "slide" handlers. Step 5 refers only to
+ *    validation that is NOT required to determine scope; the firm invariant is
+ *    that a forbidden caller must get 403, never 429.
+ *
+ * MUST be called AFTER the auth (401) and role/scope (403) checks. A forbidden
+ * caller must receive 403, never 429, and must not consume bucket capacity. If
+ * the scope check needs a resource, read it before calling this. Enforces 403 >
+ * 429 only — 404-vs-429 is NOT promised globally; do not hoist an existence-
+ * only read solely to make 404 beat 429.
+ *
+ * Per-tier capacity/refill comes from the table above.
+ * Throws HttpError(429, "RATE_LIMITED") with a Retry-After header when the
+ * per-tier bucket is exhausted.
  */
 export async function mutationRateLimit(
   req: HttpRequest,

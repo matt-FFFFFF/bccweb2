@@ -9,6 +9,7 @@ import {
   privateBlobExists,
   readPublicJson,
 } from "../../__tests__/helpers/seed.js";
+import { resetAllBuckets } from "../../lib/rateLimit.js";
 import "../sites.js";
 
 const ctx = { log: () => undefined } as never;
@@ -22,7 +23,16 @@ async function invoke(
   return (await entry.handler(req as never, ctx)) as {
     status: number;
     jsonBody?: unknown;
+    headers?: Record<string, string>;
   };
+}
+
+// Random source IP per request so any IP-keyed limiter never binds; the
+// mutation limiter is userId-keyed, which is the bucket we exercise here.
+function randIp(): string {
+  return `10.42.${Math.floor(Math.random() * 250) + 1}.${
+    Math.floor(Math.random() * 250) + 1
+  }`;
 }
 
 describe("sites endpoints — RoundsCoord scoping", () => {
@@ -274,5 +284,94 @@ describe("sites endpoints — RoundsCoord scoping", () => {
       })
     );
     expect(del.status).toBe(403);
+  });
+
+  test("forbidden cross-club coord PUT returns 403 not 429 even with drained bucket", async () => {
+    resetAllBuckets();
+    const site = await makeSite({ clubId: randomUUID() });
+    const { user } = await makeUser({
+      roles: ["RoundsCoord"],
+      clubId: randomUUID(),
+      emailVerified: true,
+    });
+
+    // Drain coord's userId bucket on the updateSite endpoint (standard tier = 30).
+    let last = await invoke(
+      "updateSite",
+      makeAuthRequest(user.id, user.email, {
+        method: "PUT",
+        params: { id: site.id },
+        body: { parkingW3W: "///nope" },
+        headers: { "x-forwarded-for": randIp() },
+      })
+    );
+    for (let i = 0; i < 31; i += 1) {
+      last = await invoke(
+        "updateSite",
+        makeAuthRequest(user.id, user.email, {
+          method: "PUT",
+          params: { id: site.id },
+          body: { parkingW3W: "///nope" },
+          headers: { "x-forwarded-for": randIp() },
+        })
+      );
+    }
+
+    expect(last.status).toBe(403);
+    expect((last.jsonBody as { code?: string }).code).toBe("FORBIDDEN");
+    expect(last.headers?.["Retry-After"]).toBeUndefined();
+  });
+
+  test("forbidden cross-club coord DELETE returns 403 not 429 even with drained bucket", async () => {
+    resetAllBuckets();
+    const site = await makeSite({ clubId: randomUUID() });
+    const { user } = await makeUser({
+      roles: ["RoundsCoord"],
+      clubId: randomUUID(),
+      emailVerified: true,
+    });
+
+    let last = await invoke(
+      "deleteSite",
+      makeAuthRequest(user.id, user.email, {
+        method: "DELETE",
+        params: { id: site.id },
+        headers: { "x-forwarded-for": randIp() },
+      })
+    );
+    for (let i = 0; i < 31; i += 1) {
+      last = await invoke(
+        "deleteSite",
+        makeAuthRequest(user.id, user.email, {
+          method: "DELETE",
+          params: { id: site.id },
+          headers: { "x-forwarded-for": randIp() },
+        })
+      );
+    }
+
+    expect(last.status).toBe(403);
+    expect((last.jsonBody as { code?: string }).code).toBe("FORBIDDEN");
+    expect(last.headers?.["Retry-After"]).toBeUndefined();
+    expect(await privateBlobExists(`sites/${site.id}.json`)).toBe(true);
+  });
+
+  test("deleteSite on an absent site is idempotent (204, not 404)", async () => {
+    resetAllBuckets();
+    const { user: admin } = await makeUser({
+      roles: ["Admin"],
+      emailVerified: true,
+    });
+
+    const res = await invoke(
+      "deleteSite",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "DELETE",
+        params: { id: randomUUID() },
+        headers: { "x-forwarded-for": randIp() },
+      })
+    );
+
+    expect(res.status).toBe(204);
   });
 });
