@@ -85,7 +85,6 @@ async function createPureTrackGroupsHandler(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "createPureTrackGroups", "heavy");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
@@ -104,6 +103,8 @@ async function createPureTrackGroupsHandler(
   if (!isAdmin(caller.roles) && round.organisingClub?.id !== caller.clubId) {
     return forbiddenResponse();
   }
+
+  await mutationRateLimit(req, caller, "createPureTrackGroups", "heavy");
 
   if (round.status !== "Locked" && round.status !== "Complete") {
     return {
