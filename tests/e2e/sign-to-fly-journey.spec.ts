@@ -86,6 +86,22 @@ test.describe("sign-to-fly journey", () => {
 
     await page.getByRole("link", { name: /sign to fly/i }).click();
     await expect(page.getByRole("heading", { name: /sign to fly/i })).toBeVisible({ timeout: 5000 });
+    
+    const summaryCard = page.getByTestId("briefing-summary");
+    await expect(summaryCard).toBeVisible();
+    await expect(summaryCard).toContainText("Briefing summary");
+    await expect(summaryCard).toContainText("Site Name: Milk Hill");
+    await expect(summaryCard).toContainText("Wind Speed/Direction: SW 10-15");
+    await expect(summaryCard).toContainText("Direction of Flight: North ridge");
+    await expect(summaryCard).toContainText("Expected Landing Area: Main bottom landing field");
+    await expect(summaryCard).toContainText("Airspace and Hazards: Avoid the village and power lines");
+    await expect(summaryCard).toContainText("NOTAMs: No active NOTAMs");
+    await expect(summaryCard).toContainText("BENO Line Description: Standard BENO line");
+    await expect(summaryCard).toContainText("Briefer Contact: Chief Briefer - 07700 900000");
+    await expect(summaryCard).toContainText("Frequency: 144.45 MHz");
+    await expect(summaryCard.getByRole("link", { name: /view full brief/i })).toBeVisible();
+    await expect(summaryCard.locator("img")).toHaveCount(2);
+
     await expect(page.getByRole("heading", { name: /legal acceptance text/i })).toBeVisible({ timeout: 5000 });
     await shot(page, "06-sign-to-fly-legal-text");
 
@@ -319,6 +335,9 @@ async function handleApi(route: Route, apiPath: string, url: URL, state: E2EStat
     }
     return fulfillJson(route, state.brief);
   }
+  if (apiPath.startsWith(`rounds/${ROUND_ID}/brief/images/`) && method === "GET") {
+    return route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("") });
+  }
   if (apiPath === `rounds/${ROUND_ID}/brief` && method === "PUT") {
     const body = request.postDataJSON() as any;
     const dryRun = url.searchParams.get("dryRun") === "true";
@@ -455,6 +474,7 @@ function createState(): E2EState {
       NOTAMs: "No active NOTAMs",
       BENO_LineDescription: "Standard BENO line",
       briefersNotes: "Fly safely",
+      frequencyMhz: 144.450,
       takeOffW3W: "pilot.launch.here",
       briefingW3W: "briefing.point.here",
       parkingW3W: "filled.count.soap",
@@ -464,7 +484,7 @@ function createState(): E2EState {
         clubName: "Alpha Club",
         pilots: [briefPilot(PILOT_A_ID, 1, "Pilot A"), briefPilot(PILOT_B_ID, 2, "Pilot B")],
       }],
-      imagePaths: [],
+      imagePaths: ["weather-chart.png", "airspace-map.png"],
     },
     wording: {
       version: 1,

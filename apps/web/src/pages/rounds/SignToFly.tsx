@@ -3,6 +3,7 @@ import { useParams, Link } from "react-router-dom";
 import { api, ApiError } from "../../lib/api.js";
 import { sanitizeWordingHtml } from "../../lib/sanitize.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
+import { BriefImages } from "../../components/BriefImages.js";
 import type { SignToFlyWording, Round, RoundBrief } from "@bccweb/types";
 
 export default function SignToFly() {
@@ -125,6 +126,22 @@ export default function SignToFly() {
 
   const sanitizedHtml = sanitizeWordingHtml(wording.html);
 
+  const hasContent = Boolean(
+    brief.siteName || 
+    brief.briefingTime || 
+    brief.checkInByTime || 
+    brief.landByTime || 
+    brief.windSpeedDirection || 
+    brief.directionOfFlight || 
+    brief.expectedLandingArea || 
+    brief.airspaceAndHazards || 
+    brief.NOTAMs || 
+    brief.BENO_LineDescription || 
+    (brief.briefer?.name || brief.briefer?.phoneNumber) || 
+    brief.frequencyMhz !== undefined || 
+    (brief.imagePaths && brief.imagePaths.length > 0)
+  );
+
   return (
     <div style={{ maxWidth: 800, margin: "0 auto", paddingBottom: "3rem" }}>
       <nav style={{ marginBottom: "1.5rem", fontSize: "0.85rem", color: "#888" }}>
@@ -141,6 +158,37 @@ export default function SignToFly() {
           <strong>Date:</strong> {new Date(round.date).toLocaleDateString()}
         </p>
       </div>
+
+      {hasContent && (
+        <div data-testid="briefing-summary" style={{ background: "#fff", border: "1px solid #dee2e6", borderRadius: "0.5rem", padding: "1.5rem", marginBottom: "2rem" }}>
+          <h2 style={{ marginTop: 0, color: "#1a4fa0", fontSize: "1.25rem", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            Briefing summary
+            <Link to={`/rounds/${roundId}/brief`} style={{ fontSize: "0.9rem", color: "#0066cc", textDecoration: "none" }}>
+              View full brief →
+            </Link>
+          </h2>
+          <ul style={{ margin: 0, paddingLeft: "1.5rem", color: "#333", lineHeight: 1.6 }}>
+            {brief.siteName && <li><strong>Site Name:</strong> {brief.siteName}</li>}
+            {brief.briefingTime && <li><strong>Briefing Time:</strong> {brief.briefingTime}</li>}
+            {brief.checkInByTime && <li><strong>Check-in Time:</strong> {brief.checkInByTime}</li>}
+            {brief.landByTime && <li><strong>Land-by Time:</strong> {brief.landByTime}</li>}
+            {brief.windSpeedDirection && <li><strong>Wind Speed/Direction:</strong> {brief.windSpeedDirection}</li>}
+            {brief.directionOfFlight && <li><strong>Direction of Flight:</strong> {brief.directionOfFlight}</li>}
+            {brief.expectedLandingArea && <li><strong>Expected Landing Area:</strong> {brief.expectedLandingArea}</li>}
+            {brief.airspaceAndHazards && <li><strong>Airspace and Hazards:</strong> {brief.airspaceAndHazards}</li>}
+            {brief.NOTAMs && <li><strong>NOTAMs:</strong> {brief.NOTAMs}</li>}
+            {brief.BENO_LineDescription && <li><strong>BENO Line Description:</strong> {brief.BENO_LineDescription}</li>}
+            {(brief.briefer?.name || brief.briefer?.phoneNumber) && (
+              <li>
+                <strong>Briefer Contact:</strong>{" "}
+                {[brief.briefer?.name, brief.briefer?.phoneNumber].filter(Boolean).join(" - ")}
+              </li>
+            )}
+            {brief.frequencyMhz !== undefined && <li><strong>Frequency:</strong> {brief.frequencyMhz} MHz</li>}
+          </ul>
+          <BriefImages imagePaths={brief.imagePaths || []} roundId={brief.roundId} />
+        </div>
+      )}
 
       <div style={{ marginBottom: "2rem", lineHeight: 1.6, color: "#333" }} dangerouslySetInnerHTML={{ __html: sanitizedHtml }} />
 

@@ -16,6 +16,7 @@ import type { RoundBrief as RoundBriefType, BriefTeamEntry, BriefPilotEntry, Man
 import { useAuth } from "../../hooks/useAuth.js";
 import { ApiError } from "../../lib/api.js";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
+import { BriefImages } from "../../components/BriefImages.js";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -227,10 +228,8 @@ function TeamSection({ team }: { team: BriefTeamEntry }) {
 
 function SafetyBriefingSection({
   brief,
-  imageUrls,
 }: {
   brief: RoundBriefType;
-  imageUrls: string[];
 }) {
   const fieldStyle: React.CSSProperties = {
     padding: "0.65rem",
@@ -296,28 +295,7 @@ function SafetyBriefingSection({
         <div><span style={labelStyle}>Email</span>{displayValue(brief.briefer?.emailAddress)}</div>
       </div>
 
-      {brief.imagePaths && brief.imagePaths.length > 0 && (
-        <div style={{ marginTop: "1rem" }}>
-          <h3 style={{ fontSize: "0.95rem", margin: "0 0 0.6rem", color: "#1a4fa0" }}>
-            Briefing Images
-          </h3>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem" }}>
-            {brief.imagePaths.map((path, index) => (
-              <div key={path} style={{ width: 220 }}>
-                {imageUrls[index] ? (
-                  <img
-                    src={imageUrls[index]}
-                    alt={`Briefing image ${index + 1}`}
-                    style={{ width: "100%", height: "auto", borderRadius: "0.35rem", border: "1px solid #dee2e6" }}
-                  />
-                ) : (
-                  <span style={{ color: "#666", fontSize: "0.85rem" }}>Image unavailable</span>
-                )}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      <BriefImages imagePaths={brief.imagePaths || []} roundId={brief.roundId} />
     </section>
   );
 }
@@ -333,7 +311,6 @@ export default function RoundBrief() {
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
   const [downloading, setDownloading] = useState(false);
-  const [imageUrls, setImageUrls] = useState<string[]>([]);
 
   useEffect(() => {
     if (!id) return;
@@ -361,42 +338,6 @@ export default function RoundBrief() {
       })
       .finally(() => setLoading(false));
   }, [id]);
-
-  useEffect(() => {
-    if (!id || !brief?.imagePaths?.length) {
-      setImageUrls([]);
-      return;
-    }
-
-    let cancelled = false;
-    const objectUrls: string[] = [];
-    const accessToken = localStorage.getItem("bcc_access_token");
-    const headers: Record<string, string> = {};
-    if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
-
-    Promise.all(
-      brief.imagePaths.map(async (_path, index) => {
-        const res = await fetch(`/api/rounds/${id}/brief/images/${index + 1}`, { headers });
-        if (!res.ok) return "";
-        const url = URL.createObjectURL(await res.blob());
-        objectUrls.push(url);
-        return url;
-      })
-    ).then((urls) => {
-      if (cancelled) {
-        urls.forEach((url) => { if (url) URL.revokeObjectURL(url); });
-        return;
-      }
-      setImageUrls(urls);
-    }).catch(() => {
-      if (!cancelled) setImageUrls([]);
-    });
-
-    return () => {
-      cancelled = true;
-      objectUrls.forEach((url) => URL.revokeObjectURL(url));
-    };
-  }, [id, brief]);
 
   async function downloadPdf() {
     if (!id) return;
@@ -599,7 +540,7 @@ export default function RoundBrief() {
         </div>
       </section>
 
-      <SafetyBriefingSection brief={brief} imageUrls={imageUrls} />
+      <SafetyBriefingSection brief={brief} />
 
       {/* Teams */}
       <section>
