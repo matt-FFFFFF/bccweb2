@@ -219,7 +219,7 @@ export interface SeasonClub {
 
 export interface PilotSummary {
   id: string;
-  legacyId?: number;
+  legacyId: number | null;
   name: string; // fullName for index lookups
   clubId?: string;
   rating?: PilotRatingValue;
@@ -234,7 +234,7 @@ export type PilotEmailIndex = Record<string, string>;
 
 export interface Pilot {
   id: string;
-  legacyId?: number;
+  legacyId: number | null;
   bhpaNumber?: number;
   coachType: CoachType;
   pilotRating: PilotRatingValue;

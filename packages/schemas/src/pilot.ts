@@ -115,9 +115,7 @@ export const PilotSummarySchema = z
   })
   .strip();
 
-PilotSummarySchema satisfies z.ZodType<
-  Omit<PilotSummary, "legacyId"> & { legacyId: number | null }
->;
+PilotSummarySchema satisfies z.ZodType<PilotSummary>;
 
 export const PilotSchema = z
   .object({
@@ -149,4 +147,4 @@ export const PilotSchema = z
   })
   .strip();
 
-PilotSchema satisfies z.ZodType<Omit<Pilot, "legacyId"> & { legacyId: number | null }>;
+PilotSchema satisfies z.ZodType<Pilot>;
