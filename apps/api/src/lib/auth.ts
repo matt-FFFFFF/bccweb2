@@ -1,8 +1,13 @@
 import { HttpRequest } from "@azure/functions";
 import { Buffer } from "buffer";
 import jwt from "jsonwebtoken";
-import type { CallerIdentity, Pilot, PilotEmailIndex, User } from "@bccweb/types";
-import { getPrivateBlobClient, getPrivateBlockBlobClient, readBlob, withPrivateLease, writePrivateBlob } from "./blob.js";
+import * as z from "zod/v4";
+import type { CallerIdentity, PilotEmailIndex, User } from "@bccweb/types";
+import { PilotSchema, UserSchema } from "@bccweb/schemas";
+import { getPrivateBlobClient, getPrivateBlockBlobClient, withPrivateLease } from "./blob.js";
+import { readJson, writePrivateJson } from "./blobJson.js";
+
+const StringRecordSchema = z.record(z.string(), z.string());
 
 // ─── JWT validation ────────────────────────────────────────────────────────
 
@@ -42,7 +47,7 @@ export async function getOrCreateUser(
   const blobClient = getPrivateBlobClient(userPath);
 
   try {
-    return await readBlob<User>(blobClient);
+    return await readJson(blobClient, UserSchema, userPath);
   } catch (err: unknown) {
     const status = (err as { statusCode?: number }).statusCode;
     if (status !== 404) throw err;
@@ -51,15 +56,20 @@ export async function getOrCreateUser(
     let clubId: string | null = null;
 
     try {
-      const emailIndex = await readBlob<PilotEmailIndex>(
-        getPrivateBlobClient("pilot-email-index.json")
+      const emailIndex = await readJson(
+        getPrivateBlobClient("pilot-email-index.json"),
+        StringRecordSchema,
+        "pilot-email-index.json",
       );
       const foundPilotId = emailIndex[email.toLowerCase()];
       if (foundPilotId) {
         pilotId = foundPilotId;
         try {
-          const pilot = await readBlob<Pilot>(
-            getPrivateBlobClient(`pilots/${foundPilotId}.json`)
+          const pilotPath = `pilots/${foundPilotId}.json`;
+          const pilot = await readJson(
+            getPrivateBlobClient(pilotPath),
+            PilotSchema,
+            pilotPath,
           );
           clubId = pilot.currentClub?.id ?? null;
         } catch {
@@ -79,7 +89,7 @@ export async function getOrCreateUser(
       createdAt: new Date().toISOString(),
     };
 
-    await writePrivateBlob(userPath, newUser);
+    await writePrivateJson(userPath, UserSchema, newUser);
     await updateUserIndex(email, userId);
 
     return newUser;
@@ -92,7 +102,11 @@ async function updateUserIndex(email: string, userId: string): Promise<void> {
   await withPrivateLeaseRetry(indexPath, async (leaseId) => {
     let index: Record<string, string> = {};
     try {
-      index = await readBlob<Record<string, string>>(getPrivateBlobClient(indexPath));
+      index = await readJson(
+        getPrivateBlobClient(indexPath),
+        StringRecordSchema,
+        indexPath,
+      );
     } catch (err: unknown) {
       const statusCode = (err as { statusCode?: number }).statusCode;
       if (statusCode !== 404) throw err;
@@ -100,7 +114,7 @@ async function updateUserIndex(email: string, userId: string): Promise<void> {
     }
 
     index[email.toLowerCase()] = userId;
-    await writePrivateBlob(indexPath, index, leaseId);
+    await writePrivateJson(indexPath, StringRecordSchema, index, leaseId);
   });
 }
 
@@ -111,14 +125,18 @@ export async function updatePilotEmailIndex(email: string, pilotId: string): Pro
   await withPrivateLeaseRetry(indexPath, async (leaseId) => {
     let index: PilotEmailIndex = {};
     try {
-      index = await readBlob<PilotEmailIndex>(getPrivateBlobClient(indexPath));
+      index = await readJson(
+        getPrivateBlobClient(indexPath),
+        StringRecordSchema,
+        indexPath,
+      );
     } catch (err: unknown) {
       const statusCode = (err as { statusCode?: number }).statusCode;
       if (statusCode !== 404) throw err;
       // no-op
     }
     index[email.toLowerCase()] = pilotId;
-    await writePrivateBlob(indexPath, index, leaseId);
+    await writePrivateJson(indexPath, StringRecordSchema, index, leaseId);
   });
 }
 

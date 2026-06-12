@@ -12,12 +12,9 @@
 import { createHash } from "crypto";
 import type { HttpRequest } from "@azure/functions";
 import type { CallerIdentity } from "@bccweb/types";
-import {
-  getPrivateBlobClient,
-  readBlob,
-  withPrivateLease,
-  writePrivateBlob,
-} from "./blob.js";
+import { AuthCredentialSchema } from "@bccweb/schemas";
+import { getPrivateBlobClient, withPrivateLease } from "./blob.js";
+import { readJson, writePrivateJson } from "./blobJson.js";
 import { HttpError } from "./http.js";
 
 // ─── Token Bucket ─────────────────────────────────────────────────────────────
@@ -168,15 +165,9 @@ const LOCKOUT_DURATION_MS = 15 * 60_000; // 15 minutes
 
 // ─── Internal types ───────────────────────────────────────────────────────────
 
-interface CredentialWithLockout {
-  passwordHash: string;
-  emailVerified: boolean;
-  createdAt: string;
-  /** ISO timestamps of recent failed attempts within the failure window. */
-  failedAttempts?: string[];
-  /** ISO timestamp until which the account is locked; null/absent when unlocked. */
-  lockedUntil?: string | null;
-}
+// Credential shape is owned by AuthCredentialSchema (@bccweb/schemas). The
+// schema is a strict superset of the lockout fields touched here — see
+// .omo/evidence/task-42-lockout-superset.txt for the audit.
 
 function sha8(value: string): string {
   return createHash("sha256").update(value).digest("hex").slice(0, 8);
@@ -192,11 +183,10 @@ function sha8(value: string): string {
  * case during account setup) or if the lockout has expired.
  */
 export async function checkAccountLockout(userId: string): Promise<void> {
-  let cred: CredentialWithLockout;
+  const path = `auth/${userId}.json`;
+  let cred;
   try {
-    cred = await readBlob<CredentialWithLockout>(
-      getPrivateBlobClient(`auth/${userId}.json`)
-    );
+    cred = await readJson(getPrivateBlobClient(path), AuthCredentialSchema, path);
   } catch {
     return; // blob missing — no lockout to enforce
   }
@@ -225,8 +215,10 @@ export async function recordLoginFailure(userId: string): Promise<void> {
   const path = `auth/${userId}.json`;
   try {
     await withPrivateLease(path, async (leaseId) => {
-      const cred = await readBlob<CredentialWithLockout>(
-        getPrivateBlobClient(path)
+      const cred = await readJson(
+        getPrivateBlobClient(path),
+        AuthCredentialSchema,
+        path,
       );
 
       const now = Date.now();
@@ -247,7 +239,7 @@ export async function recordLoginFailure(userId: string): Promise<void> {
         console.warn(`[METRIC] auth.lockout.triggered userId=${sha8(userId)}`);
       }
 
-      await writePrivateBlob(path, cred, leaseId);
+      await writePrivateJson(path, AuthCredentialSchema, cred, leaseId);
     });
   } catch (err) {
     if ((err as { statusCode?: number }).statusCode === 404) return;
@@ -265,12 +257,14 @@ export async function recordLoginSuccess(userId: string): Promise<void> {
   const path = `auth/${userId}.json`;
   try {
     await withPrivateLease(path, async (leaseId) => {
-      const cred = await readBlob<CredentialWithLockout>(
-        getPrivateBlobClient(path)
+      const cred = await readJson(
+        getPrivateBlobClient(path),
+        AuthCredentialSchema,
+        path,
       );
       cred.failedAttempts = [];
       cred.lockedUntil = null;
-      await writePrivateBlob(path, cred, leaseId);
+      await writePrivateJson(path, AuthCredentialSchema, cred, leaseId);
     });
   } catch (err) {
     if ((err as { statusCode?: number }).statusCode === 404) return;
