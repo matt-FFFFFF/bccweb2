@@ -4,20 +4,18 @@
  *
  * Four behaviours are pinned here:
  *
- *  1. Re-entrancy guard (NEW — RED until T8): when `renewLease()` takes longer
- *     than `renewIntervalMs`, interval ticks MUST NOT start a second renew while
- *     one is in flight. We track concurrent in-flight `renewLease` invocations and
- *     assert max concurrency === 1. The CURRENT code (a bare `setInterval` with an
- *     async callback and no guard) overlaps renews → concurrency reaches 2 → RED.
+ *  1. Re-entrancy guard (contract test): when `renewLease()` takes longer than
+ *     `renewIntervalMs`, interval ticks must not start a second renew while one
+ *     is in flight. We track concurrent in-flight `renewLease` invocations and
+ *     assert max concurrency === 1.
  *
  *  2. Throw ordering (characterization — GREEN now): `LeaseRenewalFailedError` is
  *     thrown ONLY when `fn` resolved but a renew failed. If `fn` itself throws,
  *     `fn`'s error wins and NO `LeaseRenewalFailedError` is produced.
  *
- *  3. Logging via telemetry (NEW — RED until T8): lease acquire/renew/release must
+ *  3. Logging via telemetry (contract test): lease acquire/renew/release must
  *     emit through `getTelemetryClient()?.trackTrace(...)` (the API chosen in T1),
- *     NOT `console.log`. The CURRENT code uses `console.log("[lease] …")` and never
- *     touches telemetry → both telemetry-called and no-console-log assertions RED.
+ *     not `console.log`.
  *
  *  4. opts validation (characterization — GREEN now): `renewIntervalMs >
  *     leaseDurationSec * 500` still throws "renewal interval too long"; the
@@ -31,7 +29,7 @@
  * Mock seam mirrors blob.leaseRetry.test.ts: the shared setup files cache `blob.js`
  * against the REAL @azure/storage-blob, so each test does `vi.resetModules()` and a
  * dynamic `import("../blob.js")` to pick up the mocked package (and the mocked
- * telemetry module, once T8 wires it in).
+ * telemetry module.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -117,9 +115,9 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
-// ─── 1. Re-entrancy guard (NEW — RED until T8) ───────────────────────────────
+// ─── 1. Re-entrancy guard ─────────────────────────────────────────────────────
 
-describe("withLeaseRenewing — re-entrancy guard (RED until T8)", () => {
+describe("withLeaseRenewing — re-entrancy guard", () => {
   test("renews never overlap: max in-flight renewLease concurrency === 1", async () => {
     const RENEW_INTERVAL = 1_000;
     const RENEW_DURATION = 2 * RENEW_INTERVAL; // each renew outlives one interval
@@ -151,7 +149,7 @@ describe("withLeaseRenewing — re-entrancy guard (RED until T8)", () => {
 
     // Sanity: renews actually fired while fn ran.
     expect(tracker.calls).toBeGreaterThan(0);
-    // RED until T8: the current bare setInterval overlaps renews (concurrency 2).
+    // Contract assertion: renews must stay single-flight.
     expect(tracker.maxConcurrency).toBe(1);
   });
 });
@@ -219,9 +217,9 @@ describe("withLeaseRenewing — throw ordering (characterization, GREEN now)", (
   });
 });
 
-// ─── 3. Logging via telemetry (NEW — RED until T8) ───────────────────────────
+// ─── 3. Logging via telemetry ────────────────────────────────────────────────
 
-describe("withLeaseRenewing — telemetry logging (RED until T8)", () => {
+describe("withLeaseRenewing — telemetry logging", () => {
   test("lease lifecycle emits via getTelemetryClient().trackTrace, not console.log", async () => {
     const RENEW_INTERVAL = 1_000;
     const FN_DURATION = 2 * RENEW_INTERVAL; // allows acquire + ≥1 renew + release
@@ -241,10 +239,10 @@ describe("withLeaseRenewing — telemetry logging (RED until T8)", () => {
     await vi.advanceTimersByTimeAsync(FN_DURATION);
     await expect(promise).resolves.toBe("ok");
 
-    // RED until T8: lease events must route through telemetry.
+    // Contract assertion: lease events must route through telemetry.
     expect(telemetryMock.trackTrace).toHaveBeenCalled();
 
-    // RED until T8: no "[lease] …" console.log lines may remain.
+    // Contract assertion: no "[lease] …" console.log lines may remain.
     const leaseLogs = logSpy.mock.calls.filter(
       ([msg]) => typeof msg === "string" && msg.startsWith("[lease]"),
     );
@@ -252,7 +250,7 @@ describe("withLeaseRenewing — telemetry logging (RED until T8)", () => {
   });
 });
 
-// ─── 3b. Release-failure telemetry (PR #26 round-3) ──────────────────────────
+// ─── 3b. Release-failure telemetry ────────────────────────────────────────────
 
 describe("withLeaseRenewing — release-failure telemetry", () => {
   const traceMessages = () =>

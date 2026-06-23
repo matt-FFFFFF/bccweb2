@@ -78,12 +78,10 @@ describe("resetBlobSingletons", () => {
     );
   });
 
-  // ─── Fail-loud container-name contract (T8) ─────────────────────────────────
-  // These assertions are RED until T8 removes the silent "data"/"data-private"
-  // default in getContainer()/getPrivateContainer(). With a valid connection
-  // string but NO container name, resolving a client MUST throw an error that
-  // names the missing env var, instead of silently resolving the production
-  // container.
+  // ─── Fail-loud container-name contract ──────────────────────────────────────
+  // With a valid connection string but NO container name, resolving a client
+  // must throw an error that names the missing env var instead of silently
+  // falling back to "data"/"data-private".
 
   test("PUBLIC client throws naming BLOB_CONTAINER_NAME when it is unset", async () => {
     process.env.BLOB_CONNECTION_STRING = "UseDevelopmentStorage=true;public";

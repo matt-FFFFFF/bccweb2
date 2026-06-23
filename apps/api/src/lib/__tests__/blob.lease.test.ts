@@ -9,14 +9,11 @@
  *     calls each acquire+release; a contention case where a second acquire
  *     while the blob is already leased yields HTTP 409.
  *
- *  2. Guarded success-release (NEW behavior, RED until T8) — when `fn` succeeds
- *     but `releaseLease()` throws, `withLease` should RESOLVE with `fn`'s result
- *     and attempt release exactly once. Today the success-path `await
- *     leaseClient.releaseLease()` is UNGUARDED, so the rejection propagates and
- *     `fn`'s result is discarded — this case FAILS until T8 mirrors the
- *     `withLeaseRenewingOnClient` guarded `finally` (blob.ts:264-273).
+ *  2. Guarded success-release (characterization of the shipped helper) — when
+ *     `fn` succeeds but `releaseLease()` throws, `withLease` should resolve with
+ *     `fn`'s result and attempt release exactly once.
  *
- *  3. Error-path release stays best-effort (GREEN now) — when `fn` throws,
+ *  3. Error-path release stays best-effort (GREEN) — when `fn` throws,
  *     `fn`'s error propagates and the release failure is swallowed.
  *
  * IMPORTANT (T2 probe finding): real Azurite `releaseLease()` on a broken /
@@ -24,7 +21,7 @@
  * therefore drive release failure via a MOCKED lease client whose
  * `releaseLease` rejects — a real broken lease would make these tests vacuous.
  * The mocked cases use `vi.doMock` (non-hoisted) + `vi.resetModules()` + a
- * dynamic `import("../blob.js")` so they do NOT disturb the real
+ * dynamic `import("../blob.js")` so they do not disturb the real
  * `@azure/storage-blob` used by the serialization cases (which rely on the
  * statically-imported, real `withLease`/`writeBlob`).
  */
@@ -122,7 +119,7 @@ async function importBlobWithMockedRelease(
   return { mod, acquireLease, trackTrace };
 }
 
-describe("withLease guarded success-release (mocked, RED until T8)", () => {
+describe("withLease guarded success-release (mocked contract)", () => {
   beforeEach(() => {
     vi.resetModules();
   });
@@ -144,8 +141,8 @@ describe("withLease guarded success-release (mocked, RED until T8)", () => {
       return "FN_RESULT";
     });
 
-    // RED until T8: today the unguarded success-path `await releaseLease()`
-    // rejects and discards FN_RESULT, so withLease throws instead of resolving.
+    // Contract assertion for the shipped helper: release failures do not
+    // override the successful fn result.
     expect(result).toBe("FN_RESULT");
     // Release attempted exactly once on the happy path — no double-release.
     expect(releaseLease).toHaveBeenCalledTimes(1);

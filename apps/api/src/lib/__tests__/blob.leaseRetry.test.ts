@@ -1,8 +1,8 @@
 /**
- * RED contract test for the soon-to-exist exported helpers
+ * Contract test for the exported lease-retry helpers
  *   withLeaseRetry(path, fn)        → wraps withLease
  *   withPrivateLeaseRetry(path, fn) → wraps withPrivateLease
- * in apps/api/src/lib/blob.ts (implemented by T8).
+ * in apps/api/src/lib/blob.ts.
  *
  * This encodes the EXACT current semantics of the 20-attempt retry copied in
  *   apps/api/src/functions/pilots.ts:395-411 (withLeaseRetry, public)
@@ -20,9 +20,7 @@
  * 409/412 sequences are injected WITHOUT Azurite and WITHOUT real wall-clock
  * waits (vi.useFakeTimers drives the backoff).
  *
- * This file is RED until T8 adds the exports — `withLeaseRetry` /
- * `withPrivateLeaseRetry` resolve to `undefined` and calling them throws
- * "is not a function". That is the intended RED-for-missing-export signal.
+ * This file exercises the shipped exports directly.
  */
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 

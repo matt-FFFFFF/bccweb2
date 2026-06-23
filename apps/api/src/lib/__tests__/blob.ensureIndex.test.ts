@@ -25,9 +25,8 @@ vi.mock("@azure/storage-blob", () => ({
   BlobServiceClient: { fromConnectionString },
 }));
 
-// These two exports do NOT exist yet (authored by T8). Until then every call
-// below throws "… is not a function" — RED for the RIGHT reason (missing
-// export), not an assertion bug.
+// Contract tests for the shipped index-creation helpers in blob.ts.
+// Every call below targets the exported helpers directly.
 async function loadHelpers() {
   return import("../blob.js");
 }
