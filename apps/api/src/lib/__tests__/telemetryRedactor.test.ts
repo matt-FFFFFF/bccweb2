@@ -280,7 +280,23 @@ describe("PiiRedactingTelemetryProcessor", () => {
 // ─── HealthFilterTelemetryProcessor tests ─────────────────────────────────────
 
 describe("HealthFilterTelemetryProcessor", () => {
-  it("drops envelopes with ai.operation.name === 'Functions.health'", () => {
+  it("drops successful Functions.health envelopes (success === true)", () => {
+    const processor = new HealthFilterTelemetryProcessor();
+    const envelope: TelemetryEnvelope = {
+      name: "Microsoft.ApplicationInsights.Request",
+      tags: { "ai.operation.name": "Functions.health" },
+      data: {
+        baseData: {
+          name: "Functions.health",
+          success: true,
+          responseCode: "200",
+        },
+      },
+    };
+    expect(processor.process(envelope)).toBe(false);
+  });
+
+  it("drops Functions.health envelopes with no success indicator", () => {
     const processor = new HealthFilterTelemetryProcessor();
     const envelope: TelemetryEnvelope = {
       name: "Microsoft.ApplicationInsights.Request",
@@ -288,6 +304,26 @@ describe("HealthFilterTelemetryProcessor", () => {
       data: { baseData: { name: "Functions.health" } },
     };
     expect(processor.process(envelope)).toBe(false);
+  });
+
+  it("forwards failed Functions.health envelopes (success === false)", () => {
+    const processor = new HealthFilterTelemetryProcessor();
+    const envelope: TelemetryEnvelope = {
+      name: "Microsoft.ApplicationInsights.Request",
+      tags: { "ai.operation.name": "Functions.health" },
+      data: { baseData: { name: "Functions.health", success: false } },
+    };
+    expect(processor.process(envelope)).toBe(true);
+  });
+
+  it("forwards failed Functions.health envelopes (responseCode >= 400)", () => {
+    const processor = new HealthFilterTelemetryProcessor();
+    const envelope: TelemetryEnvelope = {
+      name: "Microsoft.ApplicationInsights.Request",
+      tags: { "ai.operation.name": "Functions.health" },
+      data: { baseData: { name: "Functions.health", responseCode: "503" } },
+    };
+    expect(processor.process(envelope)).toBe(true);
   });
 
   it("forwards envelopes for other Azure Functions", () => {
