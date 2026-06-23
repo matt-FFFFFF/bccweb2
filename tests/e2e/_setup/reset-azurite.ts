@@ -35,6 +35,52 @@ function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * Hard guard: this helper DELETES whole blob containers. Refuse to run unless
+ * the target endpoint is a local Azurite emulator (loopback host / well-known
+ * Azurite hostnames), so a misconfigured BLOB_CONNECTION_STRING pointing at a
+ * real Azure Storage account can never irreversibly wipe live data.
+ *
+ * Escape hatch: set ALLOW_DESTRUCTIVE_BLOB_RESET=1 to opt in explicitly (only
+ * intended for throwaway test storage you own).
+ */
+const LOCAL_BLOB_HOSTS = new Set([
+  "127.0.0.1",
+  "localhost",
+  "::1",
+  "[::1]",
+  "azurite",
+  "azurite.local",
+]);
+
+function assertLocalAzurite(connectionString: string): void {
+  if (process.env.ALLOW_DESTRUCTIVE_BLOB_RESET === "1") return;
+
+  const match = /BlobEndpoint=([^;]+)/i.exec(connectionString);
+  const endpoint = match?.[1];
+  let host: string | undefined;
+  if (endpoint) {
+    try {
+      host = new URL(endpoint).hostname;
+    } catch {
+      host = undefined;
+    }
+  } else if (/AccountName=devstoreaccount1\b/.test(connectionString)) {
+    // UseDevelopmentStorage / well-known dev account with no explicit endpoint.
+    host = "127.0.0.1";
+  }
+
+  if (!host || !LOCAL_BLOB_HOSTS.has(host.toLowerCase())) {
+    throw new Error(
+      `resetAzuriteAndSeedAdmin() refuses to run: BLOB_CONNECTION_STRING ` +
+        `BlobEndpoint host '${host ?? "<unknown>"}' is not a local Azurite ` +
+        `endpoint. This helper DELETES entire containers and must never target ` +
+        `real Azure Storage. Point it at local Azurite, or set ` +
+        `ALLOW_DESTRUCTIVE_BLOB_RESET=1 to override for throwaway test storage.`,
+    );
+  }
+}
+
 /** Extract an HTTP status / Azure error code from any thrown error. */
 function errInfo(err: unknown): { status?: number; code?: string } {
   if (err instanceof RestError) {
