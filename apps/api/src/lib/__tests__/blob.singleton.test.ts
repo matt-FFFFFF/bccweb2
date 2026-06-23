@@ -21,9 +21,11 @@ vi.mock("@azure/storage-blob", () => ({
 describe("resetBlobSingletons", () => {
   // Save the blob-related env so this file is self-contained and leaves no
   // deleted env behind. Earlier this afterEach did `delete process.env.*`,
-  // which meant any later test in the file (or accidental ordering change)
-  // could resolve the REAL "data"/"data-private" container silently. We now
-  // snapshot in beforeEach and restore in afterEach.
+  // leaving the container-name env vars unset for any later test in the file
+  // (or an accidental ordering change). blob.ts now fails loud when those vars
+  // are unset, so such a test would crash rather than silently fall through —
+  // but snapshotting in beforeEach and restoring in afterEach keeps the env
+  // intact and the file hermetic regardless.
   let savedEnv: {
     conn: string | undefined;
     pub: string | undefined;

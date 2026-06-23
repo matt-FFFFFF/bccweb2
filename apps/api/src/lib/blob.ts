@@ -238,17 +238,20 @@ export async function withPrivateLeaseRetry<T>(
   fn: (leaseId: string) => Promise<T>
 ): Promise<T> {
   const maxAttempts = 20;
+  let lastErr: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
     try {
       return await withPrivateLease(path, fn);
     } catch (err) {
       const statusCode = (err as { statusCode?: number }).statusCode;
       if (statusCode !== 409 && statusCode !== 412) throw err;
-      if (attempt === maxAttempts) throw err;
-      await new Promise((r) => setTimeout(r, 25 * attempt));
+      lastErr = err;
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 25 * attempt));
+      }
     }
   }
-  throw new Error("Failed to acquire private blob lease");
+  throw lastErr;
 }
 
 async function withLeaseOnClient<T>(
