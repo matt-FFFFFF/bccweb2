@@ -259,7 +259,10 @@ async function withLeaseOnClient<T>(
   const leaseClient = client.getBlobLeaseClient();
   const response = await leaseClient.acquireLease(30);
   const leaseId = response.leaseId;
-  if (!leaseId) throw new Error("Failed to acquire blob lease: no leaseId returned");
+  if (!leaseId)
+    throw new Error(
+      `Failed to acquire blob lease for "${path}": no leaseId returned`
+    );
 
   try {
     return await fn(leaseId);
@@ -312,7 +315,10 @@ async function withLeaseRenewingOnClient<T>(
   const leaseClient = client.getBlobLeaseClient();
   const response = await leaseClient.acquireLease(leaseDurationSec);
   const leaseId = response.leaseId;
-  if (!leaseId) throw new Error("Failed to acquire blob lease: no leaseId returned");
+  if (!leaseId)
+    throw new Error(
+      `Failed to acquire blob lease for "${path}": no leaseId returned`
+    );
 
   trackLeaseTrace("Blob lease acquired", { path, leaseId });
 
