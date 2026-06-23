@@ -1,6 +1,6 @@
 /**
  * Characterization + RED-contract tests for `withLeaseRenewing` (public) in
- * apps/api/src/lib/blob.ts (currently `withLeaseRenewingOnClient`, lines 223-274).
+ * apps/api/src/lib/blob.ts (currently `withLeaseRenewingOnClient`, lines 311-387).
  *
  * Four behaviours are pinned here:
  *
@@ -312,6 +312,44 @@ describe("withLeaseRenewing — release-failure telemetry", () => {
     const messages = traceMessages();
     expect(messages).toContain("Blob lease released");
     expect(messages).not.toContain("Blob lease release failed");
+  });
+});
+
+// ─── 3c. Cleanup-window renewal race (issue #28 RED) ─────────────────────────
+
+describe("withLeaseRenewing — cleanup-window race (issue #28)", () => {
+  test("fn success wins when an in-flight renew rejects during the release await window", async () => {
+    const RENEW_INTERVAL = 1_000;
+
+    azureMock.renewLease.mockImplementation(
+      () =>
+        new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new Error("renew-broke-late")), 1_500);
+        }),
+    );
+    azureMock.releaseLease.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(resolve, 1_500);
+        }),
+    );
+
+    const { withLeaseRenewing } = await importBlob();
+    const fn = vi.fn(fnResolvingAfter(1_500, "fn-ok"));
+
+    const promise = withLeaseRenewing("rounds.json", fn, {
+      leaseDurationSec: 30,
+      renewIntervalMs: RENEW_INTERVAL,
+    });
+    const settled = promise.then(
+      (value) => ({ status: "fulfilled" as const, value }),
+      (error: unknown) => ({ status: "rejected" as const, error }),
+    );
+
+    // fn settles at t=1500; release-await spans t=1500→t=3000; renew rejects at t=2500 (inside the window)
+    await vi.advanceTimersByTimeAsync(3_000);
+
+    await expect(settled).resolves.toEqual({ status: "fulfilled", value: "fn-ok" });
   });
 });
 
