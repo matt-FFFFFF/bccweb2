@@ -1,13 +1,19 @@
 /**
  * telemetryRedactor.ts
  *
- * Application Insights-compatible TelemetryProcessor that scrubs PII from every
- * telemetry envelope before it is forwarded to the Azure Monitor ingestion endpoint.
+ * PII-scrubbing processors for Azure Monitor / Application Insights telemetry.
  *
- * Usage (register once at app startup):
- *   import { PiiRedactingTelemetryProcessor } from "./lib/telemetryRedactor.js";
- *   const client = new TelemetryClient(connectionString);
- *   client.addTelemetryProcessor(new PiiRedactingTelemetryProcessor().process);
+ * Two processor flavours are provided:
+ *
+ * 1. PiiRedactingLogRecordProcessor (applicationinsights v3 / OTel-native)
+ *    Implements the OpenTelemetry LogRecordProcessor interface; register via
+ *    Configuration.setAzureMonitorOptions({ logRecordProcessors: [...] }).
+ *    This is the active processor used in telemetry.ts.
+ *
+ * 2. PiiRedactingTelemetryProcessor (applicationinsights v2 compatibility shim)
+ *    Works against the v2 envelope / addTelemetryProcessor API.
+ *    Kept for the unit tests in telemetryRedactor.test.ts; not wired into the
+ *    live SDK path because addTelemetryProcessor is a no-op in v3.
  *
  * The PII_FIELDS constant is a TS-native copy of the list maintained in
  * scripts/lib/pii.mjs (the two lists MUST be kept in sync).
@@ -103,6 +109,10 @@ export interface TelemetryEnvelope {
  *
  * Returning `true` forwards the envelope; returning `false` drops it entirely.
  * This processor always forwards — it only scrubs, never drops.
+ *
+ * NOTE: addTelemetryProcessor is a no-op in applicationinsights v3.
+ * This class is retained for the existing unit tests in telemetryRedactor.test.ts.
+ * For the live SDK path, use PiiRedactingLogRecordProcessor below.
  */
 export class PiiRedactingTelemetryProcessor {
   private readonly fields: ReadonlyArray<string>;
@@ -135,5 +145,55 @@ export class PiiRedactingTelemetryProcessor {
     }
 
     return true;
+  }
+}
+
+// ─── OTel LogRecordProcessor (applicationinsights v3) ────────────────────────
+
+/**
+ * Minimal subset of the OTel SdkLogRecord needed for PII redaction.
+ * Matches the shape of @opentelemetry/sdk-logs SdkLogRecord without requiring
+ * a direct dependency on that package.
+ */
+interface RedactableLogRecord {
+  readonly attributes: Record<string, unknown>;
+  setAttribute(key: string, value: unknown): unknown;
+}
+
+/**
+ * OpenTelemetry LogRecordProcessor that redacts PII from log-record attributes
+ * before they are exported to Azure Monitor.
+ *
+ * applicationinsights v3 is built on OTel; the v2 addTelemetryProcessor hook is
+ * a no-op shim. Register this processor via:
+ *   appInsights.setup(connectionString)
+ *     ...
+ *     .setAzureMonitorOptions({ logRecordProcessors: [new PiiRedactingLogRecordProcessor()] })
+ *     .start();
+ *
+ * The trackEvent() path maps telemetry.properties into logRecord.attributes, so
+ * redacting at this level scrubs PII before it leaves the process.
+ */
+export class PiiRedactingLogRecordProcessor {
+  private readonly fields: ReadonlyArray<string>;
+
+  constructor(fields: ReadonlyArray<string> = PII_FIELDS) {
+    this.fields = fields;
+  }
+
+  onEmit(logRecord: RedactableLogRecord, _context?: unknown): void {
+    for (const field of this.fields) {
+      if (Object.prototype.hasOwnProperty.call(logRecord.attributes, field)) {
+        logRecord.setAttribute(field, "***");
+      }
+    }
+  }
+
+  forceFlush(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  shutdown(): Promise<void> {
+    return Promise.resolve();
   }
 }

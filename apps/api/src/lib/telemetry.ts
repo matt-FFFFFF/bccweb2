@@ -1,8 +1,5 @@
 import * as appInsights from "applicationinsights";
-import {
-  PiiRedactingTelemetryProcessor,
-  type TelemetryEnvelope,
-} from "./telemetryRedactor.js";
+import { PiiRedactingLogRecordProcessor } from "./telemetryRedactor.js";
 
 let initialised = false;
 
@@ -33,19 +30,8 @@ export function setup(): void {
     .setAutoCollectDependencies(true)
     .setAutoCollectPerformance(true, true)
     .setSendLiveMetrics(false)
+    .setAzureMonitorOptions({ logRecordProcessors: [new PiiRedactingLogRecordProcessor()] })
     .start();
-
-  const client = appInsights.defaultClient;
-  if (client) {
-    const processor = new PiiRedactingTelemetryProcessor();
-    client.addTelemetryProcessor(
-      (envelope, contextObjects) =>
-        processor.process(
-          envelope as unknown as TelemetryEnvelope,
-          contextObjects as Record<string, unknown> | undefined
-        )
-    );
-  }
 
   initialised = true;
   console.info("[telemetry] Application Insights initialised with PII redactor");
