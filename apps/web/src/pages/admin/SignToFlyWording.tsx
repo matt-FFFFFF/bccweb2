@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth.js";
-import { api } from "../../lib/api.js";
+import { api, ApiError } from "../../lib/api.js";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
 import { sanitizeWordingHtml } from "../../lib/sanitize.js";
 
@@ -42,8 +42,8 @@ function Banner({ msg, ok }: { msg: string; ok?: boolean }) {
 
 interface WordingVersion {
   version: number;
-  publishedAt: string;
-  publishedByPilotId: string;
+  blobPath: string;
+  lastModified: string;
 }
 
 interface ActiveWording {
@@ -71,15 +71,30 @@ export default function AdminSignToFlyWording() {
     setLoading(true);
     setLoadErr(null);
     try {
-      const [act, hist] = await Promise.all([
+      const [activeResult, historyResult] = await Promise.allSettled([
         api.get<ActiveWording>("sign-to-fly/wording/active"),
         api.get<WordingVersion[]>("manage/sign-to-fly/wording")
       ]);
-      setActive(act);
-      setHistory(hist);
-      if (!formHtml && !formPlainText && act) {
-        setFormHtml(act.html);
-        setFormPlainText(act.plainText);
+
+      if (activeResult.status === "fulfilled") {
+        const act = activeResult.value;
+        setActive(act);
+        if (!formHtml && !formPlainText && act) {
+          setFormHtml(act.html);
+          setFormPlainText(act.plainText);
+        }
+      } else if (activeResult.reason instanceof ApiError && activeResult.reason.code === "WORDING_NOT_SEEDED") {
+        setActive(null);
+      } else {
+        const err = activeResult.reason;
+        setLoadErr(err instanceof Error ? err.message : "Failed to load wording");
+      }
+
+      if (historyResult.status === "fulfilled") {
+        setHistory(historyResult.value);
+      } else {
+        const err = historyResult.reason;
+        setLoadErr(err instanceof Error ? err.message : "Failed to load wording history");
       }
     } catch (ex) {
       setLoadErr(ex instanceof Error ? ex.message : "Failed to load wording");
@@ -156,7 +171,6 @@ export default function AdminSignToFlyWording() {
                 <tr style={{ borderBottom: "1px solid #ccc", textAlign: "left" }}>
                   <th style={{ padding: "0.25rem" }}>Version</th>
                   <th style={{ padding: "0.25rem" }}>Published</th>
-                  <th style={{ padding: "0.25rem" }}>By</th>
                   <th style={{ padding: "0.25rem" }}>Status</th>
                 </tr>
               </thead>
@@ -164,8 +178,7 @@ export default function AdminSignToFlyWording() {
                 {history.map(h => (
                   <tr key={h.version} style={{ borderBottom: "1px solid #eee" }}>
                     <td style={{ padding: "0.35rem 0.25rem" }}>{h.version}</td>
-                    <td style={{ padding: "0.35rem 0.25rem" }}>{new Date(h.publishedAt).toLocaleDateString()}</td>
-                    <td style={{ padding: "0.35rem 0.25rem", color: "#666" }}>{h.publishedByPilotId.substring(0, 8)}...</td>
+                    <td style={{ padding: "0.35rem 0.25rem" }}>{new Date(h.lastModified).toLocaleDateString()}</td>
                     <td style={{ padding: "0.35rem 0.25rem" }}>
                       {h.version === active?.version ? (
                         <span style={{ background: "#d1e7dd", color: "#0f5132", padding: "0.1rem 0.4rem", borderRadius: "1rem", fontSize: "0.75rem" }}>Active</span>
