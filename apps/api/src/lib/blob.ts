@@ -4,6 +4,7 @@ import {
   BlobClient,
   BlockBlobClient,
 } from "@azure/storage-blob";
+import { getTelemetryClient } from "./telemetry.js";
 
 // ─── Client singletons ────────────────────────────────────────────────────────
 
@@ -45,14 +46,20 @@ function getBlobService(): BlobServiceClient {
 
 function getContainer(): ContainerClient {
   if (_container) return _container;
-  const containerName = process.env["BLOB_CONTAINER_NAME"] ?? "data";
+  const containerName = process.env["BLOB_CONTAINER_NAME"];
+  if (!containerName) {
+    throw new Error("BLOB_CONTAINER_NAME environment variable is not set");
+  }
   _container = getBlobService().getContainerClient(containerName);
   return _container;
 }
 
 function getPrivateContainer(): ContainerClient {
   if (_privateContainer) return _privateContainer;
-  const containerName = process.env["BLOB_PRIVATE_CONTAINER_NAME"] ?? "data-private";
+  const containerName = process.env["BLOB_PRIVATE_CONTAINER_NAME"];
+  if (!containerName) {
+    throw new Error("BLOB_PRIVATE_CONTAINER_NAME environment variable is not set");
+  }
   _privateContainer = getBlobService().getContainerClient(containerName);
   return _privateContainer;
 }
@@ -140,6 +147,50 @@ export async function writePrivateBlob<T>(
   });
 }
 
+export async function ensureJsonIndexBlob(
+  path: string,
+  seed: string
+): Promise<void> {
+  const client = getBlockBlobClient(path);
+  const maxAttempts = 10;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await client.uploadData(Buffer.from(seed), {
+        blobHTTPHeaders: { blobContentType: "application/json" },
+        conditions: { ifNoneMatch: "*" },
+      });
+      return;
+    } catch (err) {
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      if (statusCode === 409) return;
+      if (statusCode !== 412 || attempt === maxAttempts) throw err;
+      await new Promise((r) => setTimeout(r, 25 * attempt));
+    }
+  }
+}
+
+export async function ensurePrivateJsonIndexBlob(
+  path: string,
+  seed: string
+): Promise<void> {
+  const client = getPrivateBlockBlobClient(path);
+  const maxAttempts = 10;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await client.uploadData(Buffer.from(seed), {
+        blobHTTPHeaders: { blobContentType: "application/json" },
+        conditions: { ifNoneMatch: "*" },
+      });
+      return;
+    } catch (err) {
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      if (statusCode === 409) return;
+      if (statusCode !== 412 || attempt === maxAttempts) throw err;
+      await new Promise((r) => setTimeout(r, 25 * attempt));
+    }
+  }
+}
+
 // ─── withLease ────────────────────────────────────────────────────────────────
 
 /**
@@ -150,22 +201,7 @@ export async function withLease<T>(
   path: string,
   fn: (leaseId: string) => Promise<T>
 ): Promise<T> {
-  const client = getBlockBlobClient(path);
-  const leaseClient = client.getBlobLeaseClient();
-  const response = await leaseClient.acquireLease(30);
-  const leaseId = response.leaseId;
-  if (!leaseId) throw new Error("Failed to acquire blob lease: no leaseId returned");
-
-  try {
-    const result = await fn(leaseId);
-    await leaseClient.releaseLease();
-    return result;
-  } catch (err) {
-    await leaseClient.releaseLease().catch(() => {
-      // best-effort release; ignore errors here
-    });
-    throw err;
-  }
+  return withLeaseOnClient(path, getBlockBlobClient(path), fn);
 }
 
 /**
@@ -176,21 +212,73 @@ export async function withPrivateLease<T>(
   path: string,
   fn: (leaseId: string) => Promise<T>
 ): Promise<T> {
-  const client = getPrivateBlockBlobClient(path);
+  return withLeaseOnClient(path, getPrivateBlockBlobClient(path), fn);
+}
+
+export async function withLeaseRetry(
+  path: string,
+  fn: (leaseId: string) => Promise<unknown>
+): Promise<void> {
+  const maxAttempts = 20;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      await withLease(path, fn);
+      return;
+    } catch (err) {
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      if (statusCode !== 409 && statusCode !== 412) throw err;
+      if (attempt === maxAttempts) throw err;
+      await new Promise((r) => setTimeout(r, 25 * attempt));
+    }
+  }
+}
+
+export async function withPrivateLeaseRetry<T>(
+  path: string,
+  fn: (leaseId: string) => Promise<T>
+): Promise<T> {
+  const maxAttempts = 20;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    try {
+      return await withPrivateLease(path, fn);
+    } catch (err) {
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      if (statusCode !== 409 && statusCode !== 412) throw err;
+      lastErr = err;
+      if (attempt < maxAttempts) {
+        await new Promise((r) => setTimeout(r, 25 * attempt));
+      }
+    }
+  }
+  throw lastErr;
+}
+
+async function withLeaseOnClient<T>(
+  path: string,
+  client: BlockBlobClient,
+  fn: (leaseId: string) => Promise<T>
+): Promise<T> {
   const leaseClient = client.getBlobLeaseClient();
   const response = await leaseClient.acquireLease(30);
   const leaseId = response.leaseId;
-  if (!leaseId) throw new Error("Failed to acquire blob lease: no leaseId returned");
+  if (!leaseId)
+    throw new Error(
+      `Failed to acquire blob lease for "${path}": no leaseId returned`
+    );
 
   try {
-    const result = await fn(leaseId);
-    await leaseClient.releaseLease();
-    return result;
-  } catch (err) {
-    await leaseClient.releaseLease().catch(() => {
-      // best-effort release; ignore errors here
+    return await fn(leaseId);
+  } finally {
+    // best-effort release; failures must NOT throw or discard fn's result, but
+    // are surfaced via telemetry instead of being swallowed silently.
+    await leaseClient.releaseLease().catch((err: unknown) => {
+      trackLeaseTrace("Blob lease release failed", {
+        path,
+        leaseId,
+        ...safeErrorProps(err),
+      });
     });
-    throw err;
   }
 }
 
@@ -236,22 +324,34 @@ async function withLeaseRenewingOnClient<T>(
   const leaseClient = client.getBlobLeaseClient();
   const response = await leaseClient.acquireLease(leaseDurationSec);
   const leaseId = response.leaseId;
-  if (!leaseId) throw new Error("Failed to acquire blob lease: no leaseId returned");
+  if (!leaseId)
+    throw new Error(
+      `Failed to acquire blob lease for "${path}": no leaseId returned`
+    );
 
-  console.log("[lease] acquired", { path, leaseId });
+  trackLeaseTrace("Blob lease acquired", { path, leaseId });
 
   let attempt = 0;
   let totalRenewals = 0;
   let renewalError: unknown = null;
+  let renewing = false;
   const handle = setInterval(async () => {
+    if (renewing) return;
+    renewing = true;
     attempt += 1;
     try {
       await leaseClient.renewLease();
       totalRenewals += 1;
-      console.log("[lease] renewed", { path, leaseId, attempt });
+      trackLeaseTrace("Blob lease renewed", {
+        path,
+        leaseId,
+        attempt,
+      });
     } catch (err) {
       renewalError = err;
       clearInterval(handle);
+    } finally {
+      renewing = false;
     }
   }, renewIntervalMs);
 
@@ -263,14 +363,44 @@ async function withLeaseRenewingOnClient<T>(
     throw err;
   } finally {
     clearInterval(handle);
-    await leaseClient.releaseLease().catch(() => {
-      // best-effort release; ignore errors here
+    let released = true;
+    await leaseClient.releaseLease().catch((err: unknown) => {
+      released = false;
+      trackLeaseTrace("Blob lease release failed", {
+        path,
+        leaseId,
+        totalRenewals,
+        ...safeErrorProps(err),
+      });
     });
-    console.log("[lease] released", { path, leaseId, totalRenewals });
+    if (released) {
+      trackLeaseTrace("Blob lease released", {
+        path,
+        leaseId,
+        totalRenewals,
+      });
+    }
     if (renewalError && !fnError) {
       throw new LeaseRenewalFailedError(path, renewalError);
     }
   }
+}
+
+function trackLeaseTrace(
+  message: string,
+  properties: Record<string, unknown>
+): void {
+  const client = getTelemetryClient();
+  client?.trackTrace({ message, properties });
+}
+
+function safeErrorProps(err: unknown): Record<string, unknown> {
+  const props: Record<string, unknown> = {
+    errorName: err instanceof Error ? err.name : "unknown",
+  };
+  const statusCode = (err as { statusCode?: unknown } | null)?.statusCode;
+  if (typeof statusCode === "number") props.statusCode = statusCode;
+  return props;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────

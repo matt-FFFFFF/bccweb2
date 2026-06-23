@@ -1,10 +1,13 @@
 import { HttpRequest } from "@azure/functions";
-import { Buffer } from "buffer";
 import jwt from "jsonwebtoken";
 import * as z from "zod/v4";
 import type { CallerIdentity, PilotEmailIndex, User } from "@bccweb/types";
 import { PilotSchema, UserSchema } from "@bccweb/schemas";
-import { getPrivateBlobClient, getPrivateBlockBlobClient, withPrivateLease } from "./blob.js";
+import {
+  ensurePrivateJsonIndexBlob,
+  getPrivateBlobClient,
+  withPrivateLeaseRetry,
+} from "./blob.js";
 import { readJson, writePrivateJson } from "./blobJson.js";
 
 const StringRecordSchema = z.record(z.string(), z.string());
@@ -98,7 +101,7 @@ export async function getOrCreateUser(
 
 async function updateUserIndex(email: string, userId: string): Promise<void> {
   const indexPath = "user-index.json";
-  await ensurePrivateIndexBlob(indexPath);
+  await ensurePrivateJsonIndexBlob(indexPath, "{}");
   await withPrivateLeaseRetry(indexPath, async (leaseId) => {
     let index: Record<string, string> = {};
     try {
@@ -120,7 +123,7 @@ async function updateUserIndex(email: string, userId: string): Promise<void> {
 
 export async function updatePilotEmailIndex(email: string, pilotId: string): Promise<void> {
   const indexPath = "pilot-email-index.json";
-  await ensurePrivateIndexBlob(indexPath);
+  await ensurePrivateJsonIndexBlob(indexPath, "{}");
 
   await withPrivateLeaseRetry(indexPath, async (leaseId) => {
     let index: PilotEmailIndex = {};
@@ -138,43 +141,6 @@ export async function updatePilotEmailIndex(email: string, pilotId: string): Pro
     index[email.toLowerCase()] = pilotId;
     await writePrivateJson(indexPath, StringRecordSchema, index, leaseId);
   });
-}
-
-async function ensurePrivateIndexBlob(indexPath: string): Promise<void> {
-  const client = getPrivateBlockBlobClient(indexPath);
-  const maxAttempts = 10;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      await client.uploadData(Buffer.from("{}"), {
-        blobHTTPHeaders: { blobContentType: "application/json" },
-        conditions: { ifNoneMatch: "*" },
-      });
-      return;
-    } catch (err: unknown) {
-      const statusCode = (err as { statusCode?: number }).statusCode;
-      if (statusCode === 409) return;
-      if (statusCode !== 412 || attempt === maxAttempts) throw err;
-      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
-    }
-  }
-}
-
-async function withPrivateLeaseRetry<T>(
-  indexPath: string,
-  fn: (leaseId: string) => Promise<T>
-): Promise<T> {
-  const maxAttempts = 20;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      return await withPrivateLease(indexPath, fn);
-    } catch (err: unknown) {
-      const statusCode = (err as { statusCode?: number }).statusCode;
-      if (statusCode !== 409 && statusCode !== 412) throw err;
-      if (attempt === maxAttempts) throw err;
-      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
-    }
-  }
-  throw new Error("unreachable");
 }
 
 // ─── Main middleware ───────────────────────────────────────────────────────

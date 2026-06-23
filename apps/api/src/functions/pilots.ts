@@ -35,7 +35,8 @@ import {
   getBlobClient,
   getBlockBlobClient,
   getPrivateBlobClient,
-  withLease,
+  withLeaseRetry,
+  ensureJsonIndexBlob,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
@@ -346,7 +347,7 @@ async function upsertPilotInIndex(
   pilot: Pilot,
   email?: string
 ): Promise<void> {
-  await ensurePilotsIndexBlob();
+  await ensureJsonIndexBlob("pilots.json", "[]");
 
   await withLeaseRetry("pilots.json", async (leaseId) => {
     let index: PilotSummary[] = [];
@@ -389,43 +390,6 @@ async function upsertPilotInIndex(
 
   if (email) {
     await updatePilotEmailIndex(email, pilot.id);
-  }
-}
-
-async function withLeaseRetry(
-  path: string,
-  fn: (leaseId: string) => Promise<void>
-): Promise<void> {
-  const maxAttempts = 20;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      await withLease(path, fn);
-      return;
-    } catch (err: unknown) {
-      const statusCode = (err as { statusCode?: number }).statusCode;
-      if (statusCode !== 409 && statusCode !== 412) throw err;
-      if (attempt === maxAttempts) throw err;
-      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
-    }
-  }
-}
-
-async function ensurePilotsIndexBlob(): Promise<void> {
-  const client = getBlockBlobClient("pilots.json");
-  const maxAttempts = 10;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      await client.uploadData(Buffer.from("[]"), {
-        blobHTTPHeaders: { blobContentType: "application/json" },
-        conditions: { ifNoneMatch: "*" },
-      });
-      return;
-    } catch (err: unknown) {
-      const statusCode = (err as { statusCode?: number }).statusCode;
-      if (statusCode === 409) return;
-      if (statusCode !== 412 || attempt === maxAttempts) throw err;
-      await new Promise((resolve) => setTimeout(resolve, 25 * attempt));
-    }
   }
 }
 
