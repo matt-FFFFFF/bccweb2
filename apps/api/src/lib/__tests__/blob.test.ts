@@ -1,38 +1,48 @@
 import { randomUUID } from "crypto";
-import { describe, expect, test, vi } from "vitest";
+import { beforeEach, describe, expect, test, vi } from "vitest";
 import { getPublicContainer } from "../../__tests__/helpers/azurite.js";
-import {
-  LeaseRenewalFailedError,
-  withLeaseRenewing,
-  writeBlob,
-} from "../blob.js";
+
+const telemetryMock = vi.hoisted(() => {
+  const trackTrace = vi.fn();
+  return { trackTrace, client: { trackTrace } };
+});
+
+vi.mock("../telemetry.js", () => ({
+  getTelemetryClient: vi.fn(() => telemetryMock.client),
+  setup: vi.fn(),
+  resetForTests: vi.fn(),
+}));
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function importBlob(): Promise<typeof import("../blob.js")> {
+  return import("../blob.js");
+}
+
 describe("withLeaseRenewing", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    telemetryMock.trackTrace.mockClear();
+  });
+
   test("60s op succeeds with >=3 renewals", async () => {
     vi.setConfig({ testTimeout: 70_000 });
+    const { withLeaseRenewing, writeBlob } = await importBlob();
     const path = `lease-renew/${randomUUID()}.json`;
     await writeBlob(path, { value: "initial" });
-    const logs: unknown[][] = [];
-    const logSpy = vi.spyOn(console, "log").mockImplementation((...args) => {
-      logs.push(args);
-    });
 
-    try {
-      await withLeaseRenewing(
-        path,
-        async (leaseId) => {
-          await sleep(60_000);
-          await writeBlob(path, { value: "updated" }, leaseId);
-        },
-        { leaseDurationSec: 31, renewIntervalMs: 15_000 }
-      );
-    } finally {
-      logSpy.mockRestore();
-    }
+    await withLeaseRenewing(
+      path,
+      async (leaseId) => {
+        await sleep(60_000);
+        await writeBlob(path, { value: "updated" }, leaseId);
+      },
+      { leaseDurationSec: 31, renewIntervalMs: 15_000 }
+    );
 
-    const renewals = logs.filter(([message]) => message === "[lease] renewed");
+    const renewals = telemetryMock.trackTrace.mock.calls.filter(
+      ([trace]) => trace.message === "Blob lease renewed"
+    );
     expect(renewals.length).toBeGreaterThanOrEqual(3);
     const blob = getPublicContainer().getBlobClient(path);
     const properties = await blob.getProperties();
@@ -40,6 +50,7 @@ describe("withLeaseRenewing", () => {
   });
 
   test("releases on fn throw", async () => {
+    const { withLeaseRenewing, writeBlob } = await importBlob();
     const path = `lease-renew/${randomUUID()}.json`;
     await writeBlob(path, { value: "initial" });
 
@@ -59,6 +70,8 @@ describe("withLeaseRenewing", () => {
   });
 
   test("force-break of lease causes LeaseRenewalFailedError", async () => {
+    const { LeaseRenewalFailedError, withLeaseRenewing, writeBlob } =
+      await importBlob();
     const path = `lease-renew/${randomUUID()}.json`;
     await writeBlob(path, { value: "initial" });
     const blob = getPublicContainer().getBlockBlobClient(path);

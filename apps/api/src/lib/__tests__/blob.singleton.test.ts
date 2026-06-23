@@ -6,8 +6,8 @@ const { fromConnectionString } = vi.hoisted(() => ({
     getContainerClient: vi.fn((containerName: string) => ({
       connectionString,
       containerName,
-      getBlobClient: vi.fn(),
-      getBlockBlobClient: vi.fn(),
+      getBlobClient: vi.fn(() => ({ containerName })),
+      getBlockBlobClient: vi.fn(() => ({ containerName })),
     })),
   })),
 }));
@@ -19,7 +19,23 @@ vi.mock("@azure/storage-blob", () => ({
 }));
 
 describe("resetBlobSingletons", () => {
+  // Save the blob-related env so this file is self-contained and leaves no
+  // deleted env behind. Earlier this afterEach did `delete process.env.*`,
+  // which meant any later test in the file (or accidental ordering change)
+  // could resolve the REAL "data"/"data-private" container silently. We now
+  // snapshot in beforeEach and restore in afterEach.
+  let savedEnv: {
+    conn: string | undefined;
+    pub: string | undefined;
+    priv: string | undefined;
+  };
+
   beforeEach(() => {
+    savedEnv = {
+      conn: process.env.BLOB_CONNECTION_STRING,
+      pub: process.env.BLOB_CONTAINER_NAME,
+      priv: process.env.BLOB_PRIVATE_CONTAINER_NAME,
+    };
     // Reset the module registry so the dynamic import below re-loads blob.js
     // with the mocked @azure/storage-blob in place. Without this, blob.js is
     // cached from earlier setup-file imports and still references the real
@@ -29,8 +45,13 @@ describe("resetBlobSingletons", () => {
   });
 
   afterEach(() => {
-    delete process.env.BLOB_CONNECTION_STRING;
-    delete process.env.BLOB_CONTAINER_NAME;
+    const restore = (key: string, val: string | undefined) => {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    };
+    restore("BLOB_CONNECTION_STRING", savedEnv.conn);
+    restore("BLOB_CONTAINER_NAME", savedEnv.pub);
+    restore("BLOB_PRIVATE_CONTAINER_NAME", savedEnv.priv);
   });
 
   test("re-reads BLOB_CONNECTION_STRING after reset", async () => {
@@ -55,5 +76,58 @@ describe("resetBlobSingletons", () => {
     expect(fromConnectionString).toHaveBeenLastCalledWith(
       "UseDevelopmentStorage=true;second"
     );
+  });
+
+  // ─── Fail-loud container-name contract (T8) ─────────────────────────────────
+  // These assertions are RED until T8 removes the silent "data"/"data-private"
+  // default in getContainer()/getPrivateContainer(). With a valid connection
+  // string but NO container name, resolving a client MUST throw an error that
+  // names the missing env var, instead of silently resolving the production
+  // container.
+
+  test("PUBLIC client throws naming BLOB_CONTAINER_NAME when it is unset", async () => {
+    process.env.BLOB_CONNECTION_STRING = "UseDevelopmentStorage=true;public";
+    delete process.env.BLOB_CONTAINER_NAME;
+
+    const { getBlobClient } = await import("../blob.js");
+
+    expect(() => getBlobClient("rounds/one.json")).toThrow(
+      /BLOB_CONTAINER_NAME/
+    );
+  });
+
+  test("PRIVATE client throws naming BLOB_PRIVATE_CONTAINER_NAME when it is unset", async () => {
+    process.env.BLOB_CONNECTION_STRING = "UseDevelopmentStorage=true;private";
+    delete process.env.BLOB_PRIVATE_CONTAINER_NAME;
+
+    const { getPrivateBlobClient } = await import("../blob.js");
+
+    expect(() => getPrivateBlobClient("pilots/one.json")).toThrow(
+      /BLOB_PRIVATE_CONTAINER_NAME/
+    );
+  });
+
+  // ─── Per-file isolation mechanism must survive fail-loud ────────────────────
+  // helpers/azurite.ts sets BLOB_CONTAINER_NAME="test-data-<rand>" then calls
+  // resetBlobSingletons(). The fail-loud check must only trigger on a genuinely
+  // unset name — when a name IS set, the client must resolve THAT container.
+
+  test("resolves the explicitly-set container name after reset (isolation)", async () => {
+    process.env.BLOB_CONNECTION_STRING = "UseDevelopmentStorage=true;iso";
+    process.env.BLOB_CONTAINER_NAME = "data";
+
+    const { getBlobClient, resetBlobSingletons } = await import("../blob.js");
+
+    // First resolution caches the original container.
+    getBlobClient("rounds/one.json");
+
+    // Simulate per-file isolation: reset + set the random per-file container.
+    resetBlobSingletons();
+    process.env.BLOB_CONTAINER_NAME = "test-data-abc";
+
+    const client = getBlobClient("rounds/two.json") as unknown as {
+      containerName: string;
+    };
+    expect(client.containerName).toBe("test-data-abc");
   });
 });
