@@ -215,16 +215,7 @@ export async function withPrivateLease<T>(
   return withLeaseOnClient(path, getPrivateBlockBlobClient(path), fn);
 }
 
-export function withLeaseRetry(
-  path: string,
-  fn: (leaseId: string) => Promise<unknown>
-): Promise<void> {
-  const promise = withLeaseRetryImpl(path, fn);
-  promise.catch(() => {});
-  return promise;
-}
-
-async function withLeaseRetryImpl(
+export async function withLeaseRetry(
   path: string,
   fn: (leaseId: string) => Promise<unknown>
 ): Promise<void> {
@@ -242,16 +233,7 @@ async function withLeaseRetryImpl(
   }
 }
 
-export function withPrivateLeaseRetry<T>(
-  path: string,
-  fn: (leaseId: string) => Promise<T>
-): Promise<T> {
-  const promise = withPrivateLeaseRetryImpl(path, fn);
-  promise.catch(() => {});
-  return promise;
-}
-
-async function withPrivateLeaseRetryImpl<T>(
+export async function withPrivateLeaseRetry<T>(
   path: string,
   fn: (leaseId: string) => Promise<T>
 ): Promise<T> {

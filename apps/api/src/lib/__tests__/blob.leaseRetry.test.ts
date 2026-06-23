@@ -163,10 +163,10 @@ describe("withLeaseRetry / withPrivateLeaseRetry — 20-attempt contract", () =>
     const { withLeaseRetry } = await importBlob();
 
     const fn = vi.fn().mockResolvedValue(undefined);
-    const promise = withLeaseRetry("rounds.json", fn);
+    const assertion = expect(withLeaseRetry("rounds.json", fn)).rejects.toBe(fatal);
     await vi.runAllTimersAsync();
 
-    await expect(promise).rejects.toBe(fatal);
+    await assertion;
     expect(azureMock.acquireLease).toHaveBeenCalledTimes(1); // no retry
     expect(fn).not.toHaveBeenCalled();
   });
@@ -178,10 +178,12 @@ describe("withLeaseRetry / withPrivateLeaseRetry — 20-attempt contract", () =>
     const { withPrivateLeaseRetry } = await importBlob();
 
     const fn = vi.fn().mockResolvedValue("never");
-    const promise = withPrivateLeaseRetry("user-index.json", fn);
+    const assertion = expect(withPrivateLeaseRetry("user-index.json", fn)).rejects.toBe(
+      fatal
+    );
     await vi.runAllTimersAsync();
 
-    await expect(promise).rejects.toBe(fatal);
+    await assertion;
     expect(azureMock.acquireLease).toHaveBeenCalledTimes(1);
   });
 
@@ -195,11 +197,12 @@ describe("withLeaseRetry / withPrivateLeaseRetry — 20-attempt contract", () =>
 
     const fn = vi.fn().mockResolvedValue(undefined);
     const promise = withLeaseRetry("rounds.json", fn);
+    const assertion = expect(promise).rejects.toBe(conflict);
+    const statusAssertion = expect(promise).rejects.toHaveProperty("statusCode", 409);
     await vi.runAllTimersAsync();
 
-    const thrown = await promise.catch((e: unknown) => e);
-    expect(thrown).toBe(conflict); // ORIGINAL error identity preserved
-    expect((thrown as { statusCode?: number }).statusCode).toBe(409);
+    await assertion; // ORIGINAL error identity preserved
+    await statusAssertion;
     expect(azureMock.acquireLease).toHaveBeenCalledTimes(20); // maxAttempts
     expect(fn).not.toHaveBeenCalled();
   });
@@ -212,11 +215,12 @@ describe("withLeaseRetry / withPrivateLeaseRetry — 20-attempt contract", () =>
 
     const fn = vi.fn().mockResolvedValue("never");
     const promise = withPrivateLeaseRetry("user-index.json", fn);
+    const assertion = expect(promise).rejects.toBe(conflict);
+    const statusAssertion = expect(promise).rejects.toHaveProperty("statusCode", 412);
     await vi.runAllTimersAsync();
 
-    const thrown = await promise.catch((e: unknown) => e);
-    expect(thrown).toBe(conflict);
-    expect((thrown as { statusCode?: number }).statusCode).toBe(412);
+    await assertion;
+    await statusAssertion;
     expect(azureMock.acquireLease).toHaveBeenCalledTimes(20);
   });
 
