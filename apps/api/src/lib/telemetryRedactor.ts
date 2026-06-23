@@ -92,7 +92,29 @@ export interface TelemetryEnvelope {
   [key: string]: unknown;
 }
 
-// ─── Processor class ──────────────────────────────────────────────────────────
+// ─── Processor classes ────────────────────────────────────────────────────────
+
+/**
+ * Application Insights TelemetryProcessor that drops all telemetry emitted
+ * for invocations of the `health` Azure Function (liveness / readiness probes).
+ *
+ * Health checks are called at high frequency by the Azure platform and produce
+ * noise without diagnostic value. Returning `false` from a processor instructs
+ * the SDK to discard the envelope entirely.
+ */
+export class HealthFilterTelemetryProcessor {
+  process(
+    envelope: TelemetryEnvelope,
+    _contextObjects?: Record<string, unknown>
+  ): boolean {
+    if (!envelope) return true;
+    const tags = envelope["tags"] as Record<string, unknown> | undefined;
+    if (tags?.["ai.operation.name"] === "Functions.health") {
+      return false;
+    }
+    return true;
+  }
+}
 
 /**
  * Application Insights TelemetryProcessor that redacts PII fields in-place
