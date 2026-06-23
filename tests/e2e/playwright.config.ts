@@ -14,6 +14,13 @@ export default defineConfig({
   projects: [
     {
       name: "chromium-desktop",
+      testIgnore: /admin-sign-to-fly-wording\.spec\.ts$/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "realstack-serial",
+      fullyParallel: false,
+      testMatch: /admin-sign-to-fly-wording\.spec\.ts$/,
       use: { ...devices["Desktop Chrome"] },
     },
   ],
