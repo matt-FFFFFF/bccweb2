@@ -108,12 +108,18 @@ async function importBlobWithMockedRelease(
   releaseLease: ReturnType<typeof vi.fn>,
 ) {
   const acquireLease = vi.fn().mockResolvedValue({ leaseId: "mock-lease-id" });
+  const trackTrace = vi.fn();
   vi.resetModules();
   vi.doMock("@azure/storage-blob", () =>
     makeStorageMock(acquireLease, releaseLease),
   );
+  vi.doMock("../telemetry.js", () => ({
+    getTelemetryClient: () => ({ trackTrace }),
+    setup: vi.fn(),
+    resetForTests: vi.fn(),
+  }));
   const mod = await import("../blob.js");
-  return { mod, acquireLease };
+  return { mod, acquireLease, trackTrace };
 }
 
 describe("withLease guarded success-release (mocked, RED until T8)", () => {
@@ -123,6 +129,7 @@ describe("withLease guarded success-release (mocked, RED until T8)", () => {
 
   afterEach(() => {
     vi.doUnmock("@azure/storage-blob");
+    vi.doUnmock("../telemetry.js");
     vi.resetModules();
   });
 
@@ -142,6 +149,28 @@ describe("withLease guarded success-release (mocked, RED until T8)", () => {
     expect(result).toBe("FN_RESULT");
     // Release attempted exactly once on the happy path — no double-release.
     expect(releaseLease).toHaveBeenCalledTimes(1);
+  });
+
+  test("releaseLease failure emits a 'Blob lease release failed' trace with safe props", async () => {
+    const releaseLease = vi
+      .fn()
+      .mockRejectedValue(Object.assign(new Error("release-secret-detail"), { statusCode: 409 }));
+    const { mod, trackTrace } = await importBlobWithMockedRelease(releaseLease);
+
+    const result = await mod.withLease("some/path.json", async () => "FN_RESULT");
+
+    expect(result).toBe("FN_RESULT");
+    const failureCall = trackTrace.mock.calls.find(
+      ([arg]) => (arg as { message: string }).message === "Blob lease release failed",
+    );
+    expect(failureCall).toBeDefined();
+    expect(failureCall?.[0].properties).toMatchObject({
+      path: "some/path.json",
+      leaseId: "mock-lease-id",
+      errorName: "Error",
+      statusCode: 409,
+    });
+    expect(JSON.stringify(failureCall?.[0].properties)).not.toContain("release-secret-detail");
   });
 
   test("withPrivateLease resolves with fn's result even when releaseLease throws", async () => {
@@ -170,6 +199,7 @@ describe("withLease error-path release stays best-effort (mocked, GREEN now)", (
 
   afterEach(() => {
     vi.doUnmock("@azure/storage-blob");
+    vi.doUnmock("../telemetry.js");
     vi.resetModules();
   });
 

@@ -252,6 +252,71 @@ describe("withLeaseRenewing — telemetry logging (RED until T8)", () => {
   });
 });
 
+// ─── 3b. Release-failure telemetry (PR #26 round-3) ──────────────────────────
+
+describe("withLeaseRenewing — release-failure telemetry", () => {
+  const traceMessages = () =>
+    telemetryMock.trackTrace.mock.calls.map(([arg]) => (arg as { message: string }).message);
+
+  test("releaseLease throws → emits 'Blob lease release failed', NOT 'Blob lease released'", async () => {
+    const RENEW_INTERVAL = 1_000;
+    const FN_DURATION = 2 * RENEW_INTERVAL;
+
+    azureMock.renewLease.mockResolvedValue(undefined);
+    const releaseErr = Object.assign(new Error("release-broke"), { statusCode: 409 });
+    azureMock.releaseLease.mockRejectedValue(releaseErr);
+
+    const { withLeaseRenewing } = await importBlob();
+    const fn = vi.fn(fnResolvingAfter(FN_DURATION, "ok"));
+
+    const promise = withLeaseRenewing("rounds.json", fn, {
+      leaseDurationSec: 30,
+      renewIntervalMs: RENEW_INTERVAL,
+    });
+
+    await vi.advanceTimersByTimeAsync(FN_DURATION);
+    await expect(promise).resolves.toBe("ok");
+
+    const messages = traceMessages();
+    expect(messages).toContain("Blob lease release failed");
+    expect(messages).not.toContain("Blob lease released");
+
+    const failureCall = telemetryMock.trackTrace.mock.calls.find(
+      ([arg]) => (arg as { message: string }).message === "Blob lease release failed",
+    );
+    expect(failureCall?.[0].properties).toMatchObject({
+      path: "rounds.json",
+      leaseId: LEASE_ID,
+      errorName: "Error",
+      statusCode: 409,
+    });
+    expect(JSON.stringify(failureCall?.[0].properties)).not.toContain("release-broke");
+  });
+
+  test("releaseLease succeeds → emits 'Blob lease released', NOT 'Blob lease release failed'", async () => {
+    const RENEW_INTERVAL = 1_000;
+    const FN_DURATION = 2 * RENEW_INTERVAL;
+
+    azureMock.renewLease.mockResolvedValue(undefined);
+    azureMock.releaseLease.mockResolvedValue(undefined);
+
+    const { withLeaseRenewing } = await importBlob();
+    const fn = vi.fn(fnResolvingAfter(FN_DURATION, "ok"));
+
+    const promise = withLeaseRenewing("rounds.json", fn, {
+      leaseDurationSec: 30,
+      renewIntervalMs: RENEW_INTERVAL,
+    });
+
+    await vi.advanceTimersByTimeAsync(FN_DURATION);
+    await expect(promise).resolves.toBe("ok");
+
+    const messages = traceMessages();
+    expect(messages).toContain("Blob lease released");
+    expect(messages).not.toContain("Blob lease release failed");
+  });
+});
+
 // ─── 4. opts validation (characterization — GREEN now) ───────────────────────
 
 describe("withLeaseRenewing — opts validation (characterization, GREEN now)", () => {

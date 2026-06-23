@@ -267,8 +267,14 @@ async function withLeaseOnClient<T>(
   try {
     return await fn(leaseId);
   } finally {
-    await leaseClient.releaseLease().catch(() => {
-      // best-effort release; ignore errors here
+    // best-effort release; failures must NOT throw or discard fn's result, but
+    // are surfaced via telemetry instead of being swallowed silently.
+    await leaseClient.releaseLease().catch((err: unknown) => {
+      trackLeaseTrace("Blob lease release failed", {
+        path,
+        leaseId,
+        ...safeErrorProps(err),
+      });
     });
   }
 }
@@ -354,14 +360,23 @@ async function withLeaseRenewingOnClient<T>(
     throw err;
   } finally {
     clearInterval(handle);
-    await leaseClient.releaseLease().catch(() => {
-      // best-effort release; ignore errors here
+    let released = true;
+    await leaseClient.releaseLease().catch((err: unknown) => {
+      released = false;
+      trackLeaseTrace("Blob lease release failed", {
+        path,
+        leaseId,
+        totalRenewals,
+        ...safeErrorProps(err),
+      });
     });
-    trackLeaseTrace("Blob lease released", {
-      path,
-      leaseId,
-      totalRenewals,
-    });
+    if (released) {
+      trackLeaseTrace("Blob lease released", {
+        path,
+        leaseId,
+        totalRenewals,
+      });
+    }
     if (renewalError && !fnError) {
       throw new LeaseRenewalFailedError(path, renewalError);
     }
@@ -374,6 +389,15 @@ function trackLeaseTrace(
 ): void {
   const client = getTelemetryClient();
   client?.trackTrace({ message, properties });
+}
+
+function safeErrorProps(err: unknown): Record<string, unknown> {
+  const props: Record<string, unknown> = {
+    errorName: err instanceof Error ? err.name : "unknown",
+  };
+  const statusCode = (err as { statusCode?: unknown } | null)?.statusCode;
+  if (typeof statusCode === "number") props.statusCode = statusCode;
+  return props;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
