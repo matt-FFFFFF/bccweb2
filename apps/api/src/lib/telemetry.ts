@@ -1,5 +1,6 @@
 import * as appInsights from "applicationinsights";
 import {
+  HealthFilterTelemetryProcessor,
   PiiRedactingTelemetryProcessor,
   type TelemetryEnvelope,
 } from "./telemetryRedactor.js";
@@ -37,6 +38,15 @@ export function setup(): void {
 
   const client = appInsights.defaultClient;
   if (client) {
+    const healthFilter = new HealthFilterTelemetryProcessor();
+    client.addTelemetryProcessor(
+      (envelope, contextObjects) =>
+        healthFilter.process(
+          envelope as unknown as TelemetryEnvelope,
+          contextObjects as Record<string, unknown> | undefined
+        )
+    );
+
     const processor = new PiiRedactingTelemetryProcessor();
     client.addTelemetryProcessor(
       (envelope, contextObjects) =>
@@ -48,7 +58,7 @@ export function setup(): void {
   }
 
   initialised = true;
-  console.info("[telemetry] Application Insights initialised with PII redactor");
+  console.info("[telemetry] Application Insights initialised with health filter and PII redactor");
 }
 
 export function getTelemetryClient(): appInsights.TelemetryClient | undefined {

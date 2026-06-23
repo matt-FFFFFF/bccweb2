@@ -45,7 +45,7 @@ describe("telemetry.setup()", () => {
     expect(warnSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("initialises the SDK and registers exactly one telemetry processor when configured", () => {
+  it("initialises the SDK and registers exactly two telemetry processors when configured", () => {
     process.env["APPLICATIONINSIGHTS_CONNECTION_STRING"] = CONN;
 
     setup();
@@ -57,16 +57,17 @@ describe("telemetry.setup()", () => {
     // applicationinsights v2 keeps the registered processors on the
     // TelemetryClient itself (private `_telemetryProcessors` array); v3
     // moved this to a no-op shim. We pinned v2 in apps/api/package.json
-    // precisely so the redactor actually runs — assert exactly one is
-    // present (the PiiRedactingTelemetryProcessor's bound `process`).
+    // precisely so the redactor actually runs — assert exactly two are
+    // present: HealthFilterTelemetryProcessor (first) and
+    // PiiRedactingTelemetryProcessor (second).
     const processors = (
       client as unknown as { _telemetryProcessors: unknown[] }
     )._telemetryProcessors;
     expect(Array.isArray(processors)).toBe(true);
-    expect(processors).toHaveLength(1);
+    expect(processors).toHaveLength(2);
   });
 
-  it("is idempotent — calling setup() twice does not double-register the processor", () => {
+  it("is idempotent — calling setup() twice does not double-register the processors", () => {
     process.env["APPLICATIONINSIGHTS_CONNECTION_STRING"] = CONN;
 
     setup();
@@ -76,7 +77,7 @@ describe("telemetry.setup()", () => {
     const processors = (
       client as unknown as { _telemetryProcessors: unknown[] }
     )._telemetryProcessors;
-    expect(processors).toHaveLength(1);
+    expect(processors).toHaveLength(2);
   });
 
   it("scrubs PII from a fired track event before it reaches the channel", () => {

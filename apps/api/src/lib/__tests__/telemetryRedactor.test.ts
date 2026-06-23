@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  HealthFilterTelemetryProcessor,
   PiiRedactingTelemetryProcessor,
   PII_FIELDS,
   redactObject,
@@ -273,5 +274,90 @@ describe("PiiRedactingTelemetryProcessor", () => {
     const result = process(envelope);
     expect(result).toBe(true);
     expect(envelope.data!.baseData!["email"]).toBe("***");
+  });
+});
+
+// ─── HealthFilterTelemetryProcessor tests ─────────────────────────────────────
+
+describe("HealthFilterTelemetryProcessor", () => {
+  it("drops successful Functions.health envelopes (success === true)", () => {
+    const processor = new HealthFilterTelemetryProcessor();
+    const envelope: TelemetryEnvelope = {
+      name: "Microsoft.ApplicationInsights.Request",
+      tags: { "ai.operation.name": "Functions.health" },
+      data: {
+        baseData: {
+          name: "Functions.health",
+          success: true,
+          responseCode: "200",
+        },
+      },
+    };
+    expect(processor.process(envelope)).toBe(false);
+  });
+
+  it("drops Functions.health envelopes with no success indicator", () => {
+    const processor = new HealthFilterTelemetryProcessor();
+    const envelope: TelemetryEnvelope = {
+      name: "Microsoft.ApplicationInsights.Request",
+      tags: { "ai.operation.name": "Functions.health" },
+      data: { baseData: { name: "Functions.health" } },
+    };
+    expect(processor.process(envelope)).toBe(false);
+  });
+
+  it("forwards failed Functions.health envelopes (success === false)", () => {
+    const processor = new HealthFilterTelemetryProcessor();
+    const envelope: TelemetryEnvelope = {
+      name: "Microsoft.ApplicationInsights.Request",
+      tags: { "ai.operation.name": "Functions.health" },
+      data: { baseData: { name: "Functions.health", success: false } },
+    };
+    expect(processor.process(envelope)).toBe(true);
+  });
+
+  it("forwards failed Functions.health envelopes (responseCode >= 400)", () => {
+    const processor = new HealthFilterTelemetryProcessor();
+    const envelope: TelemetryEnvelope = {
+      name: "Microsoft.ApplicationInsights.Request",
+      tags: { "ai.operation.name": "Functions.health" },
+      data: { baseData: { name: "Functions.health", responseCode: "503" } },
+    };
+    expect(processor.process(envelope)).toBe(true);
+  });
+
+  it("forwards envelopes for other Azure Functions", () => {
+    const processor = new HealthFilterTelemetryProcessor();
+    const envelope: TelemetryEnvelope = {
+      name: "Microsoft.ApplicationInsights.Request",
+      tags: { "ai.operation.name": "Functions.me" },
+      data: { baseData: { name: "Functions.me" } },
+    };
+    expect(processor.process(envelope)).toBe(true);
+  });
+
+  it("forwards envelopes with no tags", () => {
+    const processor = new HealthFilterTelemetryProcessor();
+    const envelope: TelemetryEnvelope = {
+      name: "Microsoft.ApplicationInsights.Event",
+      data: { baseData: { name: "some.event" } },
+    };
+    expect(processor.process(envelope)).toBe(true);
+  });
+
+  it("forwards envelopes with tags that have no ai.operation.name", () => {
+    const processor = new HealthFilterTelemetryProcessor();
+    const envelope: TelemetryEnvelope = {
+      tags: { "ai.cloud.role": "api" },
+      data: { baseData: {} },
+    };
+    expect(processor.process(envelope)).toBe(true);
+  });
+
+  it("handles null envelope gracefully", () => {
+    const processor = new HealthFilterTelemetryProcessor();
+    expect(
+      processor.process(null as unknown as TelemetryEnvelope)
+    ).toBe(true);
   });
 });

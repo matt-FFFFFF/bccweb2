@@ -92,7 +92,46 @@ export interface TelemetryEnvelope {
   [key: string]: unknown;
 }
 
-// ─── Processor class ──────────────────────────────────────────────────────────
+// ─── Processor classes ────────────────────────────────────────────────────────
+
+/**
+ * Application Insights TelemetryProcessor that drops *successful* telemetry
+ * emitted for invocations of the `health` Azure Function (liveness / readiness
+ * probes).
+ *
+ * Health checks are called at high frequency by the Azure platform and a
+ * passing probe produces noise without diagnostic value. Returning `false`
+ * from a processor instructs the SDK to discard the envelope entirely.
+ *
+ * Failed health probes are forwarded, not dropped: a probe that returns 5xx /
+ * `success === false` is exactly the signal request-failure alerts rely on, so
+ * suppressing it would hide real outages. An envelope is treated as a failure
+ * (and forwarded) when its `baseData.success === false` or its numeric
+ * `responseCode >= 400`; otherwise the health envelope is dropped.
+ */
+export class HealthFilterTelemetryProcessor {
+  process(
+    envelope: TelemetryEnvelope,
+    _contextObjects?: Record<string, unknown>
+  ): boolean {
+    if (!envelope) return true;
+    const tags = envelope["tags"] as Record<string, unknown> | undefined;
+    if (tags?.["ai.operation.name"] !== "Functions.health") {
+      return true;
+    }
+
+    // Health envelope: forward it only if it indicates a failure, so real
+    // outages remain visible to App Insights failure alerts. Drop the
+    // high-frequency successful probes.
+    const baseData = envelope.data?.baseData;
+    if (baseData) {
+      if (baseData["success"] === false) return true;
+      const responseCode = Number(baseData["responseCode"]);
+      if (Number.isFinite(responseCode) && responseCode >= 400) return true;
+    }
+    return false;
+  }
+}
 
 /**
  * Application Insights TelemetryProcessor that redacts PII fields in-place
