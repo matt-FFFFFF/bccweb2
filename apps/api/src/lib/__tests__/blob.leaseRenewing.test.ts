@@ -1,6 +1,6 @@
 /**
  * Characterization + RED-contract tests for `withLeaseRenewing` (public) in
- * apps/api/src/lib/blob.ts (currently `withLeaseRenewingOnClient`, lines 311-387).
+ * apps/api/src/lib/blob.ts (currently `withLeaseRenewingOnClient`, lines 311-391).
  *
  * Four behaviours are pinned here:
  *
