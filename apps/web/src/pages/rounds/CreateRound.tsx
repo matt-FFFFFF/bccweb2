@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router";
 import type { SiteSummary, SeasonSummary, Round } from "@bccweb/types";
 import { useBlob } from "../../hooks/useBlob.js";
 import { useAuth } from "../../hooks/useAuth.js";

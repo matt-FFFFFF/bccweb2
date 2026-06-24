@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router";
 import { useAuth, AuthError } from "../../hooks/useAuth.js";
 import { api } from "../../lib/api.js";
 

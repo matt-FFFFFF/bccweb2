@@ -1,4 +1,4 @@
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import type { RoundSummary } from "@bccweb/types";
 import { useBlob } from "../../hooks/useBlob.js";
 import { useAuth } from "../../hooks/useAuth.js";

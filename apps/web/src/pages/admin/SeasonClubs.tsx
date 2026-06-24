@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "react-router-dom";
+import { useParams } from "react-router";
 import type { ClubSummary, SeasonClub } from "@bccweb/types";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
 import { useAuth } from "../../hooks/useAuth.js";

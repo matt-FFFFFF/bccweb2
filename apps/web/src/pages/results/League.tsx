@@ -1,4 +1,4 @@
-import { Link, useParams, useNavigate } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router";
 import type { SeasonSummary, Season } from "@bccweb/types";
 import { useBlob } from "../../hooks/useBlob.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";

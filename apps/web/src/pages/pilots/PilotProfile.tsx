@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 import type { Pilot, PilotClubMembership, CoachType, PilotRatingValue, WingClass, ManufacturerRef, ClubSummary } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
 import { useBlob } from "../../hooks/useBlob.js";

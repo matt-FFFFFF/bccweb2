@@ -1,6 +1,6 @@
 import "./setup.ts";
 import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
 import type { RoundBrief as RoundBriefType } from "@bccweb/types";
 import RoundBrief from "../pages/rounds/RoundBrief.js";

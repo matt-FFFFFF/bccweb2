@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import type { PilotSummary } from "@bccweb/types";
 import { api, ApiError } from "../../lib/api.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";

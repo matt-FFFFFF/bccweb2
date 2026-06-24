@@ -1,6 +1,6 @@
 import type { CallerIdentity } from "@bccweb/types";
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router";
 
 // ─── Auth error ──────────────────────────────────────────────────────────────
 
