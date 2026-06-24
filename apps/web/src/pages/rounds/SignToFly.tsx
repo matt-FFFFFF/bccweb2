@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link } from "react-router";
 import { api, ApiError } from "../../lib/api.js";
 import { sanitizeWordingHtml } from "../../lib/sanitize.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";

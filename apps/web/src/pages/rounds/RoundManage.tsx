@@ -11,7 +11,7 @@
  */
 
 import { useState, useCallback, useEffect } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 import type {
   Round,
   RoundStatus,

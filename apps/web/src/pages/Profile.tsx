@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Navigate, useNavigate } from "react-router-dom";
+import { Navigate, useNavigate } from "react-router";
 import * as z from "zod/v4";
 import type { ClubSummary, Pilot } from "@bccweb/types";
 import { ClubSummarySchema } from "@bccweb/schemas";

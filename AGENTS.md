@@ -167,7 +167,7 @@ Any new feature or endpoint MUST ship with the UI for the people who operate it 
 ## Web (`apps/web`)
 
 Entry: `src/main.tsx` → [`src/router.tsx`](file:///Volumes/code/bccweb2/apps/web/src/router.tsx)
-(React Router v6, `BrowserRouter`). `RequireAuth` / `RequireCoord` wrap protected
+(React Router v7, `BrowserRouter`). `RequireAuth` / `RequireCoord` wrap protected
 routes; unauthenticated → `/login?return=<path>`. `FirstLoginOfSeasonGate` wraps
 the whole router to force re-acceptance of season T&Cs.
 

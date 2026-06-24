@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import FirstLoginOfSeasonGate from "../FirstLoginOfSeasonGate.js";
-import { BrowserRouter } from "react-router-dom";
+import { BrowserRouter } from "react-router";
 import { api } from "../../lib/api.js";
 
 const mockUseAuth = vi.fn();
@@ -35,7 +35,7 @@ describe("FirstLoginOfSeasonGate", () => {
     });
     
     render(
-      <BrowserRouter>
+      <BrowserRouter useTransitions={false}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>
@@ -60,7 +60,7 @@ describe("FirstLoginOfSeasonGate", () => {
     });
     
     render(
-      <BrowserRouter>
+      <BrowserRouter useTransitions={false}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>
@@ -86,7 +86,7 @@ describe("FirstLoginOfSeasonGate", () => {
     });
     
     render(
-      <BrowserRouter>
+      <BrowserRouter useTransitions={false}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>
@@ -115,7 +115,7 @@ describe("FirstLoginOfSeasonGate", () => {
     vi.mocked(api.put).mockResolvedValueOnce({});
     
     render(
-      <BrowserRouter>
+      <BrowserRouter useTransitions={false}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>
@@ -146,7 +146,7 @@ describe("FirstLoginOfSeasonGate", () => {
     });
     
     render(
-      <BrowserRouter>
+      <BrowserRouter useTransitions={false}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>

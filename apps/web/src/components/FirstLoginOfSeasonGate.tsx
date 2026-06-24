@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation, Link, useNavigate } from "react-router-dom";
+import { useLocation, Link, useNavigate } from "react-router";
 import * as z from "zod/v4";
 import { ClubSummarySchema } from "@bccweb/schemas";
 import { useAuth } from "../hooks/useAuth.js";

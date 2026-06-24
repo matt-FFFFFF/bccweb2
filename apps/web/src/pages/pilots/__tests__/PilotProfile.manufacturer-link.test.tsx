@@ -1,6 +1,6 @@
 import "../../../__tests__/setup.ts";
 import { render, screen, waitFor } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Pilot } from "@bccweb/types";
 import PilotProfile from "../PilotProfile.js";

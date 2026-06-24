@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { api } from "../../lib/api.js";
 import { TS_CS_VERSION } from "../../lib/terms.js";
 

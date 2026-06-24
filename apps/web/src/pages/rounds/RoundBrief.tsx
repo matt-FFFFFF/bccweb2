@@ -11,7 +11,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams } from "react-router";
 import type { RoundBrief as RoundBriefType, BriefTeamEntry, BriefPilotEntry, ManufacturerRef } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
 import { ApiError } from "../../lib/api.js";

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useLocation } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useLocation } from "react-router";
 import * as z from "zod/v4";
 import { SeasonSummarySchema } from "@bccweb/schemas";
 import { useAuth, AuthProvider, loginUrl } from "./hooks/useAuth.js";
@@ -174,7 +174,8 @@ function Page({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    // useTransitions={false}: preserve v6 update semantics; remove at RR v8 upgrade — see issue #42
+    <BrowserRouter useTransitions={false}>
       <AuthProvider>
         <FirstLoginOfSeasonGate><Nav />
         <main className="bcc-main">
