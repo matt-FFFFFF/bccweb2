@@ -48,6 +48,23 @@ Watch: `npm run test:watch` (root).
 
 Check docker and podman.
 
+## Plan Execution (worktrees)
+
+Execute saved plans (`.omo/plans/*.md`) in a **dedicated git worktree**, never in the
+main checkout:
+
+- Create the worktree under `.worktrees/<plan-name>` on a **new branch** off the base,
+  e.g. `git worktree add .worktrees/pdf-stack-upgrade -b deps/pdf-stack-149-25 origin/main`.
+  `.worktrees/` is gitignored — keep throwaway verification artifacts (render harnesses,
+  scratch Dockerfiles) there, uncommitted.
+- A fresh worktree has **no `node_modules`/`dist/`** — run `npm ci && make build` in it
+  before editing or typechecking (workspaces resolve `@bccweb/types` from `dist/`).
+- Do all task work inside the worktree; commit only the intended source files.
+- After the **user approves the completion gate**, OFFER to run the `pr-flow` skill to
+  open the PR, drive CI to green, and handle the Copilot review loop. Do not merge unless
+  the user asks. On completion, fast-forward `main`, then `git worktree remove` and delete
+  the branch.
+
 ## TypeScript Quirks
 
 - **`apps/api`, `packages/types`, `packages/scoring`** use `module: NodeNext` →
