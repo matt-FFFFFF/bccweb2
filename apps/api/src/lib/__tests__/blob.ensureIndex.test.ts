@@ -42,6 +42,9 @@ describe("ensureJsonIndexBlob / ensurePrivateJsonIndexBlob — create-only contr
   });
 
   afterEach(() => {
+    // Restore any spies (e.g. the globalThis.setTimeout spies below) so they
+    // never leak across tests and cause cross-file flakiness.
+    vi.restoreAllMocks();
     vi.useRealTimers();
     delete process.env["BLOB_CONNECTION_STRING"];
     delete process.env["BLOB_CONTAINER_NAME"];
@@ -80,44 +83,77 @@ describe("ensureJsonIndexBlob / ensurePrivateJsonIndexBlob — create-only contr
     expect(uploadData).toHaveBeenCalledTimes(1);
   });
 
-  // ── 3. 412 → retry up to 10 attempts with 25*attempt backoff ──────────────
-  test("412 → retries with 25*attempt backoff then succeeds", async () => {
-    vi.useFakeTimers();
+  // ── 3. 412 → resolves immediately as no-op, NO retry/backoff ──────────────
+  // NEW contract: real Azure returns 409 for create-only on an existing blob,
+  // but a 412 PreconditionFailed is likewise treated as "already present" —
+  // resolve at once, exactly one uploadData call, and NEVER schedule a retry
+  // (setTimeout must not fire).
+  test("412 → resolves immediately, exactly 1 call, setTimeout not called", async () => {
     const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
-    uploadData
-      .mockRejectedValueOnce({ statusCode: 412 })
-      .mockRejectedValueOnce({ statusCode: 412 })
-      .mockResolvedValueOnce(undefined);
+    uploadData.mockRejectedValueOnce({ statusCode: 412 });
 
     const { ensureJsonIndexBlob } = await loadHelpers();
-    const pending = ensureJsonIndexBlob("pilots.json", "[]");
-    await vi.runAllTimersAsync();
-    await pending;
 
-    expect(uploadData).toHaveBeenCalledTimes(3);
-    // Backoff schedule: attempt 1 → 25ms, attempt 2 → 50ms.
-    expect(setTimeoutSpy).toHaveBeenNthCalledWith(1, expect.any(Function), 25);
-    expect(setTimeoutSpy).toHaveBeenNthCalledWith(2, expect.any(Function), 50);
+    await expect(
+      ensureJsonIndexBlob("pilots.json", "[]"),
+    ).resolves.toBeUndefined();
+
+    // No retry loop: one attempt only and no backoff scheduled.
+    expect(uploadData).toHaveBeenCalledTimes(1);
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
   });
 
-  // ── 4. 412 ×10 (exhaust) → throw the ORIGINAL error ───────────────────────
-  test("412 ×10 exhausts attempts and throws the original error", async () => {
-    vi.useFakeTimers();
-    const original = { statusCode: 412, message: "PreconditionFailed" };
-    uploadData.mockRejectedValue(original);
+  // ── 3b. private helper also treats 412 as a no-op (no retry) ──────────────
+  test("ensurePrivateJsonIndexBlob → 412 resolves immediately, exactly 1 call, setTimeout not called", async () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+    uploadData.mockRejectedValueOnce({ statusCode: 412 });
+
+    const { ensurePrivateJsonIndexBlob } = await loadHelpers();
+
+    await expect(
+      ensurePrivateJsonIndexBlob("user-index.json", "{}"),
+    ).resolves.toBeUndefined();
+
+    expect(uploadData).toHaveBeenCalledTimes(1);
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+  });
+
+  // ── 4. non-409/412 (500) → reject with that exact error, exactly 1 call ───
+  // Guard: the helper MUST NOT swallow unexpected failures. A 500 propagates
+  // unchanged on the first attempt — no retry.
+  test("non-409/412 (statusCode 500) → rejects with that exact error, exactly 1 call", async () => {
+    const boom = { statusCode: 500, message: "InternalError" };
+    uploadData.mockRejectedValueOnce(boom);
 
     const { ensureJsonIndexBlob } = await loadHelpers();
-    const pending = ensureJsonIndexBlob("pilots.json", "[]");
-    const caught = pending.then(
-      () => {
-        throw new Error("expected rejection");
-      },
-      (err: unknown) => err,
-    );
-    await vi.runAllTimersAsync();
 
-    expect(await caught).toBe(original);
-    expect(uploadData).toHaveBeenCalledTimes(10);
+    await expect(ensureJsonIndexBlob("pilots.json", "[]")).rejects.toBe(boom);
+    expect(uploadData).toHaveBeenCalledTimes(1);
+  });
+
+  // ── 4b. private helper also propagates a non-409/412 error ────────────────
+  test("ensurePrivateJsonIndexBlob → non-409/412 (statusCode 500) rejects with that exact error, exactly 1 call", async () => {
+    const boom = { statusCode: 500, message: "InternalError" };
+    uploadData.mockRejectedValueOnce(boom);
+
+    const { ensurePrivateJsonIndexBlob } = await loadHelpers();
+
+    await expect(
+      ensurePrivateJsonIndexBlob("user-index.json", "{}"),
+    ).rejects.toBe(boom);
+    expect(uploadData).toHaveBeenCalledTimes(1);
+  });
+
+  // ── 4c. error with NO statusCode → reject with that error, exactly 1 call ─
+  // e.g. a DNS/network failure carries no statusCode; it must still propagate.
+  test("error with no statusCode → rejects with that exact error, exactly 1 call", async () => {
+    const netErr = new Error("ENOTFOUND");
+    uploadData.mockRejectedValueOnce(netErr);
+
+    const { ensureJsonIndexBlob } = await loadHelpers();
+
+    await expect(ensureJsonIndexBlob("pilots.json", "[]")).rejects.toBe(netErr);
+    expect(uploadData).toHaveBeenCalledTimes(1);
   });
 
   // ── 5. private helper seeds '{}' (record index), distinct from '[]' ───────

@@ -127,7 +127,7 @@ export async function writeBlob<T>(
  * Optionally pass a leaseId to write under an active blob lease.
  *
  * Pass `options.ifNoneMatch = "*"` to perform an atomic create-only write —
- * Azure returns HTTP 412 (PreconditionFailed) if the blob already exists, which
+ * Azure returns HTTP 409 (BlobAlreadyExists) if the blob already exists, which
  * the caller can catch and treat as a no-op (don't overwrite).
  */
 export async function writePrivateBlob<T>(
@@ -152,20 +152,18 @@ export async function ensureJsonIndexBlob(
   seed: string
 ): Promise<void> {
   const client = getBlockBlobClient(path);
-  const maxAttempts = 10;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      await client.uploadData(Buffer.from(seed), {
-        blobHTTPHeaders: { blobContentType: "application/json" },
-        conditions: { ifNoneMatch: "*" },
-      });
-      return;
-    } catch (err) {
-      const statusCode = (err as { statusCode?: number }).statusCode;
-      if (statusCode === 409) return;
-      if (statusCode !== 412 || attempt === maxAttempts) throw err;
-      await new Promise((r) => setTimeout(r, 25 * attempt));
-    }
+  try {
+    await client.uploadData(Buffer.from(seed), {
+      blobHTTPHeaders: { blobContentType: "application/json" },
+      conditions: { ifNoneMatch: "*" },
+    });
+  } catch (err) {
+    const statusCode = (err as { statusCode?: number }).statusCode;
+    // 409/412 ⇒ blob already exists (create-only ifNoneMatch:"*" conflict);
+    // real Azure returns 409 (issue #27), Azurite likewise — both are no-ops.
+    // Every other error (incl. no statusCode: network/403/500) MUST propagate.
+    if (statusCode === 409 || statusCode === 412) return;
+    throw err;
   }
 }
 
@@ -174,20 +172,18 @@ export async function ensurePrivateJsonIndexBlob(
   seed: string
 ): Promise<void> {
   const client = getPrivateBlockBlobClient(path);
-  const maxAttempts = 10;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
-    try {
-      await client.uploadData(Buffer.from(seed), {
-        blobHTTPHeaders: { blobContentType: "application/json" },
-        conditions: { ifNoneMatch: "*" },
-      });
-      return;
-    } catch (err) {
-      const statusCode = (err as { statusCode?: number }).statusCode;
-      if (statusCode === 409) return;
-      if (statusCode !== 412 || attempt === maxAttempts) throw err;
-      await new Promise((r) => setTimeout(r, 25 * attempt));
-    }
+  try {
+    await client.uploadData(Buffer.from(seed), {
+      blobHTTPHeaders: { blobContentType: "application/json" },
+      conditions: { ifNoneMatch: "*" },
+    });
+  } catch (err) {
+    const statusCode = (err as { statusCode?: number }).statusCode;
+    // 409/412 ⇒ blob already exists (create-only ifNoneMatch:"*" conflict);
+    // real Azure returns 409 (issue #27), Azurite likewise — both are no-ops.
+    // Every other error (incl. no statusCode: network/403/500) MUST propagate.
+    if (statusCode === 409 || statusCode === 412) return;
+    throw err;
   }
 }
 
