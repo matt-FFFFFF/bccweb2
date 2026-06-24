@@ -13,21 +13,20 @@
   },
   "dependencies": {
     "@azure/communication-email": "^1.1.0",
-    "@azure/functions": "^4.6.0",
-    "@azure/identity": "^4.5.0",
-    "@azure/storage-blob": "^12.25.0",
+    "@azure/functions": "^4.16.1",
+    "@azure/identity": "^4.13.1",
+    "@azure/storage-blob": "^12.32.0",
     "@bccweb/scoring": "*",
     "@bccweb/types": "*",
     "@sparticuz/chromium": "^143.0.4",
-    "@types/bcryptjs": "^2.4.6",
     "applicationinsights": "^2.9.8",
     "bcryptjs": "^3.0.3",
     "handlebars": "^4.7.9",
-    "jsonwebtoken": "^9.0.2",
+    "jsonwebtoken": "^9.0.3",
     "puppeteer-core": "^24.40.0"
   },
   "devDependencies": {
-    "@types/jsonwebtoken": "^9.0.7",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^24.12.4",
     "typescript": "^5.4.5"
   }
