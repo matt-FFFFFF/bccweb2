@@ -42,6 +42,9 @@ describe("ensureJsonIndexBlob / ensurePrivateJsonIndexBlob — create-only contr
   });
 
   afterEach(() => {
+    // Restore any spies (e.g. the globalThis.setTimeout spies below) so they
+    // never leak across tests and cause cross-file flakiness.
+    vi.restoreAllMocks();
     vi.useRealTimers();
     delete process.env["BLOB_CONNECTION_STRING"];
     delete process.env["BLOB_CONTAINER_NAME"];
