@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen, cleanup, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
@@ -53,7 +53,6 @@ beforeEach(() => {
 });
 
 afterEach(() => {
-  cleanup();
   // Reset jsdom history so each test starts from a known location.
   window.history.replaceState({}, "", "/");
 });
