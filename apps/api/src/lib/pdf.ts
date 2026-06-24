@@ -278,12 +278,15 @@ export async function generateBriefPdf(brief: RoundBrief): Promise<Buffer> {
     args: chromium.args,
     defaultViewport: { width: 1280, height: 800 },
     executablePath,
-    headless: true,
+    // @sparticuz/chromium 149 ships a headless-shell binary and removed chromium.headless;
+    // puppeteer "shell" selects the old headless mode the bundled binary supports.
+    headless: "shell",
   });
 
   try {
     const page = await browser.newPage();
-    await page.setContent(html, { waitUntil: "networkidle0" });
+    // networkidle* removed from setContent in puppeteer-core 24.43.1; brief HTML is fully inline.
+    await page.setContent(html, { waitUntil: "load" });
     const pdfBuffer = await page.pdf({
       format: "A4",
       printBackground: true,

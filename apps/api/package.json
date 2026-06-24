@@ -18,12 +18,12 @@
     "@azure/storage-blob": "^12.32.0",
     "@bccweb/scoring": "*",
     "@bccweb/types": "*",
-    "@sparticuz/chromium": "^143.0.4",
+    "@sparticuz/chromium": "^149.0.0",
     "applicationinsights": "^2.9.8",
     "bcryptjs": "^3.0.3",
     "handlebars": "^4.7.9",
     "jsonwebtoken": "^9.0.3",
-    "puppeteer-core": "~24.40.0"
+    "puppeteer-core": "^25.2.0"
   },
   "devDependencies": {
     "@types/jsonwebtoken": "^9.0.10",
