@@ -6,7 +6,7 @@ interface MigrateModule {
 }
 
 async function loadMigrationHelpers(): Promise<MigrateModule> {
-  const modulePath = new URL("../../../../scripts/migrate/migrate.mjs", import.meta.url).href;
+  const modulePath = new URL("../../../../scripts/migrate/transforms.mjs", import.meta.url).href;
   return import(modulePath) as Promise<MigrateModule>;
 }
 
