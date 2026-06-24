@@ -1,5 +1,5 @@
 # ── Stage 1: Build ────────────────────────────────────────────────────────────
-FROM node:24-alpine AS build
+FROM node:24-slim AS build
 WORKDIR /build
 
 # Copy manifests first for better layer caching
