@@ -46,7 +46,9 @@ describe("RegisterForRound", () => {
 
     expect(await screen.findByRole("heading", { name: /Register for Milk Hill/ })).toBeInTheDocument();
     expect(await screen.findByDisplayValue(/First available slot/)).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Register for this round" }));
+    const registerButton = await screen.findByRole("button", { name: "Register for this round" });
+    await waitFor(() => expect(registerButton).toBeEnabled());
+    fireEvent.click(registerButton);
 
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith("rounds/r1/register-self", { teamId: "t1" });
@@ -62,7 +64,9 @@ describe("RegisterForRound", () => {
 
     renderComponent();
 
-    fireEvent.click(await screen.findByRole("button", { name: "Register for this round" }));
+    const registerButton = await screen.findByRole("button", { name: "Register for this round" });
+    await waitFor(() => expect(registerButton).toBeEnabled());
+    fireEvent.click(registerButton);
 
     expect(await screen.findByText("You are already booked into another round.")).toBeInTheDocument();
     expect(screen.getByText("Conflicting round r2 on 2026-06-09")).toBeInTheDocument();

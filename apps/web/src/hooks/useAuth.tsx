@@ -236,7 +236,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [logout, navigate]);
 
   const value: AuthState = { loading, identity, isRefreshing, login, logout, refreshIdentity };
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  return <AuthContext value={value}>{children}</AuthContext>;
 }
 
 /** Returns shared auth state. Must be used inside <AuthProvider>. */
