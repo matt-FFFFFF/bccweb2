@@ -1,5 +1,6 @@
 /// <reference types="@testing-library/jest-dom" />
 import "@testing-library/jest-dom/vitest";
+import { format as nodeFormat } from "node:util";
 import { afterEach, beforeEach } from "vitest";
 import { cleanup } from "@testing-library/react";
 
@@ -51,9 +52,10 @@ let unexpectedConsole: string[] = [];
 let restoreConsole: (() => void) | undefined;
 
 function formatArgs(args: unknown[]): string {
-  return args
-    .map((a) => (a instanceof Error ? (a.stack ?? a.message) : typeof a === "string" ? a : String(a)))
-    .join(" ");
+  // Mirror console's printf-style formatting (%s/%d/%o, Error stacks) so React
+  // warnings with format strings render readably instead of leaving raw
+  // placeholders in the gate's failure output.
+  return nodeFormat(...args);
 }
 
 beforeEach(() => {
