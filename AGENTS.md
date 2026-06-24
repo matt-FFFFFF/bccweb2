@@ -7,7 +7,7 @@ rewriting a legacy .NET app. **All data lives in Azure Blob Storage — no DB.**
 
 ```
 apps/api/        @bccweb/api     — Azure Functions v4 HTTP API (Node 24, ESM, TS)
-apps/web/        @bccweb/web     — React 18 SPA (Vite 5, TS)
+apps/web/        @bccweb/web     — React 18 SPA (Vite 8, TS)
 packages/types/  @bccweb/types   — Shared TS interfaces (no runtime deps)
 packages/scoring/@bccweb/scoring — Pure scoring: scoreRound(), computeLeague()
 iac/                             — Terraform (Azure)
