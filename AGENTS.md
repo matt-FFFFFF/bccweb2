@@ -29,20 +29,24 @@ typechecking dependents, or use `make build`. `make clean` deletes
 
 ## Build / Test / Dev
 
-| Command | Notes |
-|---|---|
-| `make build` | Correct dep order: types → scoring → api; types → web. Prefer this over `npm run build`. |
-| `make typecheck` | `npm run typecheck --workspaces --if-present` |
-| `make test` | `npx vitest run` (vitest workspace mode, root devDep). **Requires Azurite up for API tests.** |
-| `make dev` | Full stack via Docker Compose (Azurite + API + Web/Caddy) |
-| `make dev-api` | Just the Functions host on `:7071` (Azurite must already be running) |
-| `make dev-web` | Vite dev server on `:5173` |
-| `make clean` | Removes `dist/` AND `*.tsbuildinfo` |
-| `npm run e2e` | Playwright (config at `tests/e2e/playwright.config.ts`, base URL `:5173`) |
-| `npm run lint` | **Only `apps/web` has a lint script** (eslint). Other workspaces have none. |
+| Command          | Notes                                                                                         |
+| ---------------- | --------------------------------------------------------------------------------------------- |
+| `make build`     | Correct dep order: types → scoring → api; types → web. Prefer this over `npm run build`.      |
+| `make typecheck` | `npm run typecheck --workspaces --if-present`                                                 |
+| `make test`      | `npx vitest run` (vitest workspace mode, root devDep). **Requires Azurite up for API tests.** |
+| `make dev`       | Full stack via Docker Compose (Azurite + API + Web/Caddy)                                     |
+| `make dev-api`   | Just the Functions host on `:7071` (Azurite must already be running)                          |
+| `make dev-web`   | Vite dev server on `:5173`                                                                    |
+| `make clean`     | Removes `dist/` AND `*.tsbuildinfo`                                                           |
+| `npm run e2e`    | Playwright (config at `tests/e2e/playwright.config.ts`, base URL `:5173`)                     |
+| `npm run lint`   | **Only `apps/web` has a lint script** (eslint). Other workspaces have none.                   |
 
 Single-file test runs: `npx vitest run path/to/file.test.ts`.
 Watch: `npm run test:watch` (root).
+
+## Container Runtime
+
+Check docker and podman.
 
 ## TypeScript Quirks
 
@@ -169,12 +173,12 @@ in `src/bcc-theme.css`.
 
 ## Roles
 
-| Role | Capabilities |
-|---|---|
-| `Admin` | All admin pages, all writes |
+| Role          | Capabilities                                                                        |
+| ------------- | ----------------------------------------------------------------------------------- |
+| `Admin`       | All admin pages, all writes                                                         |
 | `RoundsCoord` | Manage rounds and club teams for their own `clubId`; sees `/club` self-service page |
-| `Pilot` | Read authenticated endpoints, edit own profile |
-| (anon) | Reads public blobs only (results, seasons, pilot list) |
+| `Pilot`       | Read authenticated endpoints, edit own profile                                      |
+| (anon)        | Reads public blobs only (results, seasons, pilot list)                              |
 
 ## Testing — Critical Gotchas
 
