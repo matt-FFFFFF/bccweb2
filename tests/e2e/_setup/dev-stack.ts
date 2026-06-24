@@ -10,13 +10,13 @@ const WEB_URL = process.env.E2E_BASE_URL ?? "http://localhost:5173";
 export async function startDevStack(): Promise<DevStackHandle> {
   const processes: ChildProcess[] = [];
   await run("docker", ["compose", "up", "-d", "azurite", "azurite-init"]);
-  processes.push(spawnManaged("bun", ["--filter", "@bccweb/api", "run", "start"], {
+  processes.push(spawnManaged("npm", ["run", "start", "--workspace", "@bccweb/api"], {
     MOCK_ACS: "1",
     MOCK_PURETRACK: "1",
     JWT_SECRET: "e2e-dev-secret-at-least-32-characters",
     APP_URL: WEB_URL,
   }));
-  processes.push(spawnManaged("bun", ["--filter", "@bccweb/web", "run", "dev"]));
+  processes.push(spawnManaged("npm", ["run", "dev", "--workspace", "@bccweb/web"]));
   await waitForUrl(API_HEALTH_URL, 60_000);
   await waitForUrl(WEB_URL, 60_000);
   return {

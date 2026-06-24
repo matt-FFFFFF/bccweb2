@@ -60,7 +60,7 @@ node scripts/migrate/validate.mjs --source "https://<storage_account>.blob.core.
 
 # Run API integration tests against the production function endpoint
 # Note: Requires a valid admin token for the production environment
-API_BASE_URL="https://<function_app_name>.azurewebsites.net" bun test apps/api/src/__tests__/integration
+API_BASE_URL="https://<function_app_name>.azurewebsites.net" npx vitest run apps/api/src/__tests__/integration
 ```
 
 Ensure the Application Insights dashboard shows no 5xx errors during these tests. Check the `exceptions` table in Kusto for any `StatusNormalizationError` or `BlobLeaseError`. Validation is complete when the privacy scanner returns a clean pass and the API response times for the `pilots.json` and `rounds.json` endpoints are within the expected 200ms threshold.

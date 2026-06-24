@@ -5,13 +5,13 @@ Browser-level smoke and integration tests against the running dev stack.
 ## One-shot browser install
 
 ```sh
-bunx playwright install --with-deps chromium
+npx playwright install --with-deps chromium
 ```
 
 If `--with-deps` requires sudo (Linux CI), use the plain form instead:
 
 ```sh
-bunx playwright install chromium
+npx playwright install chromium
 ```
 
 ## Start the dev stack
@@ -25,13 +25,13 @@ docker compose up -d azurite
 Start the API (Azure Functions) in the background:
 
 ```sh
-bun --filter '@bccweb/api' run start &
+npm run start --workspace @bccweb/api &
 ```
 
 Start the web dev server in the background:
 
 ```sh
-bun --filter '@bccweb/web' run dev &
+npm run dev --workspace @bccweb/web &
 ```
 
 Wait until the API health endpoint responds before running tests:
@@ -49,7 +49,7 @@ export E2E_BASE_URL=http://localhost:5173
 ## Run tests
 
 ```sh
-bun run e2e
+npm run e2e
 ```
 
 This runs `playwright test --config tests/e2e/playwright.config.ts`.
