@@ -6,7 +6,7 @@ data stored in Azure Blob Storage (no database). Replaces a legacy .NET app.
 
 ## Stack
 
-- **Web**: React 18, Vite 5, React Router v6, TypeScript
+- **Web**: React 18, Vite 5, React Router v7, TypeScript
 - **API**: Azure Functions v4 (Node 24, ESM, programming-model v4), TypeScript
 - **Storage**: Azure Blob Storage (two containers: `data` public, `data-private` private)
 - **Auth**: HS256 JWT (bespoke), `JWT_SECRET` from Azure Key Vault in prod
