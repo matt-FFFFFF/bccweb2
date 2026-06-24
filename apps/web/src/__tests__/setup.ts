@@ -1,6 +1,5 @@
 /// <reference types="@testing-library/jest-dom" />
 import "@testing-library/jest-dom/vitest";
-import { format as nodeFormat } from "node:util";
 import { afterEach, beforeEach } from "vitest";
 import { cleanup } from "@testing-library/react";
 
@@ -51,11 +50,56 @@ const CONSOLE_ALLOWLIST: RegExp[] = [
 let unexpectedConsole: string[] = [];
 let restoreConsole: (() => void) | undefined;
 
+function stringifyArg(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value instanceof Error) return value.stack ?? value.message;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
+// Browser-safe printf formatter mirroring console's %s/%d/%o substitution so
+// React warnings render readably in the gate's failure output. Deliberately
+// uses NO `node:*` builtins (e.g. util.format): this file is under apps/web's
+// tsconfig `include: ["src"]`, and the isolated web Docker build (Dockerfile.dev)
+// has no `@types/node`, so a Node import here fails `tsc --noEmit` in CI.
 function formatArgs(args: unknown[]): string {
-  // Mirror console's printf-style formatting (%s/%d/%o, Error stacks) so React
-  // warnings with format strings render readably instead of leaving raw
-  // placeholders in the gate's failure output.
-  return nodeFormat(...args);
+  if (args.length === 0) return "";
+  const first = args[0];
+  if (typeof first !== "string") return args.map(stringifyArg).join(" ");
+
+  let next = 1;
+  const formatted = first.replace(/%[sdifoOjc%]/g, (spec) => {
+    if (spec === "%%") return "%";
+    if (next >= args.length) return spec;
+    const arg = args[next++];
+    switch (spec) {
+      case "%c":
+        return ""; // CSS directive: consume the arg, emit nothing
+      case "%d":
+      case "%i":
+        if (typeof arg === "bigint") return String(arg);
+        return Number.isNaN(Number(arg)) ? "NaN" : String(Math.trunc(Number(arg)));
+      case "%f":
+        return Number.isNaN(Number(arg)) ? "NaN" : String(Number(arg));
+      case "%j":
+        try {
+          return JSON.stringify(arg);
+        } catch {
+          return "[Circular]";
+        }
+      case "%o":
+      case "%O":
+        return stringifyArg(arg);
+      default:
+        return typeof arg === "string" ? arg : stringifyArg(arg);
+    }
+  });
+
+  const rest = args.slice(next).map(stringifyArg);
+  return rest.length > 0 ? `${formatted} ${rest.join(" ")}` : formatted;
 }
 
 beforeEach(() => {
