@@ -335,12 +335,14 @@ async function withLeaseRenewingOnClient<T>(
   let totalRenewals = 0;
   let renewalError: unknown = null;
   let renewing = false;
+  let stopping = false;
   const handle = setInterval(async () => {
-    if (renewing) return;
+    if (renewing || stopping) return;
     renewing = true;
     attempt += 1;
     try {
       await leaseClient.renewLease();
+      if (stopping) return;
       totalRenewals += 1;
       trackLeaseTrace("Blob lease renewed", {
         path,
@@ -348,6 +350,7 @@ async function withLeaseRenewingOnClient<T>(
         attempt,
       });
     } catch (err) {
+      if (stopping) return;
       renewalError = err;
       clearInterval(handle);
     } finally {
@@ -362,6 +365,7 @@ async function withLeaseRenewingOnClient<T>(
     fnError = err;
     throw err;
   } finally {
+    stopping = true;
     clearInterval(handle);
     let released = true;
     await leaseClient.releaseLease().catch((err: unknown) => {
