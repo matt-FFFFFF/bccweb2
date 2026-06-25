@@ -48,7 +48,7 @@ function createMockSpan(
   };
 }
 
-function createMockLogRecord(): {
+function createMockLogRecord(attributes: SdkLogRecord["attributes"] = {}): {
   readonly logRecord: SdkLogRecord;
   readonly setAttribute: ReturnType<typeof vi.fn>;
 } {
@@ -58,7 +58,7 @@ function createMockLogRecord(): {
     hrTimeObserved: [0, 0],
     resource: {} as SdkLogRecord["resource"],
     instrumentationScope: { name: "test" },
-    attributes: {},
+    attributes,
     droppedAttributesCount: 0,
     setAttribute,
     setAttributes: vi.fn(() => logRecord),
@@ -303,15 +303,21 @@ describe("PiiRedactingLogRecordProcessor", () => {
     }
   });
 
-  it("sets every PII field on emitted log records to '***'", () => {
+  it("redacts only PII attributes already present on emitted log records", () => {
     const processor = new PiiRedactingLogRecordProcessor();
-    const { logRecord, setAttribute } = createMockLogRecord();
+    const { logRecord, setAttribute } = createMockLogRecord({
+      email: "pilot@example.com",
+      accessToken: "tok_abc",
+      roundId: "round-1",
+    });
 
     processor.onEmit(logRecord);
 
     expect(setAttribute).toHaveBeenCalledWith("email", "***");
     expect(setAttribute).toHaveBeenCalledWith("accessToken", "***");
-    expect(setAttribute).toHaveBeenCalledTimes(PII_FIELDS.length);
+    expect(setAttribute).not.toHaveBeenCalledWith("password", "***");
+    expect(setAttribute).not.toHaveBeenCalledWith("roundId", "***");
+    expect(setAttribute).toHaveBeenCalledTimes(2);
   });
 
   it("resolves forceFlush and shutdown", async () => {

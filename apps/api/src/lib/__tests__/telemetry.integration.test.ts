@@ -51,7 +51,7 @@ function createIntegrationLogRecord(): {
     hrTimeObserved: [0, 0],
     resource: {} as SdkLogRecord["resource"],
     instrumentationScope: { name: "integration-test" },
-    attributes: {},
+    attributes: { email: "pilot@example.com", accessToken: "tok_secret" },
     droppedAttributesCount: 0,
     setAttribute,
     setAttributes: vi.fn(() => logRecord),

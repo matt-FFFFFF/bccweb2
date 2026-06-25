@@ -168,8 +168,11 @@ export class PiiRedactingLogRecordProcessor implements LogRecordProcessor {
   }
 
   onEmit(logRecord: SdkLogRecord, _context?: Context): void {
+    const attrs = logRecord.attributes;
     for (const field of this.fields) {
-      logRecord.setAttribute(field, "***");
+      if (Object.prototype.hasOwnProperty.call(attrs, field)) {
+        logRecord.setAttribute(field, "***");
+      }
     }
   }
 
