@@ -9,8 +9,8 @@
     "validate": "node validate.mjs"
   },
   "dependencies": {
-    "mssql": "^11.0.1",
-    "@azure/storage-blob": "^12.27.0",
-    "uuid": "^11.1.1"
+    "mssql": "11.0.1",
+    "@azure/storage-blob": "12.31.0",
+    "uuid": "11.1.1"
   }
 }
