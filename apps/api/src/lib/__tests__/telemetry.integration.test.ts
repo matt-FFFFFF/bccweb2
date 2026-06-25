@@ -109,6 +109,9 @@ describe("telemetry.setup()", () => {
     setup();
 
     const client = getTelemetryClient();
+    // Vitest's module runner gives live CJS namespace bindings, while native
+    // Node ESM does not. The production-parity guard is the compiled-dist
+    // native ESM probe recorded in fix-getclient-probe.txt.
     expect(client).toBeDefined();
     expect(client).toBe(appInsights.defaultClient);
     expect(infoSpy).toHaveBeenCalledWith(

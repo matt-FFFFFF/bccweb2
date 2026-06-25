@@ -1,4 +1,5 @@
-import * as appInsights from "applicationinsights";
+import appInsights from "applicationinsights";
+import type * as appInsightsTypes from "applicationinsights";
 import {
   PiiRedactingLogRecordProcessor,
   PiiRedactingSpanProcessor,
@@ -45,7 +46,7 @@ export function setup(): void {
   );
 }
 
-export function getTelemetryClient(): appInsights.TelemetryClient | undefined {
+export function getTelemetryClient(): appInsightsTypes.TelemetryClient | undefined {
   return appInsights.defaultClient ?? undefined;
 }
 
