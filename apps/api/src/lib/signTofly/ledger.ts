@@ -7,6 +7,7 @@ import {
   getPrivateBlockBlobClient,
 } from "../blob.js";
 import { readJson } from "../blobJson.js";
+import { trustedClientIp } from "../clientIp.js";
 import { computeBriefHash } from "./briefVersion.js";
 
 let privateContainer: ContainerClient | null = null;
@@ -161,9 +162,7 @@ export function buildSignaturePayload(opts: {
 }
 
 export function extractIp(req: HttpRequest): string | null {
-  const xff = req.headers.get("x-forwarded-for");
-  if (xff) return xff.split(",")[0]?.trim() ?? null;
-  return req.headers.get("x-azure-clientip") ?? null;
+  return trustedClientIp(req);
 }
 
 function signatureWritePath(sig: Signature): string {

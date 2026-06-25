@@ -21,6 +21,7 @@ import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, BlobShapeError, withErrorHandler } from "../lib/http.js";
 import { rateLimit } from "../lib/rateLimit.js";
+import { trustedClientIp } from "../lib/clientIp.js";
 import { getLatestSignature } from "../lib/signTofly/ledger.js";
 
 // RegistrationConfig widens ConfigSchema with autoAllocatePilotsToRoundClub —
@@ -46,11 +47,7 @@ interface PilotClubForSeason {
 const OPEN_STATUSES = new Set<Round["status"]>(["Proposed", "Confirmed"]);
 
 function ipFallback(req: HttpRequest): string {
-  return (
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    req.headers.get("x-azure-clientip") ??
-    "unknown"
-  );
+  return trustedClientIp(req) ?? "unknown";
 }
 
 async function registerSelf(
