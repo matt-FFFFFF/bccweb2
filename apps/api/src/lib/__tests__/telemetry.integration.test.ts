@@ -2,7 +2,7 @@ import { SpanKind, SpanStatusCode, TraceFlags } from "@opentelemetry/api";
 import type { SdkLogRecord } from "@opentelemetry/sdk-logs";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
-import * as appInsights from "applicationinsights";
+import appInsights from "applicationinsights";
 import { setup, getTelemetryClient, resetForTests } from "../telemetry.js";
 import {
   PiiRedactingLogRecordProcessor,
