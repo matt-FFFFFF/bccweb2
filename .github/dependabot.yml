@@ -1,0 +1,62 @@
+# Dependabot VERSION updates.
+#
+# Security updates are a separate repo setting (Settings -> Code security) and
+# need no config here — this file only governs proactive version bumps.
+#
+# Cadence: quarterly — Dependabot runs on the 1st of Jan / Apr / Jul / Oct.
+# Major versions are intentionally INCLUDED (no semver-major ignore rule).
+# Updates are grouped so each quarter lands a few consolidated PRs, not dozens.
+#
+# To make majors arrive as their own reviewable PRs instead of inside the
+# grouped PR, add `update-types: ["minor", "patch"]` to a group below; majors
+# then flow as individual PRs while minor/patch stay batched.
+version: 2
+
+updates:
+  # ── Root npm workspace graph (apps/* + packages/*, single root lockfile) ─────
+  # Dependabot detects the workspaces from the root package.json + lockfile and
+  # proposes updates across every workspace. Two groups => one PR for runtime
+  # deps and one for dev/tooling, each including majors.
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "quarterly"
+    open-pull-requests-limit: 10
+    commit-message:
+      prefix: "build" # -> build(deps): / build(deps-dev): (matches repo history)
+      include: "scope"
+    groups:
+      production-dependencies:
+        dependency-type: "production"
+      development-dependencies:
+        dependency-type: "development"
+
+  # ── Standalone migration tool (own lockfile, OUTSIDE the npm workspaces) ─────
+  # Optional: remove this block if you don't want PRs for the one-time SQL->Blob
+  # migration tool. It pulls `mssql` and is never deployed.
+  - package-ecosystem: "npm"
+    directory: "/scripts/migrate"
+    schedule:
+      interval: "quarterly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "build"
+      include: "scope"
+    groups:
+      migrate-dependencies:
+        patterns:
+          - "*"
+
+  # ── GitHub Actions (workflows pin actions by commit SHA — keep them current) ─
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "quarterly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    groups:
+      github-actions:
+        patterns:
+          - "*"
