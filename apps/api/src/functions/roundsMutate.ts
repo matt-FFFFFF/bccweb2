@@ -154,14 +154,15 @@ async function createRound(
     throw new HttpError(400, "INVALID_DATE", "date must be yyyy-MM-dd");
   }
 
-  // A non-admin coord may only organise rounds for their own club; default to it when omitted.
+  // A non-admin coord may only organise rounds for their own club, and must have one.
   const isAdmin = caller.roles.includes("Admin");
+  if (!isAdmin && !caller.clubId) {
+    return forbiddenResponse("Your account is not linked to a club");
+  }
   if (!isAdmin && body.organisingClubId && body.organisingClubId !== caller.clubId) {
     return forbiddenResponse("You can only create rounds for your own club");
   }
-  const organisingClubId = isAdmin
-    ? body.organisingClubId
-    : (body.organisingClubId ?? caller.clubId ?? undefined);
+  const organisingClubId = isAdmin ? body.organisingClubId : caller.clubId;
 
   await mutationRateLimit(req, caller, "createRound", "standard");
 
