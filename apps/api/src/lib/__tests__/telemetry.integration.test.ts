@@ -133,7 +133,7 @@ describe("telemetry.setup()", () => {
     expect(infoSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("scrubs PII through the v3 span and log processors used by setup", () => {
+  it("v3 span and log processors scrub PII (direct processor behavior)", () => {
     process.env["APPLICATIONINSIGHTS_CONNECTION_STRING"] = CONN;
 
     setup();
