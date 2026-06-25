@@ -12,6 +12,7 @@ interface AuthCredential {
   failedAttempts?: string[];
   failedAttemptCount?: number;
   lockedUntil?: string | null;
+  tokenVersion?: number;
 }
 
 const userRoleAliases = {
@@ -72,6 +73,7 @@ export const AuthCredentialSchema = z
     failedAttempts: lenientOptional(healingArray(z.string())),
     failedAttemptCount: lenientOptional(z.number().int().nonnegative()),
     lockedUntil: lenientOptional(NullableStringSchema),
+    tokenVersion: lenientOptional(z.number().int().nonnegative()),
   })
   .strip();
 

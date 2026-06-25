@@ -32,7 +32,7 @@ const VerificationStateSchema = z.object({
   createdAt: z.string(),
   expiresAt: z.string(),
 });
-import { getOrCreateUser } from "../lib/auth.js";
+import { getCallerIdentity, getOrCreateUser, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { extractIp } from "../lib/signTofly/ledger.js";
 import {
@@ -424,7 +424,7 @@ async function login(
 
   await recordLoginSuccess(userId);
   const accessToken = signAccessToken(userId, email);
-  const refreshToken = signRefreshToken(userId);
+  const refreshToken = signRefreshToken(userId, cred.tokenVersion ?? 0);
 
   return {
     status: 200,
@@ -448,11 +448,30 @@ async function refresh(
 
   if (!body.refreshToken) return badRequest("refreshToken is required");
 
+  const invalidRefresh: HttpResponseInit = {
+    status: 401,
+    jsonBody: { error: "Invalid or expired refresh token" },
+  };
+
   let userId: string;
+  let tokenVersion: number;
   try {
-    userId = verifyRefreshToken(body.refreshToken);
+    ({ userId, tokenVersion } = verifyRefreshToken(body.refreshToken));
   } catch {
-    return { status: 401, jsonBody: { error: "Invalid or expired refresh token" } };
+    return invalidRefresh;
+  }
+
+  // Reject revoked refresh tokens: tokenVersion is bumped on logout and password
+  // reset, so a token issued before the bump no longer matches the stored value.
+  let cred: AuthCredential;
+  try {
+    const credPath = `auth/${userId}.json`;
+    cred = await readJson(getPrivateBlobClient(credPath), AuthCredentialSchema, credPath);
+  } catch {
+    return invalidRefresh;
+  }
+  if ((cred.tokenVersion ?? 0) !== tokenVersion) {
+    return invalidRefresh;
   }
 
   // Confirm user still exists and get their email
@@ -568,6 +587,7 @@ async function resetPassword(
     }
 
     cred.passwordHash = await hashPassword(newPassword);
+    cred.tokenVersion = (cred.tokenVersion ?? 0) + 1;
     await writePrivateJson(credPath, AuthCredentialSchema, cred, leaseId);
   });
 
@@ -575,6 +595,46 @@ async function resetPassword(
     status: 200,
     jsonBody: { message: "Password reset successfully. You can now sign in." },
   };
+}
+
+// ─── POST /api/auth/logout ────────────────────────────────────────────────────
+
+async function logout(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  rateLimit(req, {
+    endpoint: "logout",
+    capacity: 10,
+    refillPerMin: 10,
+    identityKey: caller.userId,
+  });
+
+  // SECURITY: bumping tokenVersion revokes every refresh token previously issued
+  // to this user (refresh compares the stored version). Missing creds = nothing
+  // to revoke, so logout stays idempotent (204).
+  const credPath = `auth/${caller.userId}.json`;
+  try {
+    await withPrivateLease(credPath, async (leaseId) => {
+      const cred = await readJson(
+        getPrivateBlobClient(credPath),
+        AuthCredentialSchema,
+        credPath,
+      );
+      cred.tokenVersion = (cred.tokenVersion ?? 0) + 1;
+      await writePrivateJson(credPath, AuthCredentialSchema, cred, leaseId);
+    });
+  } catch (err) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      return { status: 204 };
+    }
+    throw err;
+  }
+
+  return { status: 204 };
 }
 
 // ─── Registration ─────────────────────────────────────────────────────────────
@@ -626,4 +686,11 @@ app.http("authResetPassword", {
   authLevel: "anonymous",
   route: "auth/reset-password",
   handler: withErrorHandler(resetPassword),
+});
+
+app.http("authLogout", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "auth/logout",
+  handler: withErrorHandler(logout),
 });

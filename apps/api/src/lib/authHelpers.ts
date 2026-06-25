@@ -20,6 +20,7 @@ export interface AuthCredential {
   passwordHash: string;
   emailVerified: boolean;
   createdAt: string;
+  tokenVersion?: number;
 }
 
 export interface AuthToken {
@@ -71,24 +72,29 @@ export function signAccessToken(userId: string, email: string): string {
   );
 }
 
-export function signRefreshToken(userId: string): string {
+export function signRefreshToken(userId: string, tokenVersion: number): string {
   return jwt.sign(
-    { sub: userId, type: "refresh" },
+    { sub: userId, type: "refresh", tokenVersion },
     getJwtSecret(),
     { algorithm: "HS256", expiresIn: "30d" }
   );
 }
 
 /**
- * Verify a refresh token and return the userId (sub claim).
- * Throws if invalid or expired.
+ * Verify a refresh token and return its userId + tokenVersion claim. A missing
+ * or malformed (non-integer / negative) version is rejected. Throws if invalid
+ * or expired.
  */
-export function verifyRefreshToken(token: string): string {
+export function verifyRefreshToken(token: string): { userId: string; tokenVersion: number } {
   const claims = jwt.verify(token, getJwtSecret(), {
     algorithms: ["HS256"],
-  }) as { sub: string; type: string };
+  }) as { sub: string; type: string; tokenVersion?: unknown };
   if (claims.type !== "refresh") throw new Error("Invalid token type");
-  return claims.sub;
+  const { tokenVersion } = claims;
+  if (typeof tokenVersion !== "number" || !Number.isInteger(tokenVersion) || tokenVersion < 0) {
+    throw new Error("Invalid token version");
+  }
+  return { userId: claims.sub, tokenVersion };
 }
 
 // ─── Password ─────────────────────────────────────────────────────────────────
