@@ -81,7 +81,7 @@ async function seedVersion1(html: string): Promise<void> {
     version: 1,
     hash: hashHtml(html),
     html,
-    plainText: html.replace(/<[^>]+>/g, ""),
+    plainText: stripTags(html),
     createdAt: new Date().toISOString(),
     createdBy: "seed-test",
   };
@@ -111,4 +111,16 @@ function blobExists(path: string): Promise<boolean> {
 
 function hashHtml(html: string): string {
   return createHash("sha256").update(html, "utf8").digest("hex");
+}
+
+// Strip HTML tags until the string is stable: a single pass can leave a residual
+// `<tag` behind for nested/crafted markup, so repeat until nothing changes.
+function stripTags(html: string): string {
+  let text = html;
+  let previous: string;
+  do {
+    previous = text;
+    text = text.replace(/<[^>]+>/g, "");
+  } while (text !== previous);
+  return text;
 }

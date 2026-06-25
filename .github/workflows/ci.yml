@@ -5,6 +5,12 @@ on:
   push:
     branches: [main]
 
+# Least-privilege default for every job: these jobs only read the repo (build,
+# test, lint, docker builds) — none write contents, comment, push images, or use
+# OIDC. Individual jobs can widen this if they ever need more.
+permissions:
+  contents: read
+
 # Cancel superseded runs on the same ref (e.g. rapid pushes to a PR branch).
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}

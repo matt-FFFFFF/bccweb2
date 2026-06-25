@@ -6,6 +6,11 @@ on:
     branches:
       - main
 
+# Least-privilege default: the scan only checks out the repo and reads blobs from
+# a local Azurite. upload-artifact (on failure) needs no extra scope.
+permissions:
+  contents: read
+
 jobs:
   privacy-scan:
     name: PII Leak Detection

@@ -91,15 +91,33 @@ async function uploadJson(client, data) {
   });
 }
 
+const HTML_ENTITIES = Object.freeze({
+  "&nbsp;": " ",
+  "&amp;": "&",
+  "&lt;": "<",
+  "&gt;": ">",
+});
+
 function htmlToPlainText(input) {
-  return input
+  let text = input
     .replace(/<br\s*\/?>/gi, "\n")
-    .replace(/<\/(div|p)>/gi, "\n")
-    .replace(/<[^>]+>/g, "")
-    .replace(/&nbsp;/g, " ")
-    .replace(/&amp;/g, "&")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
+    .replace(/<\/(div|p)>/gi, "\n");
+
+  // Strip tags repeatedly until the string stops changing. A single pass can
+  // leave a residual `<tag` behind when markup is nested/crafted (e.g.
+  // `<scr<script>ipt>`), so loop until stable.
+  let previous;
+  do {
+    previous = text;
+    text = text.replace(/<[^>]+>/g, "");
+  } while (text !== previous);
+
+  // Decode entities in ONE pass via a lookup map. Doing this sequentially
+  // (e.g. `&amp;` → `&` then `&lt;` → `<`) would double-unescape `&amp;lt;`
+  // into `<`; a single combined pass leaves it as the literal `&lt;`.
+  text = text.replace(/&(?:nbsp|amp|lt|gt);/g, (entity) => HTML_ENTITIES[entity]);
+
+  return text
     .split(/\n/)
     .map((line) => line.trim())
     .filter(Boolean)
