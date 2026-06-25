@@ -270,12 +270,12 @@ async function updateRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "updateRound", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   await assertManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "updateRound", "standard");
 
   const body = (await req.json()) as {
     date?: string;
@@ -441,6 +441,7 @@ async function confirmRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await assertManageableRound(caller, id);
   await mutationRateLimit(req, caller, "confirmRound", "standard");
 
   const result = await transition(req, id, ["Proposed"], "Confirmed");
@@ -479,6 +480,7 @@ async function briefCompleteRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await assertManageableRound(caller, id);
   await mutationRateLimit(req, caller, "briefCompleteRound", "standard");
 
   const result = await transition(req, id, ["Confirmed"], "BriefComplete");
@@ -704,7 +706,6 @@ async function lockRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "lockRound", "heavy");
 
   const path = `rounds/${id}.json`;
 
@@ -720,6 +721,7 @@ async function lockRound(
   }
 
   assertCanManageRound(caller, round);
+  await mutationRateLimit(req, caller, "lockRound", "heavy");
 
   if (round.status !== "BriefComplete") {
     return {
@@ -883,6 +885,7 @@ async function unlockRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+  await assertManageableRound(caller, id);
   await mutationRateLimit(req, caller, "unlockRound", "standard");
 
   const result = await transition(req, id, ["Locked"], "Confirmed", async (r) => {
@@ -917,9 +920,7 @@ async function completeRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "completeRound", "heavy");
 
-  const config = await loadConfig();
   const path = `rounds/${id}.json`;
   let current: Round;
 
@@ -933,6 +934,9 @@ async function completeRound(
   }
 
   assertCanManageRound(caller, current);
+  await mutationRateLimit(req, caller, "completeRound", "heavy");
+
+  const config = await loadConfig();
 
   if (current.status !== "Locked") {
     return {
@@ -998,9 +1002,8 @@ async function updateNarrative(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "updateNarrative", "standard");
-
   await assertManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "updateNarrative", "standard");
 
   const body = (await req.json()) as { narrative?: string };
   if (body.narrative === undefined) {
