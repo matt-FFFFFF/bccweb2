@@ -289,6 +289,14 @@ async function updateRound(
     status?: string;
   };
 
+  if (
+    !caller.roles.includes("Admin") &&
+    body.organisingClubId &&
+    body.organisingClubId !== caller.clubId
+  ) {
+    return forbiddenResponse("You can only assign rounds to your own club");
+  }
+
   const path = `rounds/${id}.json`;
   let updated: Round;
 

@@ -137,7 +137,6 @@ async function logFlight(
   if (!isPilotSelf && !isManagerRole) {
     return forbiddenResponse("You can only log flights for yourself");
   }
-  await mutationRateLimit(req, caller, "logFlight", "flights");
 
   if (!isPilotSelf) {
     let round: Round;
@@ -154,6 +153,7 @@ async function logFlight(
       return forbiddenResponse("You can only log flights for yourself");
     }
   }
+  await mutationRateLimit(req, caller, "logFlight", "flights");
 
   const flight: Flight = {
     id: randomUUID(),
@@ -278,7 +278,6 @@ async function deleteFlight(
   if (!isCoord(caller.roles) && !isAdmin(caller.roles)) {
     return forbiddenResponse();
   }
-  await mutationRateLimit(req, caller, "deleteFlight", "flights");
 
   const { id: roundId, flightId } = req.params as {
     id?: string;
@@ -299,6 +298,7 @@ async function deleteFlight(
     throw new HttpError(500, "INTERNAL");
   }
   if (!canManageRound(caller, round)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "deleteFlight", "flights");
 
   const result = await mutateLocked(roundId, (r) => {
     // Allow delete from Locked or Complete (admin correction)
