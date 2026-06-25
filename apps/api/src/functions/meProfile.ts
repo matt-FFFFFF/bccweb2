@@ -210,7 +210,10 @@ async function upsertPilotInIndex(pilot: Pilot): Promise<void> {
       id: pilot.id,
       legacyId: pilot.legacyId,
       name: pilot.person.fullName,
-      clubId: pilot.currentClub?.id,
+      // Verified-membership only (Security: E). A self-created pilot has no
+      // season-club yet, so no public club affiliation until one is assigned;
+      // never expose the self-declared currentClub in the anonymous index.
+      clubId: undefined,
       rating: pilot.pilotRating,
     };
     const idx = index.findIndex((p) => p.id === pilot.id);

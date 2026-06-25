@@ -23,6 +23,7 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { canManageRound } from "../lib/roundAuth.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
@@ -128,11 +129,29 @@ async function logFlight(
     throw new HttpError(400, "INVALID_BODY", "distance (km, >= 0) is required");
   }
 
-  // Auth: Pilot can only log for themselves; Coord/Admin can log for anyone
+  // Auth: Pilot logs own flight; manager (Admin/organising-club coord) logs for anyone in their round.
   const isPilotSelf =
     caller.roles.includes("Pilot") && caller.pilotId === body.pilotId;
-  if (!isCoord(caller.roles) && !isPilotSelf) {
+  const isManagerRole =
+    caller.roles.includes("Admin") || caller.roles.includes("RoundsCoord");
+  if (!isPilotSelf && !isManagerRole) {
     return forbiddenResponse("You can only log flights for yourself");
+  }
+
+  if (!isPilotSelf) {
+    let round: Round;
+    try {
+      const roundPath = `rounds/${roundId}.json`;
+      round = await readJson(getPrivateBlobClient(roundPath), RoundSchema, roundPath);
+    } catch (err: unknown) {
+      if ((err as { statusCode?: number }).statusCode === 404) {
+        throw new HttpError(404, "NOT_FOUND", "Round not found");
+      }
+      throw new HttpError(500, "INTERNAL");
+    }
+    if (!canManageRound(caller, round)) {
+      return forbiddenResponse("You can only log flights for yourself");
+    }
   }
   await mutationRateLimit(req, caller, "logFlight", "flights");
 
@@ -192,14 +211,11 @@ async function updateFlight(
 
   const body = (await req.json()) as Partial<Omit<Flight, "id" | "score" | "wingFactor">>;
 
-  // Pre-read to find the slot and check auth
-  let ownerPilotId: string | null = null;
+  // Pre-read the round to find the flight's owner slot and scope auth.
+  let round: Round;
   try {
     const preReadPath = `rounds/${roundId}.json`;
-    const r = await readJson(getPrivateBlobClient(preReadPath), RoundSchema, preReadPath);
-    const slot = findSlotByFlight(r, flightId);
-    if (!slot) throw new HttpError(404, "NOT_FOUND", "Flight not found");
-    ownerPilotId = slot.pilotId;
+    round = await readJson(getPrivateBlobClient(preReadPath), RoundSchema, preReadPath);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
@@ -207,10 +223,13 @@ async function updateFlight(
     throw new HttpError(500, "INTERNAL");
   }
 
-  // Auth: Pilot can only update their own flight; Coord/Admin can update any
+  const ownerSlot = findSlotByFlight(round, flightId);
+  if (!ownerSlot) throw new HttpError(404, "NOT_FOUND", "Flight not found");
+
+  // Auth: Pilot updates own flight; manager (Admin/organising-club coord) updates any in their round.
   const isPilotSelf =
-    caller.roles.includes("Pilot") && caller.pilotId === ownerPilotId;
-  if (!isCoord(caller.roles) && !isPilotSelf) {
+    caller.roles.includes("Pilot") && caller.pilotId === ownerSlot.pilotId;
+  if (!isPilotSelf && !canManageRound(caller, round)) {
     return forbiddenResponse("You can only update your own flights");
   }
   await mutationRateLimit(req, caller, "updateFlight", "flights");
@@ -259,7 +278,6 @@ async function deleteFlight(
   if (!isCoord(caller.roles) && !isAdmin(caller.roles)) {
     return forbiddenResponse();
   }
-  await mutationRateLimit(req, caller, "deleteFlight", "flights");
 
   const { id: roundId, flightId } = req.params as {
     id?: string;
@@ -268,6 +286,19 @@ async function deleteFlight(
   if (!roundId || !flightId) {
     throw new HttpError(400, "MISSING_IDS", "Missing round or flight id");
   }
+
+  let round: Round;
+  try {
+    const roundPath = `rounds/${roundId}.json`;
+    round = await readJson(getPrivateBlobClient(roundPath), RoundSchema, roundPath);
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
+    }
+    throw new HttpError(500, "INTERNAL");
+  }
+  if (!canManageRound(caller, round)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "deleteFlight", "flights");
 
   const result = await mutateLocked(roundId, (r) => {
     // Allow delete from Locked or Complete (admin correction)

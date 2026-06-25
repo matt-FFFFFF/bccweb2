@@ -169,7 +169,8 @@ describe("updateRoundBrief rate-limit ordering", () => {
     const ownRound = await makeEditableRoundWithBrief(clubA);
     const otherRound = await makeEditableRoundWithBrief(clubB);
     const ownBrief = await getBrief(coordA, ownRound.id);
-    const otherBrief = await getBrief(coordA, otherRound.id);
+    // coordA cannot read club B's brief (read authz, Security PR-1). The cross-club
+    // update 403s at the authz gate before its body is parsed, so ownBrief drives it.
 
     resetAllBuckets();
     const drainStatuses = await drainUpdateRoundBriefHeavyBucket(coordA, ownRound.id, ownBrief);
@@ -177,7 +178,7 @@ describe("updateRoundBrief rate-limit ordering", () => {
 
     const res = await invoke(
       "updateRoundBrief",
-      authPutBrief(coordA, otherRound.id, { ...otherBrief, briefersNotes: "cross-club dry run" }, { dryRun: "true" }),
+      authPutBrief(coordA, otherRound.id, { ...ownBrief, briefersNotes: "cross-club dry run" }, { dryRun: "true" }),
     );
     record(redGreenObservations, "cross-club after drain", res);
 
@@ -247,14 +248,13 @@ describe("updateRoundBrief rate-limit ordering", () => {
     const ownRound = await makeEditableRoundWithBrief(clubA);
     const otherRound = await makeEditableRoundWithBrief(clubB);
     const ownBrief = await getBrief(coordA, ownRound.id);
-    const otherBrief = await getBrief(coordA, otherRound.id);
 
     resetAllBuckets();
     await drainUpdateRoundBriefHeavyBucket(coordA, ownRound.id, ownBrief);
 
     const res = await invoke(
       "updateRoundBrief",
-      authPutBrief(coordA, otherRound.id, { ...otherBrief, briefersNotes: "forbidden dry run" }, { dryRun: "true" }),
+      authPutBrief(coordA, otherRound.id, { ...ownBrief, briefersNotes: "forbidden dry run" }, { dryRun: "true" }),
     );
     record(preservationObservations, "forbidden cross-club dryRun after drain", res);
 

@@ -15,7 +15,7 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import { randomUUID } from "crypto";
-import type { ClubTeamSummary, Round, Team, PilotSlot } from "@bccweb/types";
+import type { CallerIdentity, ClubTeamSummary, Round, Team, PilotSlot } from "@bccweb/types";
 import { ClubTeamSummarySchema, PilotSchema, RoundSchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
 import { getBlobClient, getPrivateBlobClient, withPrivateLease } from "../lib/blob.js";
@@ -28,6 +28,7 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { assertCanManageRound } from "../lib/roundAuth.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 import { recomputeTeamCaptain } from "../lib/teamCaptain.js";
 
@@ -35,6 +36,24 @@ import { recomputeTeamCaptain } from "../lib/teamCaptain.js";
 
 function isCoord(roles: string[]): boolean {
   return roles.includes("RoundsCoord") || roles.includes("Admin");
+}
+
+async function loadManageableRound(
+  caller: CallerIdentity,
+  id: string,
+): Promise<Round> {
+  const path = `rounds/${id}.json`;
+  let round: Round;
+  try {
+    round = await readJson(getPrivateBlobClient(path), RoundSchema, path);
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
+    }
+    throw new HttpError(500, "INTERNAL");
+  }
+  assertCanManageRound(caller, round);
+  return round;
 }
 
 // ─── Generic round mutator ────────────────────────────────────────────────────
@@ -45,6 +64,7 @@ function isCoord(roles: string[]): boolean {
  */
 async function mutateLocked(
   id: string,
+  caller: CallerIdentity,
   mutateFn: (round: Round) => void | string
 ): Promise<Round | HttpResponseInit> {
   const path = `rounds/${id}.json`;
@@ -52,6 +72,7 @@ async function mutateLocked(
   try {
     return await withPrivateLease(path, async (leaseId) => {
       const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
+      assertCanManageRound(caller, r);
       const err = mutateFn(r);
       if (err) {
         const e = new Error(err);
@@ -62,6 +83,7 @@ async function mutateLocked(
       return r;
     });
   } catch (e: unknown) {
+    if (e instanceof HttpError) throw e;
     const err = e as { isValidation?: boolean; statusCode?: number; message?: string };
     if (err.isValidation) throw new HttpError(409, "CONFLICT", err.message);
     if (err.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
@@ -78,25 +100,16 @@ async function addTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "addTeam", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
+  const round = await loadManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "addTeam", "standard");
+
   const body = (await req.json()) as { clubId?: string; teamName?: string };
   if (!body.clubId || !body.teamName?.trim()) {
     throw new HttpError(400, "INVALID_BODY", "clubId and teamName are required");
-  }
-
-  let round: Round;
-  try {
-    const roundPath = `rounds/${id}.json`;
-    round = await readJson(getPrivateBlobClient(roundPath), RoundSchema, roundPath);
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(404, "NOT_FOUND", "Round not found");
-    }
-    throw new HttpError(500, "INTERNAL");
   }
 
   // teamName must match a ClubTeam pre-registered for (clubId, seasonYear); canonical name + clubName come from the matched entry.
@@ -133,7 +146,7 @@ async function addTeam(
     pilots: [],
   };
 
-  const result = await mutateLocked(id, (r) => {
+  const result = await mutateLocked(id, caller, (r) => {
     if (r.isLocked) return "Round is locked";
     if (r.teams.length >= r.maxTeams) {
       return `Round is full (max ${r.maxTeams} teams)`;
@@ -161,14 +174,16 @@ async function removeTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "removeTeam", "standard");
 
   const { id, teamId } = req.params as { id?: string; teamId?: string };
   if (!id || !teamId) {
     throw new HttpError(400, "MISSING_IDS", "Missing round or team id");
   }
 
-  const result = await mutateLocked(id, (r) => {
+  await loadManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "removeTeam", "standard");
+
+  const result = await mutateLocked(id, caller, (r) => {
     if (r.isLocked) return "Round is locked";
     const idx = r.teams.findIndex((t) => t.id === teamId);
     if (idx === -1) return "Team not found";
@@ -188,12 +203,14 @@ async function addPilot(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "addPilot", "standard");
 
   const { id, teamId } = req.params as { id?: string; teamId?: string };
   if (!id || !teamId) {
     throw new HttpError(400, "MISSING_IDS", "Missing round or team id");
   }
+
+  await loadManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "addPilot", "standard");
 
   const body = (await req.json()) as {
     pilotId?: string;
@@ -214,7 +231,7 @@ async function addPilot(
     throw new HttpError(500, "INTERNAL");
   }
 
-  const result = await mutateLocked(id, (r) => {
+  const result = await mutateLocked(id, caller, (r) => {
     if (r.isLocked) return "Round is locked";
 
     const teamIdx = r.teams.findIndex((t) => t.id === teamId);
@@ -264,7 +281,6 @@ async function removePilot(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "removePilot", "standard");
 
   const { id, teamId, place } = req.params as {
     id?: string;
@@ -275,12 +291,15 @@ async function removePilot(
     throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
   }
 
+  await loadManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "removePilot", "standard");
+
   const placeNum = parseInt(place, 10);
   if (isNaN(placeNum)) {
     throw new HttpError(400, "INVALID_BODY", "place must be a number");
   }
 
-  const result = await mutateLocked(id, (r) => {
+  const result = await mutateLocked(id, caller, (r) => {
     if (r.isLocked) return "Round is locked";
 
     const teamIdx = r.teams.findIndex((t) => t.id === teamId);
@@ -307,7 +326,6 @@ async function updateAccounted(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "updateAccounted", "standard");
 
   const { id, teamId, place } = req.params as {
     id?: string;
@@ -318,6 +336,9 @@ async function updateAccounted(
     throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
   }
 
+  await loadManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "updateAccounted", "standard");
+
   const body = (await req.json()) as { accountedFor?: boolean };
   if (typeof body.accountedFor !== "boolean") {
     throw new HttpError(400, "INVALID_BODY", "accountedFor (boolean) is required");
@@ -325,7 +346,7 @@ async function updateAccounted(
 
   const placeNum = parseInt(place, 10);
 
-  const result = await mutateLocked(id, (r) => {
+  const result = await mutateLocked(id, caller, (r) => {
     const team = r.teams.find((t) => t.id === teamId);
     if (!team) return "Team not found";
 
