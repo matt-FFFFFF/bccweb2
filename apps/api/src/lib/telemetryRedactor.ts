@@ -1,17 +1,27 @@
 /**
  * telemetryRedactor.ts
  *
- * Application Insights-compatible TelemetryProcessor that scrubs PII from every
- * telemetry envelope before it is forwarded to the Azure Monitor ingestion endpoint.
+ * OpenTelemetry processors for Application Insights v3 / Azure Monitor.
  *
- * Usage (register once at app startup):
- *   import { PiiRedactingTelemetryProcessor } from "./lib/telemetryRedactor.js";
- *   const client = new TelemetryClient(connectionString);
- *   client.addTelemetryProcessor(new PiiRedactingTelemetryProcessor().process);
+ * T4 wires PiiRedactingSpanProcessor and PiiRedactingLogRecordProcessor through
+ * setAzureMonitorOptions({ spanProcessors, logRecordProcessors }); v3's legacy
+ * client.addTelemetryProcessor() shim is not part of the live path.
  *
  * The PII_FIELDS constant is a TS-native copy of the list maintained in
  * scripts/lib/pii.mjs (the two lists MUST be kept in sync).
  */
+
+import { SpanKind, SpanStatusCode, TraceFlags } from "@opentelemetry/api";
+import type { Context } from "@opentelemetry/api";
+import type {
+  ReadableSpan,
+  Span,
+  SpanProcessor,
+} from "@opentelemetry/sdk-trace-base";
+import type {
+  LogRecordProcessor,
+  SdkLogRecord,
+} from "@opentelemetry/sdk-logs";
 
 // ─── PII field list (source of truth: scripts/lib/pii.mjs) ───────────────────
 //
@@ -47,6 +57,33 @@ export const PII_FIELDS: ReadonlyArray<string> = [
   "wingColours",
 ];
 
+// OTel HTTP/Functions instrumentation records the same PII concepts under
+// semantic-convention attribute keys rather than this app's PII_FIELDS names:
+// - url.full, url.query → url-style request data; query strings can carry tokens/PII.
+// - user_agent.original, http.user_agent → userAgent.
+// - client.address → ip/client network address.
+// - server.address, network.peer.address, net.peer.name, net.sock.peer.addr →
+//   network identifiers/IP-like peer addresses.
+// - http.request.header.authorization, http.request.header.cookie → auth/token headers.
+export const OTEL_PII_SPAN_ATTRS: ReadonlyArray<string> = [
+  "url.full",
+  "url.query",
+  "user_agent.original",
+  "http.user_agent",
+  "client.address",
+  "server.address",
+  "network.peer.address",
+  "net.peer.name",
+  "net.sock.peer.addr",
+  "http.request.header.authorization",
+  "http.request.header.cookie",
+];
+
+const DEFAULT_PII_FIELD_SET: ReadonlySet<string> = new Set(PII_FIELDS);
+const DEFAULT_OTEL_PII_SPAN_ATTR_SET: ReadonlySet<string> = new Set(
+  OTEL_PII_SPAN_ATTRS
+);
+
 // ─── Redaction helpers ────────────────────────────────────────────────────────
 
 /**
@@ -77,102 +114,103 @@ export function redactObject(
   return result;
 }
 
-// ─── Envelope type (minimal subset, avoids hard SDK dependency) ───────────────
+export function redactAttributesInPlace(
+  attrs: Record<string, unknown>,
+  fields: ReadonlyArray<string> = PII_FIELDS,
+  otelKeys: ReadonlyArray<string> = OTEL_PII_SPAN_ATTRS
+): void {
+  const fieldSet = fields === PII_FIELDS ? DEFAULT_PII_FIELD_SET : new Set(fields);
+  const otelKeySet =
+    otelKeys === OTEL_PII_SPAN_ATTRS
+      ? DEFAULT_OTEL_PII_SPAN_ATTR_SET
+      : new Set(otelKeys);
 
-/**
- * Minimal shape of an Application Insights telemetry envelope.
- * Compatible with the @microsoft/applicationinsights-web and
- * applicationinsights Node.js SDK v2/v3 envelope contracts.
- */
-export interface TelemetryEnvelope {
-  data?: {
-    baseData?: Record<string, unknown>;
-    [key: string]: unknown;
-  };
-  [key: string]: unknown;
+  for (const [key, value] of Object.entries(attrs)) {
+    if (fieldSet.has(key) || otelKeySet.has(key)) {
+      // url.full/url.query are fully masked instead of query-stripped so malformed
+      // URL strings cannot bypass redaction through parser edge cases.
+      attrs[key] = "***";
+    } else if (value !== null && typeof value === "object") {
+      attrs[key] = redactObject(value, fields);
+    }
+  }
 }
 
 // ─── Processor classes ────────────────────────────────────────────────────────
 
-/**
- * Application Insights TelemetryProcessor that drops *successful* telemetry
- * emitted for invocations of the `health` Azure Function (liveness / readiness
- * probes).
- *
- * Health checks are called at high frequency by the Azure platform and a
- * passing probe produces noise without diagnostic value. Returning `false`
- * from a processor instructs the SDK to discard the envelope entirely.
- *
- * Failed health probes are forwarded, not dropped: a probe that returns 5xx /
- * `success === false` is exactly the signal request-failure alerts rely on, so
- * suppressing it would hide real outages. An envelope is treated as a failure
- * (and forwarded) when its `baseData.success === false` or its numeric
- * `responseCode >= 400`; otherwise the health envelope is dropped.
- */
-export class HealthFilterTelemetryProcessor {
-  process(
-    envelope: TelemetryEnvelope,
-    _contextObjects?: Record<string, unknown>
-  ): boolean {
-    if (!envelope) return true;
-    const tags = envelope["tags"] as Record<string, unknown> | undefined;
-    if (tags?.["ai.operation.name"] !== "Functions.health") {
-      return true;
-    }
+const HTTP_RESPONSE_STATUS_CODE_ATTR = "http.response.status_code";
 
-    // Health envelope: forward it only if it indicates a failure, so real
-    // outages remain visible to App Insights failure alerts. Drop the
-    // high-frequency successful probes.
-    const baseData = envelope.data?.baseData;
-    if (baseData) {
-      if (baseData["success"] === false) return true;
-      const responseCode = Number(baseData["responseCode"]);
-      if (Number.isFinite(responseCode) && responseCode >= 400) return true;
-    }
-    return false;
-  }
+function isSuccessfulSpan(span: ReadableSpan): boolean {
+  if (span.status.code === SpanStatusCode.ERROR) return false;
+
+  const statusCode = Number(span.attributes[HTTP_RESPONSE_STATUS_CODE_ATTR]);
+  return !Number.isFinite(statusCode) || statusCode < 400;
 }
 
-/**
- * Application Insights TelemetryProcessor that redacts PII fields in-place
- * from every envelope before it is sent to the ingestion endpoint.
- *
- * The `process` method signature matches the SDK contract:
- *   (envelope: Envelope, contextObjects?: Record<string, unknown>) => boolean
- *
- * Returning `true` forwards the envelope; returning `false` drops it entirely.
- * This processor always forwards — it only scrubs, never drops.
- */
-export class PiiRedactingTelemetryProcessor {
+function isHealthRequestSpan(span: ReadableSpan): boolean {
+  if (span.name === "Functions.health") return true;
+  return span.kind === SpanKind.SERVER && span.name.toLowerCase().includes("health");
+}
+
+function clearSampledFlag(span: ReadableSpan): void {
+  const spanContext = span.spanContext();
+  // Drop the span by clearing its SAMPLED trace flag. The Azure Monitor
+  // distro registers processors as [AzureMonitorSpanProcessor, ...userProcessors,
+  // BatchSpanProcessor], so this PiiRedactingSpanProcessor runs BEFORE the
+  // exporter's BatchSpanProcessor, whose onEnd() skips export when
+  // (traceFlags & SAMPLED) === 0. Span.spanContext() returns the span's own
+  // mutable context object, so this in-place clear is observed by that later
+  // processor in the same onEnd cycle. Deploy smoke still confirms end-to-end.
+  spanContext.traceFlags &= ~TraceFlags.SAMPLED;
+}
+
+export class PiiRedactingLogRecordProcessor implements LogRecordProcessor {
   private readonly fields: ReadonlyArray<string>;
 
   constructor(fields: ReadonlyArray<string> = PII_FIELDS) {
     this.fields = fields;
-    // Bind so the method can be passed directly as a callback without losing `this`.
-    this.process = this.process.bind(this);
   }
 
-  process(
-    envelope: TelemetryEnvelope,
-    _contextObjects?: Record<string, unknown>
-  ): boolean {
-    if (!envelope) return true;
-
-    // Redact baseData (contains the primary telemetry payload).
-    if (envelope.data?.baseData) {
-      envelope.data.baseData = redactObject(
-        envelope.data.baseData,
-        this.fields
-      ) as Record<string, unknown>;
-    }
-
-    // Redact any other top-level fields on the envelope itself that match PII.
+  onEmit(logRecord: SdkLogRecord, _context?: Context): void {
+    const attrs = logRecord.attributes;
     for (const field of this.fields) {
-      if (Object.prototype.hasOwnProperty.call(envelope, field)) {
-        (envelope as Record<string, unknown>)[field] = "***";
+      if (Object.prototype.hasOwnProperty.call(attrs, field)) {
+        logRecord.setAttribute(field, "***");
       }
     }
+  }
 
-    return true;
+  forceFlush(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  shutdown(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
+export class PiiRedactingSpanProcessor implements SpanProcessor {
+  private readonly fields: ReadonlyArray<string>;
+
+  constructor(fields: ReadonlyArray<string> = PII_FIELDS) {
+    this.fields = fields;
+  }
+
+  onStart(_span: Span, _parentContext: Context): void {}
+
+  onEnd(span: ReadableSpan): void {
+    redactAttributesInPlace(span.attributes, this.fields, OTEL_PII_SPAN_ATTRS);
+
+    if (isHealthRequestSpan(span) && isSuccessfulSpan(span)) {
+      clearSampledFlag(span);
+    }
+  }
+
+  forceFlush(): Promise<void> {
+    return Promise.resolve();
+  }
+
+  shutdown(): Promise<void> {
+    return Promise.resolve();
   }
 }

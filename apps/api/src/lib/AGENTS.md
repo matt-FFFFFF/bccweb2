@@ -46,11 +46,10 @@ these by name; this file is the **cheat sheet** so you don't re-read the source.
 
 ## telemetry.ts / telemetryRedactor.ts
 
-- `setup()` — one-time App Insights init, **call early** (processors attach only here);
-  no-op without env. `getTelemetryClient()`, `resetForTests()`.
+- `setup()`: one-time App Insights init, **call early** (processors attach only here via `setAzureMonitorOptions`), no-op without env. `getTelemetryClient()`, `resetForTests()`.
 - `PII_FIELDS` (must match `scripts/lib/pii.mjs`), `redactObject(obj,fields?)`.
-- `HealthFilterTelemetryProcessor` drops successful `Functions.health`;
-  `PiiRedactingTelemetryProcessor` redacts `baseData` + top-level PII keys.
+- `PiiRedactingSpanProcessor`: drops successful `Functions.health` spans (retains failed ones) and redacts PII from request/dependency span attributes (PII_FIELDS + `OTEL_PII_SPAN_ATTRS`).
+- `PiiRedactingLogRecordProcessor`: redacts PII from trackEvent/trackTrace log record attributes.
 
 ## signTofly/ — sign-to-fly workflow
 
