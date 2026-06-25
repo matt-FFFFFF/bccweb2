@@ -154,9 +154,13 @@ function isHealthRequestSpan(span: ReadableSpan): boolean {
 
 function clearSampledFlag(span: ReadableSpan): void {
   const spanContext = span.spanContext();
-  // Azure Monitor's exporter samples from SpanContext.traceFlags. Some real SDK
-  // spans may return a derived/frozen context, so deploy smoke must confirm this
-  // on Azure Functions; unit tests prove the intended mutation for stable contexts.
+  // Drop the span by clearing its SAMPLED trace flag. The Azure Monitor
+  // distro registers processors as [AzureMonitorSpanProcessor, ...userProcessors,
+  // BatchSpanProcessor], so this PiiRedactingSpanProcessor runs BEFORE the
+  // exporter's BatchSpanProcessor, whose onEnd() skips export when
+  // (traceFlags & SAMPLED) === 0. Span.spanContext() returns the span's own
+  // mutable context object, so this in-place clear is observed by that later
+  // processor in the same onEnd cycle. Deploy smoke still confirms end-to-end.
   spanContext.traceFlags &= ~TraceFlags.SAMPLED;
 }
 
