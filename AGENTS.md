@@ -25,7 +25,25 @@ typechecking dependents, or use `make build`. `make clean` deletes
 ## Toolchain (pinned in `.mise.toml`)
 
 - Node 24.16.0, Terraform `latest` (workflows expect 1.10.x), `azure-functions-core-tools` 4.12.0
-- npm ≥ 10 (workspaces). `mise install` brings these up.
+- npm 11 (workspaces, ships with Node 24). `mise install` brings these up.
+
+## Dependency management
+
+One root [`package-lock.json`](package-lock.json) for the whole workspace graph:
+npm workspaces hoist + dedupe into a single lockfile, so shared tooling
+(`typescript`, `vitest`, `zod`) resolves to one version and there's one
+`npm audit` / Dependabot surface. Do **not** split per-app lockfiles — that
+breaks `@bccweb/*` symlinking and lets shared versions drift.
+
+`scripts/migrate/` is the one deliberate exception: a standalone package
+**outside** the `workspaces` globs with its own `package-lock.json` (it pulls
+`mssql`, kept out of the deployed api/web tree). Root `npm ci` skips it; `ci.yml`
+runs a separate `npm ci` there for the migration unit tests.
+
+[`.npmrc`](.npmrc) sets `engine-strict=true` (honour the `engines` Node/npm
+floor) and `save-exact=true` (new installs pin exact, matching the no-caret
+policy). Updates are security-only via Dependabot (repo setting, intentionally
+no `dependabot.yml`).
 
 ## Build / Test / Dev
 
@@ -234,14 +252,20 @@ Terraform is split into three stacks (see `iac/README.md`): `bootstrap/` (tfstat
 
 CI: `.github/workflows/`
 
-- `deploy-api.yml` — push to `main` touching `apps/api/**` or shared packages.
-  Builds, prunes devDeps, rsyncs node_modules with `--copy-links` (workspace
-  symlinks get dereferenced into the zip), deploys via `Azure/functions-action`,
-  then smoke-tests `/api/health` and `/api/seasons`. **No auto-rollback** —
-  failure leaves the deploy in place for manual investigation.
-- `deploy-web.yml` — push to `main` touching `apps/web/**` or `packages/types/**`.
-  Builds, deploys to SWA (`skip_app_build: true`, `output_location: ../../dist/web`),
-  smoke-tests root URL. PR events use `action: 'close'`/`'upload'` for preview envs.
+- `ci.yml` — every PR + push to `main`: typecheck, lint (web only), full build
+  in dependency order, Vitest (incl. heavy lib tests with Azurite up), and
+  `docker compose build`.
+- `deploy-dev.yml` — every push to `main` deploys to **dev**: a Terraform drift
+  gate first, then the Function App and SWA in parallel. The API job builds,
+  `npm prune --omit=dev`, then `rsync --copy-links` (workspace symlinks get
+  dereferenced into the zip) and deploys via `Azure/functions-action`; both jobs
+  smoke-test (`/api/health` + `/api/seasons`, web root). **No auto-rollback** —
+  a failed smoke leaves the deploy in place for manual investigation.
+- `deploy-prod.yml` — publishing a GitHub **release** deploys to **prod**: a
+  release-ancestry check (commit must be on `main`), the same drift gate, then
+  the same Functions + SWA deploy jobs.
+- `terraform.yml` — manual `plan`/`apply` for any stack (`common`/`service`) ×
+  env (`dev`/`prod`); also the drift-reconcile path the deploy gates point at.
 - `privacy-scan.yml` — every PR + push to main. Spins up Azurite, seeds clean
   public blobs, runs `scripts/privacy-scan.mjs`. Fails the PR on PII leak.
 
