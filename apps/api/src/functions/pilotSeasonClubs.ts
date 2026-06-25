@@ -113,7 +113,7 @@ async function assignPilotSeasonClub(
 
   const parsed = AssignBodySchema.safeParse(rawBody);
   if (!parsed.success) {
-    throw new HttpError(400, "INVALID_BODY", "pilotId, clubId, seasonYear required");
+    throw new HttpError(400, "INVALID_BODY", "pilotId and clubId must be valid ids and seasonYear a year in 2000-2100");
   }
   const body = parsed.data;
 
@@ -266,8 +266,9 @@ async function deletePilotSeasonClub(
   const seasonYearRaw = req.params["seasonYear"];
   if (!pilotId || !seasonYearRaw) throw new HttpError(400, "BAD_REQUEST", "Missing params");
   if (!SAFE_ID.test(pilotId)) throw new HttpError(400, "INVALID_PILOT_ID", "Invalid pilot id");
+  if (!/^\d{4}$/.test(seasonYearRaw)) throw new HttpError(400, "INVALID_YEAR", "Invalid season year");
   const seasonYear = Number.parseInt(seasonYearRaw, 10);
-  if (!Number.isInteger(seasonYear)) throw new HttpError(400, "INVALID_YEAR", "Invalid season year");
+  if (seasonYear < 2000 || seasonYear > 2100) throw new HttpError(400, "INVALID_YEAR", "Invalid season year");
 
   if (isCoord && !isAdmin) {
     let pilotForScope: Pilot;

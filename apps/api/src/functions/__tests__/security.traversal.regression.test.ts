@@ -17,6 +17,7 @@ describe("blob path traversal (finding G)", () => {
       "double//slash.json",
       "back\\slash.json",
       "null\u0000byte.json",
+      "del\u007fchar.json",
       "",
     ])("rejects unsafe path %j", (path) => {
       expect(() => assertSafeBlobPath(path)).toThrow();
@@ -97,6 +98,17 @@ describe("blob path traversal (finding G)", () => {
       const res = await invoke("deletePilotSeasonClub", makeAuthRequest(user.id, user.email, {
         method: "DELETE",
         params: { pilotId: "x/../../pilots/victim", seasonYear: "2026" },
+      }));
+
+      expect(res.status).toBe(400);
+    });
+
+    test.each(["2026abc", "26", "0", "abcd"])("rejects non-4-digit-year route param %j", async (seasonYear) => {
+      const { user } = await makeUser({ roles: ["Admin"] });
+
+      const res = await invoke("deletePilotSeasonClub", makeAuthRequest(user.id, user.email, {
+        method: "DELETE",
+        params: { pilotId: "g-year-pilot", seasonYear },
       }));
 
       expect(res.status).toBe(400);

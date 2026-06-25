@@ -75,7 +75,7 @@ export function assertSafeBlobPath(path: string): void {
   const unsafe =
     path.length === 0 ||
     path.includes("\\") ||
-    /[\u0000-\u001f]/.test(path) ||
+    /[\u0000-\u001f\u007f]/.test(path) ||
     path.split("/").some((seg) => seg === "" || seg === "." || seg === "..");
   if (unsafe) {
     throw new HttpError(400, "INVALID_BLOB_PATH", "Invalid blob path");
