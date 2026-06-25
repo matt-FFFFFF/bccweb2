@@ -132,7 +132,6 @@ async function createRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "createRound", "standard");
 
   const body = (await req.json()) as {
     date?: string;
@@ -155,13 +154,16 @@ async function createRound(
     throw new HttpError(400, "INVALID_DATE", "date must be yyyy-MM-dd");
   }
 
-  if (
-    !caller.roles.includes("Admin") &&
-    body.organisingClubId &&
-    body.organisingClubId !== caller.clubId
-  ) {
+  // A non-admin coord may only organise rounds for their own club; default to it when omitted.
+  const isAdmin = caller.roles.includes("Admin");
+  if (!isAdmin && body.organisingClubId && body.organisingClubId !== caller.clubId) {
     return forbiddenResponse("You can only create rounds for your own club");
   }
+  const organisingClubId = isAdmin
+    ? body.organisingClubId
+    : (body.organisingClubId ?? caller.clubId ?? undefined);
+
+  await mutationRateLimit(req, caller, "createRound", "standard");
 
   // Load site
   let site: Site;
@@ -189,9 +191,9 @@ async function createRound(
 
   // Optionally load organising club
   let organisingClub: { id: string; name: string } | undefined;
-  if (body.organisingClubId) {
+  if (organisingClubId) {
     try {
-      const clubPath = `clubs/${body.organisingClubId}.json`;
+      const clubPath = `clubs/${organisingClubId}.json`;
       const club = await readJson(getPrivateBlobClient(clubPath), ClubRefSchema, clubPath);
       organisingClub = { id: club.id, name: club.name };
     } catch {
@@ -275,7 +277,6 @@ async function updateRound(
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
   await assertManageableRound(caller, id);
-  await mutationRateLimit(req, caller, "updateRound", "standard");
 
   const body = (await req.json()) as {
     date?: string;
@@ -296,6 +297,8 @@ async function updateRound(
   ) {
     return forbiddenResponse("You can only assign rounds to your own club");
   }
+
+  await mutationRateLimit(req, caller, "updateRound", "standard");
 
   const path = `rounds/${id}.json`;
   let updated: Round;

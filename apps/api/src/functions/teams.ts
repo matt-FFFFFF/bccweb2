@@ -38,6 +38,24 @@ function isCoord(roles: string[]): boolean {
   return roles.includes("RoundsCoord") || roles.includes("Admin");
 }
 
+async function loadManageableRound(
+  caller: CallerIdentity,
+  id: string,
+): Promise<Round> {
+  const path = `rounds/${id}.json`;
+  let round: Round;
+  try {
+    round = await readJson(getPrivateBlobClient(path), RoundSchema, path);
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
+    }
+    throw new HttpError(500, "INTERNAL");
+  }
+  assertCanManageRound(caller, round);
+  return round;
+}
+
 // ─── Generic round mutator ────────────────────────────────────────────────────
 
 /**
@@ -82,28 +100,17 @@ async function addTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "addTeam", "standard");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
+
+  const round = await loadManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "addTeam", "standard");
 
   const body = (await req.json()) as { clubId?: string; teamName?: string };
   if (!body.clubId || !body.teamName?.trim()) {
     throw new HttpError(400, "INVALID_BODY", "clubId and teamName are required");
   }
-
-  let round: Round;
-  try {
-    const roundPath = `rounds/${id}.json`;
-    round = await readJson(getPrivateBlobClient(roundPath), RoundSchema, roundPath);
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(404, "NOT_FOUND", "Round not found");
-    }
-    throw new HttpError(500, "INTERNAL");
-  }
-
-  assertCanManageRound(caller, round);
 
   // teamName must match a ClubTeam pre-registered for (clubId, seasonYear); canonical name + clubName come from the matched entry.
   let clubTeams: ClubTeamSummary[] = [];
@@ -167,12 +174,14 @@ async function removeTeam(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "removeTeam", "standard");
 
   const { id, teamId } = req.params as { id?: string; teamId?: string };
   if (!id || !teamId) {
     throw new HttpError(400, "MISSING_IDS", "Missing round or team id");
   }
+
+  await loadManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "removeTeam", "standard");
 
   const result = await mutateLocked(id, caller, (r) => {
     if (r.isLocked) return "Round is locked";
@@ -194,12 +203,14 @@ async function addPilot(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "addPilot", "standard");
 
   const { id, teamId } = req.params as { id?: string; teamId?: string };
   if (!id || !teamId) {
     throw new HttpError(400, "MISSING_IDS", "Missing round or team id");
   }
+
+  await loadManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "addPilot", "standard");
 
   const body = (await req.json()) as {
     pilotId?: string;
@@ -270,7 +281,6 @@ async function removePilot(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "removePilot", "standard");
 
   const { id, teamId, place } = req.params as {
     id?: string;
@@ -280,6 +290,9 @@ async function removePilot(
   if (!id || !teamId || !place) {
     throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
   }
+
+  await loadManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "removePilot", "standard");
 
   const placeNum = parseInt(place, 10);
   if (isNaN(placeNum)) {
@@ -313,7 +326,6 @@ async function updateAccounted(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
-  await mutationRateLimit(req, caller, "updateAccounted", "standard");
 
   const { id, teamId, place } = req.params as {
     id?: string;
@@ -323,6 +335,9 @@ async function updateAccounted(
   if (!id || !teamId || !place) {
     throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
   }
+
+  await loadManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "updateAccounted", "standard");
 
   const body = (await req.json()) as { accountedFor?: boolean };
   if (typeof body.accountedFor !== "boolean") {
