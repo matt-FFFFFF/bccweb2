@@ -1,8 +1,7 @@
 import * as appInsights from "applicationinsights";
 import {
-  HealthFilterTelemetryProcessor,
-  PiiRedactingTelemetryProcessor,
-  type TelemetryEnvelope,
+  PiiRedactingLogRecordProcessor,
+  PiiRedactingSpanProcessor,
 } from "./telemetryRedactor.js";
 
 let initialised = false;
@@ -34,31 +33,16 @@ export function setup(): void {
     .setAutoCollectDependencies(true)
     .setAutoCollectPerformance(true, true)
     .setSendLiveMetrics(false)
+    .setAzureMonitorOptions({
+      spanProcessors: [new PiiRedactingSpanProcessor()],
+      logRecordProcessors: [new PiiRedactingLogRecordProcessor()],
+    })
     .start();
 
-  const client = appInsights.defaultClient;
-  if (client) {
-    const healthFilter = new HealthFilterTelemetryProcessor();
-    client.addTelemetryProcessor(
-      (envelope, contextObjects) =>
-        healthFilter.process(
-          envelope as unknown as TelemetryEnvelope,
-          contextObjects as Record<string, unknown> | undefined
-        )
-    );
-
-    const processor = new PiiRedactingTelemetryProcessor();
-    client.addTelemetryProcessor(
-      (envelope, contextObjects) =>
-        processor.process(
-          envelope as unknown as TelemetryEnvelope,
-          contextObjects as Record<string, unknown> | undefined
-        )
-    );
-  }
-
   initialised = true;
-  console.info("[telemetry] Application Insights initialised with health filter and PII redactor");
+  console.info(
+    "[telemetry] Application Insights initialised with v3 span/log PII processors"
+  );
 }
 
 export function getTelemetryClient(): appInsights.TelemetryClient | undefined {

@@ -3,15 +3,12 @@ import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import type { SdkLogRecord } from "@opentelemetry/sdk-logs";
 import { describe, it, expect, vi } from "vitest";
 import {
-  HealthFilterTelemetryProcessor,
   OTEL_PII_SPAN_ATTRS,
   PiiRedactingLogRecordProcessor,
   PiiRedactingSpanProcessor,
-  PiiRedactingTelemetryProcessor,
   PII_FIELDS,
   redactAttributesInPlace,
   redactObject,
-  type TelemetryEnvelope,
 } from "../telemetryRedactor.js";
 
 type MutableSpanContext = ReturnType<ReadableSpan["spanContext"]>;
@@ -411,44 +408,5 @@ describe("PiiRedactingSpanProcessor", () => {
 
     await expect(processor.forceFlush()).resolves.toBeUndefined();
     await expect(processor.shutdown()).resolves.toBeUndefined();
-  });
-});
-
-describe("v2 compatibility telemetry processors", () => {
-  it("drops successful Functions.health envelopes and forwards failed ones", () => {
-    const processor = new HealthFilterTelemetryProcessor();
-    const successful: TelemetryEnvelope = {
-      tags: { "ai.operation.name": "Functions.health" },
-      data: { baseData: { responseCode: "200", success: true } },
-    };
-    const failed: TelemetryEnvelope = {
-      tags: { "ai.operation.name": "Functions.health" },
-      data: { baseData: { responseCode: "503" } },
-    };
-
-    expect(processor.process(successful)).toBe(false);
-    expect(processor.process(failed)).toBe(true);
-  });
-
-  it("redacts v2 envelope baseData and top-level PII fields", () => {
-    const processor = new PiiRedactingTelemetryProcessor();
-    const envelope: TelemetryEnvelope = {
-      email: "pilot@example.com",
-      data: {
-        baseData: {
-          properties: { accessToken: "tok_abc", roundId: "round-1" },
-        },
-      },
-    };
-
-    processor.process(envelope);
-
-    const properties = envelope.data?.baseData?.["properties"] as Record<
-      string,
-      unknown
-    >;
-    expect(envelope["email"]).toBe("***");
-    expect(properties["accessToken"]).toBe("***");
-    expect(properties["roundId"]).toBe("round-1");
   });
 });

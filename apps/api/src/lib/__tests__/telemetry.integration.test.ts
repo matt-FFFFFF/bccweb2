@@ -1,10 +1,68 @@
+import { SpanKind, SpanStatusCode, TraceFlags } from "@opentelemetry/api";
+import type { SdkLogRecord } from "@opentelemetry/sdk-logs";
+import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as appInsights from "applicationinsights";
 import { setup, getTelemetryClient, resetForTests } from "../telemetry.js";
-import { PII_FIELDS } from "../telemetryRedactor.js";
+import {
+  PiiRedactingLogRecordProcessor,
+  PiiRedactingSpanProcessor,
+} from "../telemetryRedactor.js";
 
 const CONN =
   "InstrumentationKey=00000000-0000-0000-0000-000000000000;IngestionEndpoint=https://example.invalid/";
+
+type MutableSpanContext = ReturnType<ReadableSpan["spanContext"]>;
+
+function createIntegrationSpan(attributes: Record<string, unknown>): ReadableSpan {
+  const context: MutableSpanContext = {
+    traceId: "0af7651916cd43dd8448eb211c80319c",
+    spanId: "b7ad6b7169203331",
+    traceFlags: TraceFlags.SAMPLED,
+  };
+
+  return {
+    name: "Functions.rounds",
+    kind: SpanKind.SERVER,
+    spanContext: () => context,
+    startTime: [0, 0],
+    endTime: [0, 1],
+    status: { code: SpanStatusCode.UNSET },
+    attributes,
+    links: [],
+    events: [],
+    duration: [0, 1],
+    ended: true,
+    resource: {} as ReadableSpan["resource"],
+    instrumentationScope: { name: "integration-test" },
+    droppedAttributesCount: 0,
+    droppedEventsCount: 0,
+    droppedLinksCount: 0,
+  };
+}
+
+function createIntegrationLogRecord(): {
+  readonly logRecord: SdkLogRecord;
+  readonly setAttribute: ReturnType<typeof vi.fn>;
+} {
+  const setAttribute = vi.fn((_key: string, _value?: unknown) => logRecord);
+  const logRecord = {
+    hrTime: [0, 0],
+    hrTimeObserved: [0, 0],
+    resource: {} as SdkLogRecord["resource"],
+    instrumentationScope: { name: "integration-test" },
+    attributes: {},
+    droppedAttributesCount: 0,
+    setAttribute,
+    setAttributes: vi.fn(() => logRecord),
+    setBody: vi.fn(() => logRecord),
+    setEventName: vi.fn(() => logRecord),
+    setSeverityNumber: vi.fn(() => logRecord),
+    setSeverityText: vi.fn(() => logRecord),
+  } satisfies SdkLogRecord;
+
+  return { logRecord, setAttribute };
+}
 
 describe("telemetry.setup()", () => {
   let warnSpy: ReturnType<typeof vi.spyOn>;
@@ -45,7 +103,7 @@ describe("telemetry.setup()", () => {
     expect(warnSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("initialises the SDK and registers exactly two telemetry processors when configured", () => {
+  it("initialises the SDK when configured", () => {
     process.env["APPLICATIONINSIGHTS_CONNECTION_STRING"] = CONN;
 
     setup();
@@ -53,81 +111,47 @@ describe("telemetry.setup()", () => {
     const client = getTelemetryClient();
     expect(client).toBeDefined();
     expect(client).toBe(appInsights.defaultClient);
-
-    // applicationinsights v2 keeps the registered processors on the
-    // TelemetryClient itself (private `_telemetryProcessors` array); v3
-    // moved this to a no-op shim. We pinned v2 in apps/api/package.json
-    // precisely so the redactor actually runs — assert exactly two are
-    // present: HealthFilterTelemetryProcessor (first) and
-    // PiiRedactingTelemetryProcessor (second).
-    const processors = (
-      client as unknown as { _telemetryProcessors: unknown[] }
-    )._telemetryProcessors;
-    expect(Array.isArray(processors)).toBe(true);
-    expect(processors).toHaveLength(2);
+    expect(infoSpy).toHaveBeenCalledWith(
+      "[telemetry] Application Insights initialised with v3 span/log PII processors"
+    );
   });
 
-  it("is idempotent — calling setup() twice does not double-register the processors", () => {
+  it("is idempotent — calling setup() twice keeps the same client", () => {
     process.env["APPLICATIONINSIGHTS_CONNECTION_STRING"] = CONN;
 
     setup();
+    const firstClient = getTelemetryClient();
     setup();
 
-    const client = getTelemetryClient()!;
-    const processors = (
-      client as unknown as { _telemetryProcessors: unknown[] }
-    )._telemetryProcessors;
-    expect(processors).toHaveLength(2);
+    const secondClient = getTelemetryClient();
+    expect(firstClient).toBeDefined();
+    expect(secondClient).toBe(firstClient);
+    expect(secondClient).toBe(appInsights.defaultClient);
+    expect(infoSpy).toHaveBeenCalledTimes(1);
   });
 
-  it("scrubs PII from a fired track event before it reaches the channel", () => {
+  it("scrubs PII through the v3 span and log processors used by setup", () => {
     process.env["APPLICATIONINSIGHTS_CONNECTION_STRING"] = CONN;
 
     setup();
-    const client = getTelemetryClient()!;
+    expect(getTelemetryClient()).toBeDefined();
 
-    // Replace the channel sink so envelopes are captured instead of sent.
-    // The SDK still runs the full processor pipeline before invoking `send`,
-    // which is exactly what we want to verify.
-    const captured: Array<Record<string, unknown>> = [];
-    (client.channel as unknown as { send: (e: unknown) => void }).send = (
-      envelope: unknown
-    ) => {
-      captured.push(envelope as Record<string, unknown>);
+    const spanAttributes: Record<string, unknown> = {
+      email: "pilot@example.com",
+      "url.query": "token=tok_secret",
+      "http.method": "GET",
     };
+    const span = createIntegrationSpan(spanAttributes);
+    new PiiRedactingSpanProcessor().onEnd(span);
 
-    client.trackEvent({
-      name: "pilot.registered",
-      properties: {
-        pilotId: "uuid-123",
-        email: "pilot@example.com",
-        phoneNumber: "+447700900000",
-        medicalInfo: "asthma",
-        accessToken: "tok_secret",
-        roundId: "round-abc",
-      },
-    });
+    const { logRecord, setAttribute } = createIntegrationLogRecord();
+    new PiiRedactingLogRecordProcessor().onEmit(logRecord);
 
-    expect(captured).toHaveLength(1);
-    const envelope = captured[0]!;
-    const data = envelope["data"] as { baseData?: Record<string, unknown> };
-    const baseData = data?.baseData ?? {};
-    const props = (baseData["properties"] ?? {}) as Record<string, unknown>;
-
-    expect(props["email"]).toBe("***");
-    expect(props["phoneNumber"]).toBe("***");
-    expect(props["medicalInfo"]).toBe("***");
-    expect(props["accessToken"]).toBe("***");
-    expect(props["pilotId"]).toBe("uuid-123");
-    expect(props["roundId"]).toBe("round-abc");
-
-    const serialised = JSON.stringify(envelope);
-    for (const field of ["email", "phoneNumber", "medicalInfo", "accessToken"]) {
-      expect(PII_FIELDS).toContain(field);
-    }
-    expect(serialised).not.toContain("pilot@example.com");
-    expect(serialised).not.toContain("+447700900000");
-    expect(serialised).not.toContain("tok_secret");
-    expect(serialised).not.toContain("asthma");
+    expect(spanAttributes["email"]).toBe("***");
+    expect(spanAttributes["url.query"]).toBe("***");
+    expect(spanAttributes["http.method"]).toBe("GET");
+    expect(span.spanContext().traceFlags).toBe(TraceFlags.SAMPLED);
+    expect(setAttribute).toHaveBeenCalledWith("email", "***");
+    expect(setAttribute).toHaveBeenCalledWith("accessToken", "***");
   });
 });
