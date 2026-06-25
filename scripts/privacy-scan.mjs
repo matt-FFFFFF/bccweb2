@@ -15,6 +15,7 @@
  */
 
 import { BlobServiceClient } from "@azure/storage-blob";
+import RE2 from "re2";
 import { readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -48,6 +49,11 @@ const BUNDLE_PATTERNS = bundlePatternsArg
       .map((p) => p.trim())
       .filter(Boolean)
   : [];
+
+// Defence-in-depth cap on operator-supplied --bundle-patterns (PII regexes are
+// short, e.g. an email or phone shape). RE2 already guarantees linear-time
+// matching, so this only guards against absurd inputs.
+const MAX_PATTERN_LENGTH = 200;
 
 const PUBLIC_CONTAINER = process.env["BLOB_CONTAINER_NAME"] ?? "data";
 
@@ -160,11 +166,26 @@ async function checkSpaBundle() {
     return;
   }
 
-  const regexes = BUNDLE_PATTERNS.map((p) => {
+  const regexes = BUNDLE_PATTERNS.map((p, index) => {
+    if (p.length > MAX_PATTERN_LENGTH) {
+      console.warn(
+        `[WARN] ${CHECK}: pattern #${index} (${p.length} chars) exceeds ${MAX_PATTERN_LENGTH} chars — skipped`
+      );
+      return null;
+    }
     try {
-      return { re: new RegExp(p), source: p };
-    } catch {
-      console.warn(`[WARN] ${CHECK}: invalid regex "${p}" — skipped`);
+      // RE2 is a linear-time, backtracking-free regex engine. Compiling the
+      // operator-supplied pattern with it (instead of `new RegExp`) means a
+      // crafted pattern can't trigger catastrophic backtracking (ReDoS) when
+      // matched against large bundle files below.
+      return { re: new RE2(p), source: p };
+    } catch (err) {
+      // Never echo the raw pattern: --bundle-patterns may contain a real PII
+      // value (not just a shape), which would leak into CI logs. Log only the
+      // index/length plus the compile error.
+      console.warn(
+        `[WARN] ${CHECK}: invalid regex at pattern #${index} (${p.length} chars) — skipped: ${err.message}`
+      );
       return null;
     }
   }).filter(Boolean);
