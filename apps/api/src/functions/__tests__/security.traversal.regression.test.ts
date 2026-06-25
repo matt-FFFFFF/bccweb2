@@ -34,7 +34,7 @@ describe("blob path traversal (finding G)", () => {
       expect(() => assertSafeBlobPath(path)).not.toThrow();
     });
 
-    test("getPrivateBlobClient throws before reaching storage on traversal", () => {
+    test("getPrivateBlobClient rejects traversal at the accessor before returning a client", () => {
       expect(() => getPrivateBlobClient("season-clubs/2025/../../auth/secret.json")).toThrow();
     });
   });
