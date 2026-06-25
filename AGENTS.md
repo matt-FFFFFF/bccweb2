@@ -57,6 +57,7 @@ main checkout:
   e.g. `git worktree add .worktrees/pdf-stack-upgrade -b deps/pdf-stack-149-25 origin/main`.
   `.worktrees/` is gitignored — keep throwaway verification artifacts (render harnesses,
   scratch Dockerfiles) there, uncommitted.
+- Ensure plan contains CORRECT PATHS for worktree, agents have unintentionally altered files in the main checkout before.
 - A fresh worktree has **no `node_modules`/`dist/`** — run `npm ci && make build` in it
   before editing or typechecking (workspaces resolve `@bccweb/types` from `dist/`).
 - Do all task work inside the worktree; commit only the intended source files.
