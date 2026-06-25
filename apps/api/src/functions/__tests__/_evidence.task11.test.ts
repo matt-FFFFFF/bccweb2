@@ -171,10 +171,17 @@ describe("Task 11 mutationRateLimit evidence harness", () => {
     await seedAdminUser(adminId, email);
     const token = signAccessToken(adminId, email);
 
-    // lockRound looks up the round; we don't seed one. The 404 path is hit
-    // AFTER the rate-limit gate consumes a token, so each call still drains
-    // the heavy bucket as intended.
-    const params = { id: randomUUID() };
+    // lockRound scope-checks the round (read + organising-club guard) before
+    // the rate limiter, consistent with the other coord handlers. Seed a
+    // manageable round so each call reaches the limiter: it drains a heavy
+    // token, then 409s on the status guard (the round is not BriefComplete).
+    const roundId = randomUUID();
+    await writePrivateBlob(`rounds/${roundId}.json`, {
+      id: roundId,
+      site: { id: randomUUID(), name: "Rate Limit Site" },
+      season: { year: 2026 },
+    });
+    const params = { id: roundId };
 
     for (let i = 1; i <= 6; i += 1) {
       const req = makeReq("POST", {}, token, params);
