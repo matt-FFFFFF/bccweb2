@@ -79,6 +79,11 @@ export const OTEL_PII_SPAN_ATTRS: ReadonlyArray<string> = [
   "http.request.header.cookie",
 ];
 
+const DEFAULT_PII_FIELD_SET: ReadonlySet<string> = new Set(PII_FIELDS);
+const DEFAULT_OTEL_PII_SPAN_ATTR_SET: ReadonlySet<string> = new Set(
+  OTEL_PII_SPAN_ATTRS
+);
+
 // ─── Redaction helpers ────────────────────────────────────────────────────────
 
 /**
@@ -114,8 +119,11 @@ export function redactAttributesInPlace(
   fields: ReadonlyArray<string> = PII_FIELDS,
   otelKeys: ReadonlyArray<string> = OTEL_PII_SPAN_ATTRS
 ): void {
-  const fieldSet = new Set(fields);
-  const otelKeySet = new Set(otelKeys);
+  const fieldSet = fields === PII_FIELDS ? DEFAULT_PII_FIELD_SET : new Set(fields);
+  const otelKeySet =
+    otelKeys === OTEL_PII_SPAN_ATTRS
+      ? DEFAULT_OTEL_PII_SPAN_ATTR_SET
+      : new Set(otelKeys);
 
   for (const [key, value] of Object.entries(attrs)) {
     if (fieldSet.has(key) || otelKeySet.has(key)) {
