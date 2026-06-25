@@ -166,10 +166,10 @@ async function checkSpaBundle() {
     return;
   }
 
-  const regexes = BUNDLE_PATTERNS.map((p) => {
+  const regexes = BUNDLE_PATTERNS.map((p, index) => {
     if (p.length > MAX_PATTERN_LENGTH) {
       console.warn(
-        `[WARN] ${CHECK}: pattern exceeds ${MAX_PATTERN_LENGTH} chars — skipped`
+        `[WARN] ${CHECK}: pattern #${index} (${p.length} chars) exceeds ${MAX_PATTERN_LENGTH} chars — skipped`
       );
       return null;
     }
@@ -179,8 +179,13 @@ async function checkSpaBundle() {
       // crafted pattern can't trigger catastrophic backtracking (ReDoS) when
       // matched against large bundle files below.
       return { re: new RE2(p), source: p };
-    } catch {
-      console.warn(`[WARN] ${CHECK}: invalid regex "${p}" — skipped`);
+    } catch (err) {
+      // Never echo the raw pattern: --bundle-patterns may contain a real PII
+      // value (not just a shape), which would leak into CI logs. Log only the
+      // index/length plus the compile error.
+      console.warn(
+        `[WARN] ${CHECK}: invalid regex at pattern #${index} (${p.length} chars) — skipped: ${err.message}`
+      );
       return null;
     }
   }).filter(Boolean);
