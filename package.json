@@ -15,14 +15,14 @@
     "e2e": "playwright test --config tests/e2e/playwright.config.ts"
   },
   "engines": {
-    "node": ">=24.0.0",
-    "npm": ">=10.0.0"
+    "node": "^24.0.0",
+    "npm": "^10.0.0"
   },
   "devDependencies": {
-    "@playwright/test": "^1.61.0",
+    "@playwright/test": "1.61.1",
     "@vitest/coverage-v8": "4.1.9",
-    "typescript-language-server": "^5.3.0",
+    "typescript-language-server": "5.3.0",
     "vitest": "4.1.9",
-    "zod": "^4"
+    "zod": "4.4.3"
   }
 }
