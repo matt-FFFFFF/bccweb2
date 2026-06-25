@@ -5,6 +5,7 @@ import {
   BlockBlobClient,
 } from "@azure/storage-blob";
 import { getTelemetryClient } from "./telemetry.js";
+import { HttpError } from "./http.js";
 
 // ─── Client singletons ────────────────────────────────────────────────────────
 
@@ -64,23 +65,44 @@ function getPrivateContainer(): ContainerClient {
   return _privateContainer;
 }
 
+// ─── Path traversal guard ────────────────────────────────────────────────────
+
+// SECURITY: the Azure SDK resolves `..` segments in blob names, so a request-derived
+// path segment is a traversal sink (cross-blob read oracle + foreign-blob write).
+// Every read/write/lease helper funnels through the four accessors below, so this
+// one guard neutralises traversal for all sinks; handlers still validate ids too.
+export function assertSafeBlobPath(path: string): void {
+  const unsafe =
+    path.length === 0 ||
+    path.includes("\\") ||
+    /[\u0000-\u001f\u007f]/.test(path) ||
+    path.split("/").some((seg) => seg === "" || seg === "." || seg === "..");
+  if (unsafe) {
+    throw new HttpError(400, "INVALID_BLOB_PATH", "Invalid blob path");
+  }
+}
+
 // ─── Public container accessors ──────────────────────────────────────────────
 
 export function getBlobClient(path: string): BlobClient {
+  assertSafeBlobPath(path);
   return getContainer().getBlobClient(path);
 }
 
 export function getBlockBlobClient(path: string): BlockBlobClient {
+  assertSafeBlobPath(path);
   return getContainer().getBlockBlobClient(path);
 }
 
 // ─── Private container accessors ─────────────────────────────────────────────
 
 export function getPrivateBlobClient(path: string): BlobClient {
+  assertSafeBlobPath(path);
   return getPrivateContainer().getBlobClient(path);
 }
 
 export function getPrivateBlockBlobClient(path: string): BlockBlobClient {
+  assertSafeBlobPath(path);
   return getPrivateContainer().getBlockBlobClient(path);
 }
 

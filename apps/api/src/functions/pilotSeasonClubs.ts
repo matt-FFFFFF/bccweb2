@@ -30,11 +30,17 @@ interface PilotClubMap {
 // the shape without stripping unknown pilot ids.
 const PilotClubMapSchema = z.record(z.string().min(1), z.string().min(1));
 
-interface AssignBody {
-  pilotId: string;
-  clubId: string;
-  seasonYear: number;
-}
+// SECURITY: pilotId/clubId are interpolated into private blob paths, so restrict
+// them to a safe id charset — request input cannot then inject `/` or `..` to
+// traverse to a foreign pilot/club blob. seasonYear must be a real year, not a
+// string carrying path separators.
+const SAFE_ID = /^[A-Za-z0-9_-]+$/;
+
+const AssignBodySchema = z.object({
+  pilotId: z.string().regex(SAFE_ID),
+  clubId: z.string().regex(SAFE_ID),
+  seasonYear: z.number().int().min(2000).max(2100),
+});
 
 function parseYear(req: HttpRequest): number {
   const raw = req.query.get("year");
@@ -98,16 +104,18 @@ async function assignPilotSeasonClub(
 
   const reassign = req.query.get("reassign") === "true";
 
-  let body: AssignBody;
+  let rawBody: unknown;
   try {
-    body = await req.json() as AssignBody;
+    rawBody = await req.json();
   } catch {
     throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
-  if (!body.pilotId || !body.clubId || !body.seasonYear) {
-    throw new HttpError(400, "INVALID_BODY", "pilotId, clubId, seasonYear required");
+  const parsed = AssignBodySchema.safeParse(rawBody);
+  if (!parsed.success) {
+    throw new HttpError(400, "INVALID_BODY", "pilotId and clubId must be valid ids and seasonYear a year in 2000-2100");
   }
+  const body = parsed.data;
 
   if (isCoord && !isAdmin && body.clubId !== caller.clubId) {
     return forbiddenResponse();
@@ -257,7 +265,10 @@ async function deletePilotSeasonClub(
   const pilotId = req.params["pilotId"];
   const seasonYearRaw = req.params["seasonYear"];
   if (!pilotId || !seasonYearRaw) throw new HttpError(400, "BAD_REQUEST", "Missing params");
+  if (!SAFE_ID.test(pilotId)) throw new HttpError(400, "INVALID_PILOT_ID", "Invalid pilot id");
+  if (!/^\d{4}$/.test(seasonYearRaw)) throw new HttpError(400, "INVALID_YEAR", "Invalid season year");
   const seasonYear = Number.parseInt(seasonYearRaw, 10);
+  if (seasonYear < 2000 || seasonYear > 2100) throw new HttpError(400, "INVALID_YEAR", "Invalid season year");
 
   if (isCoord && !isAdmin) {
     let pilotForScope: Pilot;
