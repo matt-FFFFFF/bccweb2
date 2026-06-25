@@ -12,6 +12,7 @@ import {
   getCallerIdentity,
   unauthorizedResponse,
 } from "../lib/auth.js";
+import { canManageRound, redactRoundSnapshots } from "../lib/roundAuth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 
 const RoundsIndexSchema = z.array(RoundSummarySchema);
@@ -59,7 +60,11 @@ async function getRoundById(
       RoundSchema,
       `rounds/${id}.json`,
     );
-    return { status: 200, jsonBody: round };
+    // Snapshot PII (medical/emergency/contact) is manager-only; others get it stripped.
+    const body = canManageRound(caller, round)
+      ? round
+      : redactRoundSnapshots(round);
+    return { status: 200, jsonBody: body };
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(404, "NOT_FOUND", "Round not found");

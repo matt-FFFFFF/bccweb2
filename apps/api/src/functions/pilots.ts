@@ -347,6 +347,14 @@ async function upsertPilotInIndex(
   pilot: Pilot,
   email?: string
 ): Promise<void> {
+  // Public index shows only VERIFIED active-season club membership, never the
+  // self-declared currentClub (a pilot can set that to any club). Stops a pilot
+  // poisoning the anonymously-readable index with an unaffiliated club.
+  const activeYear = await getActiveSeasonYear();
+  const verifiedClubId = pilot.seasonClubs.find(
+    (sc) => sc.seasonYear === activeYear,
+  )?.clubId;
+
   await ensureJsonIndexBlob("pilots.json", "[]");
 
   await withLeaseRetry("pilots.json", async (leaseId) => {
@@ -365,7 +373,7 @@ async function upsertPilotInIndex(
       id: pilot.id,
       legacyId: pilot.legacyId,
       name: pilot.person.fullName,
-      clubId: pilot.currentClub?.id,
+      clubId: verifiedClubId,
       rating: pilot.pilotRating,
     };
 

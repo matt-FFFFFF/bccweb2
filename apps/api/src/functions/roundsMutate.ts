@@ -19,6 +19,7 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type {
+  CallerIdentity,
   Round,
   RoundStatus,
   Season,
@@ -58,6 +59,7 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { assertCanManageRound } from "../lib/roundAuth.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 import { updateRoundsIndex, recomputeSeason } from "../lib/recompute.js";
 import { createPureTrackGroups, type PureTrackRoundResult } from "../lib/puretrack.js";
@@ -73,6 +75,23 @@ import {
 
 function isCoord(roles: string[]): boolean {
   return roles.includes("RoundsCoord") || roles.includes("Admin");
+}
+
+async function assertManageableRound(
+  caller: CallerIdentity,
+  id: string,
+): Promise<void> {
+  const path = `rounds/${id}.json`;
+  let round: Round;
+  try {
+    round = await readJson(getPrivateBlobClient(path), RoundSchema, path);
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
+    }
+    throw new HttpError(500, "INTERNAL");
+  }
+  assertCanManageRound(caller, round);
 }
 
 // Schemas for blobs without dedicated re-exports.
@@ -134,6 +153,14 @@ async function createRound(
   }
   if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
     throw new HttpError(400, "INVALID_DATE", "date must be yyyy-MM-dd");
+  }
+
+  if (
+    !caller.roles.includes("Admin") &&
+    body.organisingClubId &&
+    body.organisingClubId !== caller.clubId
+  ) {
+    return forbiddenResponse("You can only create rounds for your own club");
   }
 
   // Load site
@@ -248,6 +275,8 @@ async function updateRound(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
+  await assertManageableRound(caller, id);
+
   const body = (await req.json()) as {
     date?: string;
     siteId?: string;
@@ -358,6 +387,8 @@ async function transition(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
+
+  await assertManageableRound(caller, id);
 
   const path = `rounds/${id}.json`;
   let updated: Round;
@@ -680,6 +711,8 @@ async function lockRound(
     throw new HttpError(500, "INTERNAL");
   }
 
+  assertCanManageRound(caller, round);
+
   if (round.status !== "BriefComplete") {
     return {
       status: 409,
@@ -891,6 +924,8 @@ async function completeRound(
     throw new HttpError(500, "INTERNAL");
   }
 
+  assertCanManageRound(caller, current);
+
   if (current.status !== "Locked") {
     return {
       status: 409,
@@ -956,6 +991,8 @@ async function updateNarrative(
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
   await mutationRateLimit(req, caller, "updateNarrative", "standard");
+
+  await assertManageableRound(caller, id);
 
   const body = (await req.json()) as { narrative?: string };
   if (body.narrative === undefined) {

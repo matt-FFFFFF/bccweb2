@@ -1,0 +1,97 @@
+/**
+ * Round-level authorization helpers (Security PR-1 — BOLA / IDOR).
+ *
+ * Centralises the "who may act on this round" rule that several handlers
+ * (teams, flights, rounds, brief, roundsMutate) previously each got wrong by
+ * checking role membership (`isCoord`) WITHOUT scoping a RoundsCoord to the
+ * round's organising club. The same organising-club rule is already enforced
+ * (and tested) for the puretrack and brief-mutation endpoints; this module
+ * makes it reusable so every round-scoped handler shares one correct definition.
+ */
+
+import type { CallerIdentity, PilotSnapshot, Round } from "@bccweb/types";
+import { HttpError } from "./http.js";
+
+type RoundClubScope = Pick<Round, "organisingClub">;
+type RoundTeamsScope = Pick<Round, "teams">;
+
+/**
+ * True when the caller may MUTATE the round: an Admin, or a RoundsCoord whose
+ * own club organises it. A RoundsCoord with no clubId, or whose clubId differs
+ * from the round's organising club, is denied.
+ */
+export function canManageRound(
+  caller: CallerIdentity,
+  round: RoundClubScope,
+): boolean {
+  if (caller.roles.includes("Admin")) return true;
+  return (
+    caller.roles.includes("RoundsCoord") &&
+    caller.clubId != null &&
+    round.organisingClub?.id === caller.clubId
+  );
+}
+
+/** Throw 403 unless the caller may manage (mutate) the round. */
+export function assertCanManageRound(
+  caller: CallerIdentity,
+  round: RoundClubScope,
+): void {
+  if (!canManageRound(caller, round)) {
+    throw new HttpError(
+      403,
+      "FORBIDDEN",
+      "You can only manage rounds organised by your club",
+    );
+  }
+}
+
+/** True when the caller is a pilot occupying a filled slot in the round. */
+export function isRoundParticipant(
+  caller: CallerIdentity,
+  round: RoundTeamsScope,
+): boolean {
+  const pilotId = caller.pilotId;
+  if (!pilotId) return false;
+  return round.teams.some((team) =>
+    team.pilots.some(
+      (slot) => slot.status === "Filled" && slot.pilotId === pilotId,
+    ),
+  );
+}
+
+/**
+ * True when the caller may READ the round's private detail (incl. its brief):
+ * a manager (Admin / organising-club coord) or a pilot flying in the round.
+ */
+export function canViewRoundDetail(
+  caller: CallerIdentity,
+  round: RoundClubScope & RoundTeamsScope,
+): boolean {
+  return canManageRound(caller, round) || isRoundParticipant(caller, round);
+}
+
+/**
+ * Return a copy of the round with every pilot snapshot reduced to its non-PII
+ * scoring fields (wingClass, pilotRating). Used for callers who may read a
+ * round but must NOT see the per-pilot medical / emergency / contact PII
+ * captured at lock time. wingClass + pilotRating are explicitly NOT PII (see
+ * scripts/lib/pii.mjs) and are consumed by the brief UI, so they are retained.
+ */
+export function redactRoundSnapshots(round: Round): Round {
+  return {
+    ...round,
+    teams: round.teams.map((team) => ({
+      ...team,
+      pilots: team.pilots.map((slot) => ({
+        ...slot,
+        snapshot: slot.snapshot
+          ? ({
+              wingClass: slot.snapshot.wingClass,
+              pilotRating: slot.snapshot.pilotRating,
+            } satisfies PilotSnapshot)
+          : slot.snapshot,
+      })),
+    })),
+  };
+}

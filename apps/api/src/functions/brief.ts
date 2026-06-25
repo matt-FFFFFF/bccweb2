@@ -23,13 +23,14 @@ import {
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
+import { canViewRoundDetail } from "../lib/roundAuth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 import { computeBriefHash } from "../lib/signTofly/briefVersion.js";
 import { invalidatePriorSignToFlyFlags } from "../lib/signTofly/invalidate.js";
 import { listSignaturesForRound } from "../lib/signTofly/ledger.js";
 import { generateBriefPdf } from "../lib/pdf.js";
-import type { Round } from "@bccweb/types";
+import type { CallerIdentity, Round } from "@bccweb/types";
 
 function contentTypeForPath(path: string): string {
   const lower = path.toLowerCase();
@@ -69,6 +70,25 @@ async function readBrief(id: string): Promise<RoundBrief | null> {
   }
 }
 
+async function assertCanViewRound(
+  caller: CallerIdentity,
+  id: string,
+): Promise<void> {
+  const path = `rounds/${id}.json`;
+  let round: Round;
+  try {
+    round = await readJson(getPrivateBlobClient(path), RoundSchema, path);
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
+    }
+    throw new HttpError(500, "INTERNAL");
+  }
+  if (!canViewRoundDetail(caller, round)) {
+    throw new HttpError(403, "FORBIDDEN", "You do not have access to this round's brief");
+  }
+}
+
 // ─── GET /api/rounds/{id}/brief ───────────────────────────────────────────────
 
 async function getRoundBrief(
@@ -80,6 +100,8 @@ async function getRoundBrief(
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
+
+  await assertCanViewRound(caller, id);
 
   const brief = await readBrief(id);
   if (!brief) {
@@ -106,6 +128,8 @@ async function getRoundBriefPdf(
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
+
+  await assertCanViewRound(caller, id);
 
   // Non-JSON pdf binary: use BlobClient.download() not readBlob/readJson (see "PREFER readJson" doc in lib/blob.ts).
   const blobClient = getPrivateBlobClient(`round-briefs/${id}.pdf`);
@@ -164,6 +188,8 @@ async function getRoundBriefImage(
   if (!Number.isInteger(imageNumber) || imageNumber < 1) {
     throw new HttpError(400, "INVALID_IMAGE_NUMBER", "Invalid image number");
   }
+
+  await assertCanViewRound(caller, id);
 
   const brief = await readBrief(id);
   if (!brief) {
