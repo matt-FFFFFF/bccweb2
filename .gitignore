@@ -43,6 +43,7 @@ tests/e2e/test-results/
 iac/plan.binary
 
 # OpenCode session state
+.opencode/
 .omo/
 
 # Load-testing fixtures and dev credentials (T1)
@@ -53,3 +54,6 @@ tests/load/.prepared-round.json
 # Load-test runtime logs (k6 stdout per `make loadtest-register` / `loadtest-sign`)
 logs/
 .worktrees/
+
+# Platwrigt MCP
+.playwright-mcp/
