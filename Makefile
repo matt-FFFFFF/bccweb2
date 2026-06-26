@@ -45,6 +45,10 @@ test: ## Run all tests (requires Azurite for API tests)
 test-heavy:
 	VITEST_HEAVY=1 npx vitest run --project @bccweb/api
 
+.PHONY: test-integration
+test-integration: ## Run opt-in PureTrack LIVE-API integration tests (needs apps/api/.env + Azurite + network; self-skips without creds)
+	VITEST_INTEGRATION=1 npx vitest run --project @bccweb/api
+
 .PHONY: dev
 dev: docker-up ## Start full local dev stack (Docker Compose)
 
