@@ -9,7 +9,7 @@ import type { HttpRequest } from "@azure/functions";
 // (the platform appends the real IP at the END). The right-most XFF hop is only
 // a local/dev fallback for when `client-ip` is absent.
 export function trustedClientIp(req: HttpRequest): string | null {
-  const direct = req.headers.get("client-ip");
+  const direct = req.headers.get("client-ip")?.trim();
   if (direct) return stripPort(direct);
   const xff = req.headers.get("x-forwarded-for");
   if (!xff) return null;
