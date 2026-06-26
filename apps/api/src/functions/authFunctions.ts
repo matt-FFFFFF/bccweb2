@@ -480,8 +480,11 @@ async function refresh(
   try {
     const userPath = `users/${userId}.json`;
     user = await readJson(getPrivateBlobClient(userPath), UserSchema, userPath);
-  } catch {
-    return { status: 401, jsonBody: { error: "User not found" } };
+  } catch (err) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      return { status: 401, jsonBody: { error: "User not found" } };
+    }
+    throw err;
   }
 
   const accessToken = signAccessToken(userId, user.email);
