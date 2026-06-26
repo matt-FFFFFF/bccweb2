@@ -4,7 +4,8 @@
     "outDir": "./dist",
     "rootDir": ".",
     "module": "NodeNext",
-    "moduleResolution": "NodeNext"
+    "moduleResolution": "NodeNext",
+    "types": ["node"]
   },
   "references": [
     { "path": "../../packages/types" },
