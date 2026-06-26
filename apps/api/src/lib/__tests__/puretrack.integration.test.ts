@@ -18,17 +18,16 @@ try {
 const BASE_URL = "https://puretrack.io";
 const GROUP_BLOB_PREFIX = "puretrack-groups/";
 
-const hasCreds = !!(
-  process.env["PURETRACK_API_KEY"] &&
-  process.env["PURETRACK_EMAIL"] &&
-  process.env["PURETRACK_PASSWORD"] &&
-  process.env["PURETRACK_TEST_PILOT_IDS"]
-);
-
 const pilotIds = (process.env["PURETRACK_TEST_PILOT_IDS"] ?? "")
   .split(",")
   .map((value) => Number(value.trim()))
   .filter((value) => Number.isFinite(value) && value > 0);
+
+const hasCreds = !!(
+  process.env["PURETRACK_API_KEY"] &&
+  process.env["PURETRACK_EMAIL"] &&
+  process.env["PURETRACK_PASSWORD"]
+) && pilotIds.length > 0;
 
 type CreatedGroup = {
   readonly id: number;
@@ -289,7 +288,6 @@ describe.skipIf(!hasCreds)("PureTrack live integration", () => {
 
   it("creates round and team groups through the real PureTrack API when credentials are present", async () => {
     // Given: a locked round with one filled BCC slot for each supplied real PureTrack test pilot.
-    expect(pilotIds.length).toBeGreaterThan(0);
     const round = makeRound(runId);
     const slots = round.teams[0]?.pilots ?? [];
     const map = new Map<string, number>();
