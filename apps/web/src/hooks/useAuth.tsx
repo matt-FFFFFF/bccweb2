@@ -60,6 +60,33 @@ function clearAuthStorage() {
   localStorage.removeItem(IDENTITY_KEY);
 }
 
+// SECURITY: revoke the server-side session (bump tokenVersion) on logout. If the
+// access token is missing/expired after idle, mint a fresh one from the refresh
+// token first so the revocation call is authenticated; otherwise it would 401 and
+// silently leave the refresh token valid. Best-effort — never throws.
+async function revokeServerSideSession(
+  accessToken: string | null,
+  refreshToken: string | null,
+): Promise<void> {
+  let token = accessToken;
+  if ((!token || isTokenExpired(token)) && refreshToken && !isTokenExpired(refreshToken)) {
+    const res = await fetch("/api/auth/refresh", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refreshToken }),
+    }).catch(() => null);
+    if (res?.ok) {
+      const minted = (await res.json().catch(() => null)) as RefreshResponse | null;
+      if (minted?.accessToken) token = minted.accessToken;
+    }
+  }
+  if (!token || isTokenExpired(token)) return;
+  await fetch("/api/auth/logout", {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}` },
+  }).catch(() => undefined);
+}
+
 // ─── Hook ─────────────────────────────────────────────────────────────────
 
 export interface AuthState {
@@ -194,6 +221,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    const accessToken = localStorage.getItem(ACCESS_TOKEN_KEY);
+    const refreshToken = localStorage.getItem(REFRESH_TOKEN_KEY);
+    void revokeServerSideSession(accessToken, refreshToken);
     clearAuthStorage();
     setIdentity(null);
     setLoading(false);
