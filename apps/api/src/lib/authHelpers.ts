@@ -20,6 +20,7 @@ export interface AuthCredential {
   passwordHash: string;
   emailVerified: boolean;
   createdAt: string;
+  tokenVersion?: number;
 }
 
 export interface AuthToken {
@@ -71,24 +72,31 @@ export function signAccessToken(userId: string, email: string): string {
   );
 }
 
-export function signRefreshToken(userId: string): string {
+export function signRefreshToken(userId: string, tokenVersion: number): string {
   return jwt.sign(
-    { sub: userId, type: "refresh" },
+    { sub: userId, type: "refresh", tokenVersion },
     getJwtSecret(),
     { algorithm: "HS256", expiresIn: "30d" }
   );
 }
 
 /**
- * Verify a refresh token and return the userId (sub claim).
- * Throws if invalid or expired.
+ * Verify a refresh token and return its userId + tokenVersion claim. Rejects a
+ * non-object payload, a missing/empty subject, a non-"refresh" type, or a
+ * missing/malformed (non-integer / negative) version. Throws if invalid/expired.
  */
-export function verifyRefreshToken(token: string): string {
-  const claims = jwt.verify(token, getJwtSecret(), {
-    algorithms: ["HS256"],
-  }) as { sub: string; type: string };
-  if (claims.type !== "refresh") throw new Error("Invalid token type");
-  return claims.sub;
+export function verifyRefreshToken(token: string): { userId: string; tokenVersion: number } {
+  const claims = jwt.verify(token, getJwtSecret(), { algorithms: ["HS256"] });
+  if (typeof claims !== "object" || claims === null) {
+    throw new Error("Invalid token payload");
+  }
+  const { sub, type, tokenVersion } = claims as { sub?: unknown; type?: unknown; tokenVersion?: unknown };
+  if (type !== "refresh") throw new Error("Invalid token type");
+  if (typeof sub !== "string" || sub.length === 0) throw new Error("Invalid token subject");
+  if (typeof tokenVersion !== "number" || !Number.isInteger(tokenVersion) || tokenVersion < 0) {
+    throw new Error("Invalid token version");
+  }
+  return { userId: sub, tokenVersion };
 }
 
 // ─── Password ─────────────────────────────────────────────────────────────────

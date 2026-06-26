@@ -1,5 +1,6 @@
 import { describe, expect, test, beforeEach, afterEach, vi } from "vitest";
 import { createHash, randomUUID } from "crypto";
+import jwt from "jsonwebtoken";
 import {
   clearSentEmails,
   getRegisteredHandler,
@@ -474,5 +475,122 @@ describe("auth flow integration", () => {
     expect(fourth.status).toBe(429);
     expect(fourth.jsonBody?.["code"]).toBe("RATE_LIMITED");
     expect(fourth.headers?.["Retry-After"]).toBeDefined();
+  });
+
+  test("(15) logout bumps tokenVersion and revokes existing refresh tokens", async () => {
+    const { user } = await makeUser({ emailVerified: true });
+    const login = await invoke("authLogin", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+      body: { email: user.email, password: PASSWORD },
+    });
+    const accessToken = String(login.jsonBody?.["accessToken"]);
+    const refreshToken = String(login.jsonBody?.["refreshToken"]);
+
+    const before = await invoke("authRefresh", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+      body: { refreshToken },
+    });
+    expect(before.status).toBe(200);
+
+    const out = await invoke("authLogout", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${accessToken}`, "x-forwarded-for": uniqueIp() },
+    });
+    expect(out.status).toBe(204);
+
+    const cred = await readPrivateJson<CredWithLockout>(`auth/${user.id}.json`);
+    expect(cred?.tokenVersion).toBe(1);
+
+    const after = await invoke("authRefresh", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+      body: { refreshToken },
+    });
+    expect(after.status).toBe(401);
+  });
+
+  test("(16) reset-password revokes previously issued refresh tokens", async () => {
+    const { user } = await makeUser({ emailVerified: true });
+    const login = await invoke("authLogin", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+      body: { email: user.email, password: PASSWORD },
+    });
+    const refreshToken = String(login.jsonBody?.["refreshToken"]);
+
+    const before = await invoke("authRefresh", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+      body: { refreshToken },
+    });
+    expect(before.status).toBe(200);
+
+    const resetToken = await generateShortLivedToken(user.id, "reset", 1);
+    const reset = await invoke("authResetPassword", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+      body: { token: resetToken, newPassword: "AfterReset123!" },
+    });
+    expect(reset.status).toBe(200);
+
+    const after = await invoke("authRefresh", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+      body: { refreshToken },
+    });
+    expect(after.status).toBe(401);
+  });
+
+  test("(17) re-login after logout issues a refresh token usable at the new version", async () => {
+    const { user } = await makeUser({ emailVerified: true });
+    const first = await invoke("authLogin", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+      body: { email: user.email, password: PASSWORD },
+    });
+    await invoke("authLogout", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${String(first.jsonBody?.["accessToken"])}`,
+        "x-forwarded-for": uniqueIp(),
+      },
+    });
+
+    const second = await invoke("authLogin", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+      body: { email: user.email, password: PASSWORD },
+    });
+    const refreshed = await invoke("authRefresh", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+      body: { refreshToken: String(second.jsonBody?.["refreshToken"]) },
+    });
+    expect(refreshed.status).toBe(200);
+  });
+
+  test("(18) logout without a valid access token -> 401", async () => {
+    const res = await invoke("authLogout", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+    });
+    expect(res.status).toBe(401);
+  });
+
+  test("(19) a refresh token without a tokenVersion claim is rejected", async () => {
+    const { user } = await makeUser({ emailVerified: true });
+    const versionlessToken = jwt.sign(
+      { sub: user.id, type: "refresh" },
+      process.env["JWT_SECRET"] as string,
+      { algorithm: "HS256", expiresIn: "30d" },
+    );
+    const res = await invoke("authRefresh", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+      body: { refreshToken: versionlessToken },
+    });
+    expect(res.status).toBe(401);
   });
 });

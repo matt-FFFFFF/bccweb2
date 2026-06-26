@@ -16,6 +16,7 @@ import { AuthCredentialSchema } from "@bccweb/schemas";
 import { getPrivateBlobClient, withPrivateLease } from "./blob.js";
 import { readJson, writePrivateJson } from "./blobJson.js";
 import { HttpError } from "./http.js";
+import { trustedClientIp } from "./clientIp.js";
 
 // ─── Token Bucket ─────────────────────────────────────────────────────────────
 
@@ -88,18 +89,16 @@ export interface RateLimitOpts {
 /**
  * Token-bucket rate limiter keyed by (identityKey ?? IP, endpoint).
  *
- * Source IP is read from x-forwarded-for (first entry) or x-azure-clientip.
- * Falls back to "unknown" if neither header is present. When opts.identityKey
- * is supplied, it replaces the IP component of the bucket key.
+ * Source IP is the trusted client IP — the platform-stamped `client-ip` header,
+ * falling back to the right-most `x-forwarded-for` hop; see `trustedClientIp`.
+ * Falls back to "unknown" if absent. When opts.identityKey is supplied, it
+ * replaces the IP component of the bucket key.
  *
  * Throws HttpError(429, "RATE_LIMITED") with a Retry-After header when the
  * bucket is exhausted. Emits [METRIC] auth.rateLimit.hit on every rejection.
  */
 export function rateLimit(req: HttpRequest, opts: RateLimitOpts): void {
-  const ip =
-    req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ??
-    req.headers.get("x-azure-clientip") ??
-    "unknown";
+  const ip = trustedClientIp(req) ?? "unknown";
 
   const keyPart = opts.identityKey ?? ip;
   const key = `${keyPart}:${opts.endpoint}`;
