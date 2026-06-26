@@ -585,7 +585,7 @@ function signOwnSlot(ctx: LifecycleContext, caller: { userId: string; email: str
     method: "POST",
     params: { roundId: ctx.roundId, teamId: ctx.teamId, place: "1" },
     headers: {
-      "x-forwarded-for": "203.0.113.42, 10.0.0.1",
+      "x-forwarded-for": "10.0.0.1, 203.0.113.42",
       "user-agent": "round-lifecycle-test",
     },
   }));
@@ -597,7 +597,7 @@ function overrideSign(ctx: LifecycleContext, reason: string) {
     params: { roundId: ctx.roundId, teamId: ctx.teamId, place: "1" },
     body: { reason, onBehalfOfPilotId: ctx.pilotId },
     headers: {
-      "x-forwarded-for": "203.0.113.43, 10.0.0.1",
+      "x-forwarded-for": "10.0.0.1, 203.0.113.43",
       "user-agent": "round-lifecycle-override-test",
     },
   }));

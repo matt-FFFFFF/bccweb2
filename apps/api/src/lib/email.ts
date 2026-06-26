@@ -100,6 +100,18 @@ export async function sendEmail(opts: SendEmailOptions): Promise<void> {
 
 // ─── Helpers: email templates ─────────────────────────────────────────────────
 
+// SECURITY: values interpolated into HTML email bodies (site/round names, verify
+// and reset URLs) are escaped to prevent HTML/attribute injection into outbound
+// mail. Plain-text templates do not need this.
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
 /** Plain-text fallback body for the round brief email */
 export function briefPlainText(siteName: string, date: string): string {
   return [
@@ -118,7 +130,7 @@ export function briefHtmlBody(siteName: string, date: string): string {
 <head><meta charset="UTF-8"><title>BCC Round Brief</title></head>
 <body style="font-family:sans-serif;color:#222;max-width:600px;margin:0 auto;padding:1rem">
   <h2 style="color:#1a4fa0">BCC Round Brief</h2>
-  <p><strong>${siteName}</strong> &mdash; ${date}</p>
+  <p><strong>${escapeHtml(siteName)}</strong> &mdash; ${escapeHtml(date)}</p>
   <p>Please find the round brief attached as a PDF.</p>
   <hr style="border:none;border-top:1px solid #ddd;margin:1.5rem 0">
   <p style="font-size:0.85em;color:#888">
@@ -139,10 +151,10 @@ export function verificationEmailHtml(verifyUrl: string): string {
   <h2 style="color:#1a4fa0">Verify your BCC account</h2>
   <p>Thank you for registering. Please click the button below to verify your email address.</p>
   <p style="margin:1.5rem 0">
-    <a href="${verifyUrl}" style="background:#1a4fa0;color:#fff;padding:0.6rem 1.2rem;border-radius:0.3rem;text-decoration:none;font-weight:bold">Verify email address</a>
+    <a href="${escapeHtml(verifyUrl)}" style="background:#1a4fa0;color:#fff;padding:0.6rem 1.2rem;border-radius:0.3rem;text-decoration:none;font-weight:bold">Verify email address</a>
   </p>
   <p style="color:#666;font-size:0.9em">This link expires in 24 hours. If you did not create an account, you can ignore this email.</p>
-  <p style="color:#888;font-size:0.85em">Or copy this link: <a href="${verifyUrl}" style="color:#1a4fa0">${verifyUrl}</a></p>
+  <p style="color:#888;font-size:0.85em">Or copy this link: <a href="${escapeHtml(verifyUrl)}" style="color:#1a4fa0">${escapeHtml(verifyUrl)}</a></p>
   <hr style="border:none;border-top:1px solid #ddd;margin:1.5rem 0">
   <p style="font-size:0.85em;color:#888">This email was sent automatically by the BCC competition management system.</p>
 </body>
@@ -173,10 +185,10 @@ export function passwordResetEmailHtml(resetUrl: string): string {
   <h2 style="color:#1a4fa0">Reset your BCC password</h2>
   <p>We received a request to reset the password for your BCC account.</p>
   <p style="margin:1.5rem 0">
-    <a href="${resetUrl}" style="background:#1a4fa0;color:#fff;padding:0.6rem 1.2rem;border-radius:0.3rem;text-decoration:none;font-weight:bold">Reset password</a>
+    <a href="${escapeHtml(resetUrl)}" style="background:#1a4fa0;color:#fff;padding:0.6rem 1.2rem;border-radius:0.3rem;text-decoration:none;font-weight:bold">Reset password</a>
   </p>
   <p style="color:#666;font-size:0.9em">This link expires in 1 hour. If you did not request a password reset, you can ignore this email.</p>
-  <p style="color:#888;font-size:0.85em">Or copy this link: <a href="${resetUrl}" style="color:#1a4fa0">${resetUrl}</a></p>
+  <p style="color:#888;font-size:0.85em">Or copy this link: <a href="${escapeHtml(resetUrl)}" style="color:#1a4fa0">${escapeHtml(resetUrl)}</a></p>
   <hr style="border:none;border-top:1px solid #ddd;margin:1.5rem 0">
   <p style="font-size:0.85em;color:#888">This email was sent automatically by the BCC competition management system.</p>
 </body>

@@ -24,7 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: prod
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           # Full history — the ancestry check needs every commit on main.
           fetch-depth: 0
@@ -58,9 +58,9 @@ jobs:
       TF_VAR_puretrack_email: ${{ secrets.TF_VAR_PURETRACK_EMAIL }}
       TF_VAR_puretrack_password: ${{ secrets.TF_VAR_PURETRACK_PASSWORD }}
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
         with:
           terraform_version: "<2.0.0"
           terraform_wrapper: false
@@ -150,14 +150,14 @@ jobs:
     environment: prod
     needs: [verify-release-ancestry, terraform-check]
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Log release
         run: |
           echo "Deploying release: ${{ github.event.release.tag_name }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up mise
-        uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4.1.0
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
 
       - name: Install dependencies
         run: npm ci
@@ -240,7 +240,7 @@ jobs:
     environment: prod
     needs: [verify-release-ancestry, terraform-check]
     steps:
-      - uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: true
 
@@ -249,7 +249,7 @@ jobs:
           echo "Deploying release: ${{ github.event.release.tag_name }}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up mise
-        uses: jdx/mise-action@dba19683ed58901619b14f395a24841710cb4925 # v4.1.0
+        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
 
       - name: Install dependencies
         run: npm ci
@@ -279,7 +279,7 @@ jobs:
           echo "token=$SWA_TOKEN" >> "$GITHUB_OUTPUT"
 
       - name: Deploy to Azure Static Web Apps
-        uses: Azure/static-web-apps-deploy@4d27395796ac319302594769cfe812bd207490b1 # v1
+        uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
         with:
           azure_static_web_apps_api_token: ${{ steps.swa_token.outputs.token }}
           action: upload
