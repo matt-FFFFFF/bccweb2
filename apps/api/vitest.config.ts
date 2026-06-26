@@ -11,24 +11,37 @@ const HEAVY_TESTS = [
   "src/lib/__tests__/telemetry.integration.test.ts",
 ];
 
+const INTEGRATION_TESTS = ["src/lib/__tests__/puretrack.integration.test.ts"];
+
+const runIntegration = process.env["VITEST_INTEGRATION"] === "1";
 const runHeavy = process.env["VITEST_HEAVY"] === "1";
 
 export default defineConfig({
   test: {
-    include: runHeavy
-      ? HEAVY_TESTS
-      : [
-          "src/__tests__/**/*.test.ts",
-          "src/functions/__tests__/**/*.test.ts",
-          "src/lib/**/__tests__/**/*.test.ts",
-          "src/lib/signTofly/__tests__/**/*.test.ts",
-        ],
-    exclude: runHeavy ? [] : HEAVY_TESTS,
+    include: runIntegration
+      ? INTEGRATION_TESTS
+      : runHeavy
+        ? HEAVY_TESTS
+        : [
+            "src/__tests__/**/*.test.ts",
+            "src/functions/__tests__/**/*.test.ts",
+            "src/lib/**/__tests__/**/*.test.ts",
+            "src/lib/signTofly/__tests__/**/*.test.ts",
+          ],
+    exclude: runIntegration
+      ? []
+      : runHeavy
+        ? []
+        : [...HEAVY_TESTS, ...INTEGRATION_TESTS],
     setupFiles: [
       "src/__tests__/helpers/setup.ts",
       "src/__tests__/helpers/azurite.ts",
     ],
-    testTimeout: runHeavy ? 120_000 : 15_000,
+    testTimeout: runIntegration
+      ? 60_000
+      : runHeavy
+        ? 120_000
+        : 15_000,
     // Run tests within a file sequentially for reliable blob state
     sequence: {
       concurrent: false,
