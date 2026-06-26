@@ -18,10 +18,12 @@ try {
 const BASE_URL = "https://puretrack.io";
 const GROUP_BLOB_PREFIX = "puretrack-groups/";
 
-const pilotIds = (process.env["PURETRACK_TEST_PILOT_IDS"] ?? "")
-  .split(",")
-  .map((value) => Number(value.trim()))
-  .filter((value) => Number.isFinite(value) && value > 0);
+const pilotIds = [...new Set(
+  (process.env["PURETRACK_TEST_PILOT_IDS"] ?? "")
+    .split(",")
+    .map((value) => Number(value.trim()))
+    .filter((value) => Number.isInteger(value) && value > 0),
+)];
 
 const hasCreds = !!(
   process.env["PURETRACK_API_KEY"] &&
