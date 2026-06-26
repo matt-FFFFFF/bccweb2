@@ -56,6 +56,12 @@ type GroupState = {
   readonly membersCount: number;
 };
 
+type TeardownFailure = {
+  readonly id: number;
+  readonly slug: string;
+  readonly reason: string;
+};
+
 type FilledSlot = Round["teams"][number]["pilots"][number];
 
 function makeRound(runId: string): Round {
@@ -272,24 +278,33 @@ describe.skipIf(!hasCreds)("PureTrack live integration", () => {
           ]
         : [];
       const uniqueGroups = [...new Map([...createdGroups, ...fromResult].map((group) => [group.id, group])).values()];
+      const failures: TeardownFailure[] = [];
 
       for (const { id, slug } of uniqueGroups) {
         const url = `${BASE_URL}/api/groups/${id}`;
-        let del: Response;
         try {
-          del = await realFetch(url, { method: "DELETE", headers });
-        } catch (err) { console.warn("[ITEST] manual cleanup needed", { id, slug, url }); throw err; }
-        expect(del.status).toBe(200);
+          const del = await realFetch(url, { method: "DELETE", headers });
+          if (del.status !== 200) {
+            failures.push({ id, slug, reason: `DELETE ${url} returned ${del.status}` });
+            console.warn("[ITEST] manual cleanup needed", { id, slug, url });
+            continue;
+          }
 
-        let after: Response;
-        try {
-          after = await realFetch(url, { headers });
-        } catch (err) { console.warn("[ITEST] manual cleanup needed", { id, slug, url }); throw err; }
-        expect(after.status).toBe(404);
-        console.info("[ITEST] teardown deleted", { id, slug, url });
+          const after = await realFetch(url, { headers });
+          if (after.status !== 404) {
+            failures.push({ id, slug, reason: `GET ${url} returned ${after.status}` });
+            console.warn("[ITEST] manual cleanup needed", { id, slug, url });
+            continue;
+          }
+          console.info("[ITEST] teardown deleted", { id, slug, url });
+        } catch (err) {
+          failures.push({ id, slug, reason: err instanceof Error ? err.message : String(err) });
+          console.warn("[ITEST] manual cleanup needed", { id, slug, url });
+        }
       }
 
       await realFetch(`${BASE_URL}/api/logout`, { headers }).catch(() => {});
+      expect(failures, `PureTrack teardown left groups: ${JSON.stringify(failures)}`).toHaveLength(0);
     } finally {
       globalThis.fetch = realFetch;
     }
