@@ -24,8 +24,8 @@ These tests talk to the real BCC PureTrack account and are opt-in.
 - Run `make test-integration` (equivalently,
   `VITEST_INTEGRATION=1 npx vitest run --project @bccweb/api`).
 
-Warning: this creates throwaway groups prefixed with `ITEST-` and deletes them
-in `afterAll` teardown.
+Warning: this creates throwaway PureTrack groups named `BCC …`, containing an
+`ITEST-<runId>` marker in the site/team name, and deletes them in `afterAll`.
 
 The suite self-skips when credentials are absent, and it is excluded from the
 default `make test` path and from CI, so CI never needs PureTrack secrets.

@@ -11,8 +11,9 @@ import {
 
 try {
   process.loadEnvFile(fileURLToPath(new URL("../../../.env", import.meta.url)));
-} catch {
-  /* skip */
+} catch (err) {
+  // A missing .env is fine (suite self-skips); surface anything else (e.g. EACCES).
+  if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
 }
 
 const BASE_URL = "https://puretrack.io";
@@ -264,7 +265,13 @@ describe.skipIf(!hasCreds)("PureTrack live integration", () => {
     if (!hasCreds) return;
     try {
       const headers = authHeaders(await authenticate());
-      const uniqueGroups = [...new Map(createdGroups.map((group) => [group.id, group])).values()];
+      const fromResult: CreatedGroup[] = createdResult
+        ? [
+            { id: createdResult.roundGroupId, slug: createdResult.roundGroupSlug },
+            ...createdResult.teams.map((team) => ({ id: team.groupId, slug: team.groupSlug })),
+          ]
+        : [];
+      const uniqueGroups = [...new Map([...createdGroups, ...fromResult].map((group) => [group.id, group])).values()];
 
       for (const { id, slug } of uniqueGroups) {
         const url = `${BASE_URL}/api/groups/${id}`;
