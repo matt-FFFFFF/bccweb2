@@ -467,8 +467,9 @@ async function refresh(
   try {
     const credPath = `auth/${userId}.json`;
     cred = await readJson(getPrivateBlobClient(credPath), AuthCredentialSchema, credPath);
-  } catch {
-    return invalidRefresh;
+  } catch (err) {
+    if ((err as { statusCode?: number }).statusCode === 404) return invalidRefresh;
+    throw err;
   }
   if ((cred.tokenVersion ?? 0) !== tokenVersion) {
     return invalidRefresh;
