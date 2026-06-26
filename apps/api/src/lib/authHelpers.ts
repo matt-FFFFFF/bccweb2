@@ -81,20 +81,22 @@ export function signRefreshToken(userId: string, tokenVersion: number): string {
 }
 
 /**
- * Verify a refresh token and return its userId + tokenVersion claim. A missing
- * or malformed (non-integer / negative) version is rejected. Throws if invalid
- * or expired.
+ * Verify a refresh token and return its userId + tokenVersion claim. Rejects a
+ * non-object payload, a missing/empty subject, a non-"refresh" type, or a
+ * missing/malformed (non-integer / negative) version. Throws if invalid/expired.
  */
 export function verifyRefreshToken(token: string): { userId: string; tokenVersion: number } {
-  const claims = jwt.verify(token, getJwtSecret(), {
-    algorithms: ["HS256"],
-  }) as { sub: string; type: string; tokenVersion?: unknown };
-  if (claims.type !== "refresh") throw new Error("Invalid token type");
-  const { tokenVersion } = claims;
+  const claims = jwt.verify(token, getJwtSecret(), { algorithms: ["HS256"] });
+  if (typeof claims !== "object" || claims === null) {
+    throw new Error("Invalid token payload");
+  }
+  const { sub, type, tokenVersion } = claims as { sub?: unknown; type?: unknown; tokenVersion?: unknown };
+  if (type !== "refresh") throw new Error("Invalid token type");
+  if (typeof sub !== "string" || sub.length === 0) throw new Error("Invalid token subject");
   if (typeof tokenVersion !== "number" || !Number.isInteger(tokenVersion) || tokenVersion < 0) {
     throw new Error("Invalid token version");
   }
-  return { userId: claims.sub, tokenVersion };
+  return { userId: sub, tokenVersion };
 }
 
 // ─── Password ─────────────────────────────────────────────────────────────────
