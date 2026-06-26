@@ -41,6 +41,19 @@ type PureTrackSession = {
   readonly cookieHeader: string;
 };
 
+type ImportResponse = {
+  readonly groupId: number;
+  readonly added: readonly string[];
+  readonly failed: readonly string[];
+  readonly existing: readonly string[];
+  readonly found: readonly string[];
+};
+
+type GroupState = {
+  readonly id: number;
+  readonly membersCount: number;
+};
+
 type FilledSlot = Round["teams"][number]["pilots"][number];
 
 function makeRound(runId: string): Round {
@@ -119,11 +132,27 @@ function parseAccessToken(value: unknown): string {
   throw new Error("PureTrack teardown login response did not include an access token");
 }
 
-function parseGroupResponseId(value: unknown): number {
+function parseGroupState(value: unknown): GroupState {
   if (typeof value !== "object" || value === null || !("data" in value)) throw new Error("PureTrack group response did not include data");
   const data = value.data;
-  if (typeof data === "object" && data !== null && "id" in data && typeof data.id === "number") return data.id;
-  throw new Error("PureTrack group response did not include data.id");
+  if (typeof data === "object" && data !== null && "id" in data && "members_count" in data && typeof data.id === "number" && typeof data.members_count === "number") {
+    return { id: data.id, membersCount: data.members_count };
+  }
+  throw new Error("PureTrack group response did not include data.id and data.members_count");
+}
+
+function stringArrayFrom(value: unknown): readonly string[] | null {
+  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : null;
+}
+
+function parseImportResponse(groupId: number, value: unknown): ImportResponse | null {
+  if (typeof value !== "object" || value === null) return null;
+  const body = value as Record<string, unknown>;
+  const added = stringArrayFrom(body["added"]);
+  const failed = stringArrayFrom(body["failed"]);
+  const existing = stringArrayFrom(body["existing"]);
+  const found = stringArrayFrom(body["found"]);
+  return added && failed && existing && found ? { groupId, added, failed, existing, found } : null;
 }
 
 function getSetCookies(response: Response): string[] {
@@ -170,6 +199,7 @@ function authHeaders(session: PureTrackSession): Record<string, string> {
 describe.skipIf(!hasCreds)("PureTrack live integration", () => {
   const runId = randomUUID().slice(0, 8);
   const createdGroups: CreatedGroup[] = [];
+  const importResponses: ImportResponse[] = [];
   let realFetch: typeof fetch;
   let createdResult: PureTrackRoundResult | null = null;
 
@@ -196,10 +226,12 @@ describe.skipIf(!hasCreds)("PureTrack live integration", () => {
     return { accessToken, csrfToken, cookieHeader };
   }
 
-  async function expectGroupExists(headers: Record<string, string>, id: number): Promise<void> {
+  async function getGroupState(headers: Record<string, string>, id: number): Promise<GroupState> {
     const res = await realFetch(`${BASE_URL}/api/groups/${id}`, { headers });
     expect(res.status).toBe(200);
-    expect(parseGroupResponseId(await res.json())).toBe(id);
+    const state = parseGroupState(await res.json());
+    expect(state.id).toBe(id);
+    return state;
   }
 
   beforeAll(() => {
@@ -210,6 +242,15 @@ describe.skipIf(!hasCreds)("PureTrack live integration", () => {
         try {
           const data = await res.clone().json();
           if (isCreatedGroup(data)) createdGroups.push({ id: data.id, slug: data.slug });
+        } catch {
+          /* capture is best-effort and must never affect the live request */
+        }
+      }
+      const importMatch = String(input).match(/\/api\/groups\/(\d+)\/import-ids$/);
+      if (importMatch && init?.method === "POST" && res.ok) {
+        try {
+          const data = parseImportResponse(Number(importMatch[1]), await res.clone().json());
+          if (data) importResponses.push(data);
         } catch {
           /* capture is best-effort and must never affect the live request */
         }
@@ -269,11 +310,12 @@ describe.skipIf(!hasCreds)("PureTrack live integration", () => {
     expect(createdResult.roundGroupName).toBe(roundGroupName(round.site.name, round.date));
     expect(createdResult.teams).toHaveLength(1);
     const teamResult = createdResult.teams[0];
-    expect(teamResult?.groupId).toBeGreaterThan(0);
+    if (!teamResult) throw new Error("PureTrack did not return a team group result");
+    expect(teamResult.groupId).toBeGreaterThan(0);
 
     const headers = authHeaders(await authenticate());
-    await expectGroupExists(headers, createdResult.roundGroupId);
-    for (const team of createdResult.teams) await expectGroupExists(headers, team.groupId);
+    const roundState = await getGroupState(headers, createdResult.roundGroupId);
+    const teamState = await getGroupState(headers, teamResult.groupId);
 
     const expectedExternalIds = [
       String(createdResult.roundGroupId),
@@ -282,5 +324,15 @@ describe.skipIf(!hasCreds)("PureTrack live integration", () => {
     const actualExternalIds = await readPureTrackExternalIds();
     expect(actualExternalIds).toHaveLength(expectedExternalIds.length);
     expect(new Set(actualExternalIds)).toEqual(new Set(expectedExternalIds));
+
+    const roundImport = importResponses.find((response) => response.groupId === createdResult?.roundGroupId);
+    expect(roundImport).toBeDefined();
+    if (!roundImport) throw new Error("PureTrack round import response was not captured");
+    expect(roundImport.failed).toEqual([]);
+    for (const ptId of pilotIds) {
+      expect(roundImport.found.some((found) => found.split(/\s*=\s*/)[0]?.trim() === String(ptId))).toBe(true);
+    }
+    expect(roundState.membersCount).toBe(pilotIds.length);
+    expect(teamState.membersCount).toBe(pilotIds.length);
   });
 });
