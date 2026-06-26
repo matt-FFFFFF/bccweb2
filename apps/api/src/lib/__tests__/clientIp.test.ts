@@ -7,31 +7,39 @@ function reqWith(headers: Record<string, string>): HttpRequest {
 }
 
 describe("trustedClientIp", () => {
-  test("prefers x-azure-clientip over X-Forwarded-For", () => {
+  test("uses the right-most XFF entry (the platform-appended socket IP)", () => {
     expect(
-      trustedClientIp(reqWith({ "x-azure-clientip": "9.9.9.9", "x-forwarded-for": "1.1.1.1, 2.2.2.2" })),
-    ).toBe("9.9.9.9");
+      trustedClientIp(reqWith({ "x-forwarded-for": "1.1.1.1, 2.2.2.2, 203.0.113.9" })),
+    ).toBe("203.0.113.9");
   });
 
-  test("ignores a spoofed XFF entry when the platform IP is present", () => {
+  test("ignores client-prepended spoofed entries to the left", () => {
+    expect(trustedClientIp(reqWith({ "x-forwarded-for": "6.6.6.6, 203.0.113.9" }))).toBe("203.0.113.9");
+  });
+
+  test("does NOT trust a client-supplied x-azure-clientip", () => {
     expect(
-      trustedClientIp(reqWith({ "x-azure-clientip": "9.9.9.9", "x-forwarded-for": "6.6.6.6" })),
-    ).toBe("9.9.9.9");
+      trustedClientIp(reqWith({ "x-azure-clientip": "9.9.9.9", "x-forwarded-for": "6.6.6.6, 203.0.113.9" })),
+    ).toBe("203.0.113.9");
   });
 
-  test("falls back to the first XFF entry when no platform IP (local/dev)", () => {
-    expect(trustedClientIp(reqWith({ "x-forwarded-for": "1.1.1.1, 2.2.2.2" }))).toBe("1.1.1.1");
+  test("strips the port from the right-most entry", () => {
+    expect(trustedClientIp(reqWith({ "x-forwarded-for": "203.0.113.9:54321" }))).toBe("203.0.113.9");
   });
 
-  test("trims the XFF entry", () => {
-    expect(trustedClientIp(reqWith({ "x-forwarded-for": "  1.1.1.1  , 2.2.2.2" }))).toBe("1.1.1.1");
+  test("handles a bracketed IPv6 right-most entry", () => {
+    expect(trustedClientIp(reqWith({ "x-forwarded-for": "[2001:db8::1]:443" }))).toBe("2001:db8::1");
   });
 
-  test("returns null when neither header is present", () => {
-    expect(trustedClientIp(reqWith({}))).toBeNull();
+  test("uses a single XFF entry as-is", () => {
+    expect(trustedClientIp(reqWith({ "x-forwarded-for": "203.0.113.9" }))).toBe("203.0.113.9");
   });
 
-  test("returns null for an empty XFF header", () => {
+  test("returns null when no X-Forwarded-For is present (x-azure-clientip not trusted)", () => {
+    expect(trustedClientIp(reqWith({ "x-azure-clientip": "9.9.9.9" }))).toBeNull();
+  });
+
+  test("returns null for an empty X-Forwarded-For header", () => {
     expect(trustedClientIp(reqWith({ "x-forwarded-for": "" }))).toBeNull();
   });
 });

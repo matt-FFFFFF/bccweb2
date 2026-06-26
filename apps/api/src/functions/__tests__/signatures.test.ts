@@ -164,7 +164,7 @@ async function sign(ctx: SignContext, userId = ctx.userId, email = ctx.email) {
       method: "POST",
       params: { roundId: ctx.roundId, teamId: ctx.teamId, place: "1" },
       headers: {
-        "x-forwarded-for": "203.0.113.10, 10.0.0.1",
+        "x-forwarded-for": "10.0.0.1, 203.0.113.10",
         "user-agent": "vitest-agent",
       },
     }),
