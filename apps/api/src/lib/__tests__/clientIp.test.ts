@@ -7,35 +7,36 @@ function reqWith(headers: Record<string, string>): HttpRequest {
 }
 
 describe("trustedClientIp", () => {
-  test("uses the right-most XFF entry (the platform-appended socket IP)", () => {
+  test("prefers the platform-set client-ip header (port-stripped)", () => {
     expect(
-      trustedClientIp(reqWith({ "x-forwarded-for": "1.1.1.1, 2.2.2.2, 203.0.113.9" })),
-    ).toBe("203.0.113.9");
+      trustedClientIp(reqWith({ "client-ip": "82.71.50.1:60848", "x-forwarded-for": "6.6.6.6", "x-azure-clientip": "9.9.9.9" })),
+    ).toBe("82.71.50.1");
   });
 
-  test("ignores client-prepended spoofed entries to the left", () => {
-    expect(trustedClientIp(reqWith({ "x-forwarded-for": "6.6.6.6, 203.0.113.9" }))).toBe("203.0.113.9");
-  });
-
-  test("does NOT trust a client-supplied x-azure-clientip", () => {
+  test("does NOT use a forged x-azure-clientip or left-most XFF when client-ip is set", () => {
     expect(
-      trustedClientIp(reqWith({ "x-azure-clientip": "9.9.9.9", "x-forwarded-for": "6.6.6.6, 203.0.113.9" })),
-    ).toBe("203.0.113.9");
+      trustedClientIp(reqWith({ "client-ip": "82.71.50.1", "x-azure-clientip": "203.0.113.7", "x-forwarded-for": "203.0.113.8, 1.2.3.4" })),
+    ).toBe("82.71.50.1");
   });
 
-  test("strips the port from the right-most entry", () => {
-    expect(trustedClientIp(reqWith({ "x-forwarded-for": "203.0.113.9:54321" }))).toBe("203.0.113.9");
+  test("falls back to the right-most XFF hop when client-ip is absent (local/dev)", () => {
+    expect(trustedClientIp(reqWith({ "x-forwarded-for": "203.0.113.8, 82.71.50.1" }))).toBe("82.71.50.1");
   });
 
-  test("handles a bracketed IPv6 right-most entry", () => {
-    expect(trustedClientIp(reqWith({ "x-forwarded-for": "[2001:db8::1]:443" }))).toBe("2001:db8::1");
+  test("does NOT trust x-azure-clientip", () => {
+    expect(trustedClientIp(reqWith({ "x-azure-clientip": "203.0.113.7" }))).toBeNull();
   });
 
-  test("uses a single XFF entry as-is", () => {
-    expect(trustedClientIp(reqWith({ "x-forwarded-for": "203.0.113.9" }))).toBe("203.0.113.9");
+  test("strips the port from client-ip and the XFF fallback", () => {
+    expect(trustedClientIp(reqWith({ "client-ip": "82.71.50.1:60848" }))).toBe("82.71.50.1");
+    expect(trustedClientIp(reqWith({ "x-forwarded-for": "82.71.50.1:60846" }))).toBe("82.71.50.1");
   });
 
-  test("returns null when no X-Forwarded-For is present (x-azure-clientip not trusted)", () => {
+  test("handles a bracketed IPv6 client-ip", () => {
+    expect(trustedClientIp(reqWith({ "client-ip": "[2001:db8::1]:443" }))).toBe("2001:db8::1");
+  });
+
+  test("returns null when neither client-ip nor X-Forwarded-For is present", () => {
     expect(trustedClientIp(reqWith({ "x-azure-clientip": "9.9.9.9" }))).toBeNull();
   });
 

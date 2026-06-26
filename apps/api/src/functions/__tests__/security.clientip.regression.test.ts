@@ -38,16 +38,17 @@ beforeEach(() => {
 });
 
 describe("client-IP spoofing regression (#72/#73)", () => {
-  test("rotating client-controlled headers does NOT bypass the per-IP rate limit", async () => {
+  test("rotating client-controlled headers does NOT bypass the per-IP rate limit (client-ip fixed)", async () => {
     const victim = "victim@example.com";
-    const trustedHop = "203.0.113.10";
+    const realIp = "82.71.50.1";
     const statuses: number[] = [];
     for (let i = 0; i < 8; i += 1) {
       const res = await invoke("authForgotPassword", {
         method: "POST",
         headers: {
+          "client-ip": `${realIp}:60848`,
           "x-azure-clientip": `203.0.113.${100 + i}`,
-          "x-forwarded-for": `203.0.113.${200 + i}, ${trustedHop}`,
+          "x-forwarded-for": `203.0.113.${200 + i}`,
         },
         body: { email: victim },
       });
@@ -57,14 +58,17 @@ describe("client-IP spoofing regression (#72/#73)", () => {
     expect(statuses).toContain(429);
   });
 
-  test("a forged x-azure-clientip is NOT persisted as acceptedTsCsIp; the trusted hop is", async () => {
+  test("the platform client-ip is persisted as acceptedTsCsIp, not a forged header", async () => {
     const email = `reg-${randomUUID()}@example.com`;
-    const forged = "203.0.113.231";
-    const trustedHop = "198.51.100.7";
+    const realIp = "198.51.100.7";
 
     const res = await invoke("authRegister", {
       method: "POST",
-      headers: { "x-azure-clientip": forged, "x-forwarded-for": `10.0.0.9, ${trustedHop}` },
+      headers: {
+        "client-ip": `${realIp}:51000`,
+        "x-azure-clientip": "203.0.113.231",
+        "x-forwarded-for": "203.0.113.232, 10.0.0.9",
+      },
       body: { email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 },
     });
     expect(res.status).toBe(202);
@@ -73,7 +77,8 @@ describe("client-IP spoofing regression (#72/#73)", () => {
     const userId = index![email.toLowerCase()];
     expect(userId).toBeTruthy();
     const stored = await readPrivateJson<Record<string, unknown>>(`users/${userId}.json`);
-    expect(stored?.["acceptedTsCsIp"]).toBe(trustedHop);
-    expect(stored?.["acceptedTsCsIp"]).not.toBe(forged);
+    expect(stored?.["acceptedTsCsIp"]).toBe(realIp);
+    expect(stored?.["acceptedTsCsIp"]).not.toBe("203.0.113.231");
+    expect(stored?.["acceptedTsCsIp"]).not.toBe("203.0.113.232");
   });
 });

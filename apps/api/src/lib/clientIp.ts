@@ -1,21 +1,23 @@
 import type { HttpRequest } from "@azure/functions";
 
-// SECURITY: a client can prepend arbitrary X-Forwarded-For entries, so the
-// LEFT-most value is spoofable and must never key rate limits or audit IPs.
-// Azure App Service / Functions terminates the TCP connection at its front end
-// and APPENDS the real client socket IP to the right of XFF, so the RIGHT-most
-// entry is the platform-supplied, unspoofable value in this no-Front-Door
-// topology. x-azure-clientip is ignored: it is Front-Door-only and, even there,
-// is the client-overwritable value (x-azure-socketip is the trustworthy one).
+// SECURITY: Azure App Service overwrites the `client-ip` header with the real
+// client socket IP at its front end — unspoofable, and empirically verified on a
+// bare Linux/Node Flex Consumption Function App with no Front Door. Use it. The
+// other candidates are attacker-controlled on this topology: `x-azure-clientip`
+// is a Front-Door-only header (absent here, and passed through verbatim if a
+// client sends it), and the LEFT-most `x-forwarded-for` entry is client-supplied
+// (the platform appends the real IP at the END). The right-most XFF hop is only
+// a local/dev fallback for when `client-ip` is absent.
 export function trustedClientIp(req: HttpRequest): string | null {
+  const direct = req.headers.get("client-ip");
+  if (direct) return stripPort(direct);
   const xff = req.headers.get("x-forwarded-for");
   if (!xff) return null;
   const rightmost = xff.split(",").pop()?.trim();
-  if (!rightmost) return null;
-  return stripPort(rightmost);
+  return rightmost ? stripPort(rightmost) : null;
 }
 
-// Azure appends `ip:port` (IPv4) or `[ipv6]:port`; keep only the address.
+// Azure stamps `ip:port` (IPv4) or `[ipv6]:port`; keep only the address.
 function stripPort(entry: string): string {
   if (entry.startsWith("[")) {
     const end = entry.indexOf("]");
