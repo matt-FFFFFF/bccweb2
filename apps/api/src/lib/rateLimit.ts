@@ -89,10 +89,10 @@ export interface RateLimitOpts {
 /**
  * Token-bucket rate limiter keyed by (identityKey ?? IP, endpoint).
  *
- * Source IP is the trusted client IP (`x-azure-clientip`, then the first
- * `x-forwarded-for` entry as a local/dev fallback) — see `trustedClientIp`.
- * Falls back to "unknown" if neither header is present. When opts.identityKey
- * is supplied, it replaces the IP component of the bucket key.
+ * Source IP is the trusted client IP — the right-most `x-forwarded-for` hop
+ * (the value Azure appends at the connection edge); see `trustedClientIp`.
+ * Falls back to "unknown" if absent. When opts.identityKey is supplied, it
+ * replaces the IP component of the bucket key.
  *
  * Throws HttpError(429, "RATE_LIMITED") with a Retry-After header when the
  * bucket is exhausted. Emits [METRIC] auth.rateLimit.hit on every rejection.

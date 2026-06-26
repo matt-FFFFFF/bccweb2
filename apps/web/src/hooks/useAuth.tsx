@@ -75,7 +75,10 @@ async function revokeServerSideSession(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ refreshToken }),
     }).catch(() => null);
-    if (res?.ok) token = ((await res.json()) as RefreshResponse).accessToken;
+    if (res?.ok) {
+      const minted = (await res.json().catch(() => null)) as RefreshResponse | null;
+      if (minted?.accessToken) token = minted.accessToken;
+    }
   }
   if (!token || isTokenExpired(token)) return;
   await fetch("/api/auth/logout", {
