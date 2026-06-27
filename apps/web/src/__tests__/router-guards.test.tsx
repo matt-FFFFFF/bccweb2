@@ -96,12 +96,12 @@ describe("router guards (AC#1: protected-route redirect)", () => {
         expect(window.location.pathname).toBe("/login");
       });
 
-      // Metis Gap 3 — <Navigate replace> must REPLACE the /rounds entry: history
+      // Replace semantics: <Navigate replace> must REPLACE the /rounds entry: history
       // length is unchanged, so there is no back-button trap to the protected
       // route. A regression to a PUSH navigation would increment history.length.
       expect(window.history.length).toBe(lenBefore);
 
-      // Metis Gap 10 — clean transition under useTransitions={true}:
+      // Clean transition (no remount storm) under useTransitions={true}:
       //  (a) we settled exactly once on /login,
       //  (b) the Login page rendered a SINGLE "Sign in" heading — getByRole throws
       //      if a remount storm duplicated it, and
