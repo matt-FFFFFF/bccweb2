@@ -176,8 +176,9 @@ function Page({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    // useTransitions={false}: preserve v6 update semantics; remove at RR v8 upgrade — see issue #42
-    <BrowserRouter useTransitions={false}>
+    // useTransitions: enable React Router's enhanced transition-wrapped navigation
+    // (router state updates + <Link>/<Form> navigations wrapped in React.startTransition). Resolves #42.
+    <BrowserRouter useTransitions={true}>
       <AuthProvider>
         <FirstLoginOfSeasonGate><Nav />
         <main className="bcc-main">

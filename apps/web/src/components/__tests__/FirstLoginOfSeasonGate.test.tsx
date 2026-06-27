@@ -35,7 +35,7 @@ describe("FirstLoginOfSeasonGate", () => {
     });
     
     render(
-      <BrowserRouter useTransitions={false}>
+      <BrowserRouter useTransitions={true}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>
@@ -60,7 +60,7 @@ describe("FirstLoginOfSeasonGate", () => {
     });
     
     render(
-      <BrowserRouter useTransitions={false}>
+      <BrowserRouter useTransitions={true}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>
@@ -86,7 +86,7 @@ describe("FirstLoginOfSeasonGate", () => {
     });
     
     render(
-      <BrowserRouter useTransitions={false}>
+      <BrowserRouter useTransitions={true}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>
@@ -115,7 +115,7 @@ describe("FirstLoginOfSeasonGate", () => {
     vi.mocked(api.put).mockResolvedValueOnce({});
     
     render(
-      <BrowserRouter useTransitions={false}>
+      <BrowserRouter useTransitions={true}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>
@@ -146,7 +146,7 @@ describe("FirstLoginOfSeasonGate", () => {
     });
     
     render(
-      <BrowserRouter useTransitions={false}>
+      <BrowserRouter useTransitions={true}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>
