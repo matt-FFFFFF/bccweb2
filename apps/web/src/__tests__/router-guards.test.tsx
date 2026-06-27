@@ -75,6 +75,47 @@ describe("router guards (AC#1: protected-route redirect)", () => {
     // The real Login page rendered at the redirect target.
     expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
   });
+
+  // Sibling test (same unauth beforeEach setup): pins React Router's transition
+  // semantics now that the app runs <BrowserRouter useTransitions={true}> — the
+  // redirect must REPLACE (not push) and settle cleanly with no remount churn.
+  it("redirects via <Navigate replace> with a clean transition (no back-entry, no console noise, single /login settle)", async () => {
+    // Start at the protected path, then snapshot history length BEFORE render so
+    // we can prove the guard REPLACES rather than PUSHES the navigation entry.
+    window.history.replaceState({}, "", "/rounds");
+    const lenBefore = window.history.length;
+
+    // Capture any console noise emitted for the duration of the render + redirect.
+    // Real spies (not silenced) so a failure surfaces the offending message verbatim.
+    const errorSpy = vi.spyOn(console, "error");
+    const warnSpy = vi.spyOn(console, "warn");
+    try {
+      render(<App />);
+
+      await waitFor(() => {
+        expect(window.location.pathname).toBe("/login");
+      });
+
+      // Metis Gap 3 — <Navigate replace> must REPLACE the /rounds entry: history
+      // length is unchanged, so there is no back-button trap to the protected
+      // route. A regression to a PUSH navigation would increment history.length.
+      expect(window.history.length).toBe(lenBefore);
+
+      // Metis Gap 10 — clean transition under useTransitions={true}:
+      //  (a) we settled exactly once on /login,
+      //  (b) the Login page rendered a SINGLE "Sign in" heading — getByRole throws
+      //      if a remount storm duplicated it, and
+      //  (c) no console.error / console.warn fired during the transition (no act()
+      //      churn, no ErrorBoundary remount noise).
+      expect(window.location.pathname).toBe("/login");
+      expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
 });
 
 describe("router warnings (AC#4: no router deprecation / future-flag warnings)", () => {
