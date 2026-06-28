@@ -25,10 +25,8 @@ import type {
   Season,
   Site,
   Config,
-  Pilot,
   PilotSummary,
   PilotSnapshot,
-  WingClass,
   RoundBrief,
   BriefTeamEntry,
 } from "@bccweb/types";
@@ -892,6 +890,7 @@ async function unlockRound(
   await assertManageableRound(caller, id);
   await mutationRateLimit(req, caller, "unlockRound", "standard");
 
+  // eslint-disable-next-line @typescript-eslint/require-await -- transition()'s `extra` slot is typed (round: Round) => Promise<void>; this mutator is synchronous but the Promise-returning shape is required by that signature.
   const result = await transition(req, id, ["Locked"], "Confirmed", async (r) => {
     r.isLocked = false;
     // Clear snapshots so they are re-taken at next lock

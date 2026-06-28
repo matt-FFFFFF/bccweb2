@@ -160,6 +160,7 @@ export type MutationRateLimitTier = keyof typeof MUTATION_TIERS;
  * Throws HttpError(429, "RATE_LIMITED") with a Retry-After header when the
  * per-tier bucket is exhausted.
  */
+// eslint-disable-next-line @typescript-eslint/require-await -- public rate-limit gate awaited across every mutation handler; intentionally async (forward-compatible with async/distributed rate limiting). Dropping async would change this documented contract's signature from Promise<void> to void.
 export async function mutationRateLimit(
   req: HttpRequest,
   caller: CallerIdentity,

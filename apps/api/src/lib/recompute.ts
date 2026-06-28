@@ -4,7 +4,6 @@ import type {
   Season,
   SeasonResults,
   RoundResult,
-  WingClass,
 } from "@bccweb/types";
 import { normalizeStatus } from "@bccweb/types";
 import { computeLeague } from "@bccweb/scoring";

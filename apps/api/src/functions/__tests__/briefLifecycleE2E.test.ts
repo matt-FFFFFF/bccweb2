@@ -18,7 +18,6 @@ import type {
   RoundBrief,
   Season,
   SignToFlyWording,
-  Team,
 } from "@bccweb/types";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { invoke, makeAuthRequest } from "../../__tests__/helpers/api.js";

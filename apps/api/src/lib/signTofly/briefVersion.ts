@@ -65,5 +65,8 @@ function sortJson(value: unknown): JsonValue {
         return acc;
       }, {});
   }
-  return String(value);
+  if (typeof value === "bigint" || typeof value === "symbol" || typeof value === "function") {
+    return value.toString();
+  }
+  return "";
 }

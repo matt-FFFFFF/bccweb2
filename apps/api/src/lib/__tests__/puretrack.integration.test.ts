@@ -246,7 +246,9 @@ describe.skipIf(!hasCreds)("PureTrack live integration", () => {
     realFetch = globalThis.fetch;
     globalThis.fetch = async (input, init) => {
       const res = await realFetch(input, init);
-      if (String(input).endsWith("/api/groups") && init?.method === "POST" && res.ok) {
+      const url =
+        typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+      if (url.endsWith("/api/groups") && init?.method === "POST" && res.ok) {
         try {
           const data = await res.clone().json();
           if (isCreatedGroup(data)) createdGroups.push({ id: data.id, slug: data.slug });
@@ -254,7 +256,7 @@ describe.skipIf(!hasCreds)("PureTrack live integration", () => {
           /* capture is best-effort and must never affect the live request */
         }
       }
-      const importMatch = String(input).match(/\/api\/groups\/(\d+)\/import-ids$/);
+      const importMatch = url.match(/\/api\/groups\/(\d+)\/import-ids$/);
       if (importMatch && init?.method === "POST" && res.ok) {
         try {
           const data = parseImportResponse(Number(importMatch[1]), await res.clone().json());

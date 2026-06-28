@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { randomUUID } from "crypto";
-import type { Round, Team } from "@bccweb/types";
+import type { Round } from "@bccweb/types";
 import { getRegisteredHandler } from "../../__tests__/helpers/setup.js";
 import { makeAuthRequest } from "../../__tests__/helpers/api.js";
 import {

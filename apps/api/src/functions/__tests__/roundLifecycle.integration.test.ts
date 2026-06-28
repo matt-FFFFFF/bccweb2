@@ -8,7 +8,6 @@ import type {
   SeasonResults,
   Signature,
   SignToFlyWording,
-  Team,
 } from "@bccweb/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeAuthRequest, invoke } from "../../__tests__/helpers/api.js";

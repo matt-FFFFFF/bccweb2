@@ -15,11 +15,9 @@ import {
 import type { RoundBrief } from "@bccweb/types";
 import { BriefSchema, RoundSchema } from "@bccweb/schemas";
 import {
-  readBlob,
   getPrivateBlobClient,
   withPrivateLeaseRenewing,
   getPrivateBlockBlobClient,
-  writePrivateBlob,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";

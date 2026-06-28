@@ -17,7 +17,7 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import { BlobServiceClient } from "@azure/storage-blob";
-import type { Round, Pilot, PureTrackGroup } from "@bccweb/types";
+import type { Round, PureTrackGroup } from "@bccweb/types";
 import { PilotSchema, RoundSchema } from "@bccweb/schemas";
 import { getPrivateBlobClient, withPrivateLease } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";

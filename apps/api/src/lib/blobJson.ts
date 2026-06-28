@@ -35,7 +35,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function isJsonDeepEqual(a: unknown, b: unknown): boolean {
-  type JsonDeepEqualArg = Parameters<typeof jsonDeepEqual>[0];
   return jsonDeepEqual(a, b);
 }
 

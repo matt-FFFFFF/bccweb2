@@ -2,7 +2,6 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { app } from "@azure/functions";
 import { getCallerIdentity } from "../../lib/auth.js";
 import { readJson } from "../../lib/blobJson.js";
-import type { Pilot } from "@bccweb/types";
 
 vi.mock("@azure/functions", () => ({
   app: { http: vi.fn() },
@@ -38,7 +37,6 @@ describe("GET /me - First Login of Season logic", () => {
     vi.clearAllMocks();
     
     // We need to re-import the module to capture the handler
-    const originalHttp = app.http;
     (app as any).http = vi.fn((name, config) => {
       if (name === "me") meHandler = config.handler;
     });

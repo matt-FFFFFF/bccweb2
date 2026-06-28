@@ -3,7 +3,6 @@ import { describe, expect, test, vi, beforeEach } from "vitest";
 import { getRegisteredHandler } from "../../__tests__/helpers/setup.js";
 import { makeRequest } from "../../__tests__/helpers/api.js";
 import { makeUser, writePrivateJson } from "../../__tests__/helpers/seed.js";
-import type { AuthCredential } from "../../lib/authHelpers.js";
 import { sendEmail } from "../../lib/email.js";
 import "../authFunctions.js";
 

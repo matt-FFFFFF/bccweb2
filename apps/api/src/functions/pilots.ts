@@ -18,7 +18,6 @@ import type {
   Pilot,
   PilotSummary,
   PilotClubMembership,
-  SeasonSummary,
   WingClass,
   CoachType,
   PilotRatingValue,

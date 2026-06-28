@@ -5,7 +5,7 @@ import {
   HttpResponseInit,
   InvocationContext,
 } from "@azure/functions";
-import type { Round, RoundBrief, Signature } from "@bccweb/types";
+import type { Round, RoundBrief } from "@bccweb/types";
 import { BriefSchema, RoundSchema } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
@@ -17,7 +17,6 @@ import { HttpError, withErrorHandler } from "../lib/http.js";
 import { getActiveWording } from "../lib/signTofly/wording.js";
 import {
   buildSignaturePayload,
-  extractIp,
   getLatestSignature,
   listSignaturesForRound,
   overrideSignaturePath,
