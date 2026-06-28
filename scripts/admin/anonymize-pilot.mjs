@@ -210,7 +210,6 @@ async function main() {
   }
 
   const userId = pilot.userId ?? null;
-  const originalEmail = pilot.person?.email ?? null;
 
   console.log(`[GDPR] Found pilot. userId=${userId}, email=[hidden]`);
 

@@ -99,7 +99,7 @@ async function cmdList() {
   }
 
   const users = [];
-  for (const [email, userId] of Object.entries(index)) {
+  for (const [, userId] of Object.entries(index)) {
     const user = await readBlob(`users/${userId}.json`);
     if (user) users.push(user);
   }
