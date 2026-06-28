@@ -15,8 +15,6 @@ export default function RoundBriefEdit() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { identity } = useAuth();
-  const role = identity?.roles?.[0]; // Assume first role for simplicity, or check .includes()
-  const clubId = identity?.clubId;
   const token = localStorage.getItem("bcc_access_token");
   const [brief, setBrief] = useState<RoundBrief | null>(null);
   const [loading, setLoading] = useState(true);
