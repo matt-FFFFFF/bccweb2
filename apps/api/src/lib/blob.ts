@@ -354,26 +354,30 @@ async function withLeaseRenewingOnClient<T>(
   let renewalError: unknown = null;
   let renewing = false;
   let stopping = false;
-  const handle = setInterval(async () => {
-    if (renewing || stopping) return;
-    renewing = true;
-    attempt += 1;
-    try {
-      await leaseClient.renewLease();
-      if (stopping) return;
-      totalRenewals += 1;
-      trackLeaseTrace("Blob lease renewed", {
-        path,
-        leaseId,
-        attempt,
-      });
-    } catch (err) {
-      if (stopping) return;
-      renewalError = err;
-      clearInterval(handle);
-    } finally {
-      renewing = false;
-    }
+  // The renew body catches every error into `renewalError`, so this promise
+  // never rejects; `void` marks it deliberately floating (no-misused-promises).
+  const handle = setInterval(() => {
+    void (async () => {
+      if (renewing || stopping) return;
+      renewing = true;
+      attempt += 1;
+      try {
+        await leaseClient.renewLease();
+        if (stopping) return;
+        totalRenewals += 1;
+        trackLeaseTrace("Blob lease renewed", {
+          path,
+          leaseId,
+          attempt,
+        });
+      } catch (err) {
+        if (stopping) return;
+        renewalError = err;
+        clearInterval(handle);
+      } finally {
+        renewing = false;
+      }
+    })();
   }, renewIntervalMs);
 
   let fnError: unknown = null;
