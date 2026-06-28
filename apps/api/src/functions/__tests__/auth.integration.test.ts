@@ -61,7 +61,7 @@ async function invoke(
     query: init.query,
     headers: init.headers,
   });
-  return (await entry.handler(req as never, ctxStub())) as HandlerResponse;
+  return (await entry.handler(req, ctxStub())) as HandlerResponse;
 }
 
 function sha256Hex(value: string): string {
@@ -83,12 +83,12 @@ async function seedStaleVerificationState(
     token,
     createdAt,
     expiresAt,
-  } as VerificationState);
+  });
   await writePrivateJson(`auth/tokens/${sha256Hex(token)}.json`, {
     userId,
     type: "verify",
     expiresAt,
-  } as AuthToken);
+  });
 }
 
 async function seedExpiredVerifyToken(
@@ -99,7 +99,7 @@ async function seedExpiredVerifyToken(
     userId,
     type: "verify",
     expiresAt: new Date(Date.now() - 60_000).toISOString(),
-  } as AuthToken);
+  });
 }
 
 const PASSWORD = "TestPass123!";
@@ -135,8 +135,8 @@ describe("auth flow integration", () => {
     expect(res.status).toBe(202);
     const emails = getSentEmails();
     expect(emails).toHaveLength(1);
-    expect(emails[0]!.to).toEqual([email.toLowerCase()]);
-    expect(emails[0]!.subject).toMatch(/Verify/i);
+    expect(emails[0].to).toEqual([email.toLowerCase()]);
+    expect(emails[0].subject).toMatch(/Verify/i);
 
     const index = await readPrivateJson<Record<string, string>>("user-index.json");
     const userId = index![email.toLowerCase()];
@@ -163,7 +163,7 @@ describe("auth flow integration", () => {
 
   test("(3) register existing verified email -> 202 same shape; zero emails", async () => {
     const { user, credential } = await makeUser({ emailVerified: true });
-    await writePrivateJson(`auth/${user.id}.json`, credential as AuthCredential);
+    await writePrivateJson(`auth/${user.id}.json`, credential);
 
     const res = await invoke("authRegister", {
       method: "POST",
@@ -200,7 +200,7 @@ describe("auth flow integration", () => {
     expect(res.status).toBe(202);
     const emails = getSentEmails();
     expect(emails).toHaveLength(1);
-    expect(emails[0]!.to).toEqual([user.email.toLowerCase()]);
+    expect(emails[0].to).toEqual([user.email.toLowerCase()]);
 
     const newState = await readPrivateJson<VerificationState>(
       verificationStatePath(user.id),

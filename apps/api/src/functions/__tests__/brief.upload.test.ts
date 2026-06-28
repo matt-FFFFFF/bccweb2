@@ -51,7 +51,7 @@ describe("uploadBriefImage", () => {
 
     const res = await invoke("uploadBriefImage", req);
     expect(res.status).toBe(400);
-    expect((res.jsonBody as any).code).toBe("IMAGE_MAGIC_MISMATCH");
+    expect((res.jsonBody).code).toBe("IMAGE_MAGIC_MISMATCH");
     expect(mockUpload).not.toHaveBeenCalled();
   });
 
@@ -70,7 +70,7 @@ describe("uploadBriefImage", () => {
 
     const res = await invoke("uploadBriefImage", req);
     expect(res.status).toBe(400);
-    expect((res.jsonBody as any).code).toBe("TOO_MANY_IMAGES");
+    expect((res.jsonBody).code).toBe("TOO_MANY_IMAGES");
     expect(mockUpload).not.toHaveBeenCalled();
   });
 
@@ -89,7 +89,7 @@ describe("uploadBriefImage", () => {
 
     const res = await invoke("uploadBriefImage", req);
     expect(res.status).toBe(200);
-    expect((res.jsonBody as any).path).toMatch(/round-briefs\/round-1\/image-1\.jpg/);
+    expect((res.jsonBody).path).toMatch(/round-briefs\/round-1\/image-1\.jpg/);
     expect(mockUpload).toHaveBeenCalled();
   });
 });

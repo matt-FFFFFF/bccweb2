@@ -140,7 +140,7 @@ function makeReq(user: TestUser, request: HarnessRequest): HttpRequest {
       "x-forwarded-for": randomIp(),
     }),
     params: request.params ?? {},
-    query: new URLSearchParams(request.query ?? {}) as unknown as HttpRequest["query"],
+    query: new URLSearchParams(request.query ?? {}),
     json: async () => request.body ?? {},
   } as unknown as HttpRequest;
 }

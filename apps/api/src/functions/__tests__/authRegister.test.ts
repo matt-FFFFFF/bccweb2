@@ -51,7 +51,7 @@ describe("auth register enumeration neutralization", () => {
       body: { email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 },
     });
 
-    const res = await entry!.handler(req as never, { log: () => undefined } as never);
+    const res = await entry!.handler(req, { log: () => undefined });
 
     expect(res.status).toBe(202);
     expect(res.jsonBody).toEqual(registerResponse);
@@ -70,7 +70,7 @@ describe("auth register enumeration neutralization", () => {
       body: { email: user.email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 },
     });
 
-    const res = await entry!.handler(req as never, { log: () => undefined } as never);
+    const res = await entry!.handler(req, { log: () => undefined });
 
     expect(res.status).toBe(202);
     expect(res.jsonBody).toEqual(registerResponse);
@@ -79,7 +79,7 @@ describe("auth register enumeration neutralization", () => {
 
   test("register with existing verified email: 202 + zero emails sent", async () => {
     const { user, credential } = await makeUser({ emailVerified: true });
-    await writePrivateJson(`auth/${user.id}.json`, credential as AuthCredential);
+    await writePrivateJson(`auth/${user.id}.json`, credential);
 
     const entry = getRegisteredHandler("authRegister");
     expect(entry).toBeTruthy();
@@ -89,7 +89,7 @@ describe("auth register enumeration neutralization", () => {
       body: { email: user.email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 },
     });
 
-    const res = await entry!.handler(req as never, { log: () => undefined } as never);
+    const res = await entry!.handler(req, { log: () => undefined });
 
     expect(res.status).toBe(202);
     expect(res.jsonBody).toEqual(registerResponse);
@@ -109,20 +109,20 @@ describe("auth register enumeration neutralization", () => {
 
     responses.push(
       (await entry!.handler(
-        makeRequest({ method: "POST", body: { email: newEmail, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 } }) as never,
-        { log: () => undefined } as never,
+        makeRequest({ method: "POST", body: { email: newEmail, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 } }),
+        { log: () => undefined },
       )).jsonBody,
     );
     responses.push(
       (await entry!.handler(
-        makeRequest({ method: "POST", body: { email: unverifiedUser.email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 } }) as never,
-        { log: () => undefined } as never,
+        makeRequest({ method: "POST", body: { email: unverifiedUser.email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 } }),
+        { log: () => undefined },
       )).jsonBody,
     );
     responses.push(
       (await entry!.handler(
-        makeRequest({ method: "POST", body: { email: verifiedUser.email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 } }) as never,
-        { log: () => undefined } as never,
+        makeRequest({ method: "POST", body: { email: verifiedUser.email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 } }),
+        { log: () => undefined },
       )).jsonBody,
     );
 

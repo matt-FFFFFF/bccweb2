@@ -33,8 +33,8 @@ const AZURITE_CONNECTION_STRING =
 export const CONNECTION_STRING =
   process.env["BLOB_CONNECTION_STRING"] ?? AZURITE_CONNECTION_STRING;
 
-export const PUBLIC_CONTAINER = process.env["BLOB_CONTAINER_NAME"]!;
-export const PRIVATE_CONTAINER = process.env["BLOB_PRIVATE_CONTAINER_NAME"]!;
+export const PUBLIC_CONTAINER = process.env["BLOB_CONTAINER_NAME"];
+export const PRIVATE_CONTAINER = process.env["BLOB_PRIVATE_CONTAINER_NAME"];
 
 let blobService: BlobServiceClient;
 let publicContainer: ContainerClient;
@@ -82,12 +82,12 @@ async function sweepStaleTestContainers(
         await svc.getContainerClient(c.name).deleteIfExists();
       } catch (err) {
         // Best-effort — log and continue.
-        // eslint-disable-next-line no-console
+         
         console.warn(`[azurite-sweep] failed to delete ${c.name}:`, err);
       }
     }
   } catch (err) {
-    // eslint-disable-next-line no-console
+     
     console.warn("[azurite-sweep] listContainers failed:", err);
   }
 }

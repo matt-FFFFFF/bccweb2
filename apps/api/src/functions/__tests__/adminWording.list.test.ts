@@ -63,7 +63,7 @@ async function invokeList() {
     new MockHttpRequest({
       method: "GET",
       headers: { authorization: `Bearer ${token}` },
-    }) as never,
-    { functionName: "listSignToFlyWording" } as never,
+    }),
+    { functionName: "listSignToFlyWording" },
   );
 }

@@ -16,7 +16,7 @@ const ctx = { log: () => undefined } as never;
 async function invoke(req: ReturnType<typeof makeAuthRequest>) {
   const entry = getRegisteredHandler("createMyPilot");
   if (!entry) throw new Error("createMyPilot not registered");
-  return (await entry.handler(req as never, ctx)) as {
+  return (await entry.handler(req, ctx)) as {
     status: number;
     jsonBody?: unknown;
   };

@@ -158,7 +158,7 @@ describe("pilotSeasonClubs API", () => {
 
     const res = await invoke("assignPilotSeasonClub", req);
     expect(res.status).toBe(409);
-    const body = res.jsonBody as any;
+    const body = res.jsonBody;
     expect(body.code).toBe("CLUB_NOT_REGISTERED_FOR_SEASON");
   });
 
@@ -196,7 +196,7 @@ describe("pilotSeasonClubs API", () => {
 
     const res = await invoke("assignPilotSeasonClub", req);
     expect(res.status).toBe(409);
-    const body = res.jsonBody as any;
+    const body = res.jsonBody;
     expect(body.code).toBe("PILOT_ALREADY_ASSIGNED");
   });
 

@@ -102,10 +102,10 @@ describe("createPureTrackGroups — blob persistence", () => {
 
   it("successful group creation writes blob with expected shape", async () => {
     const { createPureTrackGroups } = await import("../puretrack.js");
-    vi.spyOn(globalThis, "setTimeout").mockImplementation(((cb: () => void) => {
+    vi.spyOn(globalThis, "setTimeout").mockImplementation((cb: () => void) => {
       if (typeof cb === "function") cb();
       return 0 as never;
-    }) as unknown as typeof setTimeout);
+    });
 
     mockSuccessfulPureTrackApi(99, 100);
 
@@ -166,10 +166,10 @@ describe("createPureTrackGroups — blob persistence", () => {
   it("null pureTrackId pilots excluded from pilotIds[] but blob still written for the rest", async () => {
     const { createPureTrackGroups } = await import("../puretrack.js");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(globalThis, "setTimeout").mockImplementation(((cb: () => void) => {
+    vi.spyOn(globalThis, "setTimeout").mockImplementation((cb: () => void) => {
       if (typeof cb === "function") cb();
       return 0 as never;
-    }) as unknown as typeof setTimeout);
+    });
 
     mockSuccessfulPureTrackApi(99, 100);
 

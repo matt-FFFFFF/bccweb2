@@ -51,7 +51,7 @@ function validConfig(overrides: Partial<Config> = {}): Config {
 }
 
 function withExtraKey<T extends object>(value: T, key: string, extra: unknown): T {
-  return { ...value, [key]: extra } as T;
+  return { ...value, [key]: extra };
 }
 
 async function rawBlobText(path: string): Promise<string> {

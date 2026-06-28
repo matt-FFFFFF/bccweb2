@@ -62,7 +62,7 @@ async function listPureTrackGroupsForRound(roundId: string): Promise<PureTrackGr
       const response = await blobClient.download();
       const chunks: Buffer[] = [];
       for await (const chunk of response.readableStreamBody!) {
-        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+        chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
       }
       const data = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as PureTrackGroup;
       if (data.roundId === roundId) {

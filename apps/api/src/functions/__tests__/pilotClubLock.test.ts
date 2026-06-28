@@ -26,7 +26,7 @@ async function invokePut(
     params: { id: pilotId },
     body,
   });
-  return (await entry.handler(req as never, ctx)) as {
+  return (await entry.handler(req, ctx)) as {
     status: number;
     jsonBody?: unknown;
   };

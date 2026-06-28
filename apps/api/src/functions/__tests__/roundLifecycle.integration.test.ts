@@ -381,7 +381,7 @@ async function seedCreatedRoundViaHandlers(): Promise<LifecycleContext> {
     body: { clubId: base.clubId, teamName: "Alpha" },
   }));
   expect(addTeamRes.status).toBe(200);
-  const teamId = ((addTeamRes.jsonBody as Round).teams[0] as Team).id;
+  const teamId = ((addTeamRes.jsonBody as Round).teams[0]).id;
 
   const addPilotRes = await invoke("addPilot", makeAuthRequest(base.adminUserId, base.adminEmail, {
     method: "POST",
@@ -624,7 +624,7 @@ async function readPublicBytes(path: string): Promise<Buffer> {
   const response = await getPublicContainer().getBlobClient(path).download();
   const chunks: Buffer[] = [];
   for await (const chunk of response.readableStreamBody!) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks);
 }
@@ -642,7 +642,7 @@ async function readAuditLines(): Promise<Array<Record<string, unknown>>> {
   const response = await getPrivateContainer().getBlobClient(path).download();
   const chunks: Buffer[] = [];
   for await (const chunk of response.readableStreamBody!) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks)
     .toString("utf8")

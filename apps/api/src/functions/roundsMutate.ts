@@ -449,7 +449,7 @@ async function confirmRound(
   await mutationRateLimit(req, caller, "confirmRound", "standard");
 
   const result = await transition(req, id, ["Proposed"], "Confirmed");
-  if ("status" in result && "jsonBody" in result) return result as HttpResponseInit;
+  if ("status" in result && "jsonBody" in result) return result;
   const updated = result as Round;
   await updateRoundsIndex(updated);
 
@@ -488,7 +488,7 @@ async function briefCompleteRound(
   await mutationRateLimit(req, caller, "briefCompleteRound", "standard");
 
   const result = await transition(req, id, ["Confirmed"], "BriefComplete");
-  if ("status" in result && "jsonBody" in result) return result as HttpResponseInit;
+  if ("status" in result && "jsonBody" in result) return result;
   await updateRoundsIndex(result as Round);
   return { status: 200, jsonBody: result };
 }
@@ -524,7 +524,7 @@ async function loadPilotPureTrackIds(round: Round): Promise<Map<string, number>>
 }
 
 function applyPureTrackResult(round: Round, ptResult: PureTrackRoundResult): Round {
-  const updated = structuredClone(round) as Round;
+  const updated = structuredClone(round);
   updated.pureTrackGroupId = ptResult.roundGroupId;
   updated.pureTrackGroupName = ptResult.roundGroupName;
   updated.pureTrackGroupSlug = ptResult.roundGroupSlug;
@@ -753,7 +753,7 @@ async function lockRound(
           pilotPath,
         );
         snapshotMap.set(pilotId, {
-          wingClass: (pilot.wingClass ?? "EN B") as WingClass,
+          wingClass: (pilot.wingClass ?? "EN B"),
           pilotRating: pilot.pilotRating,
           phoneNumber: pilot.person?.phoneNumber,
           helmetColour: pilot.helmetColour,
@@ -772,7 +772,7 @@ async function lockRound(
     })
   );
 
-  let candidateRound = structuredClone(round) as Round;
+  let candidateRound = structuredClone(round);
   candidateRound.status = "Locked";
   candidateRound.isLocked = true;
   for (const team of candidateRound.teams) {
@@ -902,7 +902,7 @@ async function unlockRound(
     }
   });
 
-  if ("status" in result && "jsonBody" in result) return result as HttpResponseInit;
+  if ("status" in result && "jsonBody" in result) return result;
   await updateRoundsIndex(result as Round);
   return { status: 200, jsonBody: result };
 }
@@ -966,7 +966,7 @@ async function completeRound(
         throw new HttpError(500, "INTERNAL");
       }
 
-      const scored = structuredClone(scoredSnapshot) as Round;
+      const scored = structuredClone(scoredSnapshot);
       scored.status = "Complete";
       scored.isLocked = false;
 

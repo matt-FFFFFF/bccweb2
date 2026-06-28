@@ -113,7 +113,7 @@ async function recomputeSeasonUncached(seasonYear: number): Promise<void> {
   );
   const normalizedRounds: Round[] = [];
   for (const round of maybeRounds) {
-    if (round !== null) normalizedRounds.push(normalizeRoundForRecompute(round as Round));
+    if (round !== null) normalizedRounds.push(normalizeRoundForRecompute(round));
   }
   normalizedRounds.sort(compareRounds);
 
@@ -191,7 +191,7 @@ function buildSeasonResults(
               : "Unknown",
             distance: slot.flight!.distance,
             score: slot.pilotPoints,
-            wingClass: slot.snapshot!.wingClass as WingClass,
+            wingClass: slot.snapshot!.wingClass,
           })),
       }));
 
@@ -205,7 +205,7 @@ function buildSeasonResults(
 }
 
 function normalizeRoundForRecompute(round: Round): Round {
-  const copy = structuredClone(round) as Round;
+  const copy = structuredClone(round);
   copy.status = normalizeStatus(copy.status);
   copy.teams = [...copy.teams].sort(
     (a, b) =>

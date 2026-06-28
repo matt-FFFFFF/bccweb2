@@ -227,7 +227,7 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
       }),
     );
     expect(addTeamRes.status).toBe(200); // Assertion 2
-    const teamId = ((addTeamRes.jsonBody as Round).teams[0] as Team).id;
+    const teamId = ((addTeamRes.jsonBody as Round).teams[0]).id;
 
     // ─── Step 4: Add pilot to slot via API ──────────────────────────────────
     const addPilotRes = await invoke(

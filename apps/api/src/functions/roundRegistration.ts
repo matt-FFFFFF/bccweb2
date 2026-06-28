@@ -124,7 +124,7 @@ async function unregisterSelf(
 
   const round = await readRound(roundId);
   ensureRegistrationOpen(round, "UNREGISTRATION_CLOSED");
-  const existing = findPilotSlot(round, caller.pilotId!);
+  const existing = findPilotSlot(round, caller.pilotId);
   if (!existing) throw new HttpError(404, "NOT_REGISTERED", "You are not registered in this round");
 
   const signature = await getLatestSignature(roundId, existing.team.id, existing.slot.placeInTeam);
