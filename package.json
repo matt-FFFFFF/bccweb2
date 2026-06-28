@@ -10,7 +10,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint": "npm run lint --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present && eslint tests/e2e scripts",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "e2e": "playwright test --config tests/e2e/playwright.config.ts"
   },
