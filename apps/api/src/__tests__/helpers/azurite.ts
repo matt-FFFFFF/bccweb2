@@ -21,8 +21,10 @@ import { resetBlobSingletons } from "../../lib/blob.js";
 
 // MODULE SCOPE: must run before any test imports of lib/blob.ts read these envs.
 const suffix = randomBytes(6).toString("hex");
-process.env.BLOB_CONTAINER_NAME = "test-data-" + suffix;
-process.env.BLOB_PRIVATE_CONTAINER_NAME = "test-priv-" + suffix;
+export const PUBLIC_CONTAINER = "test-data-" + suffix;
+export const PRIVATE_CONTAINER = "test-priv-" + suffix;
+process.env.BLOB_CONTAINER_NAME = PUBLIC_CONTAINER;
+process.env.BLOB_PRIVATE_CONTAINER_NAME = PRIVATE_CONTAINER;
 
 // Azurite well-known development connection string
 const AZURITE_CONNECTION_STRING =
@@ -32,9 +34,6 @@ const AZURITE_CONNECTION_STRING =
 
 export const CONNECTION_STRING =
   process.env["BLOB_CONNECTION_STRING"] ?? AZURITE_CONNECTION_STRING;
-
-export const PUBLIC_CONTAINER = process.env["BLOB_CONTAINER_NAME"];
-export const PRIVATE_CONTAINER = process.env["BLOB_PRIVATE_CONTAINER_NAME"];
 
 let blobService: BlobServiceClient;
 let publicContainer: ContainerClient;
