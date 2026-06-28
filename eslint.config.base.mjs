@@ -66,6 +66,18 @@ export const apiTestRelax = {
     "@typescript-eslint/no-unsafe-argument": "off",
     "@typescript-eslint/no-unsafe-return": "off",
     "@typescript-eslint/no-non-null-assertion": "off",
+    // The following fire only/overwhelmingly in tests as idiomatic-test-pattern
+    // false-positives, per typescript-eslint guidance for test files. They stay
+    // ON for production src (not relaxed here): require-await flags `async () => {}`
+    // test callbacks that legitimately have no await; unbound-method flags passing
+    // methods straight to mocks/spies/assertions; no-unsafe-function-type flags
+    // `Function`-typed mock helpers; prefer-promise-reject-errors flags deliberate
+    // non-Error rejection tests. no-floating-promises (the real missing-await safety
+    // rule) is unaffected and stays enabled, so this hides no async bugs.
+    "@typescript-eslint/require-await": "off",
+    "@typescript-eslint/unbound-method": "off",
+    "@typescript-eslint/no-unsafe-function-type": "off",
+    "@typescript-eslint/prefer-promise-reject-errors": "off",
   },
 };
 
