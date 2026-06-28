@@ -75,6 +75,54 @@ describe("router guards (AC#1: protected-route redirect)", () => {
     // The real Login page rendered at the redirect target.
     expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
   });
+
+  // Sibling test (same unauth beforeEach setup): pins React Router's transition
+  // semantics now that the app runs <BrowserRouter useTransitions={true}> — the
+  // redirect must REPLACE (not push) and settle cleanly with no remount churn.
+  it("redirects via <Navigate replace> with a clean transition (no back-entry, no console noise, single /login settle)", async () => {
+    // Start at the protected path, then spy on the History API BEFORE render so
+    // we can prove the guard REPLACES rather than PUSHES the navigation entry.
+    window.history.replaceState({}, "", "/rounds");
+    // Spy AFTER seeding the start location so the initial replaceState above is
+    // not counted. window.history.length is brittle under jsdom; spying on the
+    // History API is a deterministic, mechanism-level check of <Navigate replace>.
+    const pushSpy = vi.spyOn(window.history, "pushState");
+    const replaceSpy = vi.spyOn(window.history, "replaceState");
+
+    // Capture any console noise emitted for the duration of the render + redirect.
+    // Real spies (not silenced) so a failure surfaces the offending message verbatim.
+    const errorSpy = vi.spyOn(console, "error");
+    const warnSpy = vi.spyOn(console, "warn");
+    try {
+      render(<App />);
+
+      await waitFor(() => {
+        expect(window.location.pathname).toBe("/login");
+      });
+
+      // Replace semantics: <Navigate replace> must drive the History API's
+      // replaceState — never pushState — so there is no back-button trap to the
+      // protected route. A regression to a PUSH navigation would call pushState.
+      expect(pushSpy).not.toHaveBeenCalled();
+      expect(replaceSpy).toHaveBeenCalled();
+
+      // Clean transition (no remount storm) under useTransitions={true}:
+      //  (a) we settled exactly once on /login,
+      //  (b) the Login page rendered a SINGLE "Sign in" heading — getByRole throws
+      //      if a remount storm duplicated it, and
+      //  (c) no console.error / console.warn fired during the transition (no act()
+      //      churn, no ErrorBoundary remount noise).
+      expect(window.location.pathname).toBe("/login");
+      expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+      expect(errorSpy).not.toHaveBeenCalled();
+      expect(warnSpy).not.toHaveBeenCalled();
+    } finally {
+      pushSpy.mockRestore();
+      replaceSpy.mockRestore();
+      errorSpy.mockRestore();
+      warnSpy.mockRestore();
+    }
+  });
 });
 
 describe("router warnings (AC#4: no router deprecation / future-flag warnings)", () => {

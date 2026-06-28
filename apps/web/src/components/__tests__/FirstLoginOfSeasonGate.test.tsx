@@ -35,7 +35,7 @@ describe("FirstLoginOfSeasonGate", () => {
     });
     
     render(
-      <BrowserRouter useTransitions={false}>
+      <BrowserRouter useTransitions={true}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>
@@ -60,7 +60,7 @@ describe("FirstLoginOfSeasonGate", () => {
     });
     
     render(
-      <BrowserRouter useTransitions={false}>
+      <BrowserRouter useTransitions={true}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>
@@ -70,6 +70,36 @@ describe("FirstLoginOfSeasonGate", () => {
     await waitFor(() => {
       expect(screen.getByText(/Welcome back to the 2026 season/)).toBeInTheDocument();
     });
+  });
+
+  it("forces season-T&C interception under useTransitions={true}: aria-modal dialog + action controls render (not deferred/skipped)", async () => {
+    mockUseAuth.mockReturnValue({
+      identity: { roles: ["Pilot"], pilotId: "p1", firstLoginOfSeason: true, activeSeasonYear: 2026 },
+      loading: false,
+    });
+    vi.mocked(api.get).mockResolvedValueOnce({
+      person: { phoneNumber: "123" },
+      emergencyContactName: "Mom",
+      emergencyPhoneNumber: "911",
+      wingClass: "EN-A",
+      currentClub: { id: "c1" }
+    });
+
+    render(
+      <BrowserRouter useTransitions={true}>
+        <FirstLoginOfSeasonGate>
+          <div data-testid="child">Child Content</div>
+        </FirstLoginOfSeasonGate>
+      </BrowserRouter>
+    );
+
+    // Regression guard: transition-wrapped rendering must NOT defer/skip the forced gate.
+    // Keep these dialog + action-control assertions — they prove interception still fires.
+    const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
+    expect(dialog).toHaveTextContent(/Welcome back to the 2026 season/);
+    expect(screen.getByRole("button", { name: "Skip for now" })).toBeEnabled();
+    expect(screen.getByRole("button", { name: "Confirm & Save" })).toBeEnabled();
   });
 
   it("Skip for now sets dismissed_until + closes modal", async () => {
@@ -86,7 +116,7 @@ describe("FirstLoginOfSeasonGate", () => {
     });
     
     render(
-      <BrowserRouter useTransitions={false}>
+      <BrowserRouter useTransitions={true}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>
@@ -115,7 +145,7 @@ describe("FirstLoginOfSeasonGate", () => {
     vi.mocked(api.put).mockResolvedValueOnce({});
     
     render(
-      <BrowserRouter useTransitions={false}>
+      <BrowserRouter useTransitions={true}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>
@@ -146,7 +176,7 @@ describe("FirstLoginOfSeasonGate", () => {
     });
     
     render(
-      <BrowserRouter useTransitions={false}>
+      <BrowserRouter useTransitions={true}>
         <FirstLoginOfSeasonGate>
           <div data-testid="child">Child Content</div>
         </FirstLoginOfSeasonGate>

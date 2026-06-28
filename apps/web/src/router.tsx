@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useLocation } from "react-router";
+import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useLocation, type NavLinkRenderProps } from "react-router";
 import * as z from "zod/v4";
 import { SeasonSummarySchema } from "@bccweb/schemas";
 import { useAuth, AuthProvider, loginUrl } from "./hooks/useAuth.js";
@@ -37,6 +37,8 @@ import FirstLoginOfSeasonGate from "./components/FirstLoginOfSeasonGate.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import "./bcc-theme.css";
 
+const navLinkClass = ({ isActive }: NavLinkRenderProps) => (isActive ? "active" : "");
+
 function Nav() {
   const { identity, loading, logout } = useAuth();
 
@@ -53,47 +55,47 @@ function Nav() {
       </Link>
 
       <div className="bcc-nav__links">
-        <NavLink to="/rounds" className={({ isActive }) => isActive ? "active" : ""}>
+        <NavLink to="/rounds" className={navLinkClass}>
           Rounds
         </NavLink>
-        <NavLink to="/results" className={({ isActive }) => isActive ? "active" : ""}>
+        <NavLink to="/results" className={navLinkClass}>
           Results
         </NavLink>
         {isCoord && (
-          <NavLink to="/pilots" className={({ isActive }) => isActive ? "active" : ""}>
+          <NavLink to="/pilots" className={navLinkClass}>
             Pilots
           </NavLink>
         )}
         {isCoord && (
-          <NavLink to="/rounds/new" className={({ isActive }) => isActive ? "active" : ""}>
+          <NavLink to="/rounds/new" className={navLinkClass}>
             + New Round
           </NavLink>
         )}
         {isCoord && !isAdmin && (
-          <NavLink to="/club" className={({ isActive }) => isActive ? "active" : ""}>
+          <NavLink to="/club" className={navLinkClass}>
             My Club
           </NavLink>
         )}
         {isCoord && (
-          <NavLink to="/admin/sites" className={({ isActive }) => isActive ? "active" : ""}>
+          <NavLink to="/admin/sites" className={navLinkClass}>
             Sites
           </NavLink>
         )}
         {isAdmin && (
           <>
-            <NavLink to="/admin/users" className={({ isActive }) => isActive ? "active" : ""}>
+            <NavLink to="/admin/users" className={navLinkClass}>
               Users
             </NavLink>
-            <NavLink to="/admin/clubs" className={({ isActive }) => isActive ? "active" : ""}>
+            <NavLink to="/admin/clubs" className={navLinkClass}>
               Clubs
             </NavLink>
-            <NavLink to="/admin/seasons" className={({ isActive }) => isActive ? "active" : ""}>
+            <NavLink to="/admin/seasons" className={navLinkClass}>
               Seasons
             </NavLink>
-            <NavLink to="/admin/sign-to-fly-wording" className={({ isActive }) => isActive ? "active" : ""}>
+            <NavLink to="/admin/sign-to-fly-wording" className={navLinkClass}>
               Sign-to-fly wording
             </NavLink>
-            <NavLink to="/admin/config" className={({ isActive }) => isActive ? "active" : ""}>
+            <NavLink to="/admin/config" className={navLinkClass}>
               Config
             </NavLink>
           </>
@@ -103,7 +105,7 @@ function Nav() {
       <div className="bcc-nav__auth">
         {loading ? null : identity ? (
           <>
-            <NavLink to="/profile" className={({ isActive }) => isActive ? "active" : ""}>
+            <NavLink to="/profile" className={navLinkClass}>
               {identity.email}
             </NavLink>
             <button onClick={logout}>Sign out</button>
@@ -174,8 +176,9 @@ function Page({ children }: { children: React.ReactNode }) {
 
 export default function App() {
   return (
-    // useTransitions={false}: preserve v6 update semantics; remove at RR v8 upgrade — see issue #42
-    <BrowserRouter useTransitions={false}>
+    // useTransitions: enable React Router's enhanced transition-wrapped navigation
+    // (router state updates + <Link>/<Form> navigations wrapped in React.startTransition). Resolves #42.
+    <BrowserRouter useTransitions={true}>
       <AuthProvider>
         <FirstLoginOfSeasonGate><Nav />
         <main className="bcc-main">
