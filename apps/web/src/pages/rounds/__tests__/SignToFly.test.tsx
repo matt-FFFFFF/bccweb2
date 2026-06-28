@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
@@ -27,7 +28,7 @@ vi.mock("../../../hooks/useAuth.js", () => ({
     loading: false,
     logout: vi.fn(),
   }),
-  AuthProvider: ({ children }: any) => <>{children}</>,
+  AuthProvider: ({ children }: { children: ReactNode }) => <>{children}</>,
   loginUrl: vi.fn(),
 }));
 

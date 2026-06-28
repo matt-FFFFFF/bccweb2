@@ -1,11 +1,13 @@
 import { useState, useEffect } from "react";
 import { Link, useParams } from "react-router";
-import type { Round, PilotSummary } from "@bccweb/types";
+import type { Round, PilotSummary, RoundBrief } from "@bccweb/types";
 import { useBlob } from "../../hooks/useBlob.js";
 import { useAuth } from "../../hooks/useAuth.js";
 import { api, ApiError } from "../../lib/api.js";
 import { StatusBadge } from "../../components/StatusBadge.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
+
+type BriefWithVersion = RoundBrief & { version?: number };
 
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("en-GB", {
@@ -41,7 +43,7 @@ export default function RoundDetail() {
   const { identity } = useAuth();
 
   const [round, setRound] = useState<Round | null>(null);
-  const [brief, setBrief] = useState<any>(null); // Type is RoundBrief & { version?: number }
+  const [brief, setBrief] = useState<BriefWithVersion | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [actionError, setActionError] = useState<Error | null>(null);
@@ -60,7 +62,7 @@ export default function RoundDetail() {
 
     Promise.all([
       api.get<Round>(`rounds/${id}`),
-      api.get<any>(`rounds/${id}/brief`).catch((err: unknown) => {
+      api.get<BriefWithVersion>(`rounds/${id}/brief`).catch((err: unknown) => {
         if (err instanceof ApiError && err.status === 404) return null;
         throw err;
       }),
