@@ -14,7 +14,8 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "lint": "eslint src --max-warnings 0"
   },
   "dependencies": {
     "@bccweb/types": "*"
