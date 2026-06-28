@@ -96,6 +96,7 @@ describe("FirstLoginOfSeasonGate", () => {
     // Regression guard: transition-wrapped rendering must NOT defer/skip the forced gate.
     // Keep these dialog + action-control assertions — they prove interception still fires.
     const dialog = await screen.findByRole("dialog");
+    expect(dialog).toHaveAttribute("aria-modal", "true");
     expect(dialog).toHaveTextContent(/Welcome back to the 2026 season/);
     expect(screen.getByRole("button", { name: "Skip for now" })).toBeEnabled();
     expect(screen.getByRole("button", { name: "Confirm & Save" })).toBeEnabled();

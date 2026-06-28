@@ -80,10 +80,14 @@ describe("router guards (AC#1: protected-route redirect)", () => {
   // semantics now that the app runs <BrowserRouter useTransitions={true}> — the
   // redirect must REPLACE (not push) and settle cleanly with no remount churn.
   it("redirects via <Navigate replace> with a clean transition (no back-entry, no console noise, single /login settle)", async () => {
-    // Start at the protected path, then snapshot history length BEFORE render so
+    // Start at the protected path, then spy on the History API BEFORE render so
     // we can prove the guard REPLACES rather than PUSHES the navigation entry.
     window.history.replaceState({}, "", "/rounds");
-    const lenBefore = window.history.length;
+    // Spy AFTER seeding the start location so the initial replaceState above is
+    // not counted. window.history.length is brittle under jsdom; spying on the
+    // History API is a deterministic, mechanism-level check of <Navigate replace>.
+    const pushSpy = vi.spyOn(window.history, "pushState");
+    const replaceSpy = vi.spyOn(window.history, "replaceState");
 
     // Capture any console noise emitted for the duration of the render + redirect.
     // Real spies (not silenced) so a failure surfaces the offending message verbatim.
@@ -96,10 +100,11 @@ describe("router guards (AC#1: protected-route redirect)", () => {
         expect(window.location.pathname).toBe("/login");
       });
 
-      // Replace semantics: <Navigate replace> must REPLACE the /rounds entry: history
-      // length is unchanged, so there is no back-button trap to the protected
-      // route. A regression to a PUSH navigation would increment history.length.
-      expect(window.history.length).toBe(lenBefore);
+      // Replace semantics: <Navigate replace> must drive the History API's
+      // replaceState — never pushState — so there is no back-button trap to the
+      // protected route. A regression to a PUSH navigation would call pushState.
+      expect(pushSpy).not.toHaveBeenCalled();
+      expect(replaceSpy).toHaveBeenCalled();
 
       // Clean transition (no remount storm) under useTransitions={true}:
       //  (a) we settled exactly once on /login,
@@ -112,6 +117,8 @@ describe("router guards (AC#1: protected-route redirect)", () => {
       expect(errorSpy).not.toHaveBeenCalled();
       expect(warnSpy).not.toHaveBeenCalled();
     } finally {
+      pushSpy.mockRestore();
+      replaceSpy.mockRestore();
       errorSpy.mockRestore();
       warnSpy.mockRestore();
     }
