@@ -357,7 +357,7 @@ describe("BOLA C — round snapshot PII disclosure", () => {
     );
 
     expect(res.status).toBe(200);
-    const snapshot = (res.jsonBody as Round).teams[0]!.pilots[0]!.snapshot!;
+    const snapshot = (res.jsonBody as Round).teams[0].pilots[0].snapshot!;
     expect(snapshot.medicalInfo).toBeUndefined();
     expect(snapshot.emergencyContactName).toBeUndefined();
     expect(snapshot.emergencyPhoneNumber).toBeUndefined();
@@ -377,7 +377,7 @@ describe("BOLA C — round snapshot PII disclosure", () => {
     );
 
     expect(res.status).toBe(200);
-    const snapshot = (res.jsonBody as Round).teams[0]!.pilots[0]!.snapshot!;
+    const snapshot = (res.jsonBody as Round).teams[0].pilots[0].snapshot!;
     expect(snapshot.medicalInfo).toBe("Type 1 diabetes; carries insulin");
     expect(snapshot.emergencyPhoneNumber).toBe("07999 111222");
   });

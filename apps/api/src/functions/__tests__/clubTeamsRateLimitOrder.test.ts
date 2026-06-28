@@ -42,7 +42,7 @@ async function invoke(
       "x-forwarded-for": randomForwardedFor(),
     },
   });
-  const res = (await entry.handler(req as never, ctx)) as HttpResponseInit;
+  const res = (await entry.handler(req, ctx)) as HttpResponseInit;
   return { ...res, status: res.status ?? 200 };
 }
 

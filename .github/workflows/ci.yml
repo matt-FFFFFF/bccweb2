@@ -39,8 +39,9 @@ jobs:
         run: make typecheck
 
   # ── Lint ──────────────────────────────────────────────────────────────────────
-  # Only apps/web has a lint script (eslint). Build the shared packages first so
-  # the @bccweb/* type declarations resolve for type-aware rules.
+  # Repo-wide ESLint: per-workspace lint scripts (npm run lint --workspaces --if-present)
+  # plus root eslint for tests/e2e + scripts. Build shared packages first so the
+  # @bccweb/* type declarations resolve for apps/api's type-aware rules.
   lint:
     name: Lint
     runs-on: ubuntu-latest
@@ -54,10 +55,10 @@ jobs:
         run: npm ci
 
       - name: Build shared packages
-        run: make build-types build-schemas
+        run: make build-types build-schemas build-scoring
 
-      - name: Lint web
-        run: npm run lint --workspace apps/web
+      - name: Lint
+        run: npm run lint
 
   # ── 2. Build ──────────────────────────────────────────────────────────────────
   # Full build in dependency order (types → schemas → scoring → api; types → web).

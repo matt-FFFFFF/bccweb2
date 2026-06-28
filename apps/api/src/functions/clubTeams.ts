@@ -18,7 +18,7 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import { randomUUID } from "crypto";
-import type { Club, ClubTeam, ClubTeamSummary } from "@bccweb/types";
+import type { ClubTeam, ClubTeamSummary } from "@bccweb/types";
 import {
   ClubSchema,
   ClubTeamSchema,

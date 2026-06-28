@@ -48,10 +48,10 @@ describe("createPureTrackGroups", () => {
   it("PureTrack group creation skips pilots with null pureTrackId; group created with N-1 members; warning emitted", async () => {
     const { createPureTrackGroups } = await import("../puretrack.js");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(globalThis, "setTimeout").mockImplementation(((cb: any) => {
+    vi.spyOn(globalThis, "setTimeout").mockImplementation((cb: any) => {
       if (typeof cb === "function") cb();
       return 0 as never;
-    }) as unknown as typeof globalThis.setTimeout);
+    });
 
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "tok" }), { status: 200 }))
@@ -76,10 +76,10 @@ describe("createPureTrackGroups", () => {
   it("PureTrack group creation skips pilots with pureTrackId === 0", async () => {
     const { createPureTrackGroups } = await import("../puretrack.js");
     const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(globalThis, "setTimeout").mockImplementation(((cb: any) => {
+    vi.spyOn(globalThis, "setTimeout").mockImplementation((cb: any) => {
       if (typeof cb === "function") cb();
       return 0 as never;
-    }) as unknown as typeof globalThis.setTimeout);
+    });
 
     fetchMock
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "tok" }), { status: 200 }))

@@ -33,7 +33,7 @@ export async function readJson<T>(
     const response = await client.download();
     const chunks: Buffer[] = [];
     for await (const chunk of response.readableStreamBody!) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
     return JSON.parse(Buffer.concat(chunks).toString("utf-8")) as T;
   } catch (err: unknown) {

@@ -156,7 +156,7 @@ export async function consumeShortLivedToken(
     etag = response.etag!;
     const chunks: Buffer[] = [];
     for await (const chunk of response.readableStreamBody!) {
-      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     }
     tokenDoc = JSON.parse(Buffer.concat(chunks).toString("utf-8")) as AuthToken;
   } catch (err: unknown) {

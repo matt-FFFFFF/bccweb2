@@ -15,11 +15,9 @@ import {
 import type { RoundBrief } from "@bccweb/types";
 import { BriefSchema, RoundSchema } from "@bccweb/schemas";
 import {
-  readBlob,
   getPrivateBlobClient,
   withPrivateLeaseRenewing,
   getPrivateBlockBlobClient,
-  writePrivateBlob,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
@@ -43,7 +41,7 @@ function contentTypeForPath(path: string): string {
 async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks);
 }
@@ -155,9 +153,9 @@ async function getRoundBriefPdf(
 
   // Try to extract site name from blob metadata for a useful filename
   const siteName =
-    (downloadRes.metadata?.["sitename"] as string | undefined) ?? "round-brief";
+    (downloadRes.metadata?.["sitename"]) ?? "round-brief";
   const dateStr =
-    (downloadRes.metadata?.["date"] as string | undefined) ?? "";
+    (downloadRes.metadata?.["date"]) ?? "";
   const filename = `BCC-Brief-${siteName.replace(/\s+/g, "-")}-${dateStr}.pdf`
     .replace(/[^a-zA-Z0-9._-]/g, "-")
     .replace(/-+/g, "-");

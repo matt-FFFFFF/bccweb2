@@ -128,10 +128,10 @@ describe("confirmRound skeleton brief blob", () => {
     expect(brief!.guideUrl).toBe("https://example.com/guide");
     expect(brief!.organisingClubName).toBe("Test Org Club");
     expect(brief!.teams).toHaveLength(1);
-    expect(brief!.teams[0]!.teamName).toBe("Alpha");
-    expect(brief!.teams[0]!.clubName).toBe("Alpha Club");
+    expect(brief!.teams[0].teamName).toBe("Alpha");
+    expect(brief!.teams[0].clubName).toBe("Alpha Club");
     // Pre-lock: snapshots are null so pilots are filtered out by buildRoundBrief.
-    expect(brief!.teams[0]!.pilots).toEqual([]);
+    expect(brief!.teams[0].pilots).toEqual([]);
 
     // Narrative fields must be undefined on a skeleton.
     expect(brief!.airspaceAndHazards).toBeUndefined();

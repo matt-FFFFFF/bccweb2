@@ -67,8 +67,8 @@ describe("RoundBrief Edit API", () => {
     const res = await invoke("updateRoundBrief", req);
 
     expect(res.status).toBe(200);
-    expect((res.jsonBody as any).materialChanged).toBe(false);
-    expect((res.jsonBody as any).brief.version).toBe(1);
+    expect((res.jsonBody).materialChanged).toBe(false);
+    expect((res.jsonBody).brief.version).toBe(1);
     expect(mockWritePrivateBlob).toHaveBeenCalledWith("round-briefs/round-1.json", expect.objectContaining({ version: 1 }), "mock-lease");
   });
 
@@ -89,9 +89,9 @@ describe("RoundBrief Edit API", () => {
     const res = await invoke("updateRoundBrief", req);
 
     expect(res.status).toBe(200);
-    expect((res.jsonBody as any).materialChanged).toBe(true);
-    expect((res.jsonBody as any).invalidatedSignatureCount).toBe(1);
-    expect((res.jsonBody as any).brief.version).toBe(2);
+    expect((res.jsonBody).materialChanged).toBe(true);
+    expect((res.jsonBody).invalidatedSignatureCount).toBe(1);
+    expect((res.jsonBody).brief.version).toBe(2);
 
     expect(mockWritePrivateBlob).toHaveBeenCalledWith(
       "round-briefs/round-1.json",
@@ -116,7 +116,7 @@ describe("RoundBrief Edit API", () => {
     const res = await invoke("updateRoundBrief", req);
 
     expect(res.status).toBe(409);
-    expect((res.jsonBody as any).code).toBe("BRIEF_LOCKED");
+    expect((res.jsonBody).code).toBe("BRIEF_LOCKED");
   });
 
   it("non-admin/coord -> 403 FORBIDDEN", async () => {
@@ -153,9 +153,9 @@ describe("RoundBrief Edit API", () => {
 
     const res = await invoke("uploadBriefImage", req);
     expect(res.status).toBe(200);
-    expect((res.jsonBody as any).path).toMatch(/image-\d+\.png/);
+    expect((res.jsonBody).path).toMatch(/image-\d+\.png/);
     expect(mockUpload).toHaveBeenCalled();
-    expect(mockWritePrivateBlob).toHaveBeenCalledWith("round-briefs/round-1.json", expect.objectContaining({ imagePaths: [(res.jsonBody as any).path] }), "mock-lease");
+    expect(mockWritePrivateBlob).toHaveBeenCalledWith("round-briefs/round-1.json", expect.objectContaining({ imagePaths: [(res.jsonBody).path] }), "mock-lease");
 
     // >5MB — also needs valid magic so it reaches the size check
     const reqBig = makeRequest({ params: { id: "round-1" } });

@@ -354,26 +354,30 @@ async function withLeaseRenewingOnClient<T>(
   let renewalError: unknown = null;
   let renewing = false;
   let stopping = false;
-  const handle = setInterval(async () => {
-    if (renewing || stopping) return;
-    renewing = true;
-    attempt += 1;
-    try {
-      await leaseClient.renewLease();
-      if (stopping) return;
-      totalRenewals += 1;
-      trackLeaseTrace("Blob lease renewed", {
-        path,
-        leaseId,
-        attempt,
-      });
-    } catch (err) {
-      if (stopping) return;
-      renewalError = err;
-      clearInterval(handle);
-    } finally {
-      renewing = false;
-    }
+  // The renew body catches every error into `renewalError`, so this promise
+  // never rejects; `void` marks it deliberately floating (no-misused-promises).
+  const handle = setInterval(() => {
+    void (async () => {
+      if (renewing || stopping) return;
+      renewing = true;
+      attempt += 1;
+      try {
+        await leaseClient.renewLease();
+        if (stopping) return;
+        totalRenewals += 1;
+        trackLeaseTrace("Blob lease renewed", {
+          path,
+          leaseId,
+          attempt,
+        });
+      } catch (err) {
+        if (stopping) return;
+        renewalError = err;
+        clearInterval(handle);
+      } finally {
+        renewing = false;
+      }
+    })();
   }, renewIntervalMs);
 
   let fnError: unknown = null;
@@ -432,7 +436,7 @@ async function streamToString(
 ): Promise<string> {
   const chunks: Buffer[] = [];
   for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks).toString("utf-8");
 }

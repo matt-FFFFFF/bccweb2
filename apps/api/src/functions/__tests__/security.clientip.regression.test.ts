@@ -29,7 +29,7 @@ async function invoke(
   const entry = getRegisteredHandler(handlerName);
   if (!entry) throw new Error(`Handler "${handlerName}" not registered`);
   const req = makeRequest({ method: init.method, body: init.body, query: init.query, headers: init.headers });
-  return (await entry.handler(req as never, ctxStub())) as HandlerResponse;
+  return (await entry.handler(req, ctxStub())) as HandlerResponse;
 }
 
 beforeEach(() => {

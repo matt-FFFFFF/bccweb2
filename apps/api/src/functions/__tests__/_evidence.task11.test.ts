@@ -63,7 +63,7 @@ function makeReq(
     method,
     headers,
     params,
-    query: new URLSearchParams() as unknown as HttpRequest["query"],
+    query: new URLSearchParams(),
     json: async () => body,
   } as unknown as HttpRequest;
 }

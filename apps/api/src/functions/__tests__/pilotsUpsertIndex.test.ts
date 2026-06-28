@@ -23,7 +23,7 @@ describe("pilot index upsert", () => {
               email: `concurrent-${index}@example.com`,
             },
           }) as never,
-          { log: () => undefined } as never
+          { log: () => undefined }
         )
       )
     );

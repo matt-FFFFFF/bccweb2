@@ -73,7 +73,7 @@ describe("consumeShortLivedToken", () => {
 
     expect(rejected).toHaveLength(9);
     for (const r of rejected) {
-      expect((r as PromiseRejectedResult).reason).toBeInstanceOf(
+      expect((r).reason).toBeInstanceOf(
         TokenAlreadyConsumedError
       );
     }

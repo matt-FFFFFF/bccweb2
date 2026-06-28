@@ -38,12 +38,26 @@ interface PilotSlot {
   flight: unknown | null;
 }
 
+interface RoundState {
+  status: string;
+  isLocked: boolean;
+  date: string;
+  site: { id: string; name: string; [key: string]: unknown };
+  teams: { pilots: PilotSlot[]; [key: string]: unknown }[];
+  [key: string]: unknown;
+}
+
+interface BriefState {
+  version: number;
+  [key: string]: unknown;
+}
+
 interface E2EState {
   identities: Record<string, Identity>;
-  round: any;
-  brief: any;
-  wording: any;
-  signatures: any[];
+  round: RoundState;
+  brief: BriefState;
+  wording: unknown;
+  signatures: unknown[];
   lastRegisteredEmail: string | null;
   issuedTokens: Record<string, string>;
   pureTrackMocked: boolean;
@@ -339,7 +353,7 @@ async function handleApi(route: Route, apiPath: string, url: URL, state: E2EStat
     return route.fulfill({ status: 200, contentType: "image/png", body: Buffer.from("") });
   }
   if (apiPath === `rounds/${ROUND_ID}/brief` && method === "PUT") {
-    const body = request.postDataJSON() as any;
+    const body = request.postDataJSON() as Record<string, unknown>;
     const dryRun = url.searchParams.get("dryRun") === "true";
     const materialChanged = body.NOTAMs !== state.brief.NOTAMs;
     const invalidatedSignatureCount = materialChanged ? signedSlots(state).length : 0;

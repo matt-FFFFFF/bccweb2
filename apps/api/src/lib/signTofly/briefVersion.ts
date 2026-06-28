@@ -58,12 +58,15 @@ function sortJson(value: unknown): JsonValue {
     return value.map(sortJson);
   }
   if (typeof value === "object") {
-    return Object.keys(value as Record<string, unknown>)
+    return Object.keys(value)
       .sort()
       .reduce<Record<string, JsonValue>>((acc, key) => {
         acc[key] = sortJson((value as Record<string, unknown>)[key]);
         return acc;
       }, {});
   }
-  return String(value);
+  if (typeof value === "bigint" || typeof value === "symbol" || typeof value === "function") {
+    return value.toString();
+  }
+  return "";
 }

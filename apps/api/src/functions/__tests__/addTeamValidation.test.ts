@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import { randomUUID } from "crypto";
-import type { Round, Team } from "@bccweb/types";
+import type { Round } from "@bccweb/types";
 import { getRegisteredHandler } from "../../__tests__/helpers/setup.js";
 import { makeAuthRequest } from "../../__tests__/helpers/api.js";
 import {
@@ -27,7 +27,7 @@ async function callAddTeam(
     params: { id: roundId },
     body: { clubId, teamName },
   });
-  return (await entry.handler(req as never, ctx)) as {
+  return (await entry.handler(req, ctx)) as {
     status: number;
     jsonBody?: unknown;
   };
@@ -51,7 +51,7 @@ describe("POST /api/rounds/{id}/teams — ClubTeam validation", () => {
     expect(res.status).toBe(200);
     const updated = res.jsonBody as Round;
     expect(updated.teams).toHaveLength(1);
-    const added = updated.teams[0] as Team;
+    const added = updated.teams[0];
     expect(added.teamName).toBe("Bravo");
     expect(added.club.name).toBe("Validation Club");
   });
@@ -119,7 +119,7 @@ describe("POST /api/rounds/{id}/teams — ClubTeam validation", () => {
     const res = await callAddTeam(user.id, user.email, round.id, club.id, "  deltaforce  ");
 
     expect(res.status).toBe(200);
-    const added = (res.jsonBody as Round).teams[0] as Team;
+    const added = (res.jsonBody as Round).teams[0];
     expect(added.teamName).toBe("DeltaForce");
   });
 
@@ -136,7 +136,7 @@ describe("POST /api/rounds/{id}/teams — ClubTeam validation", () => {
       params: { id: round.id },
       body: { clubId: club.id },
     });
-    const res = (await entry.handler(req as never, ctx)) as { status: number };
+    const res = (await entry.handler(req, ctx)) as { status: number };
 
     expect(res.status).toBe(400);
   });

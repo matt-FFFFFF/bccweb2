@@ -20,7 +20,7 @@ async function invoke(
 ) {
   const entry = getRegisteredHandler(name);
   if (!entry) throw new Error(`${name} not registered`);
-  return (await entry.handler(req as never, ctx)) as {
+  return (await entry.handler(req, ctx)) as {
     status: number;
     jsonBody?: unknown;
     headers?: Record<string, string>;

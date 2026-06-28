@@ -6,7 +6,7 @@ function makeCtx(): InvocationContext {
   return {
     invocationId: "req-123",
     functionName: "testFn",
-    extraInputs: { get: vi.fn(), set: vi.fn() } as never,
+    extraInputs: { get: vi.fn(), set: vi.fn() },
     extraOutputs: { set: vi.fn() } as never,
     log: vi.fn(),
     trace: vi.fn(),
@@ -15,7 +15,7 @@ function makeCtx(): InvocationContext {
     warn: vi.fn(),
     error: vi.fn(),
     options: {} as never,
-  } as InvocationContext;
+  };
 }
 
 function makeReq(): HttpRequest {

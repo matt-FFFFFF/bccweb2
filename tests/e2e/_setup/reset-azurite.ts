@@ -179,6 +179,7 @@ export async function resetAzuriteAndSeedAdmin(): Promise<{
   email: string;
   password: string;
 }> {
+  assertLocalAzurite(CONN);
   const svc = BlobServiceClient.fromConnectionString(CONN);
   const pub = svc.getContainerClient(PUBLIC_CONTAINER);
   const priv = svc.getContainerClient(PRIVATE_CONTAINER);
