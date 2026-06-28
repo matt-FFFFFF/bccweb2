@@ -36,19 +36,23 @@ export const sharedTsRules = {
   "@typescript-eslint/no-unused-expressions": "error",
 };
 
-// Syntactic (non type-aware) TS lint. Powers packages/* and e2e.
-export const tsSyntactic = [
-  ...tseslint.configs.recommended,
-  { rules: { ...sharedTsRules } },
-];
+// syntactic TS, scoped by caller (default src/**/*.ts). Returns an array.
+export function tsSyntactic({ files = ["src/**/*.ts"] } = {}) {
+  return tseslint.config({
+    files,
+    extends: [...tseslint.configs.recommended],
+    rules: { ...sharedTsRules },
+  });
+}
 
-// Type-aware TS lint factory. Powers apps/api, which needs a parser project.
-export function tsTypeAware({ tsconfigRootDir, project }) {
-  return [
-    ...tseslint.configs.recommendedTypeChecked,
-    { languageOptions: { parserOptions: { project, tsconfigRootDir } } },
-    { rules: { ...sharedTsRules } },
-  ];
+// type-aware TS, scoped by caller (default src/**/*.ts). Returns an array.
+export function tsTypeAware({ tsconfigRootDir, project, files = ["src/**/*.ts"] }) {
+  return tseslint.config({
+    files,
+    extends: [...tseslint.configs.recommendedTypeChecked],
+    languageOptions: { parserOptions: { project, tsconfigRootDir } },
+    rules: { ...sharedTsRules },
+  });
 }
 
 // Relax the loose type-aware rules on test files (heavy mocking, casts).
@@ -72,9 +76,9 @@ export const nodeScripts = {
   languageOptions: { sourceType: "module", globals: { ...globals.node } },
 };
 
-// Playwright E2E lint. Spreads syntactic TS + the playwright flat preset.
-export const e2eConfig = [
-  ...tseslint.configs.recommended,
-  playwright.configs["flat/recommended"],
-  { files: ["tests/e2e/**/*.ts"], rules: { ...sharedTsRules } },
-];
+// Playwright e2e, fully scoped to tests/e2e/**/*.ts. Returns an array.
+export const e2eConfig = tseslint.config({
+  files: ["tests/e2e/**/*.ts"],
+  extends: [...tseslint.configs.recommended, playwright.configs["flat/recommended"]],
+  rules: { ...sharedTsRules },
+});
