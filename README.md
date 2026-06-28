@@ -1,12 +1,12 @@
 # bccweb2
 
 Competition management web app for the **British Club Challenge** (BCC) hang
-gliding & paragliding league. React 18 SPA + Azure Functions v4 API, with all
+gliding & paragliding league. React 19 SPA + Azure Functions v4 API, with all
 data stored in Azure Blob Storage (no database). Replaces a legacy .NET app.
 
 ## Stack
 
-- **Web**: React 18, Vite 8, React Router v8, TypeScript
+- **Web**: React 19, Vite 8, React Router v8, TypeScript
 - **API**: Azure Functions v4 (Node 24, ESM, programming-model v4), TypeScript
 - **Storage**: Azure Blob Storage (two containers: `data` public, `data-private` private)
 - **Auth**: HS256 JWT (bespoke), `JWT_SECRET` from Azure Key Vault in prod
