@@ -16,7 +16,16 @@ export default tseslint.config(
       "no-unused-expressions": "off",
       "@typescript-eslint/no-unused-expressions": "off",
       "no-unused-vars": "off",
-      "@typescript-eslint/no-unused-vars": "off",
+      // Re-enabled per issue #10 item 1; mirrors the ^_ opt-out convention in
+      // eslint.config.base.mjs. Base no-unused-vars stays off intentionally.
+      "@typescript-eslint/no-unused-vars": [
+        "error",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
+      ],
       "@typescript-eslint/no-explicit-any": "off",
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "off",

@@ -4,7 +4,7 @@ import type { PilotSummary, SeasonClub, ClubSummary } from "@bccweb/types";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
 import { useAuth } from "../../hooks/useAuth.js";
 import { useBlob } from "../../hooks/useBlob.js";
-import { api, ApiError } from "../../lib/api.js";
+import { api } from "../../lib/api.js";
 
 const inputStyle: React.CSSProperties = {
   padding: "0.45rem 0.6rem",
