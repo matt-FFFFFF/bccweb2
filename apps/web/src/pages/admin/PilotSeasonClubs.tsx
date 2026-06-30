@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react";
+import { useCallback, useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "react-router";
 import type { PilotSummary, SeasonClub, ClubSummary } from "@bccweb/types";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
@@ -67,7 +67,7 @@ export default function PilotSeasonClubs() {
   const pilotNameById = useMemo(() => new Map((pilotsList ?? []).map((p) => [p.id, p.name])), [pilotsList]);
   const clubNameById = useMemo(() => new Map((clubsList ?? []).map((c) => [c.id, c.name])), [clubsList]);
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!Number.isInteger(seasonYear)) return;
     setLoading(true);
     try {
@@ -82,13 +82,13 @@ export default function PilotSeasonClubs() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [seasonYear]);
 
   useEffect(() => {
     if (!authLoading && !pilotsLoading && !clubsLoading && canRead) {
       void load();
     }
-  }, [authLoading, pilotsLoading, clubsLoading, canRead, seasonYear]);
+  }, [authLoading, pilotsLoading, clubsLoading, canRead, load]);
 
   async function handleAssign(e: React.FormEvent) {
     e.preventDefault();

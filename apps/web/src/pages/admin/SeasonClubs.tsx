@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router";
 import type { ClubSummary, SeasonClub } from "@bccweb/types";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
@@ -65,7 +65,7 @@ export default function SeasonClubs() {
   const isAdmin = identity?.roles.includes("Admin");
   const canRead = isAdmin || identity?.roles.includes("RoundsCoord");
 
-  async function load() {
+  const load = useCallback(async () => {
     if (!Number.isInteger(seasonYear)) return;
     setLoading(true);
     try {
@@ -77,11 +77,11 @@ export default function SeasonClubs() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [seasonYear, clubNameById]);
 
   useEffect(() => {
     if (!authLoading && !clubsLoading && canRead) void load();
-  }, [authLoading, clubsLoading, canRead, seasonYear, isAdmin, clubNameById]);
+  }, [authLoading, clubsLoading, canRead, load]);
 
   async function register(e: React.FormEvent) {
     e.preventDefault();
