@@ -1,3 +1,4 @@
+CONTAINER_RUNTIME ?= docker
 .PHONY: help
 help: ## Show this help
 	@awk 'BEGIN {FS = ":.*?## "} /^[a-zA-Z_-]+:.*?## / {printf "  %-22s %s\n", $$1, $$2}' $(MAKEFILE_LIST) | sort
@@ -62,11 +63,11 @@ dev-web: ## Start Vite dev server on :5173
 
 .PHONY: docker-up
 docker-up: ## Start Azurite + API + Web via Docker Compose
-	docker compose up --build
+	${CONTAINER_RUNTIME} compose up --build
 
 .PHONY: docker-down
 docker-down: ## Stop Docker Compose stack
-	docker compose down
+	${CONTAINER_RUNTIME} compose down
 
 .PHONY: seed
 seed: ## Seed 500 pilots / 50 clubs / 100 club-teams + season fixtures
