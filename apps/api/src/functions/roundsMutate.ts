@@ -194,8 +194,11 @@ async function createRound(
       const clubPath = `clubs/${organisingClubId}.json`;
       const club = await readJson(getPrivateBlobClient(clubPath), ClubRefSchema, clubPath);
       organisingClub = { id: club.id, name: club.name };
-    } catch {
-      throw new HttpError(400, "CLUB_NOT_FOUND", "Organising club not found");
+    } catch (err: unknown) {
+      if ((err as { statusCode?: number }).statusCode === 404) {
+        throw new HttpError(400, "CLUB_NOT_FOUND", "Organising club not found");
+      }
+      throw new HttpError(500, "INTERNAL");
     }
   }
 
@@ -355,8 +358,11 @@ async function updateRound(
           const clubPath = `clubs/${body.organisingClubId}.json`;
           const club = await readJson(getPrivateBlobClient(clubPath), ClubRefSchema, clubPath);
           r.organisingClub = { id: club.id, name: club.name };
-        } catch {
-          throw new HttpError(400, "CLUB_NOT_FOUND", "Organising club not found");
+        } catch (err: unknown) {
+          if ((err as { statusCode?: number }).statusCode === 404) {
+            throw new HttpError(400, "CLUB_NOT_FOUND", "Organising club not found");
+          }
+          throw new HttpError(500, "INTERNAL");
         }
       }
 
