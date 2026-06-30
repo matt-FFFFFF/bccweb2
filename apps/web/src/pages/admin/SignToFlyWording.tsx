@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth.js";
 import { api, ApiError } from "../../lib/api.js";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
@@ -67,7 +67,7 @@ export default function AdminSignToFlyWording() {
 
   const isAdmin = identity?.roles.includes("Admin");
 
-  const load = useCallback(async () => {
+  async function load() {
     setLoading(true);
     setLoadErr(null);
     try {
@@ -79,9 +79,9 @@ export default function AdminSignToFlyWording() {
       if (activeResult.status === "fulfilled") {
         const act = activeResult.value;
         setActive(act);
-        if (act) {
-          setFormHtml((prev) => (prev ? prev : act.html));
-          setFormPlainText((prev) => (prev ? prev : act.plainText));
+        if (!formHtml && !formPlainText && act) {
+          setFormHtml(act.html);
+          setFormPlainText(act.plainText);
         }
       } else if (activeResult.reason instanceof ApiError && activeResult.reason.code === "WORDING_NOT_SEEDED") {
         setActive(null);
@@ -101,12 +101,14 @@ export default function AdminSignToFlyWording() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }
 
+  // Runs when isAdmin flips true; load() reads form state only as a mount-time
+  // guard (don't clobber in-progress edits), so it must not be a dependency.
   useEffect(() => {
     if (!isAdmin) return;
     void load();
-  }, [isAdmin, load]);
+  }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
