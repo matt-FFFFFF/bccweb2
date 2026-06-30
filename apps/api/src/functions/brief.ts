@@ -6,6 +6,7 @@
  * GET  /api/rounds/{id}/brief/images/{n} — streams a private brief image
  */
 
+import { randomUUID } from "node:crypto";
 import {
   app,
   HttpRequest,
@@ -16,7 +17,6 @@ import type { RoundBrief } from "@bccweb/types";
 import { BriefSchema, RoundSchema, BriefEditableSchema, BRIEF_EDITABLE_KEYS } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
-  withPrivateLeaseRenewing,
   getPrivateBlockBlobClient,
   withRoundAndBriefLease,
 } from "../lib/blob.js";
@@ -335,6 +335,21 @@ async function updateRoundBrief(
 
 // ─── POST /api/rounds/{id}/brief/images ───────────────────────────────────────
 
+// CAS create-only so withRoundAndBriefLease has a blob to lease; a concurrent
+// first-upload that already created it 409/412s, swallowed as a no-op (R3).
+async function ensureBriefExists(id: string, round: Round): Promise<void> {
+  if (await readBrief(id)) return;
+  const seed = await buildInitialBrief(round);
+  try {
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, seed, undefined, {
+      ifNoneMatch: "*",
+    });
+  } catch (e: unknown) {
+    const sc = (e as { statusCode?: number }).statusCode;
+    if (sc !== 409 && sc !== 412) throw e;
+  }
+}
+
 async function uploadBriefImage(
   req: HttpRequest,
   _ctx: InvocationContext
@@ -345,6 +360,8 @@ async function uploadBriefImage(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID");
 
+  // Unleased read is for AUTH + lazy-create seed ONLY. The authoritative status
+  // gate is re-read UNDER the round lease below (B3) — never trusted from here.
   const round = await readJson(
     getPrivateBlobClient(`rounds/${id}.json`),
     RoundSchema,
@@ -363,9 +380,6 @@ async function uploadBriefImage(
     throw new HttpError(403, "FORBIDDEN");
   }
   await mutationRateLimit(req, caller, "uploadBriefImage", "standard");
-  if (round.status === "Locked" || round.status === "Complete") {
-    throw new HttpError(409, "BRIEF_LOCKED", "Round is locked or complete.");
-  }
 
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
@@ -380,38 +394,47 @@ async function uploadBriefImage(
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const brief = await readBrief(id);
-  if (!brief) throw new HttpError(404, "NOT_FOUND", "Brief not found");
-  if ((brief.imagePaths?.length || 0) >= 10) {
-    return {
-      status: 400,
-      jsonBody: { error: "TOO_MANY_IMAGES", code: "TOO_MANY_IMAGES" },
-    };
-  }
   if (!matchesMagicBytes(file.type, buffer)) {
-    return {
-      status: 400,
-      jsonBody: { error: "IMAGE_MAGIC_MISMATCH", code: "IMAGE_MAGIC_MISMATCH" },
-    };
+    throw new HttpError(400, "IMAGE_MAGIC_MISMATCH", "Image bytes do not match the declared type");
   }
-
-  const nextN = (brief.imagePaths?.length || 0) + 1;
   const ext = file.type === "image/png" ? "png" : "jpg";
-  const imagePath = `round-briefs/${id}/image-${nextN}.${ext}`;
 
-  const imageClient = getPrivateBlockBlobClient(imagePath);
-  await imageClient.upload(buffer, buffer.length, {
-    blobHTTPHeaders: { blobContentType: file.type },
-  });
+  await ensureBriefExists(id, round);
 
-  let savedPath = "";
-  await withPrivateLeaseRenewing(`round-briefs/${id}.json`, async (leaseId) => {
+  const savedPath = await withRoundAndBriefLease(id, async (_roundLeaseId, briefLeaseId) => {
+    // B3: re-read the round status UNDER the round lease and reject any frozen /
+    // locked state HERE. imagePaths is material, so an append after T7 freezes
+    // the hash would silently break the T8 lock assertion — gate it under lease.
+    const current = await readJson(
+      getPrivateBlobClient(`rounds/${id}.json`),
+      RoundSchema,
+      `rounds/${id}.json`,
+    );
+    if (current.status !== "Proposed" && current.status !== "Confirmed") {
+      throw new HttpError(
+        409,
+        "BRIEF_LOCKED",
+        "Brief images can only be changed while the round is Proposed or Confirmed.",
+      );
+    }
+
     const existing = await readBrief(id);
-    if (!existing) throw new HttpError(404, "NOT_FOUND");
+    if (!existing) throw new HttpError(404, "NOT_FOUND", "Brief not found");
+    if ((existing.imagePaths?.length || 0) >= 10) {
+      throw new HttpError(400, "TOO_MANY_IMAGES", "A brief may hold at most 10 images.");
+    }
+
+    // crypto UUID name — NEVER reuse an index. A delete+reupload must yield a
+    // fresh path (no stale-blob collision) and register as a material change.
+    const imagePath = `round-briefs/${id}/${randomUUID()}.${ext}`;
+    await getPrivateBlockBlobClient(imagePath).upload(buffer, buffer.length, {
+      blobHTTPHeaders: { blobContentType: file.type },
+    });
+
     existing.imagePaths = existing.imagePaths || [];
     existing.imagePaths.push(imagePath);
-    savedPath = imagePath;
-    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, existing, leaseId);
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, existing, briefLeaseId);
+    return imagePath;
   });
 
   return { status: 200, jsonBody: { path: savedPath } };
@@ -448,11 +471,28 @@ async function deleteBriefImage(
     throw new HttpError(403, "FORBIDDEN");
   }
   await mutationRateLimit(req, caller, "deleteBriefImage", "standard");
-  if (round.status === "Locked" || round.status === "Complete") {
-    throw new HttpError(409, "BRIEF_LOCKED", "Round is locked or complete.");
+
+  // No lazy-create on delete; a missing brief is a 404 and also can't be leased.
+  if (!(await readBrief(id))) {
+    throw new HttpError(404, "NOT_FOUND", "Image not found");
   }
 
-  await withPrivateLeaseRenewing(`round-briefs/${id}.json`, async (leaseId) => {
+  await withRoundAndBriefLease(id, async (_roundLeaseId, briefLeaseId) => {
+    // B3: gate the material imagePaths change on the round status, re-read here
+    // under the round lease (never trusted from the unleased read above).
+    const current = await readJson(
+      getPrivateBlobClient(`rounds/${id}.json`),
+      RoundSchema,
+      `rounds/${id}.json`,
+    );
+    if (current.status !== "Proposed" && current.status !== "Confirmed") {
+      throw new HttpError(
+        409,
+        "BRIEF_LOCKED",
+        "Brief images can only be changed while the round is Proposed or Confirmed.",
+      );
+    }
+
     const existing = await readBrief(id);
     if (!existing || !existing.imagePaths || !existing.imagePaths[n - 1]) {
       throw new HttpError(404, "NOT_FOUND", "Image not found");
@@ -460,10 +500,9 @@ async function deleteBriefImage(
 
     const imagePath = existing.imagePaths[n - 1];
     existing.imagePaths.splice(n - 1, 1);
-    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, existing, leaseId);
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, existing, briefLeaseId);
 
-    const imageClient = getPrivateBlockBlobClient(imagePath);
-    await imageClient.deleteIfExists();
+    await getPrivateBlockBlobClient(imagePath).deleteIfExists();
   });
 
   return { status: 204 };
