@@ -4,43 +4,42 @@ import type { SignToFlyWording } from "@bccweb/types";
 import { getPrivateBlockBlobClient } from "../../blob.js";
 import { addWordingVersion, getActiveWording } from "../wording.js";
 
-const LEGACY_HTML = `<div class="alert alert-warning">
-    By clicking <strong>Sign to Fly</strong>, you are confirming that you have received and understood a full brief for this round, which incorporated:
-    <br /><br />
-    The day's expected meteorological conditions, including anticipated convection activity, convergence lines, cloud cover, and any frontal effects (including sea breeze fronts).
-    <br /><br />
-    An understanding of any conditions which would require terminating the flight for safety reasons, made with reference to a current aeronautical chart, details of all controlled airspace
-    or hazards to aviation that may be encountered along the anticipated route of the flight (including NOTAMs), up to a clearly defined “May not exceed” limit.
-    <br /><br />
-    That you have received and understood a suitable briefing, made with reference to a current aeronautical chart, which addresses all controlled airspace or hazards to aviation that may be encountered along the anticipated
-    route of the flight (including NOTAM’s), up to the “Do not exceed” limit detailed in this briefing document.
-    <br /><br />
-          <div class="alert alert-danger">
-              <b>Club Pilots</b><br />
-              You are confirming that you are aware of the geographical limits and altitude, height or flight level limits of the airspace or hazards and that you are confident of your ability to navigate and safely avoid any such areas or hazards.
-              <br /><br />
-              In addition you are confirming that you understand that if the flight should stray outside the anticipated “cone" of the briefed track, or reach the “May not exceed” limit, your flight must be discontinued.
-          </div>
-    Are you sure you want to <strong>Sign to Fly</strong> in this round?
-</div>`;
+// Stability lock: the wording hash is sha256 of the RAW markdown source bytes.
+// This hard-coded value pins the hashing contract — if it ever needs changing
+// the algorithm has drifted and every wordingHash already recorded in the
+// signature ledger would silently mismatch. Do not edit lightly.
+const FIXED_MARKDOWN =
+  "# Sign to Fly\n\nBy clicking **Sign to Fly**, you confirm you have received and understood a full brief for this round.\n";
+const FIXED_MARKDOWN_SHA256 =
+  "6dda7f5c90373fc53e91f9c9a65dfd301e3d956ba6950355597d430309744bfe";
 
 describe("Sign-to-Fly wording registry", () => {
-  it("getActiveWording returns seeded v1 with matching hash", async () => {
-    await seedVersion1(LEGACY_HTML);
+  it("hashes raw markdown with a stable sha256 (stability lock)", async () => {
+    await seedVersion1(FIXED_MARKDOWN);
+
+    const active = await getActiveWording();
+
+    expect(active.hash).toBe(FIXED_MARKDOWN_SHA256);
+    expect(active.hash).toBe(hashMarkdown(FIXED_MARKDOWN));
+  });
+
+  it("getActiveWording returns seeded v1 with matching markdown + hash", async () => {
+    await seedVersion1(FIXED_MARKDOWN);
 
     const active = await getActiveWording();
 
     expect(active.version).toBe(1);
-    expect(active.html).toBe(LEGACY_HTML);
-    expect(active.hash).toBe(hashHtml(LEGACY_HTML));
+    expect(active.markdown).toBe(FIXED_MARKDOWN);
+    expect(active.hash).toBe(FIXED_MARKDOWN_SHA256);
+    expect(active).not.toHaveProperty("html");
+    expect(active).not.toHaveProperty("plainText");
   });
 
-  it("addWordingVersion creates v2, marks v1 superseded, switches active pointer to v2; v1 html unchanged", async () => {
-    await seedVersion1("<p>v1 wording</p>");
+  it("addWordingVersion creates v2, marks v1 superseded, switches active pointer to v2; v1 markdown unchanged", async () => {
+    await seedVersion1("# v1 wording");
 
     const v2 = await addWordingVersion({
-      html: "<p>v2 wording</p>",
-      plainText: "v2 wording",
+      markdown: "# v2 wording",
       createdBy: "admin-user",
     });
 
@@ -48,19 +47,22 @@ describe("Sign-to-Fly wording registry", () => {
     const active = await getActiveWording();
 
     expect(v2.version).toBe(2);
-    expect(v2.hash).toBe(hashHtml("<p>v2 wording</p>"));
-    expect(v1.html).toBe("<p>v1 wording</p>");
+    expect(v2.markdown).toBe("# v2 wording");
+    expect(v2.hash).toBe(hashMarkdown("# v2 wording"));
+    expect(v2).not.toHaveProperty("html");
+    expect(v2).not.toHaveProperty("plainText");
+    expect(v1.markdown).toBe("# v1 wording");
     expect(v1.supersededBy).toBe(2);
     expect(v1.supersededAt).toEqual(expect.any(String));
     expect(active.version).toBe(2);
   });
 
   it("addWordingVersion under concurrent calls: lease retry produces sequential versions", async () => {
-    await seedVersion1("<p>v1 concurrent</p>");
+    await seedVersion1("# v1 concurrent");
 
     const attempts = await Promise.allSettled([
-      addWordingVersion({ html: "<p>v2-a</p>", plainText: "v2-a", createdBy: "admin-a" }),
-      addWordingVersion({ html: "<p>v2-b</p>", plainText: "v2-b", createdBy: "admin-b" }),
+      addWordingVersion({ markdown: "# v2-a", createdBy: "admin-a" }),
+      addWordingVersion({ markdown: "# v2-b", createdBy: "admin-b" }),
     ]);
     const fulfilled = attempts.filter(
       (result): result is PromiseFulfilledResult<SignToFlyWording> => result.status === "fulfilled",
@@ -74,14 +76,13 @@ describe("Sign-to-Fly wording registry", () => {
   });
 });
 
-async function seedVersion1(html: string): Promise<void> {
+async function seedVersion1(markdown: string): Promise<void> {
   await getPrivateBlockBlobClient("sign-to-fly/wording/2.json").deleteIfExists();
   await getPrivateBlockBlobClient("sign-to-fly/wording/3.json").deleteIfExists();
   const wording: SignToFlyWording = {
     version: 1,
-    hash: hashHtml(html),
-    html,
-    plainText: stripTags(html),
+    hash: hashMarkdown(markdown),
+    markdown,
     createdAt: new Date().toISOString(),
     createdBy: "seed-test",
   };
@@ -109,18 +110,6 @@ function blobExists(path: string): Promise<boolean> {
   return getPrivateBlockBlobClient(path).exists();
 }
 
-function hashHtml(html: string): string {
-  return createHash("sha256").update(html, "utf8").digest("hex");
-}
-
-// Strip HTML tags until the string is stable: a single pass can leave a residual
-// `<tag` behind for nested/crafted markup, so repeat until nothing changes.
-function stripTags(html: string): string {
-  let text = html;
-  let previous: string;
-  do {
-    previous = text;
-    text = text.replace(/<[^>]+>/g, "");
-  } while (text !== previous);
-  return text;
+function hashMarkdown(markdown: string): string {
+  return createHash("sha256").update(markdown, "utf8").digest("hex");
 }

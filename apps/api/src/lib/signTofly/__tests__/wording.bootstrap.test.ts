@@ -21,25 +21,24 @@ describe("Sign-to-Fly wording bootstrap", () => {
 
   it("virgin store addWordingVersion creates version 1 without leasing the missing active pointer", async () => {
     const wording = await addWordingVersion({
-      html: "<p>bootstrap wording</p>",
-      plainText: "bootstrap wording",
+      markdown: "# bootstrap wording",
       createdBy: "admin-bootstrap",
     });
 
     expect(wording).toMatchObject({
       version: 1,
-      hash: hashHtml("<p>bootstrap wording</p>"),
-      html: "<p>bootstrap wording</p>",
-      plainText: "bootstrap wording",
+      hash: hashMarkdown("# bootstrap wording"),
+      markdown: "# bootstrap wording",
       createdBy: "admin-bootstrap",
     });
+    expect(wording).not.toHaveProperty("html");
+    expect(wording).not.toHaveProperty("plainText");
     expect(wording.createdAt).toEqual(expect.any(String));
   });
 
   it("bootstrap creates both the v1 blob and the active pointer", async () => {
     await addWordingVersion({
-      html: "<p>both blobs</p>",
-      plainText: "both blobs",
+      markdown: "# both blobs",
       createdBy: "admin-bootstrap",
     });
 
@@ -48,17 +47,16 @@ describe("Sign-to-Fly wording bootstrap", () => {
 
     expect(await privateBlobExists("sign-to-fly/wording/1.json")).toBe(true);
     expect(await privateBlobExists("sign-to-fly/wording/active.json")).toBe(true);
-    expect(version).toMatchObject({ version: 1, html: "<p>both blobs</p>" });
+    expect(version).toMatchObject({ version: 1, markdown: "# both blobs" });
     expect(active).toEqual({ activeVersion: 1 });
-    await expect(getActiveWording()).resolves.toMatchObject({ version: 1, html: "<p>both blobs</p>" });
+    await expect(getActiveWording()).resolves.toMatchObject({ version: 1, markdown: "# both blobs" });
   });
 
   it("heals a partial bootstrap with v1 present and active pointer absent", async () => {
     const first: SignToFlyWording = {
       version: 1,
-      hash: hashHtml("<p>partial bootstrap seed</p>"),
-      html: "<p>partial bootstrap seed</p>",
-      plainText: "partial bootstrap seed",
+      hash: hashMarkdown("# partial bootstrap seed"),
+      markdown: "# partial bootstrap seed",
       createdAt: new Date("2026-01-01T00:00:00.000Z").toISOString(),
       createdBy: "admin-seed",
     };
@@ -73,16 +71,14 @@ describe("Sign-to-Fly wording bootstrap", () => {
     );
 
     const wording = await addWordingVersion({
-      html: "<p>healed wording</p>",
-      plainText: "healed wording",
+      markdown: "# healed wording",
       createdBy: "admin-heal",
     });
 
     expect(wording).toMatchObject({
       version: 2,
-      hash: hashHtml("<p>healed wording</p>"),
-      html: "<p>healed wording</p>",
-      plainText: "healed wording",
+      hash: hashMarkdown("# healed wording"),
+      markdown: "# healed wording",
       createdBy: "admin-heal",
     });
     await expect(getActiveWording()).resolves.toMatchObject({ version: 2 });
@@ -90,9 +86,9 @@ describe("Sign-to-Fly wording bootstrap", () => {
 
   it("three concurrent addWordingVersion calls against virgin store produce v1, v2, and v3", async () => {
     const attempts = await Promise.all([
-      addWordingVersion({ html: "<p>race a</p>", plainText: "race a", createdBy: "admin-a" }),
-      addWordingVersion({ html: "<p>race b</p>", plainText: "race b", createdBy: "admin-b" }),
-      addWordingVersion({ html: "<p>race c</p>", plainText: "race c", createdBy: "admin-c" }),
+      addWordingVersion({ markdown: "# race a", createdBy: "admin-a" }),
+      addWordingVersion({ markdown: "# race b", createdBy: "admin-b" }),
+      addWordingVersion({ markdown: "# race c", createdBy: "admin-c" }),
     ]);
 
     expect(attempts.map((wording) => wording.version).sort((a, b) => a - b)).toEqual([1, 2, 3]);
@@ -103,6 +99,6 @@ describe("Sign-to-Fly wording bootstrap", () => {
   });
 });
 
-function hashHtml(html: string): string {
-  return createHash("sha256").update(html, "utf8").digest("hex");
+function hashMarkdown(markdown: string): string {
+  return createHash("sha256").update(markdown, "utf8").digest("hex");
 }

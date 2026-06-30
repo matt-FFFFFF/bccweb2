@@ -59,7 +59,7 @@ async function getActiveSignToFlyWording(
   return { status: 200, jsonBody: await getActiveWording() };
 }
 
-async function readWordingBody(req: HttpRequest): Promise<{ html: string; plainText: string }> {
+async function readWordingBody(req: HttpRequest): Promise<{ markdown: string }> {
   let body: unknown;
   try {
     body = await req.json();
@@ -67,16 +67,12 @@ async function readWordingBody(req: HttpRequest): Promise<{ html: string; plainT
     throw new HttpError(400, "INVALID_JSON");
   }
 
-  const html = (body as { html?: unknown }).html;
-  const plainText = (body as { plainText?: unknown }).plainText;
-  if (typeof html !== "string" || html.trim() === "") {
-    throw new HttpError(400, "MISSING_HTML");
-  }
-  if (typeof plainText !== "string" || plainText.trim() === "") {
-    throw new HttpError(400, "MISSING_PLAIN_TEXT");
+  const markdown = (body as { markdown?: unknown }).markdown;
+  if (typeof markdown !== "string" || markdown.trim() === "") {
+    throw new HttpError(400, "MISSING_MARKDOWN");
   }
 
-  return { html, plainText };
+  return { markdown };
 }
 
 async function requireRole(req: HttpRequest, role: "Admin") {

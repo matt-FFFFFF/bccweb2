@@ -47,8 +47,7 @@ export async function getWording(version: number): Promise<SignToFlyWording> {
 }
 
 export async function addWordingVersion(opts: {
-  html: string;
-  plainText: string;
+  markdown: string;
   createdBy: string;
 }): Promise<SignToFlyWording> {
   const active = await readActiveWordingPointerOrNull();
@@ -80,8 +79,7 @@ export async function listWordingVersions(): Promise<WordingVersionSummary[]> {
 }
 
 async function addWordingVersionWithLease(opts: {
-  html: string;
-  plainText: string;
+  markdown: string;
   createdBy: string;
 }): Promise<SignToFlyWording> {
   for (let attempt = 0; attempt < 200; attempt += 1) {
@@ -97,8 +95,7 @@ async function addWordingVersionWithLease(opts: {
 }
 
 async function addWordingVersionWithLeaseOnce(opts: {
-  html: string;
-  plainText: string;
+  markdown: string;
   createdBy: string;
 }): Promise<SignToFlyWording> {
   return withPrivateLease(ACTIVE_WORDING_PATH, async (leaseId) => {
@@ -108,9 +105,8 @@ async function addWordingVersionWithLeaseOnce(opts: {
     const newVersion = current.version + 1;
     const next: SignToFlyWording = {
       version: newVersion,
-      hash: hashHtml(opts.html),
-      html: opts.html,
-      plainText: opts.plainText,
+      hash: hashMarkdown(opts.markdown),
+      markdown: opts.markdown,
       createdAt: now,
       createdBy: opts.createdBy,
     };
@@ -137,16 +133,14 @@ async function addWordingVersionWithLeaseOnce(opts: {
 }
 
 async function ensureBootstrapped(opts: {
-  html: string;
-  plainText: string;
+  markdown: string;
   createdBy: string;
 }): Promise<SignToFlyWording | null> {
   const now = new Date().toISOString();
   const first: SignToFlyWording = {
     version: 1,
-    hash: hashHtml(opts.html),
-    html: opts.html,
-    plainText: opts.plainText,
+    hash: hashMarkdown(opts.markdown),
+    markdown: opts.markdown,
     createdAt: now,
     createdBy: opts.createdBy,
   };
@@ -156,8 +150,8 @@ async function ensureBootstrapped(opts: {
   return createdFirst ? first : null;
 }
 
-function hashHtml(html: string): string {
-  return createHash("sha256").update(html, "utf8").digest("hex");
+function hashMarkdown(markdown: string): string {
+  return createHash("sha256").update(markdown, "utf8").digest("hex");
 }
 
 async function readActiveWordingPointer(): Promise<ActiveWording> {
