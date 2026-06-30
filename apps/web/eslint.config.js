@@ -31,7 +31,8 @@ export default tseslint.config(
       "react-hooks/rules-of-hooks": "error",
       // Re-enabled per issue #10 item 3.
       "react-hooks/exhaustive-deps": "error",
-      "react-refresh/only-export-components": "off",
+      // Re-enabled per issue #10 item 4.
+      "react-refresh/only-export-components": "error",
     },
   },
 );

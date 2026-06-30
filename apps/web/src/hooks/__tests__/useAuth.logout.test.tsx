@@ -2,7 +2,8 @@ import { describe, expect, test, beforeEach, vi } from "vitest";
 import type { ReactNode } from "react";
 import { renderHook, act, waitFor } from "@testing-library/react";
 import { BrowserRouter } from "react-router";
-import { AuthProvider, useAuth } from "../useAuth.js";
+import { useAuth } from "../useAuth.js";
+import { AuthProvider } from "../../components/AuthProvider.js";
 
 function fakeJwt(expEpochSec: number): string {
   return `h.${btoa(JSON.stringify({ exp: expEpochSec }))}.s`;
