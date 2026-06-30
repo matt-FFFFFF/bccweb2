@@ -29,7 +29,8 @@ export default tseslint.config(
       // Re-enabled per issue #10 item 2.
       "@typescript-eslint/no-explicit-any": "error",
       "react-hooks/rules-of-hooks": "error",
-      "react-hooks/exhaustive-deps": "off",
+      // Re-enabled per issue #10 item 3.
+      "react-hooks/exhaustive-deps": "error",
       "react-refresh/only-export-components": "off",
     },
   },

@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Link, useParams } from "react-router";
 import type { Round, PilotSummary, RoundBrief } from "@bccweb/types";
 import { useBlob } from "../../hooks/useBlob.js";
@@ -50,7 +50,7 @@ export default function RoundDetail() {
   const [unregistering, setUnregistering] = useState(false);
   const [notFound, setNotFound] = useState(false);
 
-  const loadRound = () => {
+  const loadRound = useCallback(() => {
     if (!id) {
       setLoading(false);
       return;
@@ -85,11 +85,11 @@ export default function RoundDetail() {
     return () => {
       cancelled = true;
     };
-  };
+  }, [id]);
 
   useEffect(() => {
     return loadRound();
-  }, [id]);
+  }, [loadRound]);
 
   const { data: pilotsIndex } = useBlob<PilotSummary[]>("pilots.json");
 
