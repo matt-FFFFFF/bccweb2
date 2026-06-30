@@ -1,11 +1,17 @@
 import { createHash } from "node:crypto";
 import type { RoundBrief } from "@bccweb/types";
 
+/**
+ * Single source of truth for SAFETY-MATERIAL brief fields: editing any of these
+ * invalidates prior sign-to-fly signatures. Imported by later materiality call
+ * sites so the set cannot drift. `satisfies keyof RoundBrief` rejects the nested
+ * `site.*W3W` paths whose non-existence silently dropped W3W edits from the hash.
+ * Prose is hashed raw (no markdown normalization); imagePaths order is material.
+ */
 export const MATERIAL_BRIEF_FIELDS = [
   "briefingTime",
-  "landByTime",
   "checkInByTime",
-  "narrative",
+  "landByTime",
   "windSpeedDirection",
   "directionOfFlight",
   "expectedLandingArea",
@@ -14,10 +20,11 @@ export const MATERIAL_BRIEF_FIELDS = [
   "BENO_LineDescription",
   "briefersNotes",
   "frequencyMhz",
-  "site.parkingW3W",
-  "site.briefingW3W",
-  "site.takeOffW3W",
-] as const;
+  "parkingW3W",
+  "briefingW3W",
+  "takeOffW3W",
+  "imagePaths",
+] as const satisfies readonly (keyof RoundBrief)[];
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 
