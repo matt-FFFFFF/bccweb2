@@ -361,10 +361,6 @@ export interface Round {
   isLocked: boolean;
   maxTeams: number;
   minimumScore: number;
-  briefingTime?: string; // HH:mm
-  landByTime?: string;
-  checkInByTime?: string;
-  narrative?: string;
   pureTrackGroupId?: number;
   pureTrackGroupName?: string;
   pureTrackGroupSlug?: string;
@@ -414,8 +410,7 @@ export interface BriefVersion {
 export interface SignToFlyWording {
   version: number;
   hash: string;
-  html: string;
-  plainText: string;
+  markdown: string;
   createdAt: string;
   createdBy: string;
   supersededAt?: string;
@@ -450,6 +445,8 @@ export interface RoundBrief {
   generatedAt: string; // ISO datetime
   date: string; // yyyy-MM-dd
   siteName: string;
+  /** Current frozen material hash set when the brief is finalized. */
+  hash?: string;
   guideUrl?: string;
   parkingW3W?: string;
   briefingW3W?: string;
