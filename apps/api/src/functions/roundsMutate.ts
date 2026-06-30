@@ -73,7 +73,7 @@ import {
 import { getTelemetryClient } from "../lib/telemetry.js";
 import { listSignaturesForRound } from "../lib/signTofly/ledger.js";
 import { invalidatePriorSignToFlyFlags } from "../lib/signTofly/invalidate.js";
-import { computeBriefHash } from "../lib/signTofly/briefVersion.js";
+import { computeBriefHash, MATERIAL_BRIEF_FIELDS } from "../lib/signTofly/briefVersion.js";
 
 /** The three coordinator-authored times that now live on the brief, not the Round. */
 export interface BriefTimes {
@@ -853,20 +853,6 @@ export async function buildBriefTeams(round: Round): Promise<BriefTeamEntry[]> {
   );
 }
 
-async function uploadBriefArtifacts(brief: RoundBrief): Promise<Buffer> {
-  await writePrivateJson(`round-briefs/${brief.roundId}.json`, BriefSchema, brief);
-  const pdfBuffer = await generateBriefPdf(brief);
-  const pdfBlobClient = getPrivateBlockBlobClient(`round-briefs/${brief.roundId}.pdf`);
-  await pdfBlobClient.upload(pdfBuffer, pdfBuffer.length, {
-    blobHTTPHeaders: { blobContentType: "application/pdf" },
-    metadata: {
-      sitename: brief.siteName,
-      date: brief.date,
-    },
-  });
-  return pdfBuffer;
-}
-
 async function readExistingBriefForLock(id: string): Promise<RoundBrief | null> {
   const path = `round-briefs/${id}.json`;
   try {
@@ -879,37 +865,35 @@ async function readExistingBriefForLock(id: string): Promise<RoundBrief | null> 
 
 async function mergeBriefForLock(
   round: Round,
-  existing: RoundBrief | null
+  existing: RoundBrief
 ): Promise<RoundBrief> {
-  // Times live on the brief now (set at create), so refresh them from the
-  // existing brief — never from the round, which no longer carries them.
-  const times: BriefTimes | undefined = existing
-    ? {
-        briefingTime: existing.briefingTime,
-        checkInByTime: existing.checkInByTime,
-        landByTime: existing.landByTime,
-      }
-    : undefined;
-  const initial = await buildInitialBrief(round, times);
-  const derived: RoundBrief = { ...initial, teams: await buildBriefTeams(round) };
-  if (!existing) return derived;
-  // Preserve coordinator-authored narrative fields and version metadata while
-  // refreshing every derived field. Any future narrative field added to
-  // RoundBrief MUST be added here too or it will be silently dropped on lock.
-  return {
-    ...derived,
-    windSpeedDirection: existing.windSpeedDirection,
-    directionOfFlight: existing.directionOfFlight,
-    expectedLandingArea: existing.expectedLandingArea,
-    airspaceAndHazards: existing.airspaceAndHazards,
-    NOTAMs: existing.NOTAMs,
-    BENO_LineDescription: existing.BENO_LineDescription,
-    briefersNotes: existing.briefersNotes,
-    briefer: existing.briefer,
-    imagePaths: existing.imagePaths,
-    version: existing.version,
-    versionHistory: existing.versionHistory,
+  // Lock refreshes ONLY non-material parts of the FROZEN brief: the team roster
+  // (re-snapshotted pilots) plus the PureTrack/site/date/club echoes. The frozen
+  // brief is the base of truth, so every safety-material field, the cosmetic
+  // briefer, and the freeze identity (version/versionHistory/hash) carry over
+  // byte-identical and computeBriefHash(result) === existing.hash still holds.
+  const merged: RoundBrief = {
+    ...existing,
+    teams: await buildBriefTeams(round),
+    siteName: round.site.name,
+    date: round.date,
+    organisingClubName: round.organisingClub?.name,
+    pureTrackGroupName: round.pureTrackGroupName,
+    pureTrackGroupSlug: round.pureTrackGroupSlug,
   };
+  // B5: re-impose each frozen material field BY NAME from the SINGLE
+  // MATERIAL_BRIEF_FIELDS declaration (no hand-kept copy that can drift), so the
+  // hash survives even if the spread above is ever changed to re-derive a
+  // material field from the Round. `briefer` is the editable-cosmetic extra; the
+  // freeze identity is never re-derived at lock.
+  for (const field of MATERIAL_BRIEF_FIELDS) {
+    Object.assign(merged, { [field]: existing[field] });
+  }
+  merged.briefer = existing.briefer;
+  merged.version = existing.version;
+  merged.versionHistory = existing.versionHistory;
+  merged.hash = existing.hash;
+  return merged;
 }
 
 async function sendBriefIfConfigured(brief: RoundBrief, pdfBuffer: Buffer | null): Promise<void> {
@@ -1045,25 +1029,28 @@ async function lockRound(
     console.error(`[lockRound:${id}] PureTrack group creation failed:`, ptErr);
   }
 
+  // B3: the brief is its own blob, so the round lease does NOT cover it. Read
+  // the frozen brief, refresh teams, verify the frozen material hash, then
+  // persist BOTH the brief JSON and the Locked round atomically under the
+  // round+brief leases. The brief must already exist (brief-complete froze it) —
+  // a missing blob cannot be leased.
+  if (!(await readExistingBriefForLock(id))) {
+    throw new HttpError(
+      409,
+      "BRIEF_REQUIRED",
+      "A frozen brief must exist before locking — reopen and re-complete the round",
+    );
+  }
+
   const briefPaths = {
     jsonPath: `round-briefs/${id}.json`,
     pdfPath: `round-briefs/${id}.pdf`,
-    generatedAt: undefined as string | undefined,
   };
-  try {
-    const existing = await readExistingBriefForLock(id);
-    const brief = await mergeBriefForLock(candidateRound, existing);
-    briefPaths.generatedAt = brief.generatedAt;
-    const pdfBuffer = await uploadBriefArtifacts(brief);
-    await sendBriefIfConfigured(brief, pdfBuffer);
-    console.log(`[lockRound:${id}] Brief artifacts generated and email processed`);
-  } catch (briefErr) {
-    console.error(`[lockRound:${id}] Brief artifact/email processing failed:`, briefErr);
-  }
 
   let updated: Round;
+  let lockedBrief: RoundBrief;
   try {
-    updated = await withPrivateLeaseRenewing(path, async (leaseId) => {
+    const result = await withRoundAndBriefLease(id, async (roundLeaseId, briefLeaseId) => {
       const r = (await readJson(
         getPrivateBlobClient(path),
         RoundSchema,
@@ -1073,8 +1060,33 @@ async function lockRound(
       if (r.status !== "BriefComplete") {
         const err = new Error("Round status changed concurrently");
         (err as { isValidation?: boolean }).isValidation = true;
-        throw new HttpError(500, "INTERNAL");
+        throw err;
       }
+
+      const briefPath = `round-briefs/${id}.json`;
+      const existing = await readJson(getPrivateBlobClient(briefPath), BriefSchema, briefPath);
+      const brief = await mergeBriefForLock(candidateRound, existing);
+
+      // The frozen material hash MUST still match — otherwise the persisted brief
+      // was mutated out-of-band since brief-complete. Abort the lock (the round
+      // write below never runs, so it stays BriefComplete) with a diagnostic and
+      // an operator-actionable message; never a silent failure.
+      if (brief.hash === undefined || computeBriefHash(brief) !== brief.hash) {
+        getTelemetryClient()?.trackTrace({
+          message: "brief.lockHashMismatch",
+          properties: { roundId: id },
+        });
+        throw new HttpError(
+          409,
+          "BRIEF_HASH_MISMATCH",
+          "Brief material no longer matches its frozen sign-to-fly hash — reopen and re-complete the round before locking",
+        );
+      }
+
+      // Hard failure: if the frozen brief JSON cannot be written, the round must
+      // NOT advance to Locked. This write throws on failure, so the round write
+      // that follows never runs and the round stays BriefComplete.
+      await writePrivateJson(briefPath, BriefSchema, brief, briefLeaseId);
 
       r.status = "Locked";
       r.isLocked = true;
@@ -1106,16 +1118,39 @@ async function lockRound(
         version: (r.brief?.version ?? 0) + 1,
         jsonPath: briefPaths.jsonPath,
         pdfPath: briefPaths.pdfPath,
-        generatedAt: briefPaths.generatedAt,
+        generatedAt: brief.generatedAt,
       };
 
-      await writePrivateJson(path, RoundSchema, r, leaseId);
-      return r;
+      await writePrivateJson(path, RoundSchema, r, roundLeaseId);
+      return { round: r, brief };
     });
+    updated = result.round;
+    lockedBrief = result.brief;
   } catch (err: unknown) {
+    if (err instanceof HttpError) throw err;
     const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
     if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
-    throw new HttpError(500, "INTERNAL");
+    throw new HttpError(
+      500,
+      "BRIEF_PERSIST_FAILED",
+      "Failed to persist the brief while locking — the round remains BriefComplete; reopen and re-complete before retrying the lock",
+    );
+  }
+
+  // PDF + email are best-effort AFTER the brief JSON and round are committed: a
+  // failure here leaves the round Locked (the artifacts are regenerable) and
+  // never rolls the lock back.
+  try {
+    const pdfBuffer = await generateBriefPdf(lockedBrief);
+    const pdfBlobClient = getPrivateBlockBlobClient(briefPaths.pdfPath);
+    await pdfBlobClient.upload(pdfBuffer, pdfBuffer.length, {
+      blobHTTPHeaders: { blobContentType: "application/pdf" },
+      metadata: { sitename: lockedBrief.siteName, date: lockedBrief.date },
+    });
+    await sendBriefIfConfigured(lockedBrief, pdfBuffer);
+    console.log(`[lockRound:${id}] Brief artifacts generated and email processed`);
+  } catch (briefErr) {
+    console.error(`[lockRound:${id}] Brief artifact/email processing failed:`, briefErr);
   }
 
   await updateRoundsIndex(updated);

@@ -27,6 +27,7 @@ import {
   writePublicJson,
 } from "../../__tests__/helpers/seed.js";
 import { signaturePath } from "../../lib/signTofly/ledger.js";
+import { computeBriefHash } from "../../lib/signTofly/briefVersion.js";
 
 const pureTrackMock = vi.hoisted(() => ({
   createPureTrackGroups: vi.fn(),
@@ -515,7 +516,7 @@ async function seedBrief(ctx: LifecycleContext, overrides: Partial<RoundBrief> =
 }
 
 function makeBrief(ctx: LifecycleContext, overrides: Partial<RoundBrief> = {}): RoundBrief & { version: number } {
-  return {
+  const brief: RoundBrief & { version: number } = {
     roundId: ctx.roundId,
     version: 1,
     generatedAt: "2026-06-09T08:00:00.000Z",
@@ -531,6 +532,10 @@ function makeBrief(ctx: LifecycleContext, overrides: Partial<RoundBrief> = {}): 
     teams: [],
     ...overrides,
   };
+  // Post-T7 a BriefComplete round always carries a frozen brief, so freeze the
+  // material hash here unless a test sets `hash` explicitly — this is what
+  // lockRound's T8 material-hash assertion verifies.
+  return overrides.hash === undefined ? { ...brief, hash: computeBriefHash(brief) } : brief;
 }
 
 function statusTransition(handler: "confirmRound" | "briefCompleteRound", ctx: LifecycleContext) {
