@@ -18,9 +18,12 @@ vi.mock("../hooks/useAuth.js", async (importActual) => {
   return {
     ...actual,
     useAuth: () => mockUseAuth(),
-    AuthProvider: ({ children }: { children: ReactNode }) => children,
   };
 });
+
+vi.mock("../components/AuthProvider.js", () => ({
+  AuthProvider: ({ children }: { children: ReactNode }) => children,
+}));
 
 const mockUseBlob = vi.fn();
 vi.mock("../hooks/useBlob.js", () => ({
