@@ -180,7 +180,7 @@ async function parseRegisterBody(req: HttpRequest): Promise<{ teamId?: string }>
   try {
     body = await req.json() as RegisterSelfBody;
   } catch {
-    return {};
+    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
   const teamId = typeof body.teamId === "string" ? body.teamId.trim() : "";
   return teamId ? { teamId } : {};

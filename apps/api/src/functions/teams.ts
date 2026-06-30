@@ -90,7 +90,7 @@ async function mutateLocked(
       if (err) {
         const e = new Error(err);
         (e as { isValidation?: boolean }).isValidation = true;
-        throw new HttpError(500, "INTERNAL");
+        throw e;
       }
       await writePrivateJson(path, RoundSchema, r, leaseId);
       return r;
