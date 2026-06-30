@@ -26,7 +26,8 @@ export default tseslint.config(
           caughtErrorsIgnorePattern: "^_",
         },
       ],
-      "@typescript-eslint/no-explicit-any": "off",
+      // Re-enabled per issue #10 item 2.
+      "@typescript-eslint/no-explicit-any": "error",
       "react-hooks/rules-of-hooks": "error",
       "react-hooks/exhaustive-deps": "off",
       "react-refresh/only-export-components": "off",

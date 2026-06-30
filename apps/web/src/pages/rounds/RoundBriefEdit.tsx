@@ -56,7 +56,7 @@ export default function RoundBriefEdit() {
     return <div className="p-4 text-red-700">Forbidden.</div>;
   }
 
-  const handleChange = (field: keyof RoundBrief, value: any) => {
+  const handleChange = <K extends keyof RoundBrief>(field: K, value: RoundBrief[K]) => {
     setBrief((prev) => prev ? { ...prev, [field]: value } : null);
   };
 

@@ -20,8 +20,8 @@ vi.mock("../../../hooks/useAuth.js", () => ({
 
 vi.mock("../../../lib/api.js", () => ({
   api: {
-    get: (...args: any[]) => state.apiGet(...args),
-    put: (...args: any[]) => state.apiPut(...args),
+    get: (...args: unknown[]) => state.apiGet(...args),
+    put: (...args: unknown[]) => state.apiPut(...args),
     post: vi.fn(),
     delete: vi.fn(),
   },
