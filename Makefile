@@ -67,7 +67,7 @@ docker-up: ## Start Azurite + API + Web via Docker Compose
 
 .PHONY: docker-down
 docker-down: ## Stop Docker Compose stack
-	${CONTAINER_RUNTIME} compose down
+	$(CONTAINER_RUNTIME) compose down
 
 .PHONY: seed
 seed: ## Seed 500 pilots / 50 clubs / 100 club-teams + season fixtures
