@@ -63,7 +63,7 @@ dev-web: ## Start Vite dev server on :5173
 
 .PHONY: docker-up
 docker-up: ## Start Azurite + API + Web via Docker Compose
-	${CONTAINER_RUNTIME} compose up --build
+	$(CONTAINER_RUNTIME) compose up --build
 
 .PHONY: docker-down
 docker-down: ## Stop Docker Compose stack
