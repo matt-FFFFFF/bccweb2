@@ -63,7 +63,9 @@ export default function RoundDetail() {
     Promise.all([
       api.get<Round>(`rounds/${id}`),
       api.get<BriefWithVersion>(`rounds/${id}/brief`).catch((err: unknown) => {
-        if (err instanceof ApiError && err.status === 404) return null;
+        // Brief is optional: a not-yet-registered pilot (403) or a Proposed
+        // round with no brief yet (404) must still see the round + Register.
+        if (err instanceof ApiError && (err.status === 403 || err.status === 404)) return null;
         throw err;
       }),
     ])
