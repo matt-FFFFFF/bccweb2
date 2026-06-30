@@ -53,9 +53,8 @@ export async function addWordingVersion(opts: {
 }): Promise<SignToFlyWording> {
   const active = await readActiveWordingPointerOrNull();
   if (!active) {
-    const bootstrapped = await tryBootstrapWordingVersion(opts);
+    const bootstrapped = await ensureBootstrapped(opts);
     if (bootstrapped) return bootstrapped;
-    await waitForActiveWordingPointer();
   }
 
   return addWordingVersionWithLease(opts);
@@ -137,7 +136,7 @@ async function addWordingVersionWithLeaseOnce(opts: {
   });
 }
 
-async function tryBootstrapWordingVersion(opts: {
+async function ensureBootstrapped(opts: {
   html: string;
   plainText: string;
   createdBy: string;
@@ -152,14 +151,9 @@ async function tryBootstrapWordingVersion(opts: {
     createdBy: opts.createdBy,
   };
 
-  try {
-    await uploadNewJson(wordingVersionPath(1), first);
-    await uploadNewJson(ACTIVE_WORDING_PATH, { activeVersion: 1 } satisfies ActiveWording);
-    return first;
-  } catch (err: unknown) {
-    if (isPreconditionFailed(err)) return null;
-    throw err;
-  }
+  const createdFirst = await uploadNewJsonIfAbsent(wordingVersionPath(1), first);
+  await uploadNewJsonIfAbsent(ACTIVE_WORDING_PATH, { activeVersion: 1 } satisfies ActiveWording);
+  return createdFirst ? first : null;
 }
 
 function hashHtml(html: string): string {
@@ -189,13 +183,6 @@ async function readActiveWordingPointerOrNull(): Promise<ActiveWording | null> {
   }
 }
 
-async function waitForActiveWordingPointer(): Promise<void> {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    if (await readActiveWordingPointerOrNull()) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
-  }
-}
-
 async function getEtag(path: string): Promise<string> {
   const props = await getPrivateBlobClient(path).getProperties();
   if (!props.etag) {
@@ -210,6 +197,16 @@ async function uploadNewJson(path: string, data: unknown): Promise<void> {
     blobHTTPHeaders: { blobContentType: "application/json" },
     conditions: { ifNoneMatch: "*" },
   });
+}
+
+async function uploadNewJsonIfAbsent(path: string, data: unknown): Promise<boolean> {
+  try {
+    await uploadNewJson(path, data);
+    return true;
+  } catch (err: unknown) {
+    if (isPreconditionFailed(err)) return false;
+    throw err;
+  }
 }
 
 async function uploadJsonIfMatch(
