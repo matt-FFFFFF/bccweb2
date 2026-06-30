@@ -315,6 +315,11 @@ async function updatePilot(
     wingManufacturer: body.wingManufacturer ?? existing.wingManufacturer,
     wingModel: body.wingModel ?? existing.wingModel,
     wingColours: body.wingColours ?? existing.wingColours,
+    bhpaNumber: body.bhpaNumber ?? existing.bhpaNumber,
+    coachType: body.coachType ?? existing.coachType,
+    pilotRating: body.pilotRating ?? existing.pilotRating,
+    pureTrackId: body.pureTrackId ?? existing.pureTrackId,
+    pureTrackLink: body.pureTrackLink ?? existing.pureTrackLink,
     currentClub: body.currentClub ?? existing.currentClub,
     person: {
       ...existing.person,
@@ -323,14 +328,6 @@ async function updatePilot(
       fullName: `${firstName} ${lastName}`,
       phoneNumber: body.phoneNumber ?? existing.person.phoneNumber,
     },
-    // Admin-only fields
-    ...(isAdmin && {
-      bhpaNumber: body.bhpaNumber ?? existing.bhpaNumber,
-      coachType: body.coachType ?? existing.coachType,
-      pilotRating: body.pilotRating ?? existing.pilotRating,
-      pureTrackId: body.pureTrackId ?? existing.pureTrackId,
-      pureTrackLink: body.pureTrackLink ?? existing.pureTrackLink,
-    }),
     profileUpdatedAt: new Date().toISOString(),
   };
 
