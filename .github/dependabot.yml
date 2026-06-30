@@ -25,6 +25,13 @@ updates:
     commit-message:
       prefix: "build" # -> build(deps): / build(deps-dev): (matches repo history)
       include: "scope"
+    ignore:
+      # Keep @types/node aligned with the pinned Node 24 runtime (.mise.toml /
+      # engines). A major bump describes APIs the Node 24 host doesn't have, so
+      # it type-checks green but can fail at runtime. Bump this together with
+      # .mise.toml + engines when the runtime moves, then drop this rule.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
     groups:
       production-dependencies:
         dependency-type: "production"
