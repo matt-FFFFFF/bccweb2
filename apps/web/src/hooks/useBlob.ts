@@ -61,14 +61,13 @@ export function useBlob<T>(
         }
       });
 
+    // `schema` is intentionally excluded from the deps below — callers pass it
+    // inline (e.g. z.array(Schema)), a new object every render, so depending on
+    // it would re-fetch on every render. Re-fetch is keyed on `path` by design.
     return () => {
       cancelled = true;
     };
-    // `schema` is intentionally excluded — callers pass it inline (e.g.
-    // z.array(Schema)), a new object every render, so depending on it would
-    // re-fetch on every render. Re-fetch is keyed on `path` by design.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [path]);
+  }, [path]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return state;
 }
