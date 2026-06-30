@@ -87,6 +87,7 @@ async function registerSelf(
   const chosenTeam = pickTeam(candidateTeams, body.teamId);
 
   await ensureNotDoubleBooked(pilot.id, round);
+  await ensureSeasonClubRecorded(pilot.id, seasonYear, pilotClubId, chosenTeam.club.name);
   const pilotSnapshot = buildPilotSnapshot(pilot);
 
   const registration = await withPrivateLease(`rounds/${roundId}.json`, async (leaseId) => {
@@ -103,8 +104,6 @@ async function registerSelf(
     await writePrivateJson(`rounds/${roundId}.json`, RoundSchema, lockedRound, leaseId);
     return { teamId: lockedTeam.id, place };
   });
-
-  await ensureSeasonClubRecorded(pilot.id, seasonYear, pilotClubId, chosenTeam.club.name);
 
   return {
     status: 200,

@@ -65,7 +65,8 @@ function authorizeTeamRegistration(
   teamId: string,
 ): void {
   const team = round.teams.find((t) => t.id === teamId);
-  if (team) assertCanRegisterForClub(caller, round, team.club.id);
+  if (!team) throw new HttpError(404, "TEAM_NOT_FOUND", "Team not found");
+  assertCanRegisterForClub(caller, round, team.club.id);
 }
 
 // ─── Generic round mutator ────────────────────────────────────────────────────
