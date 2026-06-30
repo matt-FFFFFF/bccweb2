@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import type { Club, ClubSummary, ClubTeam, ClubTeamSummary, SeasonSummary } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
 import { api } from "../../lib/api.js";
@@ -332,36 +332,35 @@ function CreateClubForm({ onCreated }: { onCreated: () => void }) {
 
 export default function AdminClubs() {
   const { identity, loading: authLoading } = useAuth();
-  // Toggle between "clubs.json" and null then back to force useBlob to re-fetch.
-  // blobClient uses cache: "no-store" so no ?v=N suffix is needed.
-  const [clubsPath, setClubsPath] = useState<string | null>("clubs.json");
-  const [teamsPath, setTeamsPath] = useState<string | null>("club-teams.json");
+  const [clubsRefresh, setClubsRefresh] = useState(0);
+  const [teamsRefresh, setTeamsRefresh] = useState(0);
 
-  const { data: clubs, loading: clubsLoading } = useBlob<ClubSummary[]>(clubsPath);
+  const { data: clubs, loading: clubsLoading } = useBlob<ClubSummary[]>(`clubs.json?v=${clubsRefresh}`);
   const { data: seasons, loading: seasonsLoading } = useBlob<SeasonSummary[]>("seasons.json");
-  const { data: allTeams, loading: teamsLoading } = useBlob<ClubTeamSummary[]>(teamsPath);
+  const { data: allTeams, loading: teamsLoading } = useBlob<ClubTeamSummary[]>(`club-teams.json?v=${teamsRefresh}`);
+
+  const clubsRef = useRef<ClubSummary[]>([]);
+  const teamsRef = useRef<ClubTeamSummary[]>([]);
+  if (clubs) clubsRef.current = clubs;
+  if (allTeams) teamsRef.current = allTeams;
+
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  useEffect(() => { if (clubs && seasons && allTeams) setLoadedOnce(true); }, [clubs, seasons, allTeams]);
 
   const isAdmin = identity?.roles.includes("Admin");
 
   const activeSeasonYear = seasons ? (seasons.find((s) => s.active) ?? seasons[seasons.length - 1])?.year ?? null : null;
 
-  if (authLoading || clubsLoading || seasonsLoading || teamsLoading) {
+  if (authLoading || (!loadedOnce && (clubsLoading || seasonsLoading || teamsLoading))) {
     return <LoadingSpinner message="Loading clubs…" />;
   }
   if (!isAdmin) return <p style={{ color: "#721c24" }}>Admin access required.</p>;
 
-  const clubList = clubs ?? [];
-  const teamIndex = allTeams ?? [];
+  const clubList = clubs ?? clubsRef.current;
+  const teamIndex = allTeams ?? teamsRef.current;
 
-  function refreshClubs() {
-    setClubsPath(null);
-    setTimeout(() => setClubsPath("clubs.json"), 0);
-  }
-
-  function refreshTeams() {
-    setTeamsPath(null);
-    setTimeout(() => setTeamsPath("club-teams.json"), 0);
-  }
+  const refreshClubs = () => setClubsRefresh((v) => v + 1);
+  const refreshTeams = () => setTeamsRefresh((v) => v + 1);
 
   return (
     <div style={{ maxWidth: 760, margin: "0 auto" }}>
