@@ -45,7 +45,6 @@ describe("RegisterForRound", () => {
     renderComponent();
 
     expect(await screen.findByRole("heading", { name: /Register for Milk Hill/ })).toBeInTheDocument();
-    expect(await screen.findByDisplayValue(/First available slot/)).toBeInTheDocument();
     const registerButton = await screen.findByRole("button", { name: "Register for this round" });
     await waitFor(() => expect(registerButton).toBeEnabled());
     fireEvent.click(registerButton);

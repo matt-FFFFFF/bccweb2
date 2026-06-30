@@ -36,12 +36,6 @@ const RoundSummariesSchema = z.array(RoundSummarySchema);
 
 interface RegisterSelfBody {
   teamId?: unknown;
-  preferredPlace?: unknown;
-}
-
-interface PilotClubForSeason {
-  clubId: string;
-  clubName: string;
 }
 
 const OPEN_STATUSES = new Set<Round["status"]>(["Proposed", "Confirmed"]);
@@ -77,29 +71,45 @@ async function registerSelf(
   const pilot = await readPilot(caller.pilotId);
   ensureProfileComplete(pilot);
 
-  const pilotClub = await ensurePilotClubForSeason(pilot.id, round, config);
-  const team = findTeamForPilotClub(round, body.teamId, pilotClub.clubId);
+  const seasonYear = round.season.year;
+  const pilotClubId = pilotClubIdForSeason(pilot, seasonYear);
+  if (!pilotClubId) {
+    throw new HttpError(409, "NO_CLUB_FOR_SEASON", "Set your club in your profile before registering.");
+  }
+  const candidateTeams = round.teams.filter((t) => t.club.id === pilotClubId);
+  if (candidateTeams.length === 0) {
+    throw new HttpError(
+      409,
+      "NO_TEAM_FOR_CLUB",
+      "Your club has no team in this round yet. Ask your club coordinator to register one.",
+    );
+  }
+  const chosenTeam = pickTeam(candidateTeams, body.teamId);
 
   await ensureNotDoubleBooked(pilot.id, round);
-  const place = choosePlace(team, body.preferredPlace, config.maxPilotsInTeam);
   const pilotSnapshot = buildPilotSnapshot(pilot);
 
-  await withPrivateLease(`rounds/${roundId}.json`, async (leaseId) => {
+  const registration = await withPrivateLease(`rounds/${roundId}.json`, async (leaseId) => {
     const lockedRound = await readRound(roundId);
     ensureRegistrationOpen(lockedRound, "REGISTRATION_CLOSED");
-    const lockedTeam = findTeamForPilotClub(lockedRound, body.teamId, pilotClub.clubId);
-    const lockedPlace = choosePlace(lockedTeam, place, config.maxPilotsInTeam);
-    if (lockedPlace !== place) throw new HttpError(409, "SLOT_TAKEN", `Place ${place} is no longer available`);
     if (isPilotInRound(lockedRound, pilot.id)) {
       throw new HttpError(409, "DOUBLE_BOOKING", `Pilot is already registered in this round ${lockedRound.id}`);
     }
-
+    const lockedTeam = lockedRound.teams.find((t) => t.id === chosenTeam.id);
+    if (!lockedTeam) throw new HttpError(404, "TEAM_NOT_FOUND", "Team not found");
+    const place = choosePlace(lockedTeam, undefined, config.maxPilotsInTeam);
     const slot = getOrCreateSlot(lockedTeam, place);
     fillSlot(slot, pilot.id, pilotSnapshot);
     await writePrivateJson(`rounds/${roundId}.json`, RoundSchema, lockedRound, leaseId);
+    return { teamId: lockedTeam.id, place };
   });
 
-  return { status: 200, jsonBody: { roundId, teamId: body.teamId, place, pilotSnapshot } };
+  await ensureSeasonClubRecorded(pilot.id, seasonYear, pilotClubId, chosenTeam.club.name);
+
+  return {
+    status: 200,
+    jsonBody: { roundId, teamId: registration.teamId, place: registration.place, pilotSnapshot },
+  };
 }
 
 async function unregisterSelf(
@@ -165,25 +175,15 @@ async function unregisterSelf(
   };
 }
 
-async function parseRegisterBody(req: HttpRequest): Promise<{ teamId: string; preferredPlace?: number }> {
+async function parseRegisterBody(req: HttpRequest): Promise<{ teamId?: string }> {
   let body: RegisterSelfBody;
   try {
     body = await req.json() as RegisterSelfBody;
   } catch {
-    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
+    return {};
   }
-
   const teamId = typeof body.teamId === "string" ? body.teamId.trim() : "";
-  if (!teamId) throw new HttpError(400, "INVALID_BODY", "teamId is required");
-
-  if (body.preferredPlace === undefined || body.preferredPlace === null || body.preferredPlace === "") {
-    return { teamId };
-  }
-  const preferredPlace = Number(body.preferredPlace);
-  if (!Number.isInteger(preferredPlace) || preferredPlace < 1) {
-    throw new HttpError(400, "INVALID_BODY", "preferredPlace must be a positive integer");
-  }
-  return { teamId, preferredPlace };
+  return teamId ? { teamId } : {};
 }
 
 async function readRound(roundId: string): Promise<Round> {
@@ -256,54 +256,38 @@ function ensureProfileComplete(pilot: Pilot): void {
   }
 }
 
-async function ensurePilotClubForSeason(
-  pilotId: string,
-  round: Round,
-  config: RegistrationConfig,
-): Promise<PilotClubForSeason> {
-  const seasonYear = round.season.year;
-  const roundClub = round.organisingClub;
-  if (!roundClub) {
-    throw new HttpError(409, "NOT_IN_CLUB_FOR_SEASON", "Round has no organising club");
-  }
-
-  const pilot = await readPilot(pilotId);
-  const existing = pilot.seasonClubs.find((club) => club.seasonYear === seasonYear);
-  if (existing?.clubId === roundClub.id) return existing;
-
-  if (existing && !config.autoAllocatePilotsToRoundClub) {
-    throw new HttpError(409, "NOT_IN_CLUB_FOR_SEASON", `Pilot is registered with ${existing.clubName} for ${seasonYear}`);
-  }
-
-  if (!existing || config.autoAllocatePilotsToRoundClub) {
-    const allocated = { seasonYear, clubId: roundClub.id, clubName: roundClub.name };
-    await withPrivateLease(`pilots/${pilotId}.json`, async (leaseId) => {
-      const lockedPilot = await readPilot(pilotId);
-      const idx = lockedPilot.seasonClubs.findIndex((club) => club.seasonYear === seasonYear);
-      if (idx >= 0) {
-        if (lockedPilot.seasonClubs[idx].clubId !== roundClub.id && !config.autoAllocatePilotsToRoundClub) {
-          throw new HttpError(409, "NOT_IN_CLUB_FOR_SEASON", `Pilot is registered with ${lockedPilot.seasonClubs[idx].clubName} for ${seasonYear}`);
-        }
-        lockedPilot.seasonClubs[idx] = allocated;
-      } else {
-        lockedPilot.seasonClubs.push(allocated);
-      }
-      lockedPilot.currentClub = roundClub;
-      await writePrivateJson(`pilots/${pilotId}.json`, PilotSchema, lockedPilot, leaseId);
-    });
-    return allocated;
-  }
-
-  throw new HttpError(409, "NOT_IN_CLUB_FOR_SEASON", `Pilot is not associated with ${roundClub.name} for ${seasonYear}`);
+function pilotClubIdForSeason(pilot: Pilot, seasonYear: number): string | null {
+  return (
+    pilot.seasonClubs.find((club) => club.seasonYear === seasonYear)?.clubId
+    ?? pilot.currentClub?.id
+    ?? null
+  );
 }
 
-function findTeamForPilotClub(round: Round, teamId: string, clubId: string): Team {
-  const team = round.teams.find((candidate) => candidate.id === teamId);
-  if (!team) throw new HttpError(404, "TEAM_NOT_FOUND", "Team not found");
-  if (team.club.id !== clubId) {
-    throw new HttpError(422, "TEAM_CLUB_MISMATCH", "Team does not belong to your club for this season");
+function pickTeam(candidates: Team[], teamId: string | undefined): Team {
+  if (teamId) {
+    const team = candidates.find((c) => c.id === teamId);
+    if (!team) {
+      throw new HttpError(422, "TEAM_CLUB_MISMATCH", "That team does not belong to your club for this round.");
+    }
+    return team;
   }
-  return team;
+  if (candidates.length === 1) return candidates[0];
+  throw new HttpError(400, "TEAM_REQUIRED", "Choose which of your club's teams to join.");
+}
+
+async function ensureSeasonClubRecorded(
+  pilotId: string,
+  seasonYear: number,
+  clubId: string,
+  clubName: string,
+): Promise<void> {
+  await withPrivateLease(`pilots/${pilotId}.json`, async (leaseId) => {
+    const pilot = await readPilot(pilotId);
+    if (pilot.seasonClubs.some((club) => club.seasonYear === seasonYear)) return;
+    pilot.seasonClubs.push({ seasonYear, clubId, clubName });
+    await writePrivateJson(`pilots/${pilotId}.json`, PilotSchema, pilot, leaseId);
+  });
 }
 
 async function ensureNotDoubleBooked(pilotId: string, targetRound: Round): Promise<void> {
