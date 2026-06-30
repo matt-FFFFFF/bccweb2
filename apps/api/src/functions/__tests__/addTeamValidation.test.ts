@@ -152,4 +152,24 @@ describe("POST /api/rounds/{id}/teams — ClubTeam validation", () => {
     );
     expect(res.status).toBe(404);
   });
+
+  test("returns 409 CONFLICT when the same team is added twice", async () => {
+    const year = 3000 + Math.floor(Math.random() * 6_000);
+    const club = await makeClub({ name: "Dup Club" });
+    await makeClubTeam({
+      clubId: club.id,
+      clubName: club.name,
+      seasonYear: year,
+      teamName: "Echo",
+    });
+    const round = await makeRound({ seasonYear: year });
+    const { user } = await makeUser({ roles: ["Admin"], emailVerified: true });
+
+    const first = await callAddTeam(user.id, user.email, round.id, club.id, "Echo");
+    expect(first.status).toBe(200);
+
+    const second = await callAddTeam(user.id, user.email, round.id, club.id, "Echo");
+    expect(second.status).toBe(409);
+    expect((second.jsonBody as { code?: string }).code).toBe("CONFLICT");
+  });
 });

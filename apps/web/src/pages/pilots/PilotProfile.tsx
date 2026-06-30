@@ -99,6 +99,7 @@ const WING_CLASSES: WingClass[] = ["EN A", "EN B", "EN C", "EN C 2-liner", "EN D
 interface EditForm {
   coachType: CoachType;
   pilotRating: PilotRatingValue;
+  bhpaNumber: string;
   helmetColour: string;
   harnessType: string;
   harnessColour: string;
@@ -106,6 +107,7 @@ interface EditForm {
   wingModel: string;
   wingColours: string;
   pureTrackId: string;
+  pureTrackLink: string;
   emergencyContactName: string;
   emergencyPhoneNumber: string;
   medicalInfo: string;
@@ -116,6 +118,7 @@ function pilotToForm(p: Pilot): EditForm {
   return {
     coachType: p.coachType,
     pilotRating: p.pilotRating,
+    bhpaNumber: p.bhpaNumber != null ? String(p.bhpaNumber) : "",
     helmetColour: p.helmetColour ?? "",
     harnessType: p.harnessType ?? "",
     harnessColour: p.harnessColour ?? "",
@@ -123,6 +126,7 @@ function pilotToForm(p: Pilot): EditForm {
     wingModel: p.wingModel ?? "",
     wingColours: p.wingColours ?? "",
     pureTrackId: p.pureTrackId != null ? String(p.pureTrackId) : "",
+    pureTrackLink: p.pureTrackLink ?? "",
     emergencyContactName: p.emergencyContactName ?? "",
     emergencyPhoneNumber: p.emergencyPhoneNumber ?? "",
     medicalInfo: p.medicalInfo ?? "",
@@ -173,6 +177,7 @@ function EditProfileForm({
       await api.put(`pilots/${pilot.id}`, {
         coachType: form.coachType,
         pilotRating: form.pilotRating,
+        bhpaNumber: form.bhpaNumber ? Number(form.bhpaNumber) : undefined,
         helmetColour: form.helmetColour || undefined,
         harnessType: form.harnessType || undefined,
         harnessColour: form.harnessColour || undefined,
@@ -180,6 +185,7 @@ function EditProfileForm({
         wingModel: form.wingModel || undefined,
         wingColours: form.wingColours || undefined,
         pureTrackId: form.pureTrackId ? Number(form.pureTrackId) : undefined,
+        pureTrackLink: form.pureTrackLink || undefined,
         emergencyContactName: form.emergencyContactName || undefined,
         emergencyPhoneNumber: form.emergencyPhoneNumber || undefined,
         medicalInfo: form.medicalInfo || undefined,
@@ -222,6 +228,10 @@ function EditProfileForm({
           </select>
         </div>
         <div>
+          <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>BHPA number</label>
+          <input type="number" min={0} style={inputStyle} value={form.bhpaNumber} onChange={(e) => setF("bhpaNumber", e.target.value)} />
+        </div>
+        <div>
           <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Wing class</label>
           <select style={inputStyle} value={form.wingClass} onChange={(e) => setF("wingClass", e.target.value as WingClass | "")}>
             <option value="">(none)</option>
@@ -251,6 +261,10 @@ function EditProfileForm({
         <div>
           <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>PureTrack ID</label>
           <input type="number" min={0} style={inputStyle} value={form.pureTrackId} onChange={(e) => setF("pureTrackId", e.target.value)} />
+        </div>
+        <div>
+          <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>PureTrack link</label>
+          <input type="url" style={inputStyle} value={form.pureTrackLink} onChange={(e) => setF("pureTrackLink", e.target.value)} placeholder="https://puretrack.io/..." />
         </div>
       </div>
 

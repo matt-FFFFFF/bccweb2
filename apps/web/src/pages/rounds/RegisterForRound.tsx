@@ -47,7 +47,6 @@ export default function RegisterForRound() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<Error | null>(null);
   const [selectedTeamId, setSelectedTeamId] = useState("");
-  const [preferredPlace, setPreferredPlace] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -85,7 +84,6 @@ export default function RegisterForRound() {
     if (!round || !pilot) return null;
     return pilot.seasonClubs.find((club) => club.seasonYear === round.season.year)?.clubId
       ?? pilot.currentClub?.id
-      ?? round.organisingClub?.id
       ?? null;
   }, [pilot, round]);
 
@@ -98,12 +96,6 @@ export default function RegisterForRound() {
     if (!selectedTeamId && teams.length > 0) setSelectedTeamId(teams[0].id);
   }, [selectedTeamId, teams]);
 
-  const selectedTeam = teams.find((team) => team.id === selectedTeamId) ?? null;
-  const maxPlace = selectedTeam
-    ? Math.max(5, ...selectedTeam.pilots.map((slot) => slot.placeInTeam), 1)
-    : 5;
-  const selectedEmptyPlaces = selectedTeam ? emptyPlaces(selectedTeam, maxPlace) : [];
-
   async function submit() {
     if (!id || !selectedTeamId) return;
     setSubmitting(true);
@@ -111,7 +103,6 @@ export default function RegisterForRound() {
     try {
       await api.post<RegisterResponse>(`rounds/${id}/register-self`, {
         teamId: selectedTeamId,
-        ...(preferredPlace ? { preferredPlace: Number(preferredPlace) } : {}),
       });
       navigate(`/rounds/${id}`);
     } catch (err) {
@@ -144,6 +135,7 @@ export default function RegisterForRound() {
   const conflict = error instanceof ApiError && error.code === "DOUBLE_BOOKING"
     ? conflictLink(error.detail)
     : null;
+  const registerDisabled = !selectedTeamId || submitting || teams.length === 0;
 
   return (
     <div style={{ maxWidth: 780, margin: "0 auto" }}>
@@ -175,7 +167,9 @@ export default function RegisterForRound() {
       <section style={{ padding: "1.25rem", border: "1px solid #dee2e6", borderRadius: "0.5rem", background: "#fff" }}>
         <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>Choose your team</h2>
         {teams.length === 0 ? (
-          <p>No teams are available for your club in this round.</p>
+          <p>{pilotClubId
+            ? "No teams are available for your club in this round."
+            : "Set your club in your profile before registering for a round."}</p>
         ) : (
           <div style={{ display: "grid", gap: "0.75rem" }}>
             {teams.map((team) => {
@@ -187,10 +181,7 @@ export default function RegisterForRound() {
                     name="teamId"
                     value={team.id}
                     checked={selectedTeamId === team.id}
-                    onChange={() => {
-                      setSelectedTeamId(team.id);
-                      setPreferredPlace("");
-                    }}
+                    onChange={() => setSelectedTeamId(team.id)}
                     style={{ marginRight: "0.6rem" }}
                   />
                   <strong>{team.teamName}</strong>
@@ -201,27 +192,20 @@ export default function RegisterForRound() {
           </div>
         )}
 
-        {selectedTeam && (
-          <label style={{ display: "block", marginTop: "1rem", fontWeight: 600 }}>
-            Preferred place (optional)
-            <select
-              value={preferredPlace}
-              onChange={(event) => setPreferredPlace(event.target.value)}
-              style={{ display: "block", marginTop: "0.35rem", padding: "0.5rem", width: "100%", maxWidth: 260 }}
-            >
-              <option value="">First available slot</option>
-              {selectedEmptyPlaces.map((place) => (
-                <option key={place} value={place}>Place {place}</option>
-              ))}
-            </select>
-          </label>
-        )}
-
         <button
           type="button"
           onClick={submit}
-          disabled={!selectedTeamId || submitting || teams.length === 0}
-          style={{ marginTop: "1.25rem", padding: "0.7rem 1rem", background: "#0066cc", color: "white", border: 0, borderRadius: "0.35rem", fontWeight: 700, cursor: submitting ? "wait" : "pointer" }}
+          disabled={registerDisabled}
+          style={{
+            marginTop: "1.25rem",
+            padding: "0.7rem 1rem",
+            background: registerDisabled ? "#adb5bd" : "#0066cc",
+            color: "white",
+            border: 0,
+            borderRadius: "0.35rem",
+            fontWeight: 700,
+            cursor: submitting ? "wait" : registerDisabled ? "not-allowed" : "pointer",
+          }}
         >
           {submitting ? "Registering…" : "Register for this round"}
         </button>

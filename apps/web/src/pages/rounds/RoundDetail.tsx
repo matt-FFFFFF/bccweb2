@@ -63,7 +63,9 @@ export default function RoundDetail() {
     Promise.all([
       api.get<Round>(`rounds/${id}`),
       api.get<BriefWithVersion>(`rounds/${id}/brief`).catch((err: unknown) => {
-        if (err instanceof ApiError && err.status === 404) return null;
+        // Brief is optional: a not-yet-registered pilot (403) or a Proposed
+        // round with no brief yet (404) must still see the round + Register.
+        if (err instanceof ApiError && (err.status === 403 || err.status === 404)) return null;
         throw err;
       }),
     ])
@@ -93,9 +95,12 @@ export default function RoundDetail() {
 
   const { data: pilotsIndex } = useBlob<PilotSummary[]>("pilots.json");
 
-  const isCoord =
-    identity?.roles.includes("RoundsCoord") ||
-    identity?.roles.includes("Admin");
+  const isAdmin = identity?.roles.includes("Admin") ?? false;
+  const isCoordRole = identity?.roles.includes("RoundsCoord") ?? false;
+  const canManage =
+    isAdmin ||
+    (isCoordRole && identity?.clubId != null && identity.clubId === round?.organisingClub?.id);
+  const canRegisterTeams = isAdmin || (isCoordRole && identity?.clubId != null);
 
   const isPilot = identity?.roles.includes("Pilot") && !!identity.pilotId;
 
@@ -163,7 +168,7 @@ export default function RoundDetail() {
           </p>
         </div>
         <StatusBadge status={round.status} />
-        {isCoord && (
+        {(canManage || canRegisterTeams) && (
           <Link
             to={`/rounds/${round.id}/manage`}
             style={{
@@ -176,7 +181,7 @@ export default function RoundDetail() {
               fontSize: "0.85rem",
             }}
           >
-            Manage
+            {canManage ? "Manage" : "Register teams"}
           </Link>
         )}
       </div>
