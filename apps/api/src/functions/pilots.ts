@@ -236,12 +236,12 @@ interface UpdatePilotBody {
   wingModel?: string;
   wingColours?: string;
   currentClub?: ClubRef;
-  // Admin-only fields
   bhpaNumber?: number;
   coachType?: CoachType;
   pilotRating?: PilotRatingValue;
   pureTrackId?: number;
   pureTrackLink?: string;
+  // email is honoured only for Admins (feeds the pilot auto-link index)
   email?: string;
 }
 

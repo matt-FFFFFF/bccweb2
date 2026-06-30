@@ -167,7 +167,9 @@ export default function RegisterForRound() {
       <section style={{ padding: "1.25rem", border: "1px solid #dee2e6", borderRadius: "0.5rem", background: "#fff" }}>
         <h2 style={{ marginTop: 0, fontSize: "1.15rem" }}>Choose your team</h2>
         {teams.length === 0 ? (
-          <p>No teams are available for your club in this round.</p>
+          <p>{pilotClubId
+            ? "No teams are available for your club in this round."
+            : "Set your club in your profile before registering for a round."}</p>
         ) : (
           <div style={{ display: "grid", gap: "0.75rem" }}>
             {teams.map((team) => {

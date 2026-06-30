@@ -100,7 +100,7 @@ export default function RoundDetail() {
   const canManage =
     isAdmin ||
     (isCoordRole && identity?.clubId != null && identity.clubId === round?.organisingClub?.id);
-  const canRegisterTeams = isAdmin || isCoordRole;
+  const canRegisterTeams = isAdmin || (isCoordRole && identity?.clubId != null);
 
   const isPilot = identity?.roles.includes("Pilot") && !!identity.pilotId;
 

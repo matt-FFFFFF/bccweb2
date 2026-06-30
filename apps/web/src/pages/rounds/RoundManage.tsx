@@ -1459,7 +1459,7 @@ export default function RoundManage() {
           })}
 
         {/* Add team form — only when not locked/complete */}
-        {r.status !== "Locked" && r.status !== "Complete" && r.status !== "Cancelled" && (
+        {r.status !== "Locked" && r.status !== "Complete" && r.status !== "Cancelled" && (canManage || myClubId != null) && (
           <div style={{ marginTop: "0.5rem" }}>
             <strong style={{ fontSize: "0.85rem" }}>Add Team</strong>
             <AddTeamForm
