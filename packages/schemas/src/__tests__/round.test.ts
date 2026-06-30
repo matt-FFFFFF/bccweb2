@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 
+import { BriefSchema } from "../brief.js";
 import {
   FlightSchema,
   PilotSlotSchema,
@@ -8,6 +9,7 @@ import {
   RoundSummarySchema,
   TeamSchema,
 } from "../round.js";
+import { SignToFlyWordingSchema } from "../signToFly.js";
 
 const validFlight = {
   id: "flight-1",
@@ -81,10 +83,6 @@ const validRound = {
   isLocked: false,
   maxTeams: 10,
   minimumScore: 5,
-  briefingTime: "09:30",
-  landByTime: "18:00",
-  checkInByTime: "19:00",
-  narrative: "Good day for a task.",
   pureTrackGroupId: 456,
   pureTrackGroupName: "BCC Round 1",
   pureTrackGroupSlug: "bcc-round-1",
@@ -202,12 +200,10 @@ describe("RoundSchema", () => {
   test("fills optional fields with undefined when invalid", () => {
     const parsed = RoundSchema.parse({
       ...validRound,
-      narrative: 123,
       organisingClub: { id: "club-1" },
       pureTrackGroupId: "not-a-number",
     });
 
-    expect(parsed.narrative).toBeUndefined();
     expect(parsed.organisingClub).toBeUndefined();
     expect(parsed.pureTrackGroupId).toBeUndefined();
   });
@@ -261,5 +257,91 @@ describe("PilotSlotSchema and FlightSchema", () => {
     const { id: _id, ...withoutId } = validFlight;
 
     expect(FlightSchema.safeParse(withoutId).success).toBe(false);
+  });
+});
+
+describe("RoundSchema strips time fields (T2)", () => {
+  test("briefingTime is STRIPPED from a parsed Round (not present on output)", () => {
+    const parsed = RoundSchema.parse({ ...validRound });
+    expect(parsed).not.toHaveProperty("briefingTime");
+  });
+
+  test("landByTime is STRIPPED from a parsed Round", () => {
+    const parsed = RoundSchema.parse({ ...validRound });
+    expect(parsed).not.toHaveProperty("landByTime");
+  });
+
+  test("checkInByTime is STRIPPED from a parsed Round", () => {
+    const parsed = RoundSchema.parse({ ...validRound });
+    expect(parsed).not.toHaveProperty("checkInByTime");
+  });
+
+  test("narrative is STRIPPED from a parsed Round", () => {
+    const parsed = RoundSchema.parse({ ...validRound });
+    expect(parsed).not.toHaveProperty("narrative");
+  });
+});
+
+describe("BriefSchema retains time fields (T2)", () => {
+  const validBrief = {
+    roundId: "round-1",
+    generatedAt: "2026-06-11T09:00:00Z",
+    date: "2026-06-11",
+    siteName: "Llangollen",
+    briefingTime: "09:30",
+    checkInByTime: "19:00",
+    landByTime: "18:00",
+    teams: [],
+  } as const;
+
+  test("BriefSchema retains briefingTime", () => {
+    const parsed = BriefSchema.parse(validBrief);
+    expect(parsed.briefingTime).toBe("09:30");
+  });
+
+  test("BriefSchema retains checkInByTime", () => {
+    const parsed = BriefSchema.parse(validBrief);
+    expect(parsed.checkInByTime).toBe("19:00");
+  });
+
+  test("BriefSchema retains landByTime", () => {
+    const parsed = BriefSchema.parse(validBrief);
+    expect(parsed.landByTime).toBe("18:00");
+  });
+
+  test("BriefSchema accepts top-level hash", () => {
+    const parsed = BriefSchema.parse({ ...validBrief, hash: "abc123" });
+    expect(parsed.hash).toBe("abc123");
+  });
+});
+
+describe("SignToFlyWordingSchema markdown-only (T2)", () => {
+  const validMarkdownWording = {
+    version: 1,
+    hash: "wording-hash",
+    markdown: "# Sign to fly\n\nPlease read carefully.",
+    createdAt: "2026-06-11T00:00:00Z",
+    createdBy: "admin-1",
+  } as const;
+
+  test("parses a valid markdown-only wording object", () => {
+    expect(SignToFlyWordingSchema.parse(validMarkdownWording)).toEqual(validMarkdownWording);
+  });
+
+  test("fails when markdown field is missing", () => {
+    const { markdown: _markdown, ...withoutMarkdown } = validMarkdownWording;
+    expect(SignToFlyWordingSchema.safeParse(withoutMarkdown).success).toBe(false);
+  });
+
+  test("fails when only html is provided (no markdown)", () => {
+    expect(
+      SignToFlyWordingSchema.safeParse({
+        version: 1,
+        hash: "wording-hash",
+        html: "<p>Sign to fly</p>",
+        createdAt: "2026-06-11T00:00:00Z",
+        createdBy: "admin-1",
+      }).success,
+    ).toBe(false);
   });
 });

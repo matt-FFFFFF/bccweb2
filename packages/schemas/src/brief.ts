@@ -131,6 +131,7 @@ export const BriefSchema = z
     generatedAt: z.string().min(1),
     date: z.string().min(1),
     siteName: z.string().min(1),
+    hash: lenientOptional(z.string()),
     guideUrl: lenientOptional(z.string()),
     parkingW3W: lenientOptional(z.string()),
     briefingW3W: lenientOptional(z.string()),
