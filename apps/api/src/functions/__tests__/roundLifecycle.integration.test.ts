@@ -184,33 +184,16 @@ describe("round lifecycle integration", () => {
     expect((res.jsonBody as { code: string }).code).toBe("BRIEF_LOCKED");
   });
 
-  it("brief cosmetic edit in BriefComplete preserves signatures and signToFly", async () => {
-    const ctx = await seedSignedBriefCompleteRound();
-    const before = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
+  it("brief edit when round is BriefComplete returns 409 BRIEF_LOCKED", async () => {
+    const ctx = await seedLifecycleRound({ status: "BriefComplete" });
+    await seedBrief(ctx);
 
-    const res = await updateBrief(ctx, makeBrief(ctx, { siteName: "Cosmetic Site Name" }));
+    const res = await updateBrief(ctx, makeBrief(ctx, { NOTAMs: "attempted edit after brief-complete" }));
 
-    expect(res.status).toBe(200);
-    expect(res.jsonBody).toMatchObject({ materialChanged: false, invalidatedSignatureCount: 0 });
-    expect((res.jsonBody as { brief: RoundBrief }).brief.version).toBe(1);
-    const after = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
-    expect(before.teams[0].pilots[0].signToFly).toBe(true);
-    expect(after.teams[0].pilots[0].signToFly).toBe(true);
-    expect(await readPrivateJson<Signature>(signaturePath(ctx.roundId, ctx.teamId, 1, 1))).not.toBeNull();
-  });
-
-  it("brief material edit in BriefComplete bumps version, invalidates affected signToFly, preserves signature blob", async () => {
-    const ctx = await seedSignedBriefCompleteRound();
-    const originalSig = await readPrivateJson<Signature>(signaturePath(ctx.roundId, ctx.teamId, 1, 1));
-
-    const res = await updateBrief(ctx, makeBrief(ctx, { NOTAMs: "New material NOTAM" }));
-
-    expect(res.status).toBe(200);
-    expect(res.jsonBody).toMatchObject({ materialChanged: true, invalidatedSignatureCount: 1 });
-    expect((res.jsonBody as { brief: RoundBrief }).brief.version).toBe(2);
-    const round = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
-    expect(round.teams[0].pilots[0].signToFly).toBe(false);
-    expect(await readPrivateJson<Signature>(signaturePath(ctx.roundId, ctx.teamId, 1, 1))).toEqual(originalSig);
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("BRIEF_LOCKED");
+    const after = (await readPrivateJson<RoundBrief>(`round-briefs/${ctx.roundId}.json`))!;
+    expect(after.NOTAMs).toBeUndefined();
   });
 
   it("double-lock race allows exactly one lock to succeed", async () => {
@@ -512,14 +495,6 @@ async function seedBaseEntities(opts: { pilotPureTrackId?: number } = {}) {
 
 async function seedLockedScorableRound(opts: { complete?: boolean } = {}): Promise<LifecycleContext> {
   return seedLifecycleRound({ status: opts.complete ? "Complete" : "Locked", isLocked: !opts.complete, complete: opts.complete, flightDistance: 42 });
-}
-
-async function seedSignedBriefCompleteRound(): Promise<LifecycleContext> {
-  const ctx = await seedLifecycleRound({ status: "BriefComplete" });
-  await seedBrief(ctx);
-  const signRes = await signOwnSlot(ctx);
-  expect(signRes.status).toBe(201);
-  return ctx;
 }
 
 async function seedWording(): Promise<void> {

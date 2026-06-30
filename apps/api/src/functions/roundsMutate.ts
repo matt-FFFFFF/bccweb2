@@ -8,7 +8,6 @@
  * POST   /api/rounds/{id}/lock             — BriefComplete → Locked + snapshot pilots
  * POST   /api/rounds/{id}/unlock           — Locked → Confirmed
  * POST   /api/rounds/{id}/complete         — Locked → Complete + score + recompute
- * POST   /api/rounds/{id}/narrative        — update narrative text
  */
 
 import {
@@ -1017,46 +1016,6 @@ async function completeRound(
   return { status: 200, jsonBody: updated };
 }
 
-// ─── POST /api/rounds/{id}/narrative ─────────────────────────────────────────
-
-async function updateNarrative(
-  req: HttpRequest,
-  _ctx: InvocationContext
-): Promise<HttpResponseInit> {
-  const id = req.params["id"];
-  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
-
-  const caller = await getCallerIdentity(req);
-  if (!caller) return unauthorizedResponse();
-  if (!isCoord(caller.roles)) return forbiddenResponse();
-  await assertManageableRound(caller, id);
-  await mutationRateLimit(req, caller, "updateNarrative", "standard");
-
-  const body = (await req.json()) as { narrative?: string };
-  if (body.narrative === undefined) {
-    throw new HttpError(400, "INVALID_BODY", "narrative is required");
-  }
-
-  const path = `rounds/${id}.json`;
-  let updated: Round;
-
-  try {
-    updated = await withPrivateLease(path, async (leaseId) => {
-      const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
-      r.narrative = body.narrative;
-      await writePrivateJson(path, RoundSchema, r, leaseId);
-      return r;
-    });
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(404, "NOT_FOUND", "Round not found");
-    }
-    throw new HttpError(500, "INTERNAL");
-  }
-
-  return { status: 200, jsonBody: updated };
-}
-
 // ─── Registration ─────────────────────────────────────────────────────────────
 
 app.http("createRound", {
@@ -1106,11 +1065,4 @@ app.http("completeRound", {
   authLevel: "anonymous",
   route: "rounds/{id}/complete",
   handler: withErrorHandler(completeRound),
-});
-
-app.http("updateNarrative", {
-  methods: ["POST"],
-  authLevel: "anonymous",
-  route: "rounds/{id}/narrative",
-  handler: withErrorHandler(updateNarrative),
 });

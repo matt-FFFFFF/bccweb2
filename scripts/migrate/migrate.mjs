@@ -817,7 +817,6 @@ async function main() {
       ...(r.BriefingTime ? { briefingTime: new Date(r.BriefingTime).toTimeString().slice(0, 5) } : {}),
       ...(r.LandByTime ? { landByTime: new Date(r.LandByTime).toTimeString().slice(0, 5) } : {}),
       ...(r.CheckInByTime ? { checkInByTime: new Date(r.CheckInByTime).toTimeString().slice(0, 5) } : {}),
-      ...(r.Narrative ? { narrative: r.Narrative } : {}),
       ...(r.PureTrackGroup_ID ? { pureTrackGroupId: r.PureTrackGroup_ID } : {}),
       ...(r.PureTrackGroupName && r.PureTrackGroupName !== "Not set yet..."
         ? { pureTrackGroupName: r.PureTrackGroupName }

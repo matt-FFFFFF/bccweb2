@@ -304,7 +304,6 @@ const CASES: CallSiteCase[] = [
   { file: "roundsMutate.ts", handler: "lockRound", endpoint: "lockRound", tier: "heavy", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },
   { file: "roundsMutate.ts", handler: "unlockRound", endpoint: "unlockRound", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },
   { file: "roundsMutate.ts", handler: "completeRound", endpoint: "completeRound", tier: "heavy", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },
-  { file: "roundsMutate.ts", handler: "updateNarrative", endpoint: "updateNarrative", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }, { narrative: "forbidden" }) },
 
   { file: "seasonClubs.ts", handler: "createSeasonClub", endpoint: "createSeasonClub", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("POST", { year: "2026" }, { clubId: randomUUID(), numTeams: 1, acceptTsCs: true }) },
   { file: "seasonClubs.ts", handler: "updateSeasonClub", endpoint: "updateSeasonClub", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("PUT", { year: "2026", seasonClubId: randomUUID() }, { numTeams: 1 }) },

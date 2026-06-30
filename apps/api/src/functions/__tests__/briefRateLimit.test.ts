@@ -109,7 +109,7 @@ async function drainUpdateRoundBriefHeavyBucket(
   for (let i = 1; i <= 5; i += 1) {
     const res = await invoke(
       "updateRoundBrief",
-      authPutBrief(user, roundId, { ...brief, briefersNotes: `drain ${i}` }, { dryRun: "true" }),
+      authPutBrief(user, roundId, { ...brief, briefersNotes: `drain ${i}` }),
     );
     statuses.push(statusOf(res));
   }
@@ -145,7 +145,7 @@ async function writeEvidence(): Promise<void> {
   await fs.writeFile(
     PRESERVATION_EVIDENCE,
     [
-      "Task 9 — updateRoundBrief 409 and dryRun preservation evidence",
+      "Task 9 — updateRoundBrief 409 and merge preservation evidence",
       ...preservationObservations.map((o) => `${o.label}: status=${o.status} code=${o.code ?? "n/a"} retryAfter=${o.retryAfter ?? "absent"}`),
       "",
     ].join("\n"),
@@ -178,7 +178,7 @@ describe("updateRoundBrief rate-limit ordering", () => {
 
     const res = await invoke(
       "updateRoundBrief",
-      authPutBrief(coordA, otherRound.id, { ...ownBrief, briefersNotes: "cross-club dry run" }, { dryRun: "true" }),
+      authPutBrief(coordA, otherRound.id, { ...ownBrief, briefersNotes: "cross-club edit" }),
     );
     record(redGreenObservations, "cross-club after drain", res);
 
@@ -204,44 +204,44 @@ describe("updateRoundBrief rate-limit ordering", () => {
     expect(codeOf(res)).toBe("BRIEF_LOCKED");
   });
 
-  it("authorized dryRun returns 200, writes nothing, and still consumes the heavy bucket", async () => {
+  it("authorized PUT returns 200, persists the merge, and the 6th call is rate-limited before any write", async () => {
     const clubId = randomUUID();
     const { user: coord } = await makeUser({ roles: ["RoundsCoord"], clubId });
     const round = await makeEditableRoundWithBrief(clubId);
     const originalBrief = await getBrief(coord, round.id);
 
     resetAllBuckets();
-    const dryRunBody = { ...originalBrief, briefersNotes: "dry-run-only mutation" };
     const first = await invoke(
       "updateRoundBrief",
-      authPutBrief(coord, round.id, dryRunBody, { dryRun: "true" }),
+      authPutBrief(coord, round.id, { ...originalBrief, briefersNotes: "edit 1" }),
     );
-    record(preservationObservations, "authorized dryRun first call", first);
+    record(preservationObservations, "authorized first call", first);
 
     expect(statusOf(first)).toBe(200);
-    expect(await readPrivateJson<RoundBrief>(`round-briefs/${round.id}.json`)).toEqual(originalBrief);
+    expect((await readPrivateJson<RoundBrief>(`round-briefs/${round.id}.json`))?.briefersNotes).toBe("edit 1");
 
     for (let i = 2; i <= 5; i += 1) {
       const res = await invoke(
         "updateRoundBrief",
-        authPutBrief(coord, round.id, { ...dryRunBody, briefersNotes: `dry-run drain ${i}` }, { dryRun: "true" }),
+        authPutBrief(coord, round.id, { ...originalBrief, briefersNotes: `edit ${i}` }),
       );
       expect(statusOf(res)).toBe(200);
     }
 
     const sixth = await invoke(
       "updateRoundBrief",
-      authPutBrief(coord, round.id, { ...dryRunBody, briefersNotes: "dry-run sixth" }, { dryRun: "true" }),
+      authPutBrief(coord, round.id, { ...originalBrief, briefersNotes: "edit 6 (rejected)" }),
     );
-    record(preservationObservations, "authorized dryRun sixth call", sixth);
+    record(preservationObservations, "authorized sixth call", sixth);
 
     expect(statusOf(sixth)).toBe(429);
     expect(codeOf(sixth)).toBe("RATE_LIMITED");
     expect(retryAfterOf(sixth)).toBeDefined();
-    expect(await readPrivateJson<RoundBrief>(`round-briefs/${round.id}.json`)).toEqual(originalBrief);
+    // 6th was rejected at the rate gate BEFORE any write — the 5th merge stands.
+    expect((await readPrivateJson<RoundBrief>(`round-briefs/${round.id}.json`))?.briefersNotes).toBe("edit 5");
   });
 
-  it("forbidden cross-club dryRun returns 403, not 429 or 200", async () => {
+  it("forbidden cross-club PUT returns 403, not 429 or 200", async () => {
     const clubA = randomUUID();
     const clubB = randomUUID();
     const { user: coordA } = await makeUser({ roles: ["RoundsCoord"], clubId: clubA });
@@ -254,9 +254,9 @@ describe("updateRoundBrief rate-limit ordering", () => {
 
     const res = await invoke(
       "updateRoundBrief",
-      authPutBrief(coordA, otherRound.id, { ...ownBrief, briefersNotes: "forbidden dry run" }, { dryRun: "true" }),
+      authPutBrief(coordA, otherRound.id, { ...ownBrief, briefersNotes: "forbidden edit" }),
     );
-    record(preservationObservations, "forbidden cross-club dryRun after drain", res);
+    record(preservationObservations, "forbidden cross-club after drain", res);
 
     expect(statusOf(res)).toBe(403);
     expect(statusOf(res)).not.toBe(429);

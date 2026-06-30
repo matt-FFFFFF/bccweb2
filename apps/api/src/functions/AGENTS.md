@@ -32,7 +32,7 @@ See root [AGENTS.md](../../../../AGENTS.md) for the module list, roles, and env.
 
 | File | Why it's big / special |
 |------|------------------------|
-| `roundsMutate.ts` (~1040) | 7 endpoints: create/update/transition/lock/unlock/complete/narrative + brief/PureTrack/PDF/email helpers; state machine ~L351-390 |
+| `roundsMutate.ts` (~1000) | 6 endpoints: create/update/transition/lock/unlock/complete + brief/PureTrack/PDF/email helpers; state machine ~L351-390 |
 | `authFunctions.ts` (~629) | register/verify/resend/login/refresh/forgot/reset + "silent OK" anti-enumeration responses |
 | `admin.ts` | config/user admin; `runConfigRmw(...)` + lease-conflict translation |
 | `brief.ts` | invalidates sign-to-fly on material brief change, regenerates PDF outside lease |

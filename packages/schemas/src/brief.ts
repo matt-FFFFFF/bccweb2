@@ -169,3 +169,29 @@ export const BriefSchema = z
   .strip();
 
 BriefSchema satisfies z.ZodType<RoundBrief>;
+
+// Coordinator-editable subset for PUT /rounds/{id}/brief. Excludes identity
+// (roundId/generatedAt/date/siteName) + derived state (teams/hash/
+// versionHistory/imagePaths) so a partial edit body validates WITHOUT them;
+// the full BriefSchema validates the merged result on write.
+export const BriefEditableSchema = BriefSchema.partial().pick({
+  briefingTime: true,
+  checkInByTime: true,
+  landByTime: true,
+  parkingW3W: true,
+  briefingW3W: true,
+  takeOffW3W: true,
+  windSpeedDirection: true,
+  directionOfFlight: true,
+  expectedLandingArea: true,
+  airspaceAndHazards: true,
+  NOTAMs: true,
+  BENO_LineDescription: true,
+  briefersNotes: true,
+  frequencyMhz: true,
+  briefer: true,
+});
+
+export const BRIEF_EDITABLE_KEYS = Object.keys(
+  BriefEditableSchema.shape,
+) as Array<keyof typeof BriefEditableSchema.shape>;

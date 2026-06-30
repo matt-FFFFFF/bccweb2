@@ -13,21 +13,19 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { RoundBrief } from "@bccweb/types";
-import { BriefSchema, RoundSchema } from "@bccweb/schemas";
+import { BriefSchema, RoundSchema, BriefEditableSchema, BRIEF_EDITABLE_KEYS } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
   withPrivateLeaseRenewing,
   getPrivateBlockBlobClient,
+  withRoundAndBriefLease,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
-import { canViewRoundDetail } from "../lib/roundAuth.js";
+import { canViewRoundDetail, assertCanManageRound } from "../lib/roundAuth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
-import { computeBriefHash } from "../lib/signTofly/briefVersion.js";
-import { invalidatePriorSignToFlyFlags } from "../lib/signTofly/invalidate.js";
-import { listSignaturesForRound } from "../lib/signTofly/ledger.js";
-import { generateBriefPdf } from "../lib/pdf.js";
+import { buildInitialBrief } from "./roundsMutate.js";
 import type { CallerIdentity, Round } from "@bccweb/types";
 
 function contentTypeForPath(path: string): string {
@@ -260,7 +258,6 @@ async function updateRoundBrief(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
-  // Auth: Admin OR RoundsCoord scoped to the round's club
   if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
     throw new HttpError(403, "FORBIDDEN");
   }
@@ -276,93 +273,64 @@ async function updateRoundBrief(
     throw e;
   });
 
-  if (!caller.roles.includes("Admin") && caller.roles.includes("RoundsCoord") && caller.clubId !== round.organisingClub?.id) {
-    throw new HttpError(403, "FORBIDDEN");
-  }
+  assertCanManageRound(caller, round);
 
   await mutationRateLimit(req, caller, "updateRoundBrief", "heavy");
 
-  if (round.status === "Locked" || round.status === "Complete") {
-    throw new HttpError(409, "BRIEF_LOCKED", "Round is locked or complete.");
+  const parsed = BriefEditableSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    throw new HttpError(400, "INVALID_BODY", "Invalid brief edit body");
+  }
+  const edits = parsed.data as Record<string, unknown>;
+
+  // Lazy-create: you cannot lease a missing blob, so create-or-skip the brief
+  // (ifNoneMatch:"*" — 409/412 = a concurrent create won, treat as no-op)
+  // BEFORE acquiring the cross-blob lease.
+  if (!(await readBrief(id))) {
+    const seed = await buildInitialBrief(round, {
+      briefingTime: edits["briefingTime"] as string | undefined,
+      checkInByTime: edits["checkInByTime"] as string | undefined,
+      landByTime: edits["landByTime"] as string | undefined,
+    });
+    try {
+      await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, seed, undefined, {
+        ifNoneMatch: "*",
+      });
+    } catch (e: unknown) {
+      const sc = (e as { statusCode?: number }).statusCode;
+      if (sc !== 409 && sc !== 412) throw e;
+    }
   }
 
-  const body = (await req.json()) as RoundBrief;
-  const isDryRun = req.query.get("dryRun") === "true";
+  const merged = await withRoundAndBriefLease(id, async (_roundLeaseId, briefLeaseId) => {
+    const current = await readJson(
+      getPrivateBlobClient(`rounds/${id}.json`),
+      RoundSchema,
+      `rounds/${id}.json`,
+    );
+    if (current.status !== "Proposed" && current.status !== "Confirmed") {
+      throw new HttpError(
+        409,
+        "BRIEF_LOCKED",
+        "Brief can only be edited while the round is Proposed or Confirmed.",
+      );
+    }
 
-  const result = await withPrivateLeaseRenewing(`round-briefs/${id}.json`, async (leaseId) => {
     const existing = await readBrief(id);
     if (!existing) throw new HttpError(404, "NOT_FOUND", "Brief not found");
 
-    const prevHash = computeBriefHash(existing);
-    const nextHash = computeBriefHash(body);
-
-    if (prevHash === nextHash) {
-      // Cosmetic
-      body.version = existing.version ?? 1;
-      body.versionHistory = existing.versionHistory;
-      
-      if (!isDryRun) {
-        await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, body, leaseId);
-      }
-      return { brief: body, materialChanged: false, invalidatedSignatureCount: 0 };
-    }
-
-    // Material change
-    const nextVersion = (existing.version ?? 1) + 1;
-    const now = new Date().toISOString();
-    
-    body.version = nextVersion;
-    body.versionHistory = existing.versionHistory ?? [];
-    body.versionHistory.push({
-      version: existing.version ?? 1,
-      hash: prevHash,
-      createdAt: existing.generatedAt || now,
-      createdBy: "legacy",
-      supersededAt: now
-    });
-
-    if (!isDryRun) {
-      await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, body, leaseId);
-    }
-
-    const signatures = await listSignaturesForRound(id);
-    const mockRound = JSON.parse(JSON.stringify(round)) as Round;
-    const updatedRound = invalidatePriorSignToFlyFlags(mockRound, body, signatures);
-
-    let count = 0;
-    for (const t1 of round.teams) {
-      for (const p1 of t1.pilots) {
-        const t2 = updatedRound.teams.find((t) => t.id === t1.id);
-        const p2 = t2?.pilots.find((p) => p.placeInTeam === p1.placeInTeam);
-        if (p1.signToFly === true && p2?.signToFly === false) {
-          count++;
-        }
+    const next = { ...existing } as Record<string, unknown>;
+    for (const key of BRIEF_EDITABLE_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(edits, key)) {
+        next[key] = edits[key];
       }
     }
 
-    if (!isDryRun && count > 0) {
-      await withPrivateLeaseRenewing(`rounds/${id}.json`, async (roundLease) => {
-        await writePrivateJson(`rounds/${id}.json`, RoundSchema, updatedRound, roundLease);
-      });
-    }
-
-    return { brief: body, materialChanged: true, invalidatedSignatureCount: count };
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, next as RoundBrief, briefLeaseId);
+    return next as RoundBrief;
   });
 
-  if (!isDryRun) {
-    // Generate PDF outside lease
-    try {
-      const pdfBuffer = await generateBriefPdf(result.brief);
-      const pdfClient = getPrivateBlockBlobClient(`round-briefs/${id}.pdf`);
-      await pdfClient.upload(pdfBuffer, pdfBuffer.length, {
-        blobHTTPHeaders: { blobContentType: "application/pdf" },
-      });
-    } catch (e) {
-      _ctx.warn("Failed to generate PDF on brief edit", e);
-    }
-  }
-
-  return { status: 200, jsonBody: result };
+  return { status: 200, jsonBody: merged };
 }
 
 // ─── POST /api/rounds/{id}/brief/images ───────────────────────────────────────
