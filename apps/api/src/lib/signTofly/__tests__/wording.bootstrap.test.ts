@@ -53,6 +53,41 @@ describe("Sign-to-Fly wording bootstrap", () => {
     await expect(getActiveWording()).resolves.toMatchObject({ version: 1, html: "<p>both blobs</p>" });
   });
 
+  it("heals a partial bootstrap with v1 present and active pointer absent", async () => {
+    const first: SignToFlyWording = {
+      version: 1,
+      hash: hashHtml("<p>partial bootstrap seed</p>"),
+      html: "<p>partial bootstrap seed</p>",
+      plainText: "partial bootstrap seed",
+      createdAt: new Date("2026-01-01T00:00:00.000Z").toISOString(),
+      createdBy: "admin-seed",
+    };
+    const content = JSON.stringify(first, null, 2);
+    await getPrivateBlockBlobClient("sign-to-fly/wording/1.json").upload(
+      content,
+      Buffer.byteLength(content),
+      {
+        blobHTTPHeaders: { blobContentType: "application/json" },
+        conditions: { ifNoneMatch: "*" },
+      },
+    );
+
+    const wording = await addWordingVersion({
+      html: "<p>healed wording</p>",
+      plainText: "healed wording",
+      createdBy: "admin-heal",
+    });
+
+    expect(wording).toMatchObject({
+      version: 2,
+      hash: hashHtml("<p>healed wording</p>"),
+      html: "<p>healed wording</p>",
+      plainText: "healed wording",
+      createdBy: "admin-heal",
+    });
+    await expect(getActiveWording()).resolves.toMatchObject({ version: 2 });
+  });
+
   it("three concurrent addWordingVersion calls against virgin store produce v1, v2, and v3", async () => {
     const attempts = await Promise.all([
       addWordingVersion({ html: "<p>race a</p>", plainText: "race a", createdBy: "admin-a" }),
