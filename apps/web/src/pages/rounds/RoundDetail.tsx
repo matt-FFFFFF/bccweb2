@@ -95,9 +95,12 @@ export default function RoundDetail() {
 
   const { data: pilotsIndex } = useBlob<PilotSummary[]>("pilots.json");
 
-  const isCoord =
-    identity?.roles.includes("RoundsCoord") ||
-    identity?.roles.includes("Admin");
+  const isAdmin = identity?.roles.includes("Admin") ?? false;
+  const isCoordRole = identity?.roles.includes("RoundsCoord") ?? false;
+  const canManage =
+    isAdmin ||
+    (isCoordRole && identity?.clubId != null && identity.clubId === round?.organisingClub?.id);
+  const canRegisterTeams = isAdmin || isCoordRole;
 
   const isPilot = identity?.roles.includes("Pilot") && !!identity.pilotId;
 
@@ -165,7 +168,7 @@ export default function RoundDetail() {
           </p>
         </div>
         <StatusBadge status={round.status} />
-        {isCoord && (
+        {(canManage || canRegisterTeams) && (
           <Link
             to={`/rounds/${round.id}/manage`}
             style={{
@@ -178,7 +181,7 @@ export default function RoundDetail() {
               fontSize: "0.85rem",
             }}
           >
-            Manage
+            {canManage ? "Manage" : "Register teams"}
           </Link>
         )}
       </div>

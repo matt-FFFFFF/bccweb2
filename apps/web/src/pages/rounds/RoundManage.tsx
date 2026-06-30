@@ -173,6 +173,7 @@ function AddTeamForm({
   seasonYear,
   existingTeams,
   onAdded,
+  lockedClubId,
 }: {
   roundId: string;
   clubs: ClubSummary[];
@@ -180,8 +181,10 @@ function AddTeamForm({
   seasonYear: number;
   existingTeams: Team[];
   onAdded: () => void;
+  lockedClubId?: string | null;
 }) {
-  const [clubId, setClubId] = useState("");
+  const [clubIdState, setClubIdState] = useState("");
+  const clubId = lockedClubId ?? clubIdState;
   const [teamName, setTeamName] = useState("");
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -209,7 +212,7 @@ function AddTeamForm({
     setErr(null);
     try {
       await api.post(`rounds/${roundId}/teams`, { clubId, teamName });
-      setClubId("");
+      setClubIdState("");
       setTeamName("");
       onAdded();
     } catch (ex) {
@@ -224,24 +227,26 @@ function AddTeamForm({
       onSubmit={(e) => { void submit(e); }}
       style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginTop: "0.75rem", alignItems: "flex-end" }}
     >
-      <div>
-        <select
-          required
-          style={{ ...inputStyle, minWidth: 160 }}
-          value={clubId}
-          onChange={(e) => {
-            setClubId(e.target.value);
-            setTeamName("");
-          }}
-        >
-          <option value="">— club —</option>
-          {clubs.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.name}
-            </option>
-          ))}
-        </select>
-      </div>
+      {!lockedClubId && (
+        <div>
+          <select
+            required
+            style={{ ...inputStyle, minWidth: 160 }}
+            value={clubIdState}
+            onChange={(e) => {
+              setClubIdState(e.target.value);
+              setTeamName("");
+            }}
+          >
+            <option value="">— club —</option>
+            {clubs.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <div>
         <select
           required
@@ -557,6 +562,8 @@ function PilotRow({
   pilots,
   status,
   canOverrideSign,
+  canManage,
+  canEditTeam,
   onChanged,
 }: {
   roundId: string;
@@ -565,6 +572,8 @@ function PilotRow({
   pilots: PilotSummary[] | null;
   status: RoundStatus;
   canOverrideSign: boolean;
+  canManage: boolean;
+  canEditTeam: boolean;
   onChanged: () => void;
 }) {
   const [showFlightForm, setShowFlightForm] = useState(false);
@@ -711,7 +720,7 @@ function PilotRow({
         )}
 
         {/* Accounted / sign-to-fly toggles (only when Locked) */}
-        {isLocked && slot.status === "Filled" && (
+        {canManage && isLocked && slot.status === "Filled" && (
           <>
             <button
               title="Accounted for"
@@ -743,7 +752,7 @@ function PilotRow({
         )}
 
         {/* Flight actions */}
-        {canFlight && slot.status === "Filled" && (
+        {canManage && canFlight && slot.status === "Filled" && (
           <>
             {slot.flight ? (
               <>
@@ -783,7 +792,7 @@ function PilotRow({
         )}
 
         {/* Remove pilot */}
-        {!isLocked && !isComplete && slot.status === "Filled" && (
+        {canEditTeam && !isLocked && !isComplete && slot.status === "Filled" && (
           <button
             style={{ ...btnStyle("#58151c", "#f8d7da"), padding: "0.2rem 0.5rem" }}
             onClick={() => { void removePilot(); }}
@@ -941,6 +950,7 @@ function TeamCard({
   status,
   canOverrideSign,
   canManageCaptain,
+  canEditTeam,
   onChanged,
 }: {
   roundId: string;
@@ -949,6 +959,7 @@ function TeamCard({
   status: RoundStatus;
   canOverrideSign: boolean;
   canManageCaptain: boolean;
+  canEditTeam: boolean;
   onChanged: () => void;
 }) {
   const [showAddPilot, setShowAddPilot] = useState(false);
@@ -956,7 +967,7 @@ function TeamCard({
 
   const isLocked = status === "Locked";
   const isComplete = status === "Complete";
-  const canEdit = !isLocked && !isComplete;
+  const canEdit = !isLocked && !isComplete && canEditTeam;
 
   async function removeTeam() {
     if (!confirm(`Remove team "${team.teamName}"?`)) return;
@@ -1044,6 +1055,8 @@ function TeamCard({
             pilots={pilots}
             status={status}
             canOverrideSign={canOverrideSign}
+            canManage={canManageCaptain}
+            canEditTeam={canEditTeam}
             onChanged={onChanged}
           />
         ))}
@@ -1311,15 +1324,13 @@ export default function RoundManage() {
 
   const r = round;
   const workflowActions = WORKFLOW[r.status] ?? [];
-  const canOverrideSign = r.status === "BriefComplete" && (
-    identity.roles.includes("Admin") ||
-    (identity.roles.includes("RoundsCoord") && identity.clubId !== null && identity.clubId === r.organisingClub?.id)
-  );
-  const canManageCaptain =
-    identity.roles.includes("Admin") ||
-    (identity.roles.includes("RoundsCoord") &&
-      identity.clubId !== null &&
-      identity.clubId === r.organisingClub?.id);
+  const myClubId = identity.clubId ?? null;
+  const isAdmin = identity.roles.includes("Admin");
+  const isRoundsCoord = identity.roles.includes("RoundsCoord");
+  
+  const canManage = isAdmin || (isRoundsCoord && myClubId !== null && myClubId === r.organisingClub?.id);
+  const canManageCaptain = canManage;
+  const canOverrideSign = r.status === "BriefComplete" && canManage;
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
@@ -1356,7 +1367,7 @@ export default function RoundManage() {
         </div>
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.5rem" }}>
           <StatusBadge status={r.status} />
-          {(r.status === "Locked" || r.status === "Complete") && (
+          {canManage && (r.status === "Locked" || r.status === "Complete") && (
             <Link
               to={`/rounds/${r.id}/brief`}
               style={{
@@ -1378,7 +1389,7 @@ export default function RoundManage() {
       </div>
 
       {/* Workflow actions */}
-      {workflowActions.length > 0 && (
+      {canManage && workflowActions.length > 0 && (
         <div style={{ ...sectionStyle, display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
           <strong style={{ fontSize: "0.85rem", color: "#555" }}>Actions:</strong>
           {workflowActions.map((a) => (
@@ -1400,22 +1411,26 @@ export default function RoundManage() {
       )}
 
       {/* Metadata */}
-      <section style={sectionStyle}>
-        <h2 style={{ fontSize: "1rem", margin: "0 0 0.75rem" }}>Round Details</h2>
-        {r.isLocked ? (
-          <p style={{ color: "#888", fontSize: "0.85rem", margin: 0 }}>
-            Unlock the round to edit metadata.
-          </p>
-        ) : (
-          <MetadataForm round={r} onSaved={() => { void loadRound(); }} />
-        )}
-      </section>
+      {canManage && (
+        <section style={sectionStyle}>
+          <h2 style={{ fontSize: "1rem", margin: "0 0 0.75rem" }}>Round Details</h2>
+          {r.isLocked ? (
+            <p style={{ color: "#888", fontSize: "0.85rem", margin: 0 }}>
+              Unlock the round to edit metadata.
+            </p>
+          ) : (
+            <MetadataForm round={r} onSaved={() => { void loadRound(); }} />
+          )}
+        </section>
+      )}
 
       {/* Narrative */}
-      <section style={sectionStyle}>
-        <h2 style={{ fontSize: "1rem", margin: "0 0 0.75rem" }}>Narrative</h2>
-        <NarrativeForm round={r} onSaved={() => { void loadRound(); }} />
-      </section>
+      {canManage && (
+        <section style={sectionStyle}>
+          <h2 style={{ fontSize: "1rem", margin: "0 0 0.75rem" }}>Narrative</h2>
+          <NarrativeForm round={r} onSaved={() => { void loadRound(); }} />
+        </section>
+      )}
 
       {/* Teams */}
       <section style={sectionStyle}>
@@ -1426,18 +1441,22 @@ export default function RoundManage() {
         {r.teams
           .slice()
           .sort((a, b) => a.teamName.localeCompare(b.teamName))
-          .map((team) => (
-            <TeamCard
-              key={team.id}
-              roundId={r.id}
-              team={team}
-              pilots={pilotsIndex}
-              status={r.status}
-              canOverrideSign={canOverrideSign}
-              canManageCaptain={canManageCaptain}
-              onChanged={() => { void loadRound(); }}
-            />
-          ))}
+          .map((team) => {
+            const canEditTeam = canManage || (isRoundsCoord && myClubId !== null && myClubId === team.club.id);
+            return (
+              <TeamCard
+                key={team.id}
+                roundId={r.id}
+                team={team}
+                pilots={pilotsIndex}
+                status={r.status}
+                canOverrideSign={canOverrideSign}
+                canManageCaptain={canManageCaptain}
+                canEditTeam={canEditTeam}
+                onChanged={() => { void loadRound(); }}
+              />
+            );
+          })}
 
         {/* Add team form — only when not locked/complete */}
         {r.status !== "Locked" && r.status !== "Complete" && r.status !== "Cancelled" && (
@@ -1450,6 +1469,7 @@ export default function RoundManage() {
               seasonYear={r.season.year}
               existingTeams={r.teams}
               onAdded={() => { void loadRound(); }}
+              lockedClubId={!canManage ? myClubId : null}
             />
           </div>
         )}
