@@ -120,8 +120,9 @@ async function getPilotById(
       `pilots/${id}.json`,
     );
 
-    // RoundsCoord can only view pilots in their own club
-    if (isCoord && !isAdmin && pilot.currentClub?.id !== caller.clubId) {
+    // Coord club-scoping applies to OTHER pilots only — a coord can always
+    // view their own profile (isSelf), even after changing their personal club.
+    if (isCoord && !isAdmin && !isSelf && pilot.currentClub?.id !== caller.clubId) {
       return forbiddenResponse();
     }
 
