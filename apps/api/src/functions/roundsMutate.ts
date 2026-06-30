@@ -188,7 +188,6 @@ async function createRound(
     throw new HttpError(500, "INTERNAL");
   }
 
-  // Optionally load organising club
   let organisingClub: { id: string; name: string } | undefined;
   if (organisingClubId) {
     try {
@@ -196,7 +195,7 @@ async function createRound(
       const club = await readJson(getPrivateBlobClient(clubPath), ClubRefSchema, clubPath);
       organisingClub = { id: club.id, name: club.name };
     } catch {
-      // optional — ignore if not found
+      throw new HttpError(400, "CLUB_NOT_FOUND", "Organising club not found");
     }
   }
 
@@ -357,7 +356,7 @@ async function updateRound(
           const club = await readJson(getPrivateBlobClient(clubPath), ClubRefSchema, clubPath);
           r.organisingClub = { id: club.id, name: club.name };
         } catch {
-          // best-effort
+          throw new HttpError(400, "CLUB_NOT_FOUND", "Organising club not found");
         }
       }
 
@@ -365,6 +364,7 @@ async function updateRound(
       return r;
     });
   } catch (err: unknown) {
+    if (err instanceof HttpError) throw err;
     const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
     if (e.message?.startsWith("Unknown status: ")) {
       return {
