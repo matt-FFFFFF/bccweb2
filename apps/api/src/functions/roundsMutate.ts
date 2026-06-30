@@ -68,6 +68,14 @@ import {
   briefHtmlBody,
   briefPlainText,
 } from "../lib/email.js";
+import { getTelemetryClient } from "../lib/telemetry.js";
+
+/** The three coordinator-authored times that now live on the brief, not the Round. */
+export interface BriefTimes {
+  briefingTime?: string;
+  checkInByTime?: string;
+  landByTime?: string;
+}
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -125,7 +133,7 @@ async function loadConfig(): Promise<Config> {
 
 async function createRound(
   req: HttpRequest,
-  _ctx: InvocationContext
+  ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
@@ -203,30 +211,39 @@ async function createRound(
   }
 
   const id = randomUUID();
-  let roundStatus: RoundStatus;
-  try {
-    roundStatus = body.status === undefined ? "Proposed" : normalizeStatus(body.status);
-  } catch (err: unknown) {
-    const message = (err as { message?: string }).message ?? "Unknown status";
-    return {
-      status: 400,
-      jsonBody: {
-        error: "Invalid status",
-        code: "INVALID_STATUS",
-        detail: message,
-      },
-    };
+  // Lifecycle invariant: a round is ALWAYS created Proposed. Accepting any other
+  // status here would let a caller skip the freeze lifecycle (confirm →
+  // brief-complete → lock), so a provided status is honoured only when it
+  // normalizes to Proposed; anything else (or an unknown value) is a 400.
+  if (body.status !== undefined) {
+    let requested: RoundStatus;
+    try {
+      requested = normalizeStatus(body.status);
+    } catch (err: unknown) {
+      const message = (err as { message?: string }).message ?? "Unknown status";
+      return {
+        status: 400,
+        jsonBody: { error: "Invalid status", code: "INVALID_STATUS", detail: message },
+      };
+    }
+    if (requested !== "Proposed") {
+      return {
+        status: 400,
+        jsonBody: {
+          error: "Invalid status",
+          code: "INVALID_STATUS",
+          detail: `Rounds must be created with status Proposed (received ${requested})`,
+        },
+      };
+    }
   }
   const round: Round = {
     id,
     date,
-    status: roundStatus,
+    status: "Proposed",
     isLocked: false,
     maxTeams: body.maxTeams ?? 8,
     minimumScore: body.minimumScore ?? 0,
-    briefingTime: body.briefingTime,
-    landByTime: body.landByTime,
-    checkInByTime: body.checkInByTime,
     site: {
       id: site.id,
       name: site.name,
@@ -261,6 +278,27 @@ async function createRound(
   // Update rounds.json index
   await updateRoundsIndex(round);
 
+  // Seed the brief at creation so coordinators land on a populated brief-edit UI.
+  // Best-effort: a failure MUST NOT fail the round create — the brief is
+  // recoverable via lazy-create on first edit/image (T6/T9). ifNoneMatch:"*" is
+  // atomic create-or-skip, so it never clobbers a brief that already exists.
+  try {
+    const brief = await buildInitialBrief(round, {
+      briefingTime: body.briefingTime,
+      checkInByTime: body.checkInByTime,
+      landByTime: body.landByTime,
+    });
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, brief, undefined, {
+      ifNoneMatch: "*",
+    });
+  } catch (briefErr) {
+    ctx.warn(`[createRound:${id}] Eager brief creation failed (recoverable):`, briefErr);
+    getTelemetryClient()?.trackTrace({
+      message: "brief.eagerCreateFailed",
+      properties: { roundId: id },
+    });
+  }
+
   return { status: 201, jsonBody: round };
 }
 
@@ -285,10 +323,6 @@ async function updateRound(
     organisingClubId?: string;
     maxTeams?: number;
     minimumScore?: number;
-    briefingTime?: string;
-    landByTime?: string;
-    checkInByTime?: string;
-    status?: string;
   };
 
   if (
@@ -317,21 +351,6 @@ async function updateRound(
       if (body.date) r.date = body.date;
       if (body.maxTeams !== undefined) r.maxTeams = body.maxTeams;
       if (body.minimumScore !== undefined) r.minimumScore = body.minimumScore;
-      if (body.briefingTime !== undefined) r.briefingTime = body.briefingTime;
-      if (body.landByTime !== undefined) r.landByTime = body.landByTime;
-      if (body.checkInByTime !== undefined)
-        r.checkInByTime = body.checkInByTime;
-
-      if (body.status !== undefined) {
-        try {
-          r.status = normalizeStatus(body.status);
-        } catch (err: unknown) {
-          const message = (err as { message?: string }).message ?? "Unknown status";
-          const validation = new Error(message);
-          (validation as { isValidation?: boolean }).isValidation = true;
-          throw new HttpError(500, "INTERNAL");
-        }
-      }
 
       // Update site if changed
       if (body.siteId && body.siteId !== r.site.id) {
@@ -372,16 +391,6 @@ async function updateRound(
   } catch (err: unknown) {
     if (err instanceof HttpError) throw err;
     const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (e.message?.startsWith("Unknown status: ")) {
-      return {
-        status: 400,
-        jsonBody: {
-          error: "Invalid status",
-          code: "INVALID_STATUS",
-          detail: e.message,
-        },
-      };
-    }
     if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
     if (e.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
     throw new HttpError(500, "INTERNAL");
@@ -457,22 +466,6 @@ async function confirmRound(
   const updated = result as Round;
   await updateRoundsIndex(updated);
 
-  // Best-effort: write a skeleton brief blob so the brief-edit UI is usable.
-  // `if-none-match: "*"` is atomic create-or-skip — never clobbers an existing
-  // brief blob (Azure returns HTTP 412, which we treat as a no-op here).
-  try {
-    const brief = await buildRoundBrief(updated);
-    await writePrivateJson(
-      `round-briefs/${updated.id}.json`,
-      BriefSchema,
-      brief,
-      undefined,
-      { ifNoneMatch: "*" }
-    );
-  } catch (briefErr) {
-    console.warn(`[confirmRound:${updated.id}] Skeleton brief creation skipped:`, briefErr);
-  }
-
   return { status: 200, jsonBody: updated };
 }
 
@@ -542,7 +535,19 @@ function applyPureTrackResult(round: Round, ptResult: PureTrackRoundResult): Rou
   return updated;
 }
 
-async function buildRoundBrief(round: Round): Promise<RoundBrief> {
+/**
+ * The single brief "seed" source. Shared by every create path — eager create
+ * (createRound), lazy-create on first edit (T6) and on first image (T9) — so all
+ * three converge on a byte-identical document for the same inputs (bar
+ * `generatedAt`). Reads the site INTERNALLY for `guideUrl`; copies siteName/W3W
+ * from `round.site` and date/club from the round; leaves safety/narrative blank;
+ * sets `imagePaths:[]`, `teams:[]`, `version:1` and NO `hash` (frozen at first
+ * brief-complete — T7).
+ */
+export async function buildInitialBrief(
+  round: Round,
+  times?: BriefTimes,
+): Promise<RoundBrief> {
   let siteGuideUrl: string | undefined;
   try {
     const sitePath = `sites/${round.site.id}.json`;
@@ -552,6 +557,28 @@ async function buildRoundBrief(round: Round): Promise<RoundBrief> {
     siteGuideUrl = undefined;
   }
 
+  return {
+    roundId: round.id,
+    generatedAt: new Date().toISOString(),
+    date: round.date,
+    siteName: round.site.name,
+    guideUrl: siteGuideUrl,
+    parkingW3W: round.site.parkingW3W,
+    briefingW3W: round.site.briefingW3W,
+    takeOffW3W: round.site.takeOffW3W,
+    briefingTime: times?.briefingTime,
+    checkInByTime: times?.checkInByTime,
+    landByTime: times?.landByTime,
+    organisingClubName: round.organisingClub?.name,
+    pureTrackGroupName: round.pureTrackGroupName,
+    pureTrackGroupSlug: round.pureTrackGroupSlug,
+    imagePaths: [],
+    version: 1,
+    teams: [],
+  };
+}
+
+export async function buildBriefTeams(round: Round): Promise<BriefTeamEntry[]> {
   const pilotsIndex = await readJson(
     getBlobClient("pilots.json"),
     PilotSummariesSchema,
@@ -559,7 +586,7 @@ async function buildRoundBrief(round: Round): Promise<RoundBrief> {
   ).catch(() => [] as PilotSummary[]);
   const pilotNameMap = new Map(pilotsIndex.map((p) => [p.id, p]));
 
-  const teams: BriefTeamEntry[] = await Promise.all(
+  return Promise.all(
     round.teams
       .filter((t) => t.pilots.some((s) => s.status === "Filled"))
       .map(async (t) => ({
@@ -602,24 +629,6 @@ async function buildRoundBrief(round: Round): Promise<RoundBrief> {
         ),
       }))
   );
-
-  return {
-    roundId: round.id,
-    generatedAt: new Date().toISOString(),
-    date: round.date,
-    siteName: round.site.name,
-    guideUrl: siteGuideUrl,
-    parkingW3W: round.site.parkingW3W,
-    briefingW3W: round.site.briefingW3W,
-    takeOffW3W: round.site.takeOffW3W,
-    briefingTime: round.briefingTime,
-    checkInByTime: round.checkInByTime,
-    landByTime: round.landByTime,
-    organisingClubName: round.organisingClub?.name,
-    pureTrackGroupName: round.pureTrackGroupName,
-    pureTrackGroupSlug: round.pureTrackGroupSlug,
-    teams,
-  };
 }
 
 async function uploadBriefArtifacts(brief: RoundBrief): Promise<Buffer> {
@@ -650,12 +659,21 @@ async function mergeBriefForLock(
   round: Round,
   existing: RoundBrief | null
 ): Promise<RoundBrief> {
-  const derived = await buildRoundBrief(round);
+  // Times live on the brief now (set at create), so refresh them from the
+  // existing brief — never from the round, which no longer carries them.
+  const times: BriefTimes | undefined = existing
+    ? {
+        briefingTime: existing.briefingTime,
+        checkInByTime: existing.checkInByTime,
+        landByTime: existing.landByTime,
+      }
+    : undefined;
+  const initial = await buildInitialBrief(round, times);
+  const derived: RoundBrief = { ...initial, teams: await buildBriefTeams(round) };
   if (!existing) return derived;
   // Preserve coordinator-authored narrative fields and version metadata while
-  // refreshing every derived field. Field list mirrors RoundBrief lines 471-485
-  // in packages/types/src/index.ts: any future narrative field added there must
-  // be added here too or it will be silently dropped on lock.
+  // refreshing every derived field. Any future narrative field added to
+  // RoundBrief MUST be added here too or it will be silently dropped on lock.
   return {
     ...derived,
     windSpeedDirection: existing.windSpeedDirection,
