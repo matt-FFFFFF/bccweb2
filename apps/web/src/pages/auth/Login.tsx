@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Link, useNavigate, useSearchParams } from "react-router";
+import { Link, useNavigate } from "react-router";
 import { useAuth, AuthError } from "../../hooks/useAuth.js";
 import { api } from "../../lib/api.js";
 
@@ -27,8 +27,6 @@ const btnStyle: React.CSSProperties = {
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [params] = useSearchParams();
-  const returnPath = params.get("return") ?? "/";
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -45,7 +43,7 @@ export default function Login() {
     setShowResend(false);
     try {
       await login(email, password);
-      navigate(returnPath, { replace: true });
+      navigate("/", { replace: true });
     } catch (ex) {
       if (ex instanceof AuthError && ex.code === "EMAIL_NOT_VERIFIED") {
         setShowResend(true);

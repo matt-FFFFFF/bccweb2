@@ -10,7 +10,7 @@ describe("me TsCs", () => {
     const { user } = await makeUser();
     await writePrivateJson(`users/${user.id}.json`, { ...user, acceptedTsCsVersion: TS_CS_VERSION });
     const entry = getRegisteredHandler("me");
-    const res = await entry!.handler(makeAuthRequest(user.id, user.email) as never, { log: () => undefined, invocationId: "req-1" } as never);
+    const res = await entry!.handler(makeAuthRequest(user.id, user.email), { log: () => undefined, invocationId: "req-1" });
     expect(res.status).toBe(200);
     expect((res.jsonBody as { tsCsAcceptanceRequired?: boolean }).tsCsAcceptanceRequired).toBe(false);
   });
@@ -19,14 +19,14 @@ describe("me TsCs", () => {
     const { user } = await makeUser();
     await writePrivateJson(`users/${user.id}.json`, { ...user, acceptedTsCsVersion: TS_CS_VERSION - 1 });
     const entry = getRegisteredHandler("me");
-    const res = await entry!.handler(makeAuthRequest(user.id, user.email) as never, { log: () => undefined, invocationId: "req-2" } as never);
+    const res = await entry!.handler(makeAuthRequest(user.id, user.email), { log: () => undefined, invocationId: "req-2" });
     expect((res.jsonBody as { tsCsAcceptanceRequired?: boolean }).tsCsAcceptanceRequired).toBe(true);
   });
 
   test("user with no acceptedTsCsVersion (legacy pre-T25) -> tsCsAcceptanceRequired: true", async () => {
     const { user } = await makeUser();
     const entry = getRegisteredHandler("me");
-    const res = await entry!.handler(makeAuthRequest(user.id, user.email) as never, { log: () => undefined, invocationId: "req-3" } as never);
+    const res = await entry!.handler(makeAuthRequest(user.id, user.email), { log: () => undefined, invocationId: "req-3" });
     expect((res.jsonBody as { tsCsAcceptanceRequired?: boolean }).tsCsAcceptanceRequired).toBe(true);
   });
 });

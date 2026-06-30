@@ -75,14 +75,14 @@ describe("round self-registration endpoints", () => {
     expect((res.jsonBody as { code: string }).code).toBe("TEAM_FULL");
   });
 
-  it("preferred place taken -> 409 SLOT_TAKEN", async () => {
+  it("auto-fills the next free slot regardless of any requested place -> 200, place 2", async () => {
     const ctx = await seedRegistrationRound({
       teamSlots: [{ placeInTeam: 1, pilotId: randomUUID() }],
     });
 
     const res = await register(ctx, { preferredPlace: 1 });
-    expect(res.status).toBe(409);
-    expect((res.jsonBody as { code: string }).code).toBe("SLOT_TAKEN");
+    expect(res.status).toBe(200);
+    expect((res.jsonBody as { place: number }).place).toBe(2);
   });
 
   it("unregister before signing -> 200; slot emptied", async () => {
@@ -166,6 +166,76 @@ describe("round self-registration endpoints", () => {
     expect(first.status).toBe(200);
     expect(second.status).toBe(200);
     expect((second.jsonBody as { place: number }).place).toBe(2);
+  });
+
+  it("pilot whose club is NOT the organiser can register into their own club's team -> 200", async () => {
+    resetAllBuckets();
+    await makeConfig({ maxPilotsInTeam: 3 });
+    const pilotClubId = randomUUID();
+    const hostClubId = randomUUID();
+    const pilot = await makePilot({ firstName: "Cara", lastName: "Pilot", clubId: pilotClubId });
+    pilot.seasonClubs = [{ seasonYear: 2026, clubId: pilotClubId, clubName: "Visitor Club" }];
+    await writePrivateJson(`pilots/${pilot.id}.json`, pilot);
+    const { user } = await makeUser({ roles: ["Pilot"], pilotId: pilot.id, clubId: pilotClubId });
+
+    const visitorTeam = makeTeam(pilotClubId, "Visitor Team");
+    const round = await makeRound({
+      date: "2026-06-10",
+      status: "Confirmed",
+      seasonYear: 2026,
+      organisingClubId: hostClubId,
+      organisingClubName: "Host Club",
+      teams: [visitorTeam],
+    });
+
+    const res = await invoke(
+      "registerSelfForRound",
+      makeAuthRequest(user.id, user.email, {
+        method: "POST",
+        params: { roundId: round.id },
+        body: { teamId: visitorTeam.id },
+        headers: { "x-forwarded-for": `${randomUUID()}.test` },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect((res.jsonBody as { teamId: string; place: number }).teamId).toBe(visitorTeam.id);
+    const saved = await readPrivateJson<Round>(`rounds/${round.id}.json`);
+    expect(saved?.teams[0].pilots[0]?.pilotId).toBe(pilot.id);
+  });
+
+  it("pilot's club has no team in the round -> 409 NO_TEAM_FOR_CLUB", async () => {
+    resetAllBuckets();
+    await makeConfig({ maxPilotsInTeam: 3 });
+    const pilotClubId = randomUUID();
+    const hostClubId = randomUUID();
+    const pilot = await makePilot({ firstName: "Dee", lastName: "Pilot", clubId: pilotClubId });
+    pilot.seasonClubs = [{ seasonYear: 2026, clubId: pilotClubId, clubName: "Lonely Club" }];
+    await writePrivateJson(`pilots/${pilot.id}.json`, pilot);
+    const { user } = await makeUser({ roles: ["Pilot"], pilotId: pilot.id, clubId: pilotClubId });
+
+    const hostTeam = makeTeam(hostClubId, "Host Team");
+    const round = await makeRound({
+      date: "2026-06-11",
+      status: "Confirmed",
+      seasonYear: 2026,
+      organisingClubId: hostClubId,
+      organisingClubName: "Host Club",
+      teams: [hostTeam],
+    });
+
+    const res = await invoke(
+      "registerSelfForRound",
+      makeAuthRequest(user.id, user.email, {
+        method: "POST",
+        params: { roundId: round.id },
+        body: {},
+        headers: { "x-forwarded-for": `${randomUUID()}.test` },
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("NO_TEAM_FOR_CLUB");
   });
 });
 

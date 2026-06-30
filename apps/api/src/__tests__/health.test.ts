@@ -13,7 +13,7 @@ describe("health smoke test", () => {
     const req = makeRequest({ method: "GET" });
     const ctx = { log: () => undefined, functionName: "health" };
 
-    const res = await entry!.handler(req as never, ctx as never);
+    const res = await entry!.handler(req, ctx);
 
     expect(res.status).toBe(200);
     expect(res.jsonBody).toEqual(

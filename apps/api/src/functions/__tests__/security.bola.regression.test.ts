@@ -69,6 +69,12 @@ async function seedCrossClubRound() {
     seasonYear: year,
     teamName: "Home Team",
   });
+  await makeClubTeam({
+    clubId: clubA.id,
+    clubName: clubA.name,
+    seasonYear: year,
+    teamName: "Visitor Team",
+  });
   const victimTeam: Team = {
     id: "victim-team",
     teamName: "Victim Team",
@@ -99,7 +105,7 @@ async function seedCrossClubRound() {
     clubId: clubB.id,
     emailVerified: true,
   });
-  return { clubB, round, coordA, coordB };
+  return { clubA, clubB, round, coordA, coordB };
 }
 
 describe("BOLA A — cross-club round/team mutation", () => {
@@ -142,6 +148,47 @@ describe("BOLA A — cross-club round/team mutation", () => {
     );
     expect(addRes.status).toBe(200);
     expect((addRes.jsonBody as Round).teams.at(-1)?.teamName).toBe("Home Team");
+  });
+
+  test("non-host RoundsCoord can register their OWN club's team + pilot, but not another club's", async () => {
+    const { clubA, round, coordA } = await seedCrossClubRound();
+
+    const addOwn = await invoke(
+      "addTeam",
+      authReq(coordA, {
+        method: "POST",
+        params: { id: round.id },
+        body: { clubId: clubA.id, teamName: "Visitor Team" },
+      }),
+    );
+    expect(addOwn.status).toBe(200);
+    const ownTeam = (addOwn.jsonBody as Round).teams.find((t) => t.club.id === clubA.id);
+    expect(ownTeam?.teamName).toBe("Visitor Team");
+
+    const pilot = await makePilot({ clubId: clubA.id, firstName: "Visit", lastName: "Pilot" });
+    const addPilotRes = await invoke(
+      "addPilot",
+      authReq(coordA, {
+        method: "POST",
+        params: { id: round.id, teamId: ownTeam!.id },
+        body: { pilotId: pilot.id },
+      }),
+    );
+    expect(addPilotRes.status).toBe(200);
+
+    const deniedPilot = await invoke(
+      "addPilot",
+      authReq(coordA, {
+        method: "POST",
+        params: { id: round.id, teamId: "victim-team" },
+        body: { pilotId: pilot.id },
+      }),
+    );
+    expect(deniedPilot.status).toBe(403);
+
+    const after = await readPrivateJson<Round>(`rounds/${round.id}.json`);
+    expect(after?.teams.find((t) => t.club.id === clubA.id)?.pilots.map((s) => s.pilotId)).toContain(pilot.id);
+    expect(after?.teams.find((t) => t.id === "victim-team")?.pilots).toHaveLength(0);
   });
 
   test("cross-club RoundsCoord cannot update a round narrative (403)", async () => {
@@ -357,7 +404,7 @@ describe("BOLA C — round snapshot PII disclosure", () => {
     );
 
     expect(res.status).toBe(200);
-    const snapshot = (res.jsonBody as Round).teams[0]!.pilots[0]!.snapshot!;
+    const snapshot = (res.jsonBody as Round).teams[0].pilots[0].snapshot!;
     expect(snapshot.medicalInfo).toBeUndefined();
     expect(snapshot.emergencyContactName).toBeUndefined();
     expect(snapshot.emergencyPhoneNumber).toBeUndefined();
@@ -377,7 +424,7 @@ describe("BOLA C — round snapshot PII disclosure", () => {
     );
 
     expect(res.status).toBe(200);
-    const snapshot = (res.jsonBody as Round).teams[0]!.pilots[0]!.snapshot!;
+    const snapshot = (res.jsonBody as Round).teams[0].pilots[0].snapshot!;
     expect(snapshot.medicalInfo).toBe("Type 1 diabetes; carries insulin");
     expect(snapshot.emergencyPhoneNumber).toBe("07999 111222");
   });

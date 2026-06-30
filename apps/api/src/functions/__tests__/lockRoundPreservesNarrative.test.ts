@@ -261,8 +261,8 @@ describe("lockRound preserves brief narrative while refreshing derived fields", 
     ))!;
     // Derived: teams rebuilt from the live round (1 team, 1 pilot now).
     expect(after.teams).toHaveLength(1);
-    expect(after.teams[0]!.pilots).toHaveLength(1);
-    expect(after.teams[0]!.pilots[0]!.pilotId).toBe(ctx.pilotId);
+    expect(after.teams[0].pilots).toHaveLength(1);
+    expect(after.teams[0].pilots[0].pilotId).toBe(ctx.pilotId);
     expect(after.siteName).toBe("Milk Hill");
   });
 

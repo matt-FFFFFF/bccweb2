@@ -264,7 +264,7 @@ async function readAuditLines(): Promise<Array<Record<string, unknown>>> {
   const response = await getPrivateContainer().getBlobClient(prefix).download();
   const chunks: Buffer[] = [];
   for await (const chunk of response.readableStreamBody!) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks)
     .toString("utf8")

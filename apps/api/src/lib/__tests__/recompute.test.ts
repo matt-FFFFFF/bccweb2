@@ -154,7 +154,7 @@ async function readPublicBytes(path: string): Promise<Buffer> {
   const response = await getPublicContainer().getBlobClient(path).download();
   const chunks: Buffer[] = [];
   for await (const chunk of response.readableStreamBody!) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string));
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
   }
   return Buffer.concat(chunks);
 }

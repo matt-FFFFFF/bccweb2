@@ -15,8 +15,8 @@ describe("auth register TsCs", () => {
     expect(entry).toBeTruthy();
 
     const res = await entry!.handler(
-      makeRequest({ method: "POST", body: { email: "nope@example.com", password: "TestPass123!" } }) as never,
-      { log: () => undefined } as never,
+      makeRequest({ method: "POST", body: { email: "nope@example.com", password: "TestPass123!" } }),
+      { log: () => undefined },
     );
 
     expect(res.status).toBe(400);
@@ -34,8 +34,8 @@ describe("auth register TsCs", () => {
         method: "POST",
         headers: { "x-forwarded-for": "203.0.113.9" },
         body: { email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 },
-      }) as never,
-      { log: () => undefined } as never,
+      }),
+      { log: () => undefined },
     );
 
     expect(res.status).toBe(202);

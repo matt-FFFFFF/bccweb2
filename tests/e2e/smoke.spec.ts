@@ -9,9 +9,12 @@ test("smoke: home page contains BCC branding", async ({ page }) => {
   const headingLocator = page.locator("h1, h2").first();
 
   const titleMatches = /BCC/i.test(title);
+  // eslint-disable-next-line playwright/no-conditional-in-test -- smoke check intentionally accepts BCC branding in EITHER the page title or a top-level heading
   if (!titleMatches) {
+    // eslint-disable-next-line playwright/no-conditional-expect -- intentional either/or branding assertion (title-or-heading), not a logic bug
     await expect(headingLocator).toContainText(/BCC/i);
   } else {
+    // eslint-disable-next-line playwright/no-conditional-expect -- intentional either/or branding assertion (title-or-heading), not a logic bug
     expect(title).toMatch(/BCC/i);
   }
 

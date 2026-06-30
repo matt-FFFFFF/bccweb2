@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation, Link, useNavigate } from "react-router";
+import { useLocation } from "react-router";
 import * as z from "zod/v4";
 import { ClubSummarySchema } from "@bccweb/schemas";
 import { useAuth } from "../hooks/useAuth.js";
@@ -15,7 +15,6 @@ interface ClubSummary {
 export default function FirstLoginOfSeasonGate({ children }: { children: React.ReactNode }) {
   const { identity, loading } = useAuth();
   const location = useLocation();
-  const navigate = useNavigate();
   const [pilot, setPilot] = useState<Pilot | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState("");

@@ -16,7 +16,7 @@ async function callGetConfig(userId: string, email: string) {
   const entry = getRegisteredHandler("getConfig");
   if (!entry) throw new Error("getConfig not registered");
   const req = makeAuthRequest(userId, email, { method: "GET" });
-  return (await entry.handler(req as never, ctx)) as {
+  return (await entry.handler(req, ctx)) as {
     status: number;
     jsonBody?: unknown;
   };

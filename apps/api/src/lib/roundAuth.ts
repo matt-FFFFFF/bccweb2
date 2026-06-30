@@ -46,6 +46,41 @@ export function assertCanManageRound(
   }
 }
 
+/**
+ * True when the caller may register/manage entries for ONE specific club in a
+ * round: a full manager (Admin / organising-club coord), or any RoundsCoord
+ * acting on their OWN club. This lets a club's coord enter that club's teams and
+ * pilots into a round another club organises, without granting them control of
+ * the round itself (status, metadata, brief, captains — still canManageRound).
+ */
+export function canRegisterClubForRound(
+  caller: CallerIdentity,
+  round: RoundClubScope,
+  clubId: string,
+): boolean {
+  if (canManageRound(caller, round)) return true;
+  return (
+    caller.roles.includes("RoundsCoord") &&
+    caller.clubId != null &&
+    caller.clubId === clubId
+  );
+}
+
+/** Throw 403 unless the caller may register teams/pilots for `clubId`. */
+export function assertCanRegisterForClub(
+  caller: CallerIdentity,
+  round: RoundClubScope,
+  clubId: string,
+): void {
+  if (!canRegisterClubForRound(caller, round, clubId)) {
+    throw new HttpError(
+      403,
+      "FORBIDDEN",
+      "You can only register teams and pilots for your own club",
+    );
+  }
+}
+
 /** True when the caller is a pilot occupying a filled slot in the round. */
 export function isRoundParticipant(
   caller: CallerIdentity,

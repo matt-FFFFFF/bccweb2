@@ -51,7 +51,7 @@ async function meHandler(
        const profileUpdatedYear = pilot.profileUpdatedAt ? new Date(pilot.profileUpdatedAt).getFullYear() : 0;
 
        firstLoginOfSeason = !pilot.profileUpdatedAt || profileUpdatedYear < activeSeasonYear || !hasSeasonClub;
-    } catch (err: unknown) {
+    } catch {
       // Ignore not found errors for pilot or other issues, just default to false if we can't determine
     }
   }

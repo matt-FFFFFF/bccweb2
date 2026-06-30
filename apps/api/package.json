@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc --project tsconfig.json",
     "watch": "tsc --project tsconfig.json --watch",
+    "lint": "eslint src --max-warnings 0",
     "start": "func start",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

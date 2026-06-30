@@ -1,7 +1,8 @@
 import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useLocation, type NavLinkRenderProps } from "react-router";
 import * as z from "zod/v4";
 import { SeasonSummarySchema } from "@bccweb/schemas";
-import { useAuth, AuthProvider, loginUrl } from "./hooks/useAuth.js";
+import { useAuth, loginUrl } from "./hooks/useAuth.js";
+import { AuthProvider } from "./components/AuthProvider.js";
 import { useBlob } from "./hooks/useBlob.js";
 import type { SeasonSummary } from "@bccweb/types";
 import Home from "./pages/Home.js";

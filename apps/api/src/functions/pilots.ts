@@ -18,7 +18,6 @@ import type {
   Pilot,
   PilotSummary,
   PilotClubMembership,
-  SeasonSummary,
   WingClass,
   CoachType,
   PilotRatingValue,
@@ -121,8 +120,9 @@ async function getPilotById(
       `pilots/${id}.json`,
     );
 
-    // RoundsCoord can only view pilots in their own club
-    if (isCoord && !isAdmin && pilot.currentClub?.id !== caller.clubId) {
+    // Coord club-scoping applies to OTHER pilots only — a coord can always
+    // view their own profile (isSelf), even after changing their personal club.
+    if (isCoord && !isAdmin && !isSelf && pilot.currentClub?.id !== caller.clubId) {
       return forbiddenResponse();
     }
 
@@ -236,12 +236,12 @@ interface UpdatePilotBody {
   wingModel?: string;
   wingColours?: string;
   currentClub?: ClubRef;
-  // Admin-only fields
   bhpaNumber?: number;
   coachType?: CoachType;
   pilotRating?: PilotRatingValue;
   pureTrackId?: number;
   pureTrackLink?: string;
+  // email is honoured only for Admins (feeds the pilot auto-link index)
   email?: string;
 }
 
@@ -316,6 +316,11 @@ async function updatePilot(
     wingManufacturer: body.wingManufacturer ?? existing.wingManufacturer,
     wingModel: body.wingModel ?? existing.wingModel,
     wingColours: body.wingColours ?? existing.wingColours,
+    bhpaNumber: body.bhpaNumber ?? existing.bhpaNumber,
+    coachType: body.coachType ?? existing.coachType,
+    pilotRating: body.pilotRating ?? existing.pilotRating,
+    pureTrackId: body.pureTrackId ?? existing.pureTrackId,
+    pureTrackLink: body.pureTrackLink ?? existing.pureTrackLink,
     currentClub: body.currentClub ?? existing.currentClub,
     person: {
       ...existing.person,
@@ -324,14 +329,6 @@ async function updatePilot(
       fullName: `${firstName} ${lastName}`,
       phoneNumber: body.phoneNumber ?? existing.person.phoneNumber,
     },
-    // Admin-only fields
-    ...(isAdmin && {
-      bhpaNumber: body.bhpaNumber ?? existing.bhpaNumber,
-      coachType: body.coachType ?? existing.coachType,
-      pilotRating: body.pilotRating ?? existing.pilotRating,
-      pureTrackId: body.pureTrackId ?? existing.pureTrackId,
-      pureTrackLink: body.pureTrackLink ?? existing.pureTrackLink,
-    }),
     profileUpdatedAt: new Date().toISOString(),
   };
 

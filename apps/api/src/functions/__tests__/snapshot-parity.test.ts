@@ -4,7 +4,7 @@ import type { Pilot, PilotSnapshot, WingClass, PilotRatingValue } from "@bccweb/
 // Mirrors the snapshot building logic in apps/api/src/functions/roundsMutate.ts
 function buildLockRoundSnapshot(pilot: Pilot): PilotSnapshot {
   return {
-    wingClass: (pilot.wingClass ?? "EN B") as WingClass,
+    wingClass: (pilot.wingClass ?? "EN B"),
     pilotRating: pilot.pilotRating,
     phoneNumber: pilot.person?.phoneNumber,
     helmetColour: pilot.helmetColour,

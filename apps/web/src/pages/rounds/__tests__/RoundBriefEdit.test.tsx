@@ -3,7 +3,6 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import RoundBriefEdit from "../RoundBriefEdit.js";
-import { ApiError } from "../../../lib/api.js";
 
 const state = vi.hoisted(() => ({
   role: "Admin" as string | undefined,
@@ -21,8 +20,8 @@ vi.mock("../../../hooks/useAuth.js", () => ({
 
 vi.mock("../../../lib/api.js", () => ({
   api: {
-    get: (...args: any[]) => state.apiGet(...args),
-    put: (...args: any[]) => state.apiPut(...args),
+    get: (...args: unknown[]) => state.apiGet(...args),
+    put: (...args: unknown[]) => state.apiPut(...args),
     post: vi.fn(),
     delete: vi.fn(),
   },

@@ -40,7 +40,7 @@ async function invoke(
 ): Promise<HandlerResult> {
   const entry = getRegisteredHandler(name);
   if (!entry) throw new Error(`${name} not registered`);
-  return (await entry.handler(req as never, ctx)) as HandlerResult;
+  return (await entry.handler(req, ctx)) as HandlerResult;
 }
 
 describe("PUT /api/manage/config — schema validation & lease", () => {

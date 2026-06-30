@@ -103,10 +103,12 @@ export default function AdminSignToFlyWording() {
     }
   }
 
+  // Runs when isAdmin flips true; load() reads form state only as a mount-time
+  // guard (don't clobber in-progress edits), so it must not be a dependency.
   useEffect(() => {
     if (!isAdmin) return;
     void load();
-  }, [isAdmin]);
+  }, [isAdmin]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();

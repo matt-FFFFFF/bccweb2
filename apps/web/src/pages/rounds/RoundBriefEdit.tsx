@@ -15,8 +15,6 @@ export default function RoundBriefEdit() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { identity } = useAuth();
-  const role = identity?.roles?.[0]; // Assume first role for simplicity, or check .includes()
-  const clubId = identity?.clubId;
   const token = localStorage.getItem("bcc_access_token");
   const [brief, setBrief] = useState<RoundBrief | null>(null);
   const [loading, setLoading] = useState(true);
@@ -58,7 +56,7 @@ export default function RoundBriefEdit() {
     return <div className="p-4 text-red-700">Forbidden.</div>;
   }
 
-  const handleChange = (field: keyof RoundBrief, value: any) => {
+  const handleChange = <K extends keyof RoundBrief>(field: K, value: RoundBrief[K]) => {
     setBrief((prev) => prev ? { ...prev, [field]: value } : null);
   };
 

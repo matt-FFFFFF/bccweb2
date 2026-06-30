@@ -154,6 +154,40 @@ describe("withLeaseRenewing — re-entrancy guard", () => {
   });
 });
 
+// ─── 1b. Renewal fires during a long-running fn ──────────────────────────────
+//
+// Locks the renewal path that the `void`-wrapped interval callback runs: with a
+// short renewIntervalMs and an fn that outlives it, renewLease must be invoked
+// and a "Blob lease renewed" trace must be emitted (proving the callback's
+// success path ran, not merely that the timer fired).
+
+describe("withLeaseRenewing — renewal fires during a long-running fn", () => {
+  test("fn outliving renewIntervalMs → renewLease invoked >=1 and 'Blob lease renewed' trace emitted", async () => {
+    const RENEW_INTERVAL = 1_000;
+    const FN_DURATION = 3 * RENEW_INTERVAL; // fn outlives several renew ticks
+
+    azureMock.renewLease.mockResolvedValue(undefined);
+
+    const { withLeaseRenewing } = await importBlob();
+    const fn = vi.fn(fnResolvingAfter(FN_DURATION, "done"));
+
+    const promise = withLeaseRenewing("rounds.json", fn, {
+      leaseDurationSec: 30,
+      renewIntervalMs: RENEW_INTERVAL,
+    });
+
+    await vi.advanceTimersByTimeAsync(FN_DURATION);
+    await expect(promise).resolves.toBe("done");
+
+    expect(azureMock.renewLease.mock.calls.length).toBeGreaterThanOrEqual(1);
+
+    const renewedTraces = telemetryMock.trackTrace.mock.calls.filter(
+      ([arg]) => (arg as { message: string }).message === "Blob lease renewed",
+    );
+    expect(renewedTraces.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
 // ─── 2. Throw ordering (characterization — GREEN now) ────────────────────────
 
 describe("withLeaseRenewing — throw ordering (characterization, GREEN now)", () => {
