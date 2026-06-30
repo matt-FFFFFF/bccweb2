@@ -57,7 +57,7 @@ no `dependabot.yml`).
 | `make dev-web`   | Vite dev server on `:5173`                                                                    |
 | `make clean`     | Removes `dist/` AND `*.tsbuildinfo`                                                           |
 | `npm run e2e`    | Playwright (config at `tests/e2e/playwright.config.ts`, base URL `:5173`)                     |
-| `npm run lint`   | **Only `apps/web` has a lint script** (eslint). Other workspaces have none.                   |
+| `npm run lint`   | eslint across **all** workspaces (`--if-present`) plus `tests/e2e` and `scripts`. Each workspace has its own `lint` script (`eslint src --max-warnings 0`). |
 
 Single-file test runs: `npx vitest run path/to/file.test.ts`.
 Watch: `npm run test:watch` (root).
@@ -252,7 +252,7 @@ Terraform is split into three stacks (see `iac/README.md`): `bootstrap/` (tfstat
 
 CI: `.github/workflows/`
 
-- `ci.yml` — every PR + push to `main`: typecheck, lint (web only), full build
+- `ci.yml` — every PR + push to `main`: typecheck, lint (all workspaces), full build
   in dependency order, Vitest (incl. heavy lib tests with Azurite up), and
   `docker compose build`.
 - `deploy-dev.yml` — every push to `main` deploys to **dev**: a Terraform drift
