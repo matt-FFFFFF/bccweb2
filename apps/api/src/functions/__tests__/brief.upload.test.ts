@@ -149,6 +149,20 @@ describe("brief image upload / delete (UUID paths, lease-gated)", () => {
     expect(computeBriefHash(after!)).toBe(hashBefore);
   });
 
+  it("F4: upload at Locked with NO brief blob → 409 BRIEF_LOCKED and NO side-effect brief is created", async () => {
+    const id = await seedRound("Locked");
+    // Intentionally seed NO brief blob — the frozen-round-without-brief edge.
+    expect(await privateBlobExists(`round-briefs/${id}.json`)).toBe(false);
+
+    const res = await invoke("uploadBriefImage", await uploadReq(id, jpegFile()));
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("BRIEF_LOCKED");
+    // The early status guard must fail fast BEFORE ensureBriefExists — a locked
+    // round must never gain a side-effect brief blob (F4 scope-fidelity blocker).
+    expect(await privateBlobExists(`round-briefs/${id}.json`)).toBe(false);
+  });
+
   it("R3: concurrent first uploads on a missing brief — CAS create wins once, both images appended, no clobber", async () => {
     const id = await seedRound("Confirmed");
 

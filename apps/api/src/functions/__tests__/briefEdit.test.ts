@@ -128,6 +128,22 @@ describe("updateRoundBrief — gated, authorized, read-merge (T6)", () => {
     expect(persisted.airspaceAndHazards).toBeUndefined();
   });
 
+  it("F4: BriefComplete with NO brief blob → 409 BRIEF_LOCKED and NO side-effect brief is created", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const clubId = randomUUID();
+    const id = await seedRound("BriefComplete", clubId);
+    // Intentionally seed NO brief blob — this is the frozen-round-without-brief edge.
+    expect(await privateBlobExists(`round-briefs/${id}.json`)).toBe(false);
+
+    const res = await put(admin, id, { airspaceAndHazards: "should not apply" });
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code?: string }).code).toBe("BRIEF_LOCKED");
+    // The early status guard must fail fast BEFORE the lazy-create — a frozen
+    // round must never gain a side-effect brief blob (F4 scope-fidelity blocker).
+    expect(await privateBlobExists(`round-briefs/${id}.json`)).toBe(false);
+  });
+
   it("cross-club RoundsCoord: 403 FORBIDDEN", async () => {
     const clubA = randomUUID();
     const clubB = randomUUID();

@@ -283,6 +283,18 @@ async function updateRoundBrief(
   }
   const edits = parsed.data as Record<string, unknown>;
 
+  // Early freeze guard (F4): reject a frozen/locked round on the already-read
+  // unleased status BEFORE the lazy-create, so a round that can no longer be
+  // edited never gains a side-effect brief blob. The under-lease re-check below
+  // stays authoritative for the freeze-race — this only fails fast pre-create.
+  if (round.status !== "Proposed" && round.status !== "Confirmed") {
+    throw new HttpError(
+      409,
+      "BRIEF_LOCKED",
+      "Brief can only be edited while the round is Proposed or Confirmed.",
+    );
+  }
+
   // Lazy-create: you cannot lease a missing blob, so create-or-skip the brief
   // (ifNoneMatch:"*" — 409/412 = a concurrent create won, treat as no-op)
   // BEFORE acquiring the cross-blob lease.
@@ -398,6 +410,18 @@ async function uploadBriefImage(
     throw new HttpError(400, "IMAGE_MAGIC_MISMATCH", "Image bytes do not match the declared type");
   }
   const ext = file.type === "image/png" ? "png" : "jpg";
+
+  // Early freeze guard (F4): mirror the under-lease B3 re-check on the already-
+  // read unleased status BEFORE ensureBriefExists, so a frozen/locked round
+  // never gains a side-effect brief blob. The under-lease gate below remains
+  // authoritative for the freeze-race — this only fails fast pre-create.
+  if (round.status !== "Proposed" && round.status !== "Confirmed") {
+    throw new HttpError(
+      409,
+      "BRIEF_LOCKED",
+      "Brief images can only be changed while the round is Proposed or Confirmed.",
+    );
+  }
 
   await ensureBriefExists(id, round);
 
