@@ -309,9 +309,9 @@ async function removePilot(
   authorizeTeamRegistration(caller, round, teamId);
   await mutationRateLimit(req, caller, "removePilot", "standard");
 
-  const placeNum = parseInt(place, 10);
-  if (isNaN(placeNum)) {
-    throw new HttpError(400, "INVALID_BODY", "place must be a number");
+  const placeNum = Number(place);
+  if (!Number.isInteger(placeNum)) {
+    throw new HttpError(400, "INVALID_PLACE", "place must be a number");
   }
 
   const result = await mutateLocked(id, caller, (r) => {
