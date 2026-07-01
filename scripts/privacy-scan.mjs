@@ -14,12 +14,18 @@
  *   1 — one or more checks FAIL (PII found / violation detected)
  */
 
-import { BlobServiceClient } from "@azure/storage-blob";
 import RE2 from "re2";
 import { readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { findPiiInObject, PII_FIELDS } from "./lib/pii.mjs";
+
+let BlobServiceClient;
+try {
+  ({ BlobServiceClient } = await import("@azure/storage-blob"));
+} catch {
+  ({ BlobServiceClient } = await import("../apps/api/node_modules/@azure/storage-blob"));
+}
 
 // ─── CLI args ─────────────────────────────────────────────────────────────────
 

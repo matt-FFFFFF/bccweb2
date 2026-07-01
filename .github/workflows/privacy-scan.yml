@@ -53,6 +53,7 @@ jobs:
       - name: Seed public container with clean test data
         # Upload representative public blobs that contain no PII fields.
         # This seeds the same shape that the live migration produces post-T21.
+        working-directory: apps/api
         run: |
           node - <<'EOF'
           import { BlobServiceClient } from "@azure/storage-blob";
