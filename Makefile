@@ -34,8 +34,9 @@ build-web: build-types build-schemas ## Build React SPA
 	npm run build --workspace=apps/web
 
 .PHONY: typecheck
-typecheck: ## Typecheck all workspaces
+typecheck: ## Typecheck all workspaces (incl. test-only tsconfig where present)
 	npm run typecheck --workspaces --if-present
+	npm run test:typecheck --workspaces --if-present
 
 .PHONY: test
 test: ## Run all tests (requires Azurite for API tests)
