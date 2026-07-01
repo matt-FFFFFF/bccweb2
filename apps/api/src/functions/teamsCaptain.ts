@@ -2,7 +2,9 @@
  * PUT /api/rounds/{id}/teams/{teamId}/captain
  *
  * Manual captain override — Admin or (RoundsCoord scoped to the round's
- * organising club). Blocked once the round is Locked or Complete.
+ * organising club). Blocked once the roster is frozen — i.e. any status
+ * past Confirmed (BriefComplete, Locked, Complete) and Cancelled — via
+ * isRosterFrozen(status).
  *
  * Body: { pilotId: string | null }
  * - If pilotId is non-null the pilot must be a Filled member of the team.
