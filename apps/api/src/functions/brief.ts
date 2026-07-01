@@ -6,6 +6,7 @@
  * GET  /api/rounds/{id}/brief/images/{n} — streams a private brief image
  */
 
+import { randomUUID } from "node:crypto";
 import {
   app,
   HttpRequest,
@@ -13,21 +14,18 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { RoundBrief } from "@bccweb/types";
-import { BriefSchema, RoundSchema } from "@bccweb/schemas";
+import { BriefSchema, RoundSchema, BriefEditableSchema, BRIEF_EDITABLE_KEYS } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
-  withPrivateLeaseRenewing,
   getPrivateBlockBlobClient,
+  withRoundAndBriefLease,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
-import { canViewRoundDetail } from "../lib/roundAuth.js";
+import { canViewRoundDetail, assertCanManageRound } from "../lib/roundAuth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
-import { computeBriefHash } from "../lib/signTofly/briefVersion.js";
-import { invalidatePriorSignToFlyFlags } from "../lib/signTofly/invalidate.js";
-import { listSignaturesForRound } from "../lib/signTofly/ledger.js";
-import { generateBriefPdf } from "../lib/pdf.js";
+import { buildInitialBrief } from "./roundsMutate.js";
 import type { CallerIdentity, Round } from "@bccweb/types";
 
 function contentTypeForPath(path: string): string {
@@ -260,7 +258,6 @@ async function updateRoundBrief(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
-  // Auth: Admin OR RoundsCoord scoped to the round's club
   if (!caller.roles.includes("Admin") && !caller.roles.includes("RoundsCoord")) {
     throw new HttpError(403, "FORBIDDEN");
   }
@@ -276,96 +273,94 @@ async function updateRoundBrief(
     throw e;
   });
 
-  if (!caller.roles.includes("Admin") && caller.roles.includes("RoundsCoord") && caller.clubId !== round.organisingClub?.id) {
-    throw new HttpError(403, "FORBIDDEN");
-  }
+  assertCanManageRound(caller, round);
 
   await mutationRateLimit(req, caller, "updateRoundBrief", "heavy");
 
-  if (round.status === "Locked" || round.status === "Complete") {
-    throw new HttpError(409, "BRIEF_LOCKED", "Round is locked or complete.");
+  const parsed = BriefEditableSchema.safeParse(await req.json());
+  if (!parsed.success) {
+    throw new HttpError(400, "INVALID_BODY", "Invalid brief edit body");
+  }
+  const edits = parsed.data as Record<string, unknown>;
+
+  // Early freeze guard (F4): reject a frozen/locked round on the already-read
+  // unleased status BEFORE the lazy-create, so a round that can no longer be
+  // edited never gains a side-effect brief blob. The under-lease re-check below
+  // stays authoritative for the freeze-race — this only fails fast pre-create.
+  if (round.status !== "Proposed" && round.status !== "Confirmed") {
+    throw new HttpError(
+      409,
+      "BRIEF_LOCKED",
+      "Brief can only be edited while the round is Proposed or Confirmed.",
+    );
   }
 
-  const body = (await req.json()) as RoundBrief;
-  const isDryRun = req.query.get("dryRun") === "true";
+  // Lazy-create: you cannot lease a missing blob, so create-or-skip the brief
+  // (ifNoneMatch:"*" — 409/412 = a concurrent create won, treat as no-op)
+  // BEFORE acquiring the cross-blob lease.
+  if (!(await readBrief(id))) {
+    const seed = await buildInitialBrief(round, {
+      briefingTime: edits["briefingTime"] as string | undefined,
+      checkInByTime: edits["checkInByTime"] as string | undefined,
+      landByTime: edits["landByTime"] as string | undefined,
+    });
+    try {
+      await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, seed, undefined, {
+        ifNoneMatch: "*",
+      });
+    } catch (e: unknown) {
+      const sc = (e as { statusCode?: number }).statusCode;
+      if (sc !== 409 && sc !== 412) throw e;
+    }
+  }
 
-  const result = await withPrivateLeaseRenewing(`round-briefs/${id}.json`, async (leaseId) => {
+  const merged = await withRoundAndBriefLease(id, async (_roundLeaseId, briefLeaseId) => {
+    const current = await readJson(
+      getPrivateBlobClient(`rounds/${id}.json`),
+      RoundSchema,
+      `rounds/${id}.json`,
+    );
+    if (current.status !== "Proposed" && current.status !== "Confirmed") {
+      throw new HttpError(
+        409,
+        "BRIEF_LOCKED",
+        "Brief can only be edited while the round is Proposed or Confirmed.",
+      );
+    }
+
     const existing = await readBrief(id);
     if (!existing) throw new HttpError(404, "NOT_FOUND", "Brief not found");
 
-    const prevHash = computeBriefHash(existing);
-    const nextHash = computeBriefHash(body);
-
-    if (prevHash === nextHash) {
-      // Cosmetic
-      body.version = existing.version ?? 1;
-      body.versionHistory = existing.versionHistory;
-      
-      if (!isDryRun) {
-        await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, body, leaseId);
-      }
-      return { brief: body, materialChanged: false, invalidatedSignatureCount: 0 };
-    }
-
-    // Material change
-    const nextVersion = (existing.version ?? 1) + 1;
-    const now = new Date().toISOString();
-    
-    body.version = nextVersion;
-    body.versionHistory = existing.versionHistory ?? [];
-    body.versionHistory.push({
-      version: existing.version ?? 1,
-      hash: prevHash,
-      createdAt: existing.generatedAt || now,
-      createdBy: "legacy",
-      supersededAt: now
-    });
-
-    if (!isDryRun) {
-      await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, body, leaseId);
-    }
-
-    const signatures = await listSignaturesForRound(id);
-    const mockRound = JSON.parse(JSON.stringify(round)) as Round;
-    const updatedRound = invalidatePriorSignToFlyFlags(mockRound, body, signatures);
-
-    let count = 0;
-    for (const t1 of round.teams) {
-      for (const p1 of t1.pilots) {
-        const t2 = updatedRound.teams.find((t) => t.id === t1.id);
-        const p2 = t2?.pilots.find((p) => p.placeInTeam === p1.placeInTeam);
-        if (p1.signToFly === true && p2?.signToFly === false) {
-          count++;
-        }
+    const next = { ...existing } as Record<string, unknown>;
+    for (const key of BRIEF_EDITABLE_KEYS) {
+      if (Object.prototype.hasOwnProperty.call(edits, key)) {
+        next[key] = edits[key];
       }
     }
 
-    if (!isDryRun && count > 0) {
-      await withPrivateLeaseRenewing(`rounds/${id}.json`, async (roundLease) => {
-        await writePrivateJson(`rounds/${id}.json`, RoundSchema, updatedRound, roundLease);
-      });
-    }
-
-    return { brief: body, materialChanged: true, invalidatedSignatureCount: count };
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, next as unknown as RoundBrief, briefLeaseId);
+    return next as unknown as RoundBrief;
   });
 
-  if (!isDryRun) {
-    // Generate PDF outside lease
-    try {
-      const pdfBuffer = await generateBriefPdf(result.brief);
-      const pdfClient = getPrivateBlockBlobClient(`round-briefs/${id}.pdf`);
-      await pdfClient.upload(pdfBuffer, pdfBuffer.length, {
-        blobHTTPHeaders: { blobContentType: "application/pdf" },
-      });
-    } catch (e) {
-      _ctx.warn("Failed to generate PDF on brief edit", e);
-    }
-  }
-
-  return { status: 200, jsonBody: result };
+  return { status: 200, jsonBody: merged };
 }
 
 // ─── POST /api/rounds/{id}/brief/images ───────────────────────────────────────
+
+// CAS create-only so withRoundAndBriefLease has a blob to lease; a concurrent
+// first-upload that already created it 409/412s, swallowed as a no-op (R3).
+async function ensureBriefExists(id: string, round: Round): Promise<void> {
+  if (await readBrief(id)) return;
+  const seed = await buildInitialBrief(round);
+  try {
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, seed, undefined, {
+      ifNoneMatch: "*",
+    });
+  } catch (e: unknown) {
+    const sc = (e as { statusCode?: number }).statusCode;
+    if (sc !== 409 && sc !== 412) throw e;
+  }
+}
 
 async function uploadBriefImage(
   req: HttpRequest,
@@ -377,6 +372,8 @@ async function uploadBriefImage(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID");
 
+  // Unleased read is for AUTH + lazy-create seed ONLY. The authoritative status
+  // gate is re-read UNDER the round lease below (B3) — never trusted from here.
   const round = await readJson(
     getPrivateBlobClient(`rounds/${id}.json`),
     RoundSchema,
@@ -395,9 +392,6 @@ async function uploadBriefImage(
     throw new HttpError(403, "FORBIDDEN");
   }
   await mutationRateLimit(req, caller, "uploadBriefImage", "standard");
-  if (round.status === "Locked" || round.status === "Complete") {
-    throw new HttpError(409, "BRIEF_LOCKED", "Round is locked or complete.");
-  }
 
   const formData = await req.formData();
   const file = formData.get("file") as File | null;
@@ -412,38 +406,59 @@ async function uploadBriefImage(
   }
 
   const buffer = Buffer.from(await file.arrayBuffer());
-  const brief = await readBrief(id);
-  if (!brief) throw new HttpError(404, "NOT_FOUND", "Brief not found");
-  if ((brief.imagePaths?.length || 0) >= 10) {
-    return {
-      status: 400,
-      jsonBody: { error: "TOO_MANY_IMAGES", code: "TOO_MANY_IMAGES" },
-    };
-  }
   if (!matchesMagicBytes(file.type, buffer)) {
-    return {
-      status: 400,
-      jsonBody: { error: "IMAGE_MAGIC_MISMATCH", code: "IMAGE_MAGIC_MISMATCH" },
-    };
+    throw new HttpError(400, "IMAGE_MAGIC_MISMATCH", "Image bytes do not match the declared type");
+  }
+  const ext = file.type === "image/png" ? "png" : "jpg";
+
+  // Early freeze guard (F4): mirror the under-lease B3 re-check on the already-
+  // read unleased status BEFORE ensureBriefExists, so a frozen/locked round
+  // never gains a side-effect brief blob. The under-lease gate below remains
+  // authoritative for the freeze-race — this only fails fast pre-create.
+  if (round.status !== "Proposed" && round.status !== "Confirmed") {
+    throw new HttpError(
+      409,
+      "BRIEF_LOCKED",
+      "Brief images can only be changed while the round is Proposed or Confirmed.",
+    );
   }
 
-  const nextN = (brief.imagePaths?.length || 0) + 1;
-  const ext = file.type === "image/png" ? "png" : "jpg";
-  const imagePath = `round-briefs/${id}/image-${nextN}.${ext}`;
+  await ensureBriefExists(id, round);
 
-  const imageClient = getPrivateBlockBlobClient(imagePath);
-  await imageClient.upload(buffer, buffer.length, {
-    blobHTTPHeaders: { blobContentType: file.type },
-  });
+  const savedPath = await withRoundAndBriefLease(id, async (_roundLeaseId, briefLeaseId) => {
+    // B3: re-read the round status UNDER the round lease and reject any frozen /
+    // locked state HERE. imagePaths is material, so an append after T7 freezes
+    // the hash would silently break the T8 lock assertion — gate it under lease.
+    const current = await readJson(
+      getPrivateBlobClient(`rounds/${id}.json`),
+      RoundSchema,
+      `rounds/${id}.json`,
+    );
+    if (current.status !== "Proposed" && current.status !== "Confirmed") {
+      throw new HttpError(
+        409,
+        "BRIEF_LOCKED",
+        "Brief images can only be changed while the round is Proposed or Confirmed.",
+      );
+    }
 
-  let savedPath = "";
-  await withPrivateLeaseRenewing(`round-briefs/${id}.json`, async (leaseId) => {
     const existing = await readBrief(id);
-    if (!existing) throw new HttpError(404, "NOT_FOUND");
+    if (!existing) throw new HttpError(404, "NOT_FOUND", "Brief not found");
+    if ((existing.imagePaths?.length || 0) >= 10) {
+      throw new HttpError(400, "TOO_MANY_IMAGES", "A brief may hold at most 10 images.");
+    }
+
+    // crypto UUID name — NEVER reuse an index. A delete+reupload must yield a
+    // fresh path (no stale-blob collision) and register as a material change.
+    const imagePath = `round-briefs/${id}/${randomUUID()}.${ext}`;
+    await getPrivateBlockBlobClient(imagePath).upload(buffer, buffer.length, {
+      blobHTTPHeaders: { blobContentType: file.type },
+    });
+
     existing.imagePaths = existing.imagePaths || [];
     existing.imagePaths.push(imagePath);
-    savedPath = imagePath;
-    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, existing, leaseId);
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, existing, briefLeaseId);
+    return imagePath;
   });
 
   return { status: 200, jsonBody: { path: savedPath } };
@@ -480,11 +495,28 @@ async function deleteBriefImage(
     throw new HttpError(403, "FORBIDDEN");
   }
   await mutationRateLimit(req, caller, "deleteBriefImage", "standard");
-  if (round.status === "Locked" || round.status === "Complete") {
-    throw new HttpError(409, "BRIEF_LOCKED", "Round is locked or complete.");
+
+  // No lazy-create on delete; a missing brief is a 404 and also can't be leased.
+  if (!(await readBrief(id))) {
+    throw new HttpError(404, "NOT_FOUND", "Image not found");
   }
 
-  await withPrivateLeaseRenewing(`round-briefs/${id}.json`, async (leaseId) => {
+  await withRoundAndBriefLease(id, async (_roundLeaseId, briefLeaseId) => {
+    // B3: gate the material imagePaths change on the round status, re-read here
+    // under the round lease (never trusted from the unleased read above).
+    const current = await readJson(
+      getPrivateBlobClient(`rounds/${id}.json`),
+      RoundSchema,
+      `rounds/${id}.json`,
+    );
+    if (current.status !== "Proposed" && current.status !== "Confirmed") {
+      throw new HttpError(
+        409,
+        "BRIEF_LOCKED",
+        "Brief images can only be changed while the round is Proposed or Confirmed.",
+      );
+    }
+
     const existing = await readBrief(id);
     if (!existing || !existing.imagePaths || !existing.imagePaths[n - 1]) {
       throw new HttpError(404, "NOT_FOUND", "Image not found");
@@ -492,10 +524,9 @@ async function deleteBriefImage(
 
     const imagePath = existing.imagePaths[n - 1];
     existing.imagePaths.splice(n - 1, 1);
-    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, existing, leaseId);
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, existing, briefLeaseId);
 
-    const imageClient = getPrivateBlockBlobClient(imagePath);
-    await imageClient.deleteIfExists();
+    await getPrivateBlockBlobClient(imagePath).deleteIfExists();
   });
 
   return { status: 204 };

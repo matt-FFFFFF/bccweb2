@@ -1,23 +1,11 @@
 import { createHash } from "node:crypto";
 import type { RoundBrief } from "@bccweb/types";
+import { MATERIAL_BRIEF_FIELDS } from "@bccweb/schemas";
 
-export const MATERIAL_BRIEF_FIELDS = [
-  "briefingTime",
-  "landByTime",
-  "checkInByTime",
-  "narrative",
-  "windSpeedDirection",
-  "directionOfFlight",
-  "expectedLandingArea",
-  "airspaceAndHazards",
-  "NOTAMs",
-  "BENO_LineDescription",
-  "briefersNotes",
-  "frequencyMhz",
-  "site.parkingW3W",
-  "site.briefingW3W",
-  "site.takeOffW3W",
-] as const;
+// Canonical material-field list now lives in @bccweb/schemas (single source, B5);
+// re-exported here so existing consumers (roundsMutate, lockRoundPreservesMaterial
+// test, brief-version tests) keep importing it from this module unchanged.
+export { MATERIAL_BRIEF_FIELDS };
 
 type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 

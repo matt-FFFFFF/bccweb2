@@ -27,6 +27,7 @@ import {
   writePublicJson,
 } from "../../__tests__/helpers/seed.js";
 import { signaturePath } from "../../lib/signTofly/ledger.js";
+import { computeBriefHash } from "../../lib/signTofly/briefVersion.js";
 
 const pureTrackMock = vi.hoisted(() => ({
   createPureTrackGroups: vi.fn(),
@@ -184,33 +185,16 @@ describe("round lifecycle integration", () => {
     expect((res.jsonBody as { code: string }).code).toBe("BRIEF_LOCKED");
   });
 
-  it("brief cosmetic edit in BriefComplete preserves signatures and signToFly", async () => {
-    const ctx = await seedSignedBriefCompleteRound();
-    const before = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
+  it("brief edit when round is BriefComplete returns 409 BRIEF_LOCKED", async () => {
+    const ctx = await seedLifecycleRound({ status: "BriefComplete" });
+    await seedBrief(ctx);
 
-    const res = await updateBrief(ctx, makeBrief(ctx, { siteName: "Cosmetic Site Name" }));
+    const res = await updateBrief(ctx, makeBrief(ctx, { NOTAMs: "attempted edit after brief-complete" }));
 
-    expect(res.status).toBe(200);
-    expect(res.jsonBody).toMatchObject({ materialChanged: false, invalidatedSignatureCount: 0 });
-    expect((res.jsonBody as { brief: RoundBrief }).brief.version).toBe(1);
-    const after = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
-    expect(before.teams[0].pilots[0].signToFly).toBe(true);
-    expect(after.teams[0].pilots[0].signToFly).toBe(true);
-    expect(await readPrivateJson<Signature>(signaturePath(ctx.roundId, ctx.teamId, 1, 1))).not.toBeNull();
-  });
-
-  it("brief material edit in BriefComplete bumps version, invalidates affected signToFly, preserves signature blob", async () => {
-    const ctx = await seedSignedBriefCompleteRound();
-    const originalSig = await readPrivateJson<Signature>(signaturePath(ctx.roundId, ctx.teamId, 1, 1));
-
-    const res = await updateBrief(ctx, makeBrief(ctx, { NOTAMs: "New material NOTAM" }));
-
-    expect(res.status).toBe(200);
-    expect(res.jsonBody).toMatchObject({ materialChanged: true, invalidatedSignatureCount: 1 });
-    expect((res.jsonBody as { brief: RoundBrief }).brief.version).toBe(2);
-    const round = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
-    expect(round.teams[0].pilots[0].signToFly).toBe(false);
-    expect(await readPrivateJson<Signature>(signaturePath(ctx.roundId, ctx.teamId, 1, 1))).toEqual(originalSig);
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("BRIEF_LOCKED");
+    const after = (await readPrivateJson<RoundBrief>(`round-briefs/${ctx.roundId}.json`))!;
+    expect(after.NOTAMs).toBeUndefined();
   });
 
   it("double-lock race allows exactly one lock to succeed", async () => {
@@ -389,6 +373,15 @@ async function seedCreatedRoundViaHandlers(): Promise<LifecycleContext> {
   }));
   expect(addPilotRes.status).toBe(200);
 
+  // Filled slots need a snapshot to pass brief-complete's roster gate.
+  const created = (await readPrivateJson<Round>(`rounds/${roundId}.json`))!;
+  for (const team of created.teams) {
+    for (const slot of team.pilots) {
+      if (slot.status === "Filled" && slot.pilotId) slot.snapshot = { wingClass: "EN B", pilotRating: "Pilot" };
+    }
+  }
+  await writePrivateJson(`rounds/${roundId}.json`, created);
+
   return { ...base, roundId, teamId };
 }
 
@@ -410,9 +403,6 @@ async function seedLifecycleRound(opts: {
     isLocked: opts.isLocked ?? status === "Locked",
     maxTeams: 8,
     minimumScore: 0,
-    briefingTime: "10:00",
-    landByTime: "18:00",
-    checkInByTime: "19:00",
     site: { id: base.siteId, name: "Milk Hill", parkingW3W: "filled.count.soap", briefingW3W: "brief.count.soap", takeOffW3W: "takeoff.count.soap" },
     organisingClub: { id: base.clubId, name: "Test Club" },
     season: { year: base.year },
@@ -514,21 +504,12 @@ async function seedLockedScorableRound(opts: { complete?: boolean } = {}): Promi
   return seedLifecycleRound({ status: opts.complete ? "Complete" : "Locked", isLocked: !opts.complete, complete: opts.complete, flightDistance: 42 });
 }
 
-async function seedSignedBriefCompleteRound(): Promise<LifecycleContext> {
-  const ctx = await seedLifecycleRound({ status: "BriefComplete" });
-  await seedBrief(ctx);
-  const signRes = await signOwnSlot(ctx);
-  expect(signRes.status).toBe(201);
-  return ctx;
-}
-
 async function seedWording(): Promise<void> {
-  const html = "<p>Sign to fly wording</p>";
+  const markdown = "Sign to fly wording";
   await writePrivateJson("sign-to-fly/wording/1.json", {
     version: 1,
-    hash: createHash("sha256").update(html, "utf8").digest("hex"),
-    html,
-    plainText: "Sign to fly wording",
+    hash: createHash("sha256").update(markdown, "utf8").digest("hex"),
+    markdown,
     createdAt: new Date().toISOString(),
     createdBy: "vitest",
   } satisfies SignToFlyWording);
@@ -540,7 +521,7 @@ async function seedBrief(ctx: LifecycleContext, overrides: Partial<RoundBrief> =
 }
 
 function makeBrief(ctx: LifecycleContext, overrides: Partial<RoundBrief> = {}): RoundBrief & { version: number } {
-  return {
+  const brief: RoundBrief & { version: number } = {
     roundId: ctx.roundId,
     version: 1,
     generatedAt: "2026-06-09T08:00:00.000Z",
@@ -556,6 +537,10 @@ function makeBrief(ctx: LifecycleContext, overrides: Partial<RoundBrief> = {}): 
     teams: [],
     ...overrides,
   };
+  // Post-T7 a BriefComplete round always carries a frozen brief, so freeze the
+  // material hash here unless a test sets `hash` explicitly — this is what
+  // lockRound's T8 material-hash assertion verifies.
+  return overrides.hash === undefined ? { ...brief, hash: computeBriefHash(brief) } : brief;
 }
 
 function statusTransition(handler: "confirmRound" | "briefCompleteRound", ctx: LifecycleContext) {

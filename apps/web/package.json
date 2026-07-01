@@ -9,15 +9,18 @@
     "preview": "vite preview",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "test:typecheck": "tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint src --report-unused-disable-directives --max-warnings 0"
   },
   "dependencies": {
     "@bccweb/schemas": "*",
     "@bccweb/types": "*",
-    "dompurify": "3.4.11",
+    "@uiw/react-md-editor": "4.1.1",
     "react": "19.2.7",
     "react-dom": "19.2.7",
+    "react-markdown": "10.1.0",
     "react-router": "8.0.1",
+    "rehype-sanitize": "6.0.0",
     "zod": "4.4.3"
   },
   "devDependencies": {

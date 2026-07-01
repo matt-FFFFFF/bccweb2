@@ -5,6 +5,7 @@ import { makeAuthRequest, invoke } from "../../__tests__/helpers/api.js";
 import { makeUser, readPrivateJson, writePrivateJson } from "../../__tests__/helpers/seed.js";
 import { getPrivateContainer } from "../../__tests__/helpers/azurite.js";
 import { signaturePath, writeSignature } from "../../lib/signTofly/ledger.js";
+import { computeBriefHash } from "../../lib/signTofly/briefVersion.js";
 import "../signatures.js";
 
 describe("signature override endpoint", () => {
@@ -211,12 +212,11 @@ async function overrideSign(
 }
 
 async function seedWording(): Promise<void> {
-  const html = "<p>Sign to fly wording</p>";
+  const markdown = "Sign to fly wording";
   const wording: SignToFlyWording = {
     version: 1,
-    hash: createHash("sha256").update(html, "utf8").digest("hex"),
-    html,
-    plainText: "Sign to fly wording",
+    hash: createHash("sha256").update(markdown, "utf8").digest("hex"),
+    markdown,
     createdAt: new Date().toISOString(),
     createdBy: "vitest",
   };
@@ -224,6 +224,7 @@ async function seedWording(): Promise<void> {
   await writePrivateJson("sign-to-fly/wording/active.json", { activeVersion: 1 });
 }
 
+// Frozen brief: override path shares signOwnSlot's G2 hash gate.
 async function seedBrief(roundId: string, version: number): Promise<void> {
   const brief: RoundBrief & { version: number } = {
     roundId,
@@ -235,8 +236,10 @@ async function seedBrief(roundId: string, version: number): Promise<void> {
     landByTime: "18:00",
     checkInByTime: "19:00",
     windSpeedDirection: `W ${version}`,
+    imagePaths: [],
     teams: [],
   };
+  brief.hash = computeBriefHash(brief);
   await writePrivateJson(`round-briefs/${roundId}.json`, brief);
 }
 

@@ -33,7 +33,7 @@ services:
   # ─── Init: create blob containers ────────────────────────────────────────────
   # Runs once, exits 0. Re-running is safe (container create is idempotent).
   azurite-init:
-    image: node:24-alpine
+    image: node:24-slim
     container_name: bccweb-azurite-init
     depends_on:
       azurite:
@@ -90,7 +90,7 @@ services:
   # `.dev-credentials` on the host via bind-mount. Pre-condition: host file
   # `.dev-credentials` must exist (the `make dev` target / T16 will touch it).
   api-init:
-    image: node:24-alpine
+    image: node:24-slim
     container_name: bccweb-api-init
     depends_on:
       api:

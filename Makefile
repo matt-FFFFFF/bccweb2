@@ -34,8 +34,9 @@ build-web: build-types build-schemas ## Build React SPA
 	npm run build --workspace=apps/web
 
 .PHONY: typecheck
-typecheck: ## Typecheck all workspaces
+typecheck: ## Typecheck all workspaces (incl. test-only tsconfig where present)
 	npm run typecheck --workspaces --if-present
+	npm run test:typecheck --workspaces --if-present
 
 .PHONY: test
 test: ## Run all tests (requires Azurite for API tests)
@@ -55,6 +56,7 @@ dev: docker-up ## Start full local dev stack (Docker Compose)
 
 .PHONY: dev-api
 dev-api: build-types build-scoring build-api ## Start Azure Functions host (requires Azurite)
+	@test -f .dev-credentials || { rm -rf .dev-credentials; touch .dev-credentials; }
 	npm run start --workspace=apps/api
 
 .PHONY: dev-web
@@ -63,6 +65,7 @@ dev-web: ## Start Vite dev server on :5173
 
 .PHONY: docker-up
 docker-up: ## Start Azurite + API + Web via Docker Compose
+	@test -f .dev-credentials || { rm -rf .dev-credentials; touch .dev-credentials; }
 	$(CONTAINER_RUNTIME) compose up --build
 
 .PHONY: docker-down

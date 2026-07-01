@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import AdminSignToFlyWording from "../SignToFlyWording.js";
 import { api, ApiError } from "../../../lib/api.js";
+import { XSS_CORPUS } from "../../../../../../tests/fixtures/xss-corpus.js";
 
 vi.mock("../../../lib/api.js", async () => {
   const actual = await vi.importActual<typeof import("../../../lib/api.js")>("../../../lib/api.js");
@@ -83,7 +84,7 @@ describe("AdminSignToFlyWording", () => {
 
   it("shows active version and next publish version when active wording exists", async () => {
     mockWordingGets({
-      active: Promise.resolve({ version: 2, html: "<p>x</p>", plainText: "x" }),
+      active: Promise.resolve({ version: 2, markdown: "**x**" }),
       history: Promise.resolve([
         {
           version: 2,
@@ -102,6 +103,26 @@ describe("AdminSignToFlyWording", () => {
 
     expect(await screen.findByRole("heading", { name: /Currently active \(version 2\)/ })).toBeVisible();
     expect(screen.getByRole("button", { name: "Publish Version 3" })).toBeInTheDocument();
+  });
+  it("neutralizes XSS payloads in active wording", async () => {
+    mockWordingGets({
+      active: Promise.resolve({ version: 1, markdown: "**Bold** " + XSS_CORPUS.join(" ") }),
+      history: Promise.resolve([]),
+    });
+
+    render(<AdminSignToFlyWording />);
+
+    await waitFor(() => {
+      const els = screen.getAllByText("Bold");
+      expect(els.some(el => el.tagName === "STRONG")).toBe(true);
+    });
+
+    const activePreview = screen.getByTestId("active-preview");
+    const html = activePreview.innerHTML;
+    expect(html).not.toContain("<script");
+    expect(html).not.toContain("onerror");
+    expect(html).not.toContain("onload");
+    expect(html).not.toContain("onmouseover");
   });
 });
 

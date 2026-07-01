@@ -131,6 +131,7 @@ export const BriefSchema = z
     generatedAt: z.string().min(1),
     date: z.string().min(1),
     siteName: z.string().min(1),
+    hash: lenientOptional(z.string()),
     guideUrl: lenientOptional(z.string()),
     parkingW3W: lenientOptional(z.string()),
     briefingW3W: lenientOptional(z.string()),
@@ -168,3 +169,41 @@ export const BriefSchema = z
   .strip();
 
 BriefSchema satisfies z.ZodType<RoundBrief>;
+
+// Single source of truth for SAFETY-MATERIAL brief fields (B5 one-declaration):
+// editing any invalidates prior sign-to-fly signatures. The sign-to-fly hash
+// re-exports this; BRIEF_EDITABLE_KEYS derives from it — so neither can drift.
+// `satisfies keyof RoundBrief` rejects nested `site.*W3W` paths that once silently
+// dropped W3W edits from the hash.
+export const MATERIAL_BRIEF_FIELDS = [
+  "briefingTime",
+  "checkInByTime",
+  "landByTime",
+  "windSpeedDirection",
+  "directionOfFlight",
+  "expectedLandingArea",
+  "airspaceAndHazards",
+  "NOTAMs",
+  "BENO_LineDescription",
+  "briefersNotes",
+  "frequencyMhz",
+  "parkingW3W",
+  "briefingW3W",
+  "takeOffW3W",
+  "imagePaths",
+] as const satisfies readonly (keyof RoundBrief)[];
+
+// PUT-editable subset = material fields MINUS imagePaths (image-endpoint-only) PLUS
+// the cosmetic `briefer` block (PUT-editable but non-material).
+export const BRIEF_EDITABLE_KEYS = [
+  ...MATERIAL_BRIEF_FIELDS.filter((f) => f !== "imagePaths"),
+  "briefer",
+] as const satisfies readonly (keyof RoundBrief)[];
+
+// Editable schema derived from the same key list (kept in lockstep). A partial edit
+// body validates without identity/derived fields; full BriefSchema validates the write.
+const briefEditableMask = Object.fromEntries(
+  BRIEF_EDITABLE_KEYS.map((key) => [key, true] as const),
+) as Record<(typeof BRIEF_EDITABLE_KEYS)[number], true>;
+
+export const BriefEditableSchema = BriefSchema.partial().pick(briefEditableMask);

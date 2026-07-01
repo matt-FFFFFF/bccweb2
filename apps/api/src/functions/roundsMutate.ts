@@ -8,7 +8,6 @@
  * POST   /api/rounds/{id}/lock             — BriefComplete → Locked + snapshot pilots
  * POST   /api/rounds/{id}/unlock           — Locked → Confirmed
  * POST   /api/rounds/{id}/complete         — Locked → Complete + score + recompute
- * POST   /api/rounds/{id}/narrative        — update narrative text
  */
 
 import {
@@ -29,6 +28,8 @@ import type {
   PilotSnapshot,
   RoundBrief,
   BriefTeamEntry,
+  BriefVersion,
+  Signature,
 } from "@bccweb/types";
 import { normalizeStatus } from "@bccweb/types";
 import { scoreRound } from "@bccweb/scoring";
@@ -48,6 +49,7 @@ import {
   withLease,
   withPrivateLease,
   withPrivateLeaseRenewing,
+  withRoundAndBriefLease,
   getPrivateBlockBlobClient,
 } from "../lib/blob.js";
 import { readJson, writeJson, writePrivateJson } from "../lib/blobJson.js";
@@ -68,6 +70,17 @@ import {
   briefHtmlBody,
   briefPlainText,
 } from "../lib/email.js";
+import { getTelemetryClient } from "../lib/telemetry.js";
+import { listSignaturesForRound } from "../lib/signTofly/ledger.js";
+import { invalidatePriorSignToFlyFlags } from "../lib/signTofly/invalidate.js";
+import { computeBriefHash, MATERIAL_BRIEF_FIELDS } from "../lib/signTofly/briefVersion.js";
+
+/** The three coordinator-authored times that now live on the brief, not the Round. */
+export interface BriefTimes {
+  briefingTime?: string;
+  checkInByTime?: string;
+  landByTime?: string;
+}
 
 // ─── Auth helpers ─────────────────────────────────────────────────────────────
 
@@ -125,7 +138,7 @@ async function loadConfig(): Promise<Config> {
 
 async function createRound(
   req: HttpRequest,
-  _ctx: InvocationContext
+  ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
@@ -203,30 +216,39 @@ async function createRound(
   }
 
   const id = randomUUID();
-  let roundStatus: RoundStatus;
-  try {
-    roundStatus = body.status === undefined ? "Proposed" : normalizeStatus(body.status);
-  } catch (err: unknown) {
-    const message = (err as { message?: string }).message ?? "Unknown status";
-    return {
-      status: 400,
-      jsonBody: {
-        error: "Invalid status",
-        code: "INVALID_STATUS",
-        detail: message,
-      },
-    };
+  // Lifecycle invariant: a round is ALWAYS created Proposed. Accepting any other
+  // status here would let a caller skip the freeze lifecycle (confirm →
+  // brief-complete → lock), so a provided status is honoured only when it
+  // normalizes to Proposed; anything else (or an unknown value) is a 400.
+  if (body.status !== undefined) {
+    let requested: RoundStatus;
+    try {
+      requested = normalizeStatus(body.status);
+    } catch (err: unknown) {
+      const message = (err as { message?: string }).message ?? "Unknown status";
+      return {
+        status: 400,
+        jsonBody: { error: "Invalid status", code: "INVALID_STATUS", detail: message },
+      };
+    }
+    if (requested !== "Proposed") {
+      return {
+        status: 400,
+        jsonBody: {
+          error: "Invalid status",
+          code: "INVALID_STATUS",
+          detail: `Rounds must be created with status Proposed (received ${requested})`,
+        },
+      };
+    }
   }
   const round: Round = {
     id,
     date,
-    status: roundStatus,
+    status: "Proposed",
     isLocked: false,
     maxTeams: body.maxTeams ?? 8,
     minimumScore: body.minimumScore ?? 0,
-    briefingTime: body.briefingTime,
-    landByTime: body.landByTime,
-    checkInByTime: body.checkInByTime,
     site: {
       id: site.id,
       name: site.name,
@@ -261,6 +283,27 @@ async function createRound(
   // Update rounds.json index
   await updateRoundsIndex(round);
 
+  // Seed the brief at creation so coordinators land on a populated brief-edit UI.
+  // Best-effort: a failure MUST NOT fail the round create — the brief is
+  // recoverable via lazy-create on first edit/image (T6/T9). ifNoneMatch:"*" is
+  // atomic create-or-skip, so it never clobbers a brief that already exists.
+  try {
+    const brief = await buildInitialBrief(round, {
+      briefingTime: body.briefingTime,
+      checkInByTime: body.checkInByTime,
+      landByTime: body.landByTime,
+    });
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, brief, undefined, {
+      ifNoneMatch: "*",
+    });
+  } catch (briefErr) {
+    ctx.warn(`[createRound:${id}] Eager brief creation failed (recoverable):`, briefErr);
+    getTelemetryClient()?.trackTrace({
+      message: "brief.eagerCreateFailed",
+      properties: { roundId: id },
+    });
+  }
+
   return { status: 201, jsonBody: round };
 }
 
@@ -285,10 +328,6 @@ async function updateRound(
     organisingClubId?: string;
     maxTeams?: number;
     minimumScore?: number;
-    briefingTime?: string;
-    landByTime?: string;
-    checkInByTime?: string;
-    status?: string;
   };
 
   if (
@@ -317,21 +356,6 @@ async function updateRound(
       if (body.date) r.date = body.date;
       if (body.maxTeams !== undefined) r.maxTeams = body.maxTeams;
       if (body.minimumScore !== undefined) r.minimumScore = body.minimumScore;
-      if (body.briefingTime !== undefined) r.briefingTime = body.briefingTime;
-      if (body.landByTime !== undefined) r.landByTime = body.landByTime;
-      if (body.checkInByTime !== undefined)
-        r.checkInByTime = body.checkInByTime;
-
-      if (body.status !== undefined) {
-        try {
-          r.status = normalizeStatus(body.status);
-        } catch (err: unknown) {
-          const message = (err as { message?: string }).message ?? "Unknown status";
-          const validation = new Error(message);
-          (validation as { isValidation?: boolean }).isValidation = true;
-          throw new HttpError(500, "INTERNAL");
-        }
-      }
 
       // Update site if changed
       if (body.siteId && body.siteId !== r.site.id) {
@@ -372,16 +396,6 @@ async function updateRound(
   } catch (err: unknown) {
     if (err instanceof HttpError) throw err;
     const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (e.message?.startsWith("Unknown status: ")) {
-      return {
-        status: 400,
-        jsonBody: {
-          error: "Invalid status",
-          code: "INVALID_STATUS",
-          detail: e.message,
-        },
-      };
-    }
     if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
     if (e.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
     throw new HttpError(500, "INTERNAL");
@@ -418,7 +432,7 @@ async function transition(
           `Expected status ${allowedFrom.join(" or ")}, got ${r.status}`
         );
         (err as { isValidation?: boolean }).isValidation = true;
-        throw new HttpError(500, "INTERNAL");
+        throw err;
       }
 
       r.status = to;
@@ -457,27 +471,179 @@ async function confirmRound(
   const updated = result as Round;
   await updateRoundsIndex(updated);
 
-  // Best-effort: write a skeleton brief blob so the brief-edit UI is usable.
-  // `if-none-match: "*"` is atomic create-or-skip — never clobbers an existing
-  // brief blob (Azure returns HTTP 412, which we treat as a no-op here).
-  try {
-    const brief = await buildRoundBrief(updated);
-    await writePrivateJson(
-      `round-briefs/${updated.id}.json`,
-      BriefSchema,
-      brief,
-      undefined,
-      { ifNoneMatch: "*" }
-    );
-  } catch (briefErr) {
-    console.warn(`[confirmRound:${updated.id}] Skeleton brief creation skipped:`, briefErr);
-  }
-
   return { status: 200, jsonBody: updated };
 }
 
 // ─── POST /api/rounds/{id}/brief-complete ─────────────────────────────────────
 
+interface CompleteBriefContext {
+  briefTeams: BriefTeamEntry[];
+  callerUserId: string;
+  roundLeaseId: string;
+  briefLeaseId: string;
+}
+
+/**
+ * Every Filled round slot must be snapshot-able — i.e. present in
+ * buildBriefTeams(round) (which only yields pilots that already carry a
+ * snapshot). A Filled slot missing from the brief teams means a pilot cannot be
+ * safely frozen before signing, so brief-complete aborts (409) rather than
+ * advancing to a state where pilots could sign against an incomplete roster.
+ */
+function assertRosterComplete(round: Round, briefTeams: BriefTeamEntry[]): void {
+  const snapshotted = new Set<string>();
+  for (const team of briefTeams) {
+    for (const pilot of team.pilots) {
+      snapshotted.add(`${pilot.pilotId}:${pilot.placeInTeam}`);
+    }
+  }
+  for (const team of round.teams) {
+    for (const slot of team.pilots) {
+      if (
+        slot.status === "Filled" &&
+        slot.pilotId &&
+        !snapshotted.has(`${slot.pilotId}:${slot.placeInTeam}`)
+      ) {
+        throw new HttpError(
+          409,
+          "ROSTER_INCOMPLETE",
+          "Every filled slot must be snapshot-able before brief-complete",
+        );
+      }
+    }
+  }
+}
+
+/**
+ * Shared count core for brief-complete so the real transaction and its dryRun
+ * preview derive `invalidatedSignatureCount` identically. MUTATES `brief`
+ * (freeze/version bump) and `round` (sign-to-fly invalidation) but performs NO
+ * persistence: the real path persists afterwards; the dryRun path MUST pass
+ * CLONES so nothing is written.
+ */
+function freezeBriefAndCountInvalidations(
+  round: Round,
+  brief: RoundBrief,
+  signatures: Signature[],
+  briefTeams: BriefTeamEntry[],
+  callerUserId: string,
+): number {
+  const now = new Date().toISOString();
+
+  brief.teams = briefTeams;
+  brief.date = round.date;
+  brief.siteName = round.site.name;
+  brief.organisingClubName = round.organisingClub?.name;
+  brief.pureTrackGroupName = round.pureTrackGroupName;
+  brief.pureTrackGroupSlug = round.pureTrackGroupSlug;
+
+  const newHash = computeBriefHash(brief);
+  if (brief.hash === undefined) {
+    brief.hash = newHash;
+  } else if (brief.hash !== newHash) {
+    const archived: BriefVersion = {
+      version: brief.version ?? 1,
+      hash: brief.hash,
+      createdAt: brief.generatedAt ?? now,
+      createdBy: callerUserId,
+      supersededAt: now,
+    };
+    brief.versionHistory = [...(brief.versionHistory ?? []), archived];
+    brief.version = (brief.version ?? 1) + 1;
+    brief.hash = newHash;
+  }
+
+  const signedBefore = new Map<string, boolean>();
+  for (const team of round.teams) {
+    for (const slot of team.pilots) {
+      signedBefore.set(`${team.id}:${slot.placeInTeam}`, slot.signToFly);
+    }
+  }
+  invalidatePriorSignToFlyFlags(round, brief, signatures);
+  let invalidatedSignatureCount = 0;
+  for (const team of round.teams) {
+    for (const slot of team.pilots) {
+      if (
+        signedBefore.get(`${team.id}:${slot.placeInTeam}`) === true &&
+        slot.signToFly === false
+      ) {
+        invalidatedSignatureCount += 1;
+      }
+    }
+  }
+  return invalidatedSignatureCount;
+}
+
+/**
+ * The atomic brief-complete body (R8) — runs as ONE unit under the round+brief
+ * leases acquired by withRoundAndBriefLease. It MUST NOT be split into separate
+ * transactions. In order:
+ *   1. Refresh NON-material derived metadata (teams/date/siteName/club/PureTrack
+ *      names) so downstream PDF/email never read stale copies. None of these are
+ *      MATERIAL_BRIEF_FIELDS, so the freeze hash is unaffected.
+ *   2. Freeze the material hash: the first freeze sets `hash` and keeps
+ *      `version`; a material change archives the prior {version, hash, createdAt,
+ *      createdBy, supersededAt} onto versionHistory (ALL BriefVersionSchema
+ *      required fields), bumps `version`, and sets the new hash.
+ *   3. Persist the frozen brief JSON (PDF generation stays OUTSIDE the lease).
+ *   4. ALWAYS invalidate prior sign-to-fly flags keyed on the now-current brief
+ *      version (retry-safe — NOT gated on whether THIS call bumped), then persist
+ *      the flag resets onto the round.
+ * Steps 1-2 + the invalidation-count of 4 are delegated to
+ * freezeBriefAndCountInvalidations (shared with the dryRun preview); this
+ * function adds the persistence (brief-before-round preserves the R8 write order).
+ * Returns the number of signatures invalidated by this call.
+ */
+async function completeBriefTransaction(
+  round: Round,
+  brief: RoundBrief,
+  signatures: Signature[],
+  ctx: CompleteBriefContext,
+): Promise<number> {
+  const invalidatedSignatureCount = freezeBriefAndCountInvalidations(
+    round,
+    brief,
+    signatures,
+    ctx.briefTeams,
+    ctx.callerUserId,
+  );
+
+  await writePrivateJson(
+    `round-briefs/${round.id}.json`,
+    BriefSchema,
+    brief,
+    ctx.briefLeaseId,
+  );
+
+  await writePrivateJson(`rounds/${round.id}.json`, RoundSchema, round, ctx.roundLeaseId);
+
+  return invalidatedSignatureCount;
+}
+
+/** Slots currently signed (signToFly === true) — the reopen dryRun's at-risk count. */
+function countCurrentlySignedSlots(round: Round): number {
+  let count = 0;
+  for (const team of round.teams) {
+    for (const slot of team.pilots) {
+      if (slot.signToFly === true) count += 1;
+    }
+  }
+  return count;
+}
+
+/**
+ * POST /api/rounds/{id}/brief-complete — Confirmed → BriefComplete.
+ *
+ * The Confirmed→BriefComplete transition that FREEZES the brief and invalidates
+ * stale sign-to-fly flags. The freeze body runs UNDER the round lease with the
+ * brief lease NESTED (B3) via withRoundAndBriefLease so the brief write is
+ * covered atomically.
+ *
+ * G2 (BLOCKING): the brief MUST already exist — this safety path never
+ * lazy-creates one (and you cannot lease a missing blob). Aborts 409 if the
+ * brief is absent (`BRIEF_REQUIRED`) or the roster is incomplete (a Filled slot
+ * is not snapshot-able). Responds with the round plus `invalidatedSignatureCount`.
+ */
 async function briefCompleteRound(
   req: HttpRequest,
   _ctx: InvocationContext
@@ -485,16 +651,148 @@ async function briefCompleteRound(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
+  const dryRun = req.query.get("dryRun") === "true";
+
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!isCoord(caller.roles)) return forbiddenResponse();
   await assertManageableRound(caller, id);
   await mutationRateLimit(req, caller, "briefCompleteRound", "standard");
 
-  const result = await transition(req, id, ["Confirmed"], "BriefComplete");
+  const roundPath = `rounds/${id}.json`;
+
+  // G2: brief must exist before the lease — withRoundAndBriefLease cannot lease
+  // a missing brief blob, and this safety path never lazy-creates one.
+  let preRound: Round;
+  try {
+    preRound = await readJson(getPrivateBlobClient(roundPath), RoundSchema, roundPath);
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
+    }
+    throw new HttpError(500, "INTERNAL");
+  }
+  if (preRound.status !== "Confirmed") {
+    throw new HttpError(409, "CONFLICT", `Expected status Confirmed, got ${preRound.status}`);
+  }
+  const preBrief = await readExistingBriefForLock(id);
+  if (!preBrief) {
+    throw new HttpError(409, "BRIEF_REQUIRED", "A brief must exist before brief-complete");
+  }
+
+  // dryRun preview: same preconditions, but compute the count on CLONES so
+  // nothing persists (freezeBriefAndCountInvalidations MUTATES its args). Powers
+  // the RoundManage confirm modal without transitioning on modal-open.
+  if (dryRun) {
+    const briefTeams = await buildBriefTeams(preRound);
+    assertRosterComplete(preRound, briefTeams);
+    const signatures = await listSignaturesForRound(id);
+    const invalidatedSignatureCount = freezeBriefAndCountInvalidations(
+      structuredClone(preRound),
+      structuredClone(preBrief),
+      signatures,
+      briefTeams,
+      caller.userId,
+    );
+    return { status: 200, jsonBody: { invalidatedSignatureCount } };
+  }
+
+  let updatedRound: Round;
+  let invalidatedSignatureCount: number;
+  try {
+    const result = await withRoundAndBriefLease(id, async (roundLeaseId, briefLeaseId) => {
+      const r = await readJson(getPrivateBlobClient(roundPath), RoundSchema, roundPath);
+      if (r.status !== "Confirmed") {
+        const err = new Error(`Expected status Confirmed, got ${r.status}`);
+        (err as { isValidation?: boolean }).isValidation = true;
+        throw err;
+      }
+      const briefPath = `round-briefs/${id}.json`;
+      const brief = await readJson(getPrivateBlobClient(briefPath), BriefSchema, briefPath);
+
+      // Roster completeness BEFORE any write — every Filled slot must be
+      // snapshot-able so pilots can be safely frozen before signing.
+      const briefTeams = await buildBriefTeams(r);
+      assertRosterComplete(r, briefTeams);
+
+      r.status = "BriefComplete";
+      const signatures = await listSignaturesForRound(id);
+      const count = await completeBriefTransaction(r, brief, signatures, {
+        briefTeams,
+        callerUserId: caller.userId,
+        roundLeaseId,
+        briefLeaseId,
+      });
+      return { round: r, count };
+    });
+    updatedRound = result.round;
+    invalidatedSignatureCount = result.count;
+  } catch (err: unknown) {
+    if (err instanceof HttpError) throw err;
+    const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
+    if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
+    if (e.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
+    throw new HttpError(500, "INTERNAL");
+  }
+
+  await updateRoundsIndex(updatedRound);
+  return { status: 200, jsonBody: { ...updatedRound, invalidatedSignatureCount } };
+}
+
+// ─── POST /api/rounds/{id}/reopen ─────────────────────────────────────────────
+
+/**
+ * POST /api/rounds/{id}/reopen — BriefComplete → Confirmed.
+ *
+ * Re-opens a brief-complete round for further brief edits. Signatures PERSIST
+ * across the reopen (Option A — they are NOT voided here); a subsequent material
+ * brief edit + brief-complete is what invalidates stale ones (keyed on the brief
+ * version bump). The response mirrors brief-complete by carrying
+ * `invalidatedSignatureCount` (always 0 — reopen invalidates nothing).
+ */
+async function reopenBrief(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const id = req.params["id"];
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
+
+  const dryRun = req.query.get("dryRun") === "true";
+
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isCoord(caller.roles)) return forbiddenResponse();
+  await assertManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "reopenBrief", "standard");
+
+  // dryRun preview: validate BriefComplete (409 otherwise, matching the real
+  // transition) and report how many currently-signed slots the reopen puts at
+  // risk, WITHOUT changing status. Powers the RoundManage confirm modal.
+  if (dryRun) {
+    const path = `rounds/${id}.json`;
+    let round: Round;
+    try {
+      round = await readJson(getPrivateBlobClient(path), RoundSchema, path);
+    } catch (err: unknown) {
+      if ((err as { statusCode?: number }).statusCode === 404) {
+        throw new HttpError(404, "NOT_FOUND", "Round not found");
+      }
+      throw new HttpError(500, "INTERNAL");
+    }
+    if (round.status !== "BriefComplete") {
+      throw new HttpError(409, "CONFLICT", `Expected status BriefComplete, got ${round.status}`);
+    }
+    return {
+      status: 200,
+      jsonBody: { invalidatedSignatureCount: countCurrentlySignedSlots(round) },
+    };
+  }
+
+  const result = await transition(req, id, ["BriefComplete"], "Confirmed");
   if ("status" in result && "jsonBody" in result) return result;
-  await updateRoundsIndex(result as Round);
-  return { status: 200, jsonBody: result };
+  const updated = result as Round;
+  await updateRoundsIndex(updated);
+  return { status: 200, jsonBody: { ...updated, invalidatedSignatureCount: 0 } };
 }
 
 // ─── POST /api/rounds/{id}/lock ───────────────────────────────────────────────
@@ -542,7 +840,19 @@ function applyPureTrackResult(round: Round, ptResult: PureTrackRoundResult): Rou
   return updated;
 }
 
-async function buildRoundBrief(round: Round): Promise<RoundBrief> {
+/**
+ * The single brief "seed" source. Shared by every create path — eager create
+ * (createRound), lazy-create on first edit (T6) and on first image (T9) — so all
+ * three converge on a byte-identical document for the same inputs (bar
+ * `generatedAt`). Reads the site INTERNALLY for `guideUrl`; copies siteName/W3W
+ * from `round.site` and date/club from the round; leaves safety/narrative blank;
+ * sets `imagePaths:[]`, `teams:[]`, `version:1` and NO `hash` (frozen at first
+ * brief-complete — T7).
+ */
+export async function buildInitialBrief(
+  round: Round,
+  times?: BriefTimes,
+): Promise<RoundBrief> {
   let siteGuideUrl: string | undefined;
   try {
     const sitePath = `sites/${round.site.id}.json`;
@@ -552,6 +862,28 @@ async function buildRoundBrief(round: Round): Promise<RoundBrief> {
     siteGuideUrl = undefined;
   }
 
+  return {
+    roundId: round.id,
+    generatedAt: new Date().toISOString(),
+    date: round.date,
+    siteName: round.site.name,
+    guideUrl: siteGuideUrl,
+    parkingW3W: round.site.parkingW3W,
+    briefingW3W: round.site.briefingW3W,
+    takeOffW3W: round.site.takeOffW3W,
+    briefingTime: times?.briefingTime,
+    checkInByTime: times?.checkInByTime,
+    landByTime: times?.landByTime,
+    organisingClubName: round.organisingClub?.name,
+    pureTrackGroupName: round.pureTrackGroupName,
+    pureTrackGroupSlug: round.pureTrackGroupSlug,
+    imagePaths: [],
+    version: 1,
+    teams: [],
+  };
+}
+
+export async function buildBriefTeams(round: Round): Promise<BriefTeamEntry[]> {
   const pilotsIndex = await readJson(
     getBlobClient("pilots.json"),
     PilotSummariesSchema,
@@ -559,7 +891,7 @@ async function buildRoundBrief(round: Round): Promise<RoundBrief> {
   ).catch(() => [] as PilotSummary[]);
   const pilotNameMap = new Map(pilotsIndex.map((p) => [p.id, p]));
 
-  const teams: BriefTeamEntry[] = await Promise.all(
+  return Promise.all(
     round.teams
       .filter((t) => t.pilots.some((s) => s.status === "Filled"))
       .map(async (t) => ({
@@ -602,38 +934,6 @@ async function buildRoundBrief(round: Round): Promise<RoundBrief> {
         ),
       }))
   );
-
-  return {
-    roundId: round.id,
-    generatedAt: new Date().toISOString(),
-    date: round.date,
-    siteName: round.site.name,
-    guideUrl: siteGuideUrl,
-    parkingW3W: round.site.parkingW3W,
-    briefingW3W: round.site.briefingW3W,
-    takeOffW3W: round.site.takeOffW3W,
-    briefingTime: round.briefingTime,
-    checkInByTime: round.checkInByTime,
-    landByTime: round.landByTime,
-    organisingClubName: round.organisingClub?.name,
-    pureTrackGroupName: round.pureTrackGroupName,
-    pureTrackGroupSlug: round.pureTrackGroupSlug,
-    teams,
-  };
-}
-
-async function uploadBriefArtifacts(brief: RoundBrief): Promise<Buffer> {
-  await writePrivateJson(`round-briefs/${brief.roundId}.json`, BriefSchema, brief);
-  const pdfBuffer = await generateBriefPdf(brief);
-  const pdfBlobClient = getPrivateBlockBlobClient(`round-briefs/${brief.roundId}.pdf`);
-  await pdfBlobClient.upload(pdfBuffer, pdfBuffer.length, {
-    blobHTTPHeaders: { blobContentType: "application/pdf" },
-    metadata: {
-      sitename: brief.siteName,
-      date: brief.date,
-    },
-  });
-  return pdfBuffer;
 }
 
 async function readExistingBriefForLock(id: string): Promise<RoundBrief | null> {
@@ -648,28 +948,35 @@ async function readExistingBriefForLock(id: string): Promise<RoundBrief | null> 
 
 async function mergeBriefForLock(
   round: Round,
-  existing: RoundBrief | null
+  existing: RoundBrief
 ): Promise<RoundBrief> {
-  const derived = await buildRoundBrief(round);
-  if (!existing) return derived;
-  // Preserve coordinator-authored narrative fields and version metadata while
-  // refreshing every derived field. Field list mirrors RoundBrief lines 471-485
-  // in packages/types/src/index.ts: any future narrative field added there must
-  // be added here too or it will be silently dropped on lock.
-  return {
-    ...derived,
-    windSpeedDirection: existing.windSpeedDirection,
-    directionOfFlight: existing.directionOfFlight,
-    expectedLandingArea: existing.expectedLandingArea,
-    airspaceAndHazards: existing.airspaceAndHazards,
-    NOTAMs: existing.NOTAMs,
-    BENO_LineDescription: existing.BENO_LineDescription,
-    briefersNotes: existing.briefersNotes,
-    briefer: existing.briefer,
-    imagePaths: existing.imagePaths,
-    version: existing.version,
-    versionHistory: existing.versionHistory,
+  // Lock refreshes ONLY non-material parts of the FROZEN brief: the team roster
+  // (re-snapshotted pilots) plus the PureTrack/site/date/club echoes. The frozen
+  // brief is the base of truth, so every safety-material field, the cosmetic
+  // briefer, and the freeze identity (version/versionHistory/hash) carry over
+  // byte-identical and computeBriefHash(result) === existing.hash still holds.
+  const merged: RoundBrief = {
+    ...existing,
+    teams: await buildBriefTeams(round),
+    siteName: round.site.name,
+    date: round.date,
+    organisingClubName: round.organisingClub?.name,
+    pureTrackGroupName: round.pureTrackGroupName,
+    pureTrackGroupSlug: round.pureTrackGroupSlug,
   };
+  // B5: re-impose each frozen material field BY NAME from the SINGLE
+  // MATERIAL_BRIEF_FIELDS declaration (no hand-kept copy that can drift), so the
+  // hash survives even if the spread above is ever changed to re-derive a
+  // material field from the Round. `briefer` is the editable-cosmetic extra; the
+  // freeze identity is never re-derived at lock.
+  for (const field of MATERIAL_BRIEF_FIELDS) {
+    Object.assign(merged, { [field]: existing[field] });
+  }
+  merged.briefer = existing.briefer;
+  merged.version = existing.version;
+  merged.versionHistory = existing.versionHistory;
+  merged.hash = existing.hash;
+  return merged;
 }
 
 async function sendBriefIfConfigured(brief: RoundBrief, pdfBuffer: Buffer | null): Promise<void> {
@@ -805,25 +1112,28 @@ async function lockRound(
     console.error(`[lockRound:${id}] PureTrack group creation failed:`, ptErr);
   }
 
+  // B3: the brief is its own blob, so the round lease does NOT cover it. Read
+  // the frozen brief, refresh teams, verify the frozen material hash, then
+  // persist BOTH the brief JSON and the Locked round atomically under the
+  // round+brief leases. The brief must already exist (brief-complete froze it) —
+  // a missing blob cannot be leased.
+  if (!(await readExistingBriefForLock(id))) {
+    throw new HttpError(
+      409,
+      "BRIEF_REQUIRED",
+      "A frozen brief must exist before locking — reopen and re-complete the round",
+    );
+  }
+
   const briefPaths = {
     jsonPath: `round-briefs/${id}.json`,
     pdfPath: `round-briefs/${id}.pdf`,
-    generatedAt: undefined as string | undefined,
   };
-  try {
-    const existing = await readExistingBriefForLock(id);
-    const brief = await mergeBriefForLock(candidateRound, existing);
-    briefPaths.generatedAt = brief.generatedAt;
-    const pdfBuffer = await uploadBriefArtifacts(brief);
-    await sendBriefIfConfigured(brief, pdfBuffer);
-    console.log(`[lockRound:${id}] Brief artifacts generated and email processed`);
-  } catch (briefErr) {
-    console.error(`[lockRound:${id}] Brief artifact/email processing failed:`, briefErr);
-  }
 
   let updated: Round;
+  let lockedBrief: RoundBrief;
   try {
-    updated = await withPrivateLeaseRenewing(path, async (leaseId) => {
+    const result = await withRoundAndBriefLease(id, async (roundLeaseId, briefLeaseId) => {
       const r = (await readJson(
         getPrivateBlobClient(path),
         RoundSchema,
@@ -833,8 +1143,33 @@ async function lockRound(
       if (r.status !== "BriefComplete") {
         const err = new Error("Round status changed concurrently");
         (err as { isValidation?: boolean }).isValidation = true;
-        throw new HttpError(500, "INTERNAL");
+        throw err;
       }
+
+      const briefPath = `round-briefs/${id}.json`;
+      const existing = await readJson(getPrivateBlobClient(briefPath), BriefSchema, briefPath);
+      const brief = await mergeBriefForLock(candidateRound, existing);
+
+      // The frozen material hash MUST still match — otherwise the persisted brief
+      // was mutated out-of-band since brief-complete. Abort the lock (the round
+      // write below never runs, so it stays BriefComplete) with a diagnostic and
+      // an operator-actionable message; never a silent failure.
+      if (brief.hash === undefined || computeBriefHash(brief) !== brief.hash) {
+        getTelemetryClient()?.trackTrace({
+          message: "brief.lockHashMismatch",
+          properties: { roundId: id },
+        });
+        throw new HttpError(
+          409,
+          "BRIEF_HASH_MISMATCH",
+          "Brief material no longer matches its frozen sign-to-fly hash — reopen and re-complete the round before locking",
+        );
+      }
+
+      // Hard failure: if the frozen brief JSON cannot be written, the round must
+      // NOT advance to Locked. This write throws on failure, so the round write
+      // that follows never runs and the round stays BriefComplete.
+      await writePrivateJson(briefPath, BriefSchema, brief, briefLeaseId);
 
       r.status = "Locked";
       r.isLocked = true;
@@ -866,16 +1201,39 @@ async function lockRound(
         version: (r.brief?.version ?? 0) + 1,
         jsonPath: briefPaths.jsonPath,
         pdfPath: briefPaths.pdfPath,
-        generatedAt: briefPaths.generatedAt,
+        generatedAt: brief.generatedAt,
       };
 
-      await writePrivateJson(path, RoundSchema, r, leaseId);
-      return r;
+      await writePrivateJson(path, RoundSchema, r, roundLeaseId);
+      return { round: r, brief };
     });
+    updated = result.round;
+    lockedBrief = result.brief;
   } catch (err: unknown) {
+    if (err instanceof HttpError) throw err;
     const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
     if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
-    throw new HttpError(500, "INTERNAL");
+    throw new HttpError(
+      500,
+      "BRIEF_PERSIST_FAILED",
+      "Failed to persist the brief while locking — the round remains BriefComplete; reopen and re-complete before retrying the lock",
+    );
+  }
+
+  // PDF + email are best-effort AFTER the brief JSON and round are committed: a
+  // failure here leaves the round Locked (the artifacts are regenerable) and
+  // never rolls the lock back.
+  try {
+    const pdfBuffer = await generateBriefPdf(lockedBrief);
+    const pdfBlobClient = getPrivateBlockBlobClient(briefPaths.pdfPath);
+    await pdfBlobClient.upload(pdfBuffer, pdfBuffer.length, {
+      blobHTTPHeaders: { blobContentType: "application/pdf" },
+      metadata: { sitename: lockedBrief.siteName, date: lockedBrief.date },
+    });
+    await sendBriefIfConfigured(lockedBrief, pdfBuffer);
+    console.log(`[lockRound:${id}] Brief artifacts generated and email processed`);
+  } catch (briefErr) {
+    console.error(`[lockRound:${id}] Brief artifact/email processing failed:`, briefErr);
   }
 
   await updateRoundsIndex(updated);
@@ -999,46 +1357,6 @@ async function completeRound(
   return { status: 200, jsonBody: updated };
 }
 
-// ─── POST /api/rounds/{id}/narrative ─────────────────────────────────────────
-
-async function updateNarrative(
-  req: HttpRequest,
-  _ctx: InvocationContext
-): Promise<HttpResponseInit> {
-  const id = req.params["id"];
-  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
-
-  const caller = await getCallerIdentity(req);
-  if (!caller) return unauthorizedResponse();
-  if (!isCoord(caller.roles)) return forbiddenResponse();
-  await assertManageableRound(caller, id);
-  await mutationRateLimit(req, caller, "updateNarrative", "standard");
-
-  const body = (await req.json()) as { narrative?: string };
-  if (body.narrative === undefined) {
-    throw new HttpError(400, "INVALID_BODY", "narrative is required");
-  }
-
-  const path = `rounds/${id}.json`;
-  let updated: Round;
-
-  try {
-    updated = await withPrivateLease(path, async (leaseId) => {
-      const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
-      r.narrative = body.narrative;
-      await writePrivateJson(path, RoundSchema, r, leaseId);
-      return r;
-    });
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(404, "NOT_FOUND", "Round not found");
-    }
-    throw new HttpError(500, "INTERNAL");
-  }
-
-  return { status: 200, jsonBody: updated };
-}
-
 // ─── Registration ─────────────────────────────────────────────────────────────
 
 app.http("createRound", {
@@ -1069,6 +1387,13 @@ app.http("briefCompleteRound", {
   handler: withErrorHandler(briefCompleteRound),
 });
 
+app.http("reopenBrief", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "rounds/{id}/reopen",
+  handler: withErrorHandler(reopenBrief),
+});
+
 app.http("lockRound", {
   methods: ["POST"],
   authLevel: "anonymous",
@@ -1088,11 +1413,4 @@ app.http("completeRound", {
   authLevel: "anonymous",
   route: "rounds/{id}/complete",
   handler: withErrorHandler(completeRound),
-});
-
-app.http("updateNarrative", {
-  methods: ["POST"],
-  authLevel: "anonymous",
-  route: "rounds/{id}/narrative",
-  handler: withErrorHandler(updateNarrative),
 });

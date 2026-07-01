@@ -1,10 +1,13 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  BRIEF_EDITABLE_KEYS,
+  BriefEditableSchema,
   BriefPilotEntrySchema,
   BriefSchema,
   BriefTeamEntrySchema,
   BriefVersionSchema,
+  MATERIAL_BRIEF_FIELDS,
 } from "../brief.js";
 
 const validSnapshot = {
@@ -185,5 +188,46 @@ describe("BriefSchema", () => {
       siteName: "Llangollen",
       teams: [],
     });
+  });
+});
+
+describe("BriefEditableSchema (coordinator-editable subset)", () => {
+  test("validates a partial edit body without identity/derived fields", () => {
+    const result = BriefEditableSchema.safeParse({
+      NOTAMs: "Temporary restricted area active",
+      frequencyMhz: 143.925,
+      briefer: { name: "Alice" },
+    });
+
+    expect(result.success).toBe(true);
+  });
+
+  test("strips identity, derived, and image-only keys from an edit body", () => {
+    const parsed = BriefEditableSchema.parse({
+      NOTAMs: "None",
+      siteName: "identity - not editable",
+      teams: [],
+      imagePaths: ["round-briefs/x.jpg"],
+    });
+
+    expect(parsed.NOTAMs).toBe("None");
+    expect(parsed).not.toHaveProperty("siteName");
+    expect(parsed).not.toHaveProperty("teams");
+    expect(parsed).not.toHaveProperty("imagePaths");
+  });
+
+  test("BRIEF_EDITABLE_KEYS = MATERIAL_BRIEF_FIELDS minus imagePaths plus briefer (single-source lock)", () => {
+    const derived = [
+      ...MATERIAL_BRIEF_FIELDS.filter((field) => field !== "imagePaths"),
+      "briefer",
+    ];
+
+    expect([...BRIEF_EDITABLE_KEYS].sort()).toEqual([...derived].sort());
+    expect([...BRIEF_EDITABLE_KEYS]).not.toContain("imagePaths");
+    expect([...BRIEF_EDITABLE_KEYS]).toContain("briefer");
+    expect([...MATERIAL_BRIEF_FIELDS]).not.toContain("briefer");
+    expect(Object.keys(BriefEditableSchema.shape).sort()).toEqual(
+      [...BRIEF_EDITABLE_KEYS].sort(),
+    );
   });
 });

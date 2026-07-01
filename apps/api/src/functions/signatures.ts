@@ -15,6 +15,7 @@ import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { getActiveWording } from "../lib/signTofly/wording.js";
+import { computeBriefHash } from "../lib/signTofly/briefVersion.js";
 import {
   buildSignaturePayload,
   getLatestSignature,
@@ -35,12 +36,6 @@ async function signOwnSlot(
 ): Promise<HttpResponseInit> {
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
-  if (caller.roles.includes("Admin") || caller.roles.includes("RoundsCoord")) {
-    throw new HttpError(403, "NOT_YOUR_SLOT_USE_OVERRIDE");
-  }
-  if (!caller.roles.includes("Pilot") || !caller.pilotId) {
-    throw new HttpError(403, "NOT_YOUR_SLOT");
-  }
 
   const { roundId, teamId, place } = req.params as {
     roundId?: string;
@@ -57,7 +52,15 @@ async function signOwnSlot(
 
   const round = await readRound(roundId);
   const slot = findSlot(round, teamId, placeNum);
-  if (slot?.pilotId !== caller.pilotId) {
+  // Authorised by slot OWNERSHIP, not role. A caller may self-sign only their
+  // own slot; an Admin/RoundsCoord signing ANOTHER pilot's slot must use the
+  // override endpoint. Signing one's OWN slot is a normal self-sign even for an
+  // Admin/Coord who also holds a Pilot profile — so this role gate lives inside
+  // the not-owned branch, never before the ownership check.
+  if (!caller.pilotId || slot?.pilotId !== caller.pilotId) {
+    if (caller.roles.includes("Admin") || caller.roles.includes("RoundsCoord")) {
+      throw new HttpError(403, "NOT_YOUR_SLOT_USE_OVERRIDE");
+    }
     throw new HttpError(403, "NOT_YOUR_SLOT");
   }
   if (round.status !== "BriefComplete") {
@@ -69,12 +72,12 @@ async function signOwnSlot(
 
   const [wording, brief] = await Promise.all([
     getActiveWording(),
-    readRoundBrief(roundId),
+    requireFrozenBrief(roundId),
   ]);
   const briefVersion = brief.version ?? 1;
   const existing = await readSignature(roundId, teamId, placeNum, briefVersion);
   if (existing) {
-    await reflectCurrentSignature(roundId, teamId, placeNum, briefVersion);
+    await reflectCurrentSignature(roundId, teamId, placeNum);
     return { status: 200, jsonBody: existing };
   }
 
@@ -93,7 +96,7 @@ async function signOwnSlot(
   });
 
   await writeSignature(sig);
-  await reflectCurrentSignature(roundId, teamId, placeNum, briefVersion);
+  await reflectCurrentSignature(roundId, teamId, placeNum);
   return { status: 201, jsonBody: sig };
 }
 
@@ -149,7 +152,7 @@ async function overrideSlotSignature(
 
   const [wording, brief] = await Promise.all([
     getActiveWording(),
-    readRoundBrief(roundId),
+    requireFrozenBrief(roundId),
   ]);
   const briefVersion = brief.version ?? 1;
   const existing = await readSignature(roundId, teamId, placeNum, briefVersion);
@@ -183,7 +186,7 @@ async function overrideSlotSignature(
       pilotAndCoordSigned: Boolean(existing && existing.source !== "coord-override"),
     },
   });
-  await reflectCurrentSignature(roundId, teamId, placeNum, briefVersion);
+  await reflectCurrentSignature(roundId, teamId, placeNum);
 
   return { status: 201, jsonBody: sig };
 }
@@ -228,16 +231,28 @@ async function readRound(roundId: string): Promise<Round> {
   }
 }
 
-async function readRoundBrief(roundId: string): Promise<RoundBriefWithVersion> {
+async function readBriefOrNull(roundId: string): Promise<RoundBriefWithVersion | null> {
   const path = `round-briefs/${roundId}.json`;
   try {
     return await readJson(getPrivateBlobClient(path), BriefSchema, path);
   } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(404, "BRIEF_NOT_FOUND", "Round brief not found");
-    }
+    if ((err as { statusCode?: number }).statusCode === 404) return null;
     throw err;
   }
+}
+
+// G2: a signature may only attach to a FROZEN, untampered brief — a missing or
+// hash-less brief is BRIEF_REQUIRED (no lazy-create on the signing path), and a
+// `hash` that no longer matches the material content is rejected.
+async function requireFrozenBrief(roundId: string): Promise<RoundBriefWithVersion> {
+  const brief = await readBriefOrNull(roundId);
+  if (!brief || !brief.hash) {
+    throw new HttpError(409, "BRIEF_REQUIRED", "Round brief must be finalised before signing");
+  }
+  if (computeBriefHash(brief) !== brief.hash) {
+    throw new HttpError(409, "BRIEF_HASH_MISMATCH", "Round brief changed since it was finalised");
+  }
+  return brief;
 }
 
 function findSlot(round: Round, teamId: string, place: number) {
@@ -245,18 +260,27 @@ function findSlot(round: Round, teamId: string, place: number) {
   return team?.pilots.find((slot) => slot.placeInTeam === place) ?? null;
 }
 
-async function reflectCurrentSignature(
+// R6: re-read status + the frozen brief version INSIDE the round lease; never
+// trust a version captured unleased. Skip unless the round is still
+// BriefComplete (a concurrent lock / re-complete must not be reflected) AND the
+// latest signature pins the now-current brief version.
+export async function reflectCurrentSignature(
   roundId: string,
   teamId: string,
   place: number,
-  currentBriefVersion: number,
 ): Promise<void> {
-  const latest = await getLatestSignature(roundId, teamId, place);
-  if (latest?.briefVersion !== currentBriefVersion) return;
-
   const path = `rounds/${roundId}.json`;
   await withPrivateLease(path, async (leaseId) => {
     const round = await readJson(getPrivateBlobClient(path), RoundSchema, path);
+    if (round.status !== "BriefComplete") return;
+
+    const brief = await readBriefOrNull(roundId);
+    if (!brief) return;
+    const currentBriefVersion = brief.version ?? 1;
+
+    const latest = await getLatestSignature(roundId, teamId, place);
+    if (latest?.briefVersion !== currentBriefVersion) return;
+
     const slot = findSlot(round, teamId, place);
     if (!slot) throw new HttpError(404, "NOT_FOUND", "Pilot slot not found");
     if (!slot.signToFly) {

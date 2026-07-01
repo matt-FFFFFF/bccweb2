@@ -9,8 +9,7 @@ import {
 const validWording = {
   version: 2,
   hash: "wording-hash",
-  html: "<p>Sign to fly</p>",
-  plainText: "Sign to fly",
+  markdown: "**Sign to fly**",
   createdAt: "2026-06-11T00:00:00Z",
   createdBy: "admin-1",
 } as const;
@@ -33,7 +32,7 @@ const validSignature = {
 } as const;
 
 describe("SignToFlyWordingSchema", () => {
-  test("round-trips a valid wording version blob without sanitising html", () => {
+  test("round-trips a valid markdown wording version blob", () => {
     expect(SignToFlyWordingSchema.parse(validWording)).toEqual(validWording);
   });
 

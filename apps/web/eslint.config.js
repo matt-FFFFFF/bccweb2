@@ -11,7 +11,7 @@ export default tseslint.config(
       "react-hooks": reactHooks,
       "react-refresh": reactRefresh.plugin,
     },
-    languageOptions: { sourceType: "module" },
+    languageOptions: { sourceType: "module", parserOptions: { jsxPragma: null } },
     rules: {
       "no-unused-expressions": "off",
       // Re-enabled per issue #10 item 5. Base no-unused-expressions stays off

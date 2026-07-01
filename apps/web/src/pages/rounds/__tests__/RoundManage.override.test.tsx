@@ -1,3 +1,10 @@
+
+vi.mock("../../../components/MarkdownEditor.js", () => ({
+  MarkdownEditor: ({ value, onChange }: { value: string, onChange: (val: string) => void }) => <textarea value={value} onChange={e => onChange(e.target.value)} />
+}));
+vi.mock("../../../components/MarkdownView.js", () => ({
+  MarkdownView: ({ markdown }: { markdown: string }) => <div>{markdown}</div>
+}));
 import "../../../__tests__/setup.ts";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";

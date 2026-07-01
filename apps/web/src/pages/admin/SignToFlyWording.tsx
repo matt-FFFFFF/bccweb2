@@ -2,18 +2,8 @@ import { useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth.js";
 import { api, ApiError } from "../../lib/api.js";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
-import { sanitizeWordingHtml } from "../../lib/sanitize.js";
-
-const inputStyle: React.CSSProperties = {
-  padding: "0.35rem 0.5rem",
-  border: "1px solid #ccc",
-  borderRadius: "0.3rem",
-  fontSize: "0.875rem",
-  boxSizing: "border-box",
-  fontFamily: "monospace",
-  width: "100%",
-  minHeight: "150px"
-};
+import { MarkdownEditor } from "../../components/MarkdownEditor.js";
+import { MarkdownView } from "../../components/MarkdownView.js";
 
 const btnStyle = (color: string, bg: string): React.CSSProperties => ({
   padding: "0.35rem 0.75rem",
@@ -48,8 +38,7 @@ interface WordingVersion {
 
 interface ActiveWording {
   version: number;
-  html: string;
-  plainText: string;
+  markdown: string;
 }
 
 export default function AdminSignToFlyWording() {
@@ -62,8 +51,7 @@ export default function AdminSignToFlyWording() {
   const [msgOk, setMsgOk] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
-  const [formHtml, setFormHtml] = useState("");
-  const [formPlainText, setFormPlainText] = useState("");
+  const [formMarkdown, setFormMarkdown] = useState("");
 
   const isAdmin = identity?.roles.includes("Admin");
 
@@ -79,9 +67,8 @@ export default function AdminSignToFlyWording() {
       if (activeResult.status === "fulfilled") {
         const act = activeResult.value;
         setActive(act);
-        if (!formHtml && !formPlainText && act) {
-          setFormHtml(act.html);
-          setFormPlainText(act.plainText);
+        if (!formMarkdown && act) {
+          setFormMarkdown(act.markdown);
         }
       } else if (activeResult.reason instanceof ApiError && activeResult.reason.code === "WORDING_NOT_SEEDED") {
         setActive(null);
@@ -112,8 +99,8 @@ export default function AdminSignToFlyWording() {
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!formHtml.trim() || !formPlainText.trim()) {
-      setMsg("Both HTML and plain text are required.");
+    if (!formMarkdown.trim()) {
+      setMsg("Markdown content is required.");
       setMsgOk(false);
       return;
     }
@@ -126,8 +113,7 @@ export default function AdminSignToFlyWording() {
     setMsg(null);
     try {
       await api.post("manage/sign-to-fly/wording", {
-        html: formHtml,
-        plainText: formPlainText,
+        markdown: formMarkdown,
       });
       setMsg(`Version ${nextVersion} published successfully.`);
       setMsgOk(true);
@@ -152,6 +138,7 @@ export default function AdminSignToFlyWording() {
         <div style={{ border: "1px solid #dee2e6", borderRadius: "0.5rem", padding: "1rem" }}>
           <h2 style={{ fontSize: "1rem", margin: "0 0 1rem" }}>Currently active (version {active?.version ?? "none"})</h2>
           <div 
+            data-testid="active-preview"
             style={{ 
               background: "#f8f9fa", 
               padding: "1rem", 
@@ -159,8 +146,9 @@ export default function AdminSignToFlyWording() {
               border: "1px solid #e9ecef",
               fontSize: "0.9rem"
             }}
-            dangerouslySetInnerHTML={{ __html: active ? sanitizeWordingHtml(active.html) : "<em>No active wording</em>" }}
-          />
+          >
+            {active ? <MarkdownView markdown={active.markdown} /> : <em>No active wording</em>}
+          </div>
         </div>
 
         <div style={{ border: "1px solid #dee2e6", borderRadius: "0.5rem", padding: "1rem" }}>
@@ -199,18 +187,18 @@ export default function AdminSignToFlyWording() {
         
         <form onSubmit={(e) => { void handleSubmit(e); }}>
           <div style={{ marginBottom: "1rem" }}>
-            <label style={{ fontSize: "0.85rem", fontWeight: 600, display: "block", marginBottom: "0.25rem" }}>HTML Content</label>
+            <label style={{ fontSize: "0.85rem", fontWeight: 600, display: "block", marginBottom: "0.25rem" }}>Markdown Content</label>
             <p style={{ fontSize: "0.8rem", color: "#666", margin: "0 0 0.5rem 0" }}>Displayed to users during sign-to-fly.</p>
-            <textarea
-              style={inputStyle}
-              value={formHtml}
-              onChange={(e) => setFormHtml(e.target.value)}
+            <MarkdownEditor
+              value={formMarkdown}
+              onChange={(v) => setFormMarkdown(v ?? "")}
             />
           </div>
 
           <div style={{ marginBottom: "1.5rem" }}>
             <label style={{ fontSize: "0.85rem", fontWeight: 600, display: "block", marginBottom: "0.25rem" }}>Live preview</label>
             <div 
+              data-testid="live-preview"
               style={{ 
                 background: "#f8f9fa", 
                 padding: "1rem", 
@@ -218,18 +206,9 @@ export default function AdminSignToFlyWording() {
                 border: "1px solid #e9ecef",
                 fontSize: "0.9rem"
               }}
-              dangerouslySetInnerHTML={{ __html: sanitizeWordingHtml(formHtml) }}
-            />
-          </div>
-
-          <div style={{ marginBottom: "1.5rem" }}>
-            <label style={{ fontSize: "0.85rem", fontWeight: 600, display: "block", marginBottom: "0.25rem" }}>Plain Text Content</label>
-            <p style={{ fontSize: "0.8rem", color: "#666", margin: "0 0 0.5rem 0" }}>Fallback for emails or non-HTML clients.</p>
-            <textarea
-              style={inputStyle}
-              value={formPlainText}
-              onChange={(e) => setFormPlainText(e.target.value)}
-            />
+            >
+              <MarkdownView markdown={formMarkdown} />
+            </div>
           </div>
 
           <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>

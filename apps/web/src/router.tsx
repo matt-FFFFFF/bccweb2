@@ -11,7 +11,6 @@ import RoundDetail from "./pages/rounds/RoundDetail.js";
 import CreateRound from "./pages/rounds/CreateRound.js";
 import RoundManage from "./pages/rounds/RoundManage.js";
 import RoundBrief from "./pages/rounds/RoundBrief.js";
-import RoundBriefEdit from "./pages/rounds/RoundBriefEdit.js";
 import SignToFly from "./pages/rounds/SignToFly.js";
 import RegisterForRound from "./pages/rounds/RegisterForRound.js";
 import League from "./pages/results/League.js";
@@ -205,7 +204,6 @@ function RoutedContent() {
           <Route path="/rounds/:id/register" element={<RequireAuth><Page><RegisterForRound /></Page></RequireAuth>} />
           <Route path="/rounds/:id/manage" element={<RequireAuth><Page><RoundManage /></Page></RequireAuth>} />
           <Route path="/rounds/:id/brief" element={<RequireAuth><Page><RoundBrief /></Page></RequireAuth>} />
-          <Route path="/rounds/:id/brief/edit" element={<RequireAuth><Page><RoundBriefEdit /></Page></RequireAuth>} />
           <Route path="/rounds/:roundId/sign/:teamId/:place" element={<RequireAuth><Page><SignToFly /></Page></RequireAuth>} />
 
           {/* Results / League — public */}

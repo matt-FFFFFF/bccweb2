@@ -49,9 +49,9 @@ describe("admin sign-to-fly wording list endpoint", () => {
 });
 
 async function seedThreeVersions(): Promise<void> {
-  await addWordingVersion({ html: "<p>v1</p>", plainText: "v1", createdBy: "admin-list" });
-  await addWordingVersion({ html: "<p>v2</p>", plainText: "v2", createdBy: "admin-list" });
-  await addWordingVersion({ html: "<p>v3</p>", plainText: "v3", createdBy: "admin-list" });
+  await addWordingVersion({ markdown: "# v1", createdBy: "admin-list" });
+  await addWordingVersion({ markdown: "# v2", createdBy: "admin-list" });
+  await addWordingVersion({ markdown: "# v3", createdBy: "admin-list" });
 }
 
 async function invokeList() {

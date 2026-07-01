@@ -7,8 +7,7 @@ export const SignToFlyWordingSchema = z
   .object({
     version: z.number().int().min(1),
     hash: z.string().min(1),
-    html: z.string(),
-    plainText: z.string(),
+    markdown: z.string(),
     createdAt: z.string().min(1),
     createdBy: z.string().min(1),
     supersededAt: lenientOptional(z.string()),

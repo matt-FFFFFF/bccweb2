@@ -191,29 +191,29 @@ describe("BOLA A — cross-club round/team mutation", () => {
     expect(after?.teams.find((t) => t.id === "victim-team")?.pilots).toHaveLength(0);
   });
 
-  test("cross-club RoundsCoord cannot update a round narrative (403)", async () => {
+  test("cross-club RoundsCoord cannot edit a round's brief (403); organising coord can (200)", async () => {
     const { round, coordA, coordB } = await seedCrossClubRound();
 
     const denied = await invoke(
-      "updateNarrative",
+      "updateRoundBrief",
       authReq(coordA, {
-        method: "POST",
+        method: "PUT",
         params: { id: round.id },
-        body: { narrative: "hijacked" },
+        body: { airspaceAndHazards: "hijacked" },
       }),
     );
     expect(denied.status).toBe(403);
 
     const allowed = await invoke(
-      "updateNarrative",
+      "updateRoundBrief",
       authReq(coordB, {
-        method: "POST",
+        method: "PUT",
         params: { id: round.id },
-        body: { narrative: "legitimate update" },
+        body: { airspaceAndHazards: "legitimate update" },
       }),
     );
     expect(allowed.status).toBe(200);
-    expect((allowed.jsonBody as Round).narrative).toBe("legitimate update");
+    expect((allowed.jsonBody as RoundBrief).airspaceAndHazards).toBe("legitimate update");
   });
 });
 

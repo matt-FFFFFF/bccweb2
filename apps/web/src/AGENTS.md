@@ -29,7 +29,7 @@ unless genuinely shared — page-local state/effects live inside the page.
 lock), `blobClient.ts` (public reader behind `useBlob`), `sanitize.ts` (HTML sanitizer for
 sign-to-fly wording), `telemetry.ts` (PII redaction + RUM stub), `terms.ts` (T&Cs version).
 **All mutations go through `api.ts`** — except multipart upload (raw `fetch` + `FormData`,
-see `RoundBriefEdit.tsx`).
+see `RoundManage.tsx`).
 
 ## pages/ — route-aligned folders
 

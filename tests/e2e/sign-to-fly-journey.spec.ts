@@ -101,20 +101,25 @@ test.describe("sign-to-fly journey", () => {
     await page.getByRole("link", { name: /sign to fly/i }).click();
     await expect(page.getByRole("heading", { name: /sign to fly/i })).toBeVisible({ timeout: 5000 });
     
-    const summaryCard = page.getByTestId("briefing-summary");
-    await expect(summaryCard).toBeVisible();
-    await expect(summaryCard).toContainText("Briefing summary");
-    await expect(summaryCard).toContainText("Site Name: Milk Hill");
-    await expect(summaryCard).toContainText("Wind Speed/Direction: SW 10-15");
-    await expect(summaryCard).toContainText("Direction of Flight: North ridge");
-    await expect(summaryCard).toContainText("Expected Landing Area: Main bottom landing field");
-    await expect(summaryCard).toContainText("Airspace and Hazards: Avoid the village and power lines");
-    await expect(summaryCard).toContainText("NOTAMs: No active NOTAMs");
-    await expect(summaryCard).toContainText("BENO Line Description: Standard BENO line");
-    await expect(summaryCard).toContainText("Briefer Contact: Chief Briefer - 07700 900000");
-    await expect(summaryCard).toContainText("Frequency: 144.45 MHz");
-    await expect(summaryCard.getByRole("link", { name: /view full brief/i })).toBeVisible();
-    await expect(summaryCard.locator("img")).toHaveCount(2);
+    const briefCard = page.getByTestId("embedded-brief");
+    await expect(briefCard).toBeVisible();
+    await expect(briefCard).toContainText("Round Brief");
+    await expect(briefCard).toContainText("Milk Hill");
+    await expect(briefCard).toContainText("Site Information");
+    await expect(briefCard).toContainText("Safety Briefing");
+    await expect(briefCard).toContainText("SW 10-15");
+    await expect(briefCard).toContainText("North ridge");
+    await expect(briefCard).toContainText("Main bottom landing field");
+    await expect(briefCard).toContainText("Avoid the village and power lines");
+    await expect(briefCard).toContainText("No active NOTAMs");
+    await expect(briefCard).toContainText("Standard BENO line");
+    await expect(briefCard).toContainText("Chief Briefer");
+    await expect(briefCard).toContainText("07700 900000");
+    await expect(briefCard).toContainText("144.45 MHz");
+    await expect(briefCard).toContainText("Teams & Pilots");
+    await expect(briefCard).toContainText("Alpha A");
+    await expect(briefCard).toContainText("Pilot A");
+    await expect(briefCard.locator("img")).toHaveCount(2);
 
     await expect(page.getByRole("heading", { name: /legal acceptance text/i })).toBeVisible({ timeout: 5000 });
     await shot(page, "06-sign-to-fly-legal-text");
@@ -157,8 +162,8 @@ test.describe("sign-to-fly journey", () => {
 
   test("admin material brief edit invalidates existing signatures", async ({ page }) => {
     await login(page, "admin@example.test", PASSWORD, { skipGate: true, signedSlots: [1, 2] });
-    await page.goto(`/rounds/${ROUND_ID}/brief/edit`);
-    await expect(page.getByRole("heading", { name: /edit round brief/i })).toBeVisible({ timeout: 5000 });
+    await page.goto(`/rounds/${ROUND_ID}/manage`);
+    await expect(page.getByRole("button", { name: /save brief/i })).toBeVisible({ timeout: 5000 });
     await shot(page, "13-material-edit-form");
 
     await page.locator("label", { hasText: /notams/i }).locator("xpath=..").locator("textarea").fill("Material NOTAM update: airspace restriction active.");
@@ -182,8 +187,8 @@ test.describe("sign-to-fly journey", () => {
 
   test("admin cosmetic brief edit preserves existing signatures", async ({ page }) => {
     await login(page, "admin@example.test", PASSWORD, { skipGate: true, signedSlots: [1, 2] });
-    await page.goto(`/rounds/${ROUND_ID}/brief/edit`);
-    await expect(page.getByRole("heading", { name: /edit round brief/i })).toBeVisible({ timeout: 5000 });
+    await page.goto(`/rounds/${ROUND_ID}/manage`);
+    await expect(page.getByRole("button", { name: /save brief/i })).toBeVisible({ timeout: 5000 });
 
     await page.locator("section", { hasText: /^Briefer/ }).locator("label", { hasText: /^Phone$/i }).locator("xpath=..").locator("input").fill("07700 900123");
     await shot(page, "16-cosmetic-edit-form");
@@ -503,8 +508,7 @@ function createState(): E2EState {
     wording: {
       version: 1,
       hash: "mock-wording-hash",
-      html: "<h2>Legal acceptance text</h2><p>You confirm you have read the safety briefing and accept responsibility for your flight.</p>",
-      plainText: "Legal acceptance text",
+      markdown: "## Legal acceptance text\n\nYou confirm you have read the safety briefing and accept responsibility for your flight.",
       createdAt: new Date().toISOString(),
       createdBy: "e2e",
     },

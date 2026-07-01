@@ -1,14 +1,15 @@
 /**
  * End-to-end brief lifecycle integration test (Vitest, NOT real HTTP).
  *
- * Exercises the FULL brief journey via registered API handlers only — proves
- * T1 (confirmRound seeds a skeleton brief) + T2 (lockRound merges narrative
- * fields while refreshing derived fields) work together end-to-end.
+ * Exercises the FULL brief journey via registered API handlers: the brief is
+ * seeded at round-create, edited through PUT /brief (read-merge of the editable
+ * subset), frozen at brief-complete, signed against the frozen hash, then locked
+ * with derived teams refreshed.
  *
- * ZERO direct Blob SDK writes to `round-briefs/*` anywhere in this file:
- * every brief mutation MUST go through `confirmRound`, `updateRoundBrief`,
- * or `lockRound`. Other entities (users, pilots, clubs, sites, seasons,
- * wording) ARE seeded directly — they are not the subject of this test.
+ * Brief mutations go through `createRound`, `updateRoundBrief`,
+ * `briefCompleteRound`, or `lockRound`. The round (to stamp a lock-time snapshot
+ * the roster gate needs) plus other entities (users, pilots, clubs, sites,
+ * seasons, wording) ARE seeded directly.
  */
 
 import { createHash, randomUUID } from "node:crypto";
@@ -153,12 +154,11 @@ async function seedBaseEntities(): Promise<E2ECtx> {
   });
 
   // Sign-to-fly wording (signOwnSlot reads this).
-  const html = "<p>Sign to fly wording</p>";
+  const markdown = "Sign to fly wording";
   await writePrivateJson("sign-to-fly/wording/1.json", {
     version: 1,
-    hash: createHash("sha256").update(html, "utf8").digest("hex"),
-    html,
-    plainText: "Sign to fly wording",
+    hash: createHash("sha256").update(markdown, "utf8").digest("hex"),
+    markdown,
     createdAt: new Date().toISOString(),
     createdBy: "vitest",
   } satisfies SignToFlyWording);
@@ -193,11 +193,9 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
     vi.restoreAllMocks();
   });
 
-  test("create -> addTeam -> addPilot -> confirm -> readBrief -> putBriefNarrative -> briefComplete -> sign -> lock -> readBrief preserves narrative + refreshes derived", async () => {
-    // ─── Step 1: Setup (admin, club, site, season, pilot, wording) ──────────
+  test("create seeds brief -> PUT /brief edit -> brief-complete freezes -> sign -> lock refreshes derived", async () => {
     const base = await seedBaseEntities();
 
-    // ─── Step 2: Create round via API ───────────────────────────────────────
     const createRes = await invoke(
       "createRound",
       makeAuthRequest(base.adminUserId, base.adminEmail, {
@@ -213,10 +211,11 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
         },
       }),
     );
-    expect(createRes.status).toBe(201); // Assertion 1
+    expect(createRes.status).toBe(201);
     const roundId = (createRes.jsonBody as Round).id;
+    // Brief is seeded at round-create, not at confirm.
+    expect(await privateBlobExists(`round-briefs/${roundId}.json`)).toBe(true);
 
-    // ─── Step 3: Add team via API ───────────────────────────────────────────
     const addTeamRes = await invoke(
       "addTeam",
       makeAuthRequest(base.adminUserId, base.adminEmail, {
@@ -225,10 +224,9 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
         body: { clubId: base.clubId, teamName: "Alpha" },
       }),
     );
-    expect(addTeamRes.status).toBe(200); // Assertion 2
+    expect(addTeamRes.status).toBe(200);
     const teamId = ((addTeamRes.jsonBody as Round).teams[0]).id;
 
-    // ─── Step 4: Add pilot to slot via API ──────────────────────────────────
     const addPilotRes = await invoke(
       "addPilot",
       makeAuthRequest(base.adminUserId, base.adminEmail, {
@@ -237,9 +235,17 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
         body: { pilotId: base.pilotId, isScoring: true },
       }),
     );
-    expect(addPilotRes.status).toBe(200); // Assertion 3
+    expect(addPilotRes.status).toBe(200);
 
-    // ─── Step 5: Confirm round → T1 must seed a skeleton brief blob ─────────
+    // Filled slots need a snapshot to pass brief-complete's roster gate.
+    const roundForSnapshot = (await readPrivateJson<Round>(`rounds/${roundId}.json`))!;
+    for (const team of roundForSnapshot.teams) {
+      for (const slot of team.pilots) {
+        if (slot.status === "Filled" && slot.pilotId) slot.snapshot = { wingClass: "EN B", pilotRating: "Pilot" };
+      }
+    }
+    await writePrivateJson(`rounds/${roundId}.json`, roundForSnapshot);
+
     const confirmRes = await invoke(
       "confirmRound",
       makeAuthRequest(base.adminUserId, base.adminEmail, {
@@ -247,11 +253,9 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
         params: { id: roundId },
       }),
     );
-    expect(confirmRes.status).toBe(200); // Assertion 4
-    expect((confirmRes.jsonBody as Round).status).toBe("Confirmed"); // Assertion 5
-    expect(await privateBlobExists(`round-briefs/${roundId}.json`)).toBe(true); // Assertion 6 (T1)
+    expect(confirmRes.status).toBe(200);
+    expect((confirmRes.jsonBody as Round).status).toBe("Confirmed");
 
-    // ─── Step 6: Read brief — has teams populated, no narrative ─────────────
     const getRes1 = await invoke(
       "getRoundBrief",
       makeAuthRequest(base.adminUserId, base.adminEmail, {
@@ -259,29 +263,27 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
         params: { id: roundId },
       }),
     );
-    expect(getRes1.status).toBe(200); // Assertion 7
+    expect(getRes1.status).toBe(200);
     const brief1 = getRes1.jsonBody as RoundBrief;
-    expect(brief1.teams).toHaveLength(1); // Assertion 8 (team rendered)
-    expect(brief1.airspaceAndHazards).toBeUndefined(); // Assertion 9 (skeleton has no narrative)
+    expect(brief1.briefingTime).toBe("10:00");
+    expect(brief1.hash).toBeUndefined();
+    expect(brief1.airspaceAndHazards).toBeUndefined();
 
-    // ─── Step 7: PUT brief with narrative fields ────────────────────────────
-    const briefWithNarrative: RoundBrief = {
-      ...brief1,
-      airspaceAndHazards: "E2E test airspace",
-      briefersNotes: "E2E briefer notes",
-      briefer: { name: "E2E Briefer" },
-    };
     const putRes = await invoke(
       "updateRoundBrief",
       makeAuthRequest(base.adminUserId, base.adminEmail, {
         method: "PUT",
         params: { id: roundId },
-        body: briefWithNarrative,
+        body: {
+          airspaceAndHazards: "E2E test airspace",
+          briefersNotes: "E2E briefer notes",
+          briefer: { name: "E2E Briefer" },
+        },
       }),
     );
-    expect(putRes.status).toBe(200); // Assertion 10
+    expect(putRes.status).toBe(200);
+    expect((putRes.jsonBody as RoundBrief).airspaceAndHazards).toBe("E2E test airspace");
 
-    // ─── Step 8: Brief-complete the round ───────────────────────────────────
     const briefCompleteRes = await invoke(
       "briefCompleteRound",
       makeAuthRequest(base.adminUserId, base.adminEmail, {
@@ -289,10 +291,12 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
         params: { id: roundId },
       }),
     );
-    expect(briefCompleteRes.status).toBe(200); // Assertion 11
-    expect((briefCompleteRes.jsonBody as Round).status).toBe("BriefComplete"); // Assertion 12
+    expect(briefCompleteRes.status).toBe(200);
+    expect((briefCompleteRes.jsonBody as Round).status).toBe("BriefComplete");
+    const frozenBrief = (await readPrivateJson<RoundBrief>(`round-briefs/${roundId}.json`))!;
+    expect(frozenBrief.hash).toBeTruthy();
+    expect(frozenBrief.teams).toHaveLength(1);
 
-    // ─── Step 9: Pilot signs own slot ───────────────────────────────────────
     const signRes = await invoke(
       "signOwnSlot",
       makeAuthRequest(base.pilotUserId, base.pilotEmail, {
@@ -304,11 +308,10 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
         },
       }),
     );
-    expect(signRes.status).toBe(201); // Assertion 13
+    expect(signRes.status).toBe(201);
     const roundAfterSign = await readPrivateJson<Round>(`rounds/${roundId}.json`);
-    expect(roundAfterSign?.teams[0]?.pilots[0]?.signToFly).toBe(true); // Assertion 14
+    expect(roundAfterSign?.teams[0]?.pilots[0]?.signToFly).toBe(true);
 
-    // ─── Step 10: Lock round → T2 must preserve narrative + refresh derived ─
     const lockRes = await invoke(
       "lockRound",
       makeAuthRequest(base.adminUserId, base.adminEmail, {
@@ -316,11 +319,9 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
         params: { id: roundId },
       }),
     );
-    expect(lockRes.status).toBe(200); // Assertion 15
-    const lockedRound = await readPrivateJson<Round>(`rounds/${roundId}.json`);
-    expect(lockedRound?.status).toBe("Locked"); // Assertion 16
+    expect(lockRes.status).toBe(200);
+    expect((await readPrivateJson<Round>(`rounds/${roundId}.json`))?.status).toBe("Locked");
 
-    // ─── Step 11: Read brief again → narrative preserved, derived refreshed ─
     const getRes2 = await invoke(
       "getRoundBrief",
       makeAuthRequest(base.adminUserId, base.adminEmail, {
@@ -328,14 +329,12 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
         params: { id: roundId },
       }),
     );
-    expect(getRes2.status).toBe(200); // Assertion 17
+    expect(getRes2.status).toBe(200);
     const brief2 = getRes2.jsonBody as RoundBrief;
-    // T2 preservation: narrative survived the lock-time merge.
-    expect(brief2.airspaceAndHazards).toBe("E2E test airspace"); // Assertion 18
-    expect(brief2.briefersNotes).toBe("E2E briefer notes"); // Assertion 19
-    // T2 refresh: derived team/pilot fields are rebuilt from the live round
-    // (lock-time snapshots are populated on slot pilots).
-    expect(brief2.teams).toHaveLength(1); // Assertion 20
-    expect(brief2.teams[0]?.pilots?.[0]?.snapshot).toBeTruthy(); // Assertion 21
+    // Edits preserved across brief-complete + lock; derived teams rebuilt.
+    expect(brief2.airspaceAndHazards).toBe("E2E test airspace");
+    expect(brief2.briefersNotes).toBe("E2E briefer notes");
+    expect(brief2.teams).toHaveLength(1);
+    expect(brief2.teams[0]?.pilots?.[0]?.snapshot).toBeTruthy();
   });
 });

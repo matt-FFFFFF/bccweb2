@@ -412,6 +412,35 @@ async function withLeaseRenewingOnClient<T>(
   }
 }
 
+// ─── withRoundAndBriefLease ─────────────────────────────────────────────────
+
+/**
+ * Acquire BOTH the round lease and its brief lease for an atomic cross-blob
+ * read-modify-write, in a FIXED order to prevent deadlock: the ROUND lease
+ * (`rounds/{id}.json`) is taken FIRST, THEN the BRIEF lease
+ * (`round-briefs/{id}.json`); on completion they release in reverse order
+ * (brief, then round) via the nested `finally`s. Both are private 30s leases
+ * that RETRY on 409/412 contention, so two concurrent cross-blob edits serialize
+ * and both succeed rather than one failing. `fn` receives
+ * `(roundLeaseId, briefLeaseId)`.
+ *
+ * The brief blob MUST already exist — you cannot lease a missing blob, so the
+ * caller create-or-skips it (`writePrivateBlob(..., { ifNoneMatch: "*" })`)
+ * BEFORE calling this. This is the single cross-blob lease primitive the brief
+ * edit / brief-complete / signature flows route through, so the round→brief
+ * ordering is defined in exactly one place.
+ */
+export async function withRoundAndBriefLease<T>(
+  roundId: string,
+  fn: (roundLeaseId: string, briefLeaseId: string) => Promise<T>
+): Promise<T> {
+  return withPrivateLeaseRetry(`rounds/${roundId}.json`, (roundLeaseId) =>
+    withPrivateLeaseRetry(`round-briefs/${roundId}.json`, (briefLeaseId) =>
+      fn(roundLeaseId, briefLeaseId)
+    )
+  );
+}
+
 function trackLeaseTrace(
   message: string,
   properties: Record<string, unknown>

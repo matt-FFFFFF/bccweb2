@@ -12,6 +12,12 @@ these by name; this file is the **cheat sheet** so you don't re-read the source.
 - `withLease` / `withPrivateLease(path, fn)` — 30s lease, passes `leaseId`, best-effort release.
 - `...LeaseRetry(...)` retries 409/412 conflicts; `...LeaseRenewing(...)` for long work →
   throws `LeaseRenewalFailedError` if renew fails.
+- `withRoundAndBriefLease(roundId, fn)` — the cross-blob primitive: acquires the ROUND lease
+  (`rounds/{id}.json`) THEN the BRIEF lease (`round-briefs/{id}.json`) in that FIXED order
+  (deadlock-free), runs `fn(roundLeaseId, briefLeaseId)`, releases brief-then-round. Both are
+  30s leases that retry on 409/412 contention so concurrent cross-blob edits serialize. The
+  brief blob must already exist — create-or-skip it (`writePrivateBlob(..., {ifNoneMatch:"*"})`)
+  first. Route every brief edit / brief-complete / signature cross-blob RMW through this.
 - `resetBlobSingletons()` — **test-only**; clears cached service/container clients.
 - Gotcha: release failure is telemetry-only; the fn's result/error wins.
 
