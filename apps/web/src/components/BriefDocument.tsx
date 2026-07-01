@@ -1,6 +1,7 @@
 import { Link } from "react-router";
 import { MarkdownView } from "./MarkdownView.js";
 import { BriefImages } from "./BriefImages.js";
+import { coachLabel } from "../lib/coach.js";
 import type {
   RoundBrief as RoundBriefType,
   BriefTeamEntry,
@@ -266,7 +267,7 @@ function SafetyBriefingSection({ brief }: { brief: RoundBriefType }) {
         }}
       >
         <div><span style={labelStyle}>Name</span>{displayValue(brief.briefer?.name)}</div>
-        <div><span style={labelStyle}>BHPA Coach Level</span>{displayValue(brief.briefer?.bhpaCoachLevel)}</div>
+        <div><span style={labelStyle}>BHPA Coach Level</span>{displayValue(brief.briefer?.bhpaCoachLevel ? coachLabel[brief.briefer.bhpaCoachLevel] : undefined)}</div>
         <div><span style={labelStyle}>BHPA Number</span>{displayValue(brief.briefer?.bhpaNumber)}</div>
         <div><span style={labelStyle}>Phone</span>{displayValue(brief.briefer?.phoneNumber)}</div>
         <div><span style={labelStyle}>Email</span>{displayValue(brief.briefer?.emailAddress)}</div>

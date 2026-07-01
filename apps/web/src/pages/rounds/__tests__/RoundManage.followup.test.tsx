@@ -123,7 +123,7 @@ describe("RoundManage follow-up fixes", () => {
     expect(screen.getByDisplayValue("07123456789")).toBeInTheDocument();
     expect(screen.getByDisplayValue("4242")).toBeInTheDocument();
     expect(screen.getByDisplayValue("carl@bcc.test")).toBeInTheDocument();
-    expect((screen.getByDisplayValue("Senior Coach") as HTMLSelectElement).value).toBe("Senior Coach");
+    expect((screen.getByDisplayValue("Senior Coach") as HTMLSelectElement).value).toBe("SeniorCoach");
   });
 
   it("does NOT overwrite an existing briefer", async () => {
@@ -189,6 +189,13 @@ describe("RoundManage follow-up fixes", () => {
     await screen.findByText("Alpha");
     expect(screen.queryByRole("button", { name: "+ Flight" })).not.toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit Flight" })).not.toBeInTheDocument();
+  });
+
+  it("keeps the Acct toggle but removes the S2F toggle at Locked", async () => {
+    state.round = makeRound({ status: "Locked", isLocked: true, teams: [makeTeam()] });
+    renderPage();
+    expect(await screen.findByRole("button", { name: "Acct" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "S2F" })).not.toBeInTheDocument();
   });
 });
 

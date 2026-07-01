@@ -53,7 +53,7 @@ describe("brief PDF safety fields", () => {
     const html = renderBriefPdfHtml(brief({
       briefer: {
         name: "Alex Briefer",
-        bhpaCoachLevel: "Senior Coach",
+        bhpaCoachLevel: "SeniorCoach",
         phoneNumber: "07123 456789",
         emailAddress: "alex@example.com",
       },

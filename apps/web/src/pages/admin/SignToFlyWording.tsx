@@ -192,6 +192,7 @@ export default function AdminSignToFlyWording() {
             <MarkdownEditor
               value={formMarkdown}
               onChange={(v) => setFormMarkdown(v ?? "")}
+              preview="edit"
             />
           </div>
 

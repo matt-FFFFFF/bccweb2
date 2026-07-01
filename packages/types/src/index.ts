@@ -2,12 +2,22 @@
 
 export type UserRole = "Admin" | "RoundsCoord" | "Pilot";
 
-export type CoachType =
-  | "None"
-  | "ClubCoach"
-  | "SeniorCoach"
-  | "Instructor"
-  | "SeniorInstructor";
+export const COACH_TYPES = [
+  "None",
+  "ClubCoach",
+  "SeniorCoach",
+  "Instructor",
+  "SeniorInstructor",
+] as const;
+export type CoachType = (typeof COACH_TYPES)[number];
+
+export const COACH_TYPE_LABELS: Record<CoachType, string> = {
+  None: "Not a coach",
+  ClubCoach: "Club Coach",
+  SeniorCoach: "Senior Coach",
+  Instructor: "Instructor",
+  SeniorInstructor: "Senior Instructor",
+};
 
 export type PilotRatingValue =
   | "Club Pilot"
@@ -467,7 +477,7 @@ export interface RoundBrief {
   frequencyMhz?: number;
   briefer?: {
     name?: string;
-    bhpaCoachLevel?: string;
+    bhpaCoachLevel?: CoachType;
     bhpaNumber?: string;
     phoneNumber?: string;
     emailAddress?: string;

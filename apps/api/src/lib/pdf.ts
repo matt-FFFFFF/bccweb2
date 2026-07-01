@@ -16,6 +16,7 @@ import Handlebars from "handlebars";
 import { marked } from "marked";
 import DOMPurify from "isomorphic-dompurify";
 import type { RoundBrief } from "@bccweb/types";
+import { COACH_TYPE_LABELS } from "@bccweb/types";
 
 // ─── Handlebars helpers ───────────────────────────────────────────────────────
 
@@ -23,6 +24,12 @@ Handlebars.registerHelper("or", (a: unknown, b: unknown) => a || b);
 Handlebars.registerHelper("default", (value: unknown) => {
   if (typeof value === "string" && value.trim().length > 0) return value;
   if (value != null && typeof value !== "string") return value;
+  return "Not provided";
+});
+Handlebars.registerHelper("coachLevel", (value: unknown) => {
+  if (typeof value === "string" && value in COACH_TYPE_LABELS) {
+    return COACH_TYPE_LABELS[value as keyof typeof COACH_TYPE_LABELS];
+  }
   return "Not provided";
 });
 Handlebars.registerHelper("formatDate", (iso: string) => {
@@ -196,7 +203,7 @@ const TEMPLATE_SRC = `<!DOCTYPE html>
 </div>
 <div class="info-grid" style="margin-top: 0.65rem;">
   <div class="info-item"><label>Briefer</label>{{default briefer.name}}</div>
-  <div class="info-item"><label>BHPA Coach Level</label>{{default briefer.bhpaCoachLevel}}</div>
+  <div class="info-item"><label>BHPA Coach Level</label>{{coachLevel briefer.bhpaCoachLevel}}</div>
   <div class="info-item"><label>BHPA Number</label>{{default briefer.bhpaNumber}}</div>
   <div class="info-item"><label>Phone</label>{{default briefer.phoneNumber}}</div>
   <div class="info-item"><label>Email</label>{{default briefer.emailAddress}}</div>
