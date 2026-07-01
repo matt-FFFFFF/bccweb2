@@ -221,6 +221,23 @@ describe("updateAccounted — who can mark a pilot accounted for", () => {
     expect((res.jsonBody as { code: string }).code).toBe("INVALID_BODY");
   });
 
+  it("non-numeric place -> 400 INVALID_PLACE (not a misleading 404)", async () => {
+    const ctx = await seedRound();
+    const { user } = await makeUser({ roles: ["Admin"] });
+
+    const res = await invoke(
+      "updateAccounted",
+      makeAuthRequest(user.id, user.email, {
+        method: "PUT",
+        params: { id: ctx.roundId, teamId: ctx.team1Id, place: "abc" },
+        body: { accountedFor: true },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect((res.jsonBody as { code: string }).code).toBe("INVALID_PLACE");
+  });
+
   it("round not Locked -> 409 (accounted-for is Locked-only)", async () => {
     const ctx = await seedRound("Confirmed");
     const { user } = await makeUser({ roles: ["Admin"] });

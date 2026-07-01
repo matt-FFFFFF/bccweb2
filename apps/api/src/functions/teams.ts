@@ -356,6 +356,9 @@ async function updateAccounted(
   }
 
   const placeNum = parseInt(place, 10);
+  if (!Number.isInteger(placeNum)) {
+    throw new HttpError(400, "INVALID_PLACE", "place must be a number");
+  }
 
   const authorizeSlot = (r: Round): void => {
     const team = r.teams.find((t) => t.id === teamId);

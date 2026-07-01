@@ -118,7 +118,7 @@ export function assertCanAccountForSlot(
     throw new HttpError(
       403,
       "FORBIDDEN",
-      "You can only account for your own slot, or your team's members as captain",
+      "Only an admin, the organising club's coordinator, the team captain, or the pilot themselves can mark this slot accounted for",
     );
   }
 }

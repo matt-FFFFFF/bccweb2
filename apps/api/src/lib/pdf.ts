@@ -27,7 +27,7 @@ Handlebars.registerHelper("default", (value: unknown) => {
   return "Not provided";
 });
 Handlebars.registerHelper("coachLevel", (value: unknown) => {
-  if (typeof value === "string" && value in COACH_TYPE_LABELS) {
+  if (typeof value === "string" && Object.prototype.hasOwnProperty.call(COACH_TYPE_LABELS, value)) {
     return COACH_TYPE_LABELS[value as keyof typeof COACH_TYPE_LABELS];
   }
   return "Not provided";
