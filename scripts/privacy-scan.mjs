@@ -17,14 +17,31 @@
 import RE2 from "re2";
 import { readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 import { findPiiInObject, PII_FIELDS } from "./lib/pii.mjs";
 
+const require = createRequire(import.meta.url);
+const scriptDir = fileURLToPath(new URL(".", import.meta.url));
 let BlobServiceClient;
-try {
-  ({ BlobServiceClient } = await import("@azure/storage-blob"));
-} catch {
-  ({ BlobServiceClient } = await import("../apps/api/node_modules/@azure/storage-blob"));
+let lastBlobImportError;
+for (const base of [process.cwd(), resolve(scriptDir, "../apps/api")]) {
+  try {
+    const resolved = require.resolve("@azure/storage-blob", { paths: [base] });
+    ({ BlobServiceClient } = await import(pathToFileURL(resolved).href));
+    break;
+  } catch (err) {
+    lastBlobImportError = err;
+  }
+}
+if (!BlobServiceClient) {
+  throw new Error(
+    `Cannot load @azure/storage-blob from this workspace. Tried ${process.cwd()} and ${resolve(
+      scriptDir,
+      "../apps/api"
+    )}. Last error: ${lastBlobImportError?.message ?? "unknown"}`
+  );
 }
 
 // ─── CLI args ─────────────────────────────────────────────────────────────────
