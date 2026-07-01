@@ -56,26 +56,22 @@ describe("ConfigSchema", () => {
     }
   });
 
-  test("legacy alternate wingClass enum keys are healed via preprocess", () => {
-    expect(
-      ConfigSchema.parse({
-        wingFactors: {
-          EN_A: 1.1,
-          EN_B: 1.0,
-          EN_C: 0.9,
-          EN_C_2_LINER: 0.8,
-          EN_D: 0.7,
-          EN_D_2_LINER: 0.6,
-        },
-      }).wingFactors,
-    ).toEqual({
-      "EN A": 1.1,
-      "EN B": 1.0,
-      "EN C": 0.9,
-      "EN C 2-liner": 0.8,
-      "EN D": 0.7,
-      "EN D 2-liner": 0.6,
+  test("legacy alternate wingClass enum keys are no longer normalized (rejected in strict mode)", () => {
+    const result = ConfigSchema.safeParse({
+      wingFactors: {
+        EN_A: 1.1,
+        EN_B: 1.0,
+        EN_C: 0.9,
+        EN_C_2_LINER: 0.8,
+        EN_D: 0.7,
+        EN_D_2_LINER: 0.6,
+      },
     });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0]?.path).toEqual(["wingFactors"]);
+    }
   });
 
   test("identity fields missing throw instead of healing", () => {

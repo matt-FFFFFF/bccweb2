@@ -112,7 +112,7 @@ describe("BriefPilotEntrySchema", () => {
     expect(parsed.pureTrackId).toBe(42);
   });
 
-  test("heals snapshot enum aliases and default scoring flag", () => {
+  test("heals invalid snapshot enums to defaults (no aliases) and default scoring flag", () => {
     const { isScoring: _isScoring, ...withoutScoring } = validPilot;
     const parsed = BriefPilotEntrySchema.parse({
       ...withoutScoring,
@@ -124,8 +124,8 @@ describe("BriefPilotEntrySchema", () => {
     });
 
     expect(parsed.isScoring).toBe(false);
-    expect(parsed.snapshot.wingClass).toBe("EN C 2-liner");
-    expect(parsed.snapshot.pilotRating).toBe("Advanced Pilot");
+    expect(parsed.snapshot.wingClass).toBe("EN A");
+    expect(parsed.snapshot.pilotRating).toBe("Pilot");
   });
 });
 

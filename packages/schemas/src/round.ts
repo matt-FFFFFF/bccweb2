@@ -1,7 +1,6 @@
 import type {
   ClubRef,
   Flight,
-  PilotRatingValue,
   PilotSlot,
   PilotSlotStatus,
   PilotSnapshot,
@@ -11,7 +10,6 @@ import type {
   ScoringType,
   SiteRef,
   Team,
-  WingClass,
 } from "@bccweb/types";
 import {
   PILOT_RATINGS,
@@ -66,27 +64,6 @@ const scoringTypeAliases = {
   manual: "Manual",
 } as const satisfies Record<string, ScoringType>;
 
-const pilotRatingAliases = {
-  clubPilot: "Club Pilot",
-  club_pilot: "Club Pilot",
-  ClubPilot: "Club Pilot",
-  pilot: "Pilot",
-  advancedPilot: "Advanced Pilot",
-  advanced_pilot: "Advanced Pilot",
-  AdvancedPilot: "Advanced Pilot",
-} as const satisfies Record<string, PilotRatingValue>;
-
-const wingClassAliases = {
-  EN_A: "EN A",
-  EN_B: "EN B",
-  EN_C: "EN C",
-  EN_C_2_LINER: "EN C 2-liner",
-  EN_D: "EN D",
-  EN_D_2_LINER: "EN D 2-liner",
-  ENC2Liner: "EN C 2-liner",
-  END2Liner: "EN D 2-liner",
-} as const satisfies Record<string, WingClass>;
-
 const ClubRefSchema = z
   .object({
     id: z.string().min(1),
@@ -125,15 +102,9 @@ export const ScoringTypeSchema = z.preprocess(
   z.enum(scoringTypeValues).catch("XC"),
 );
 
-const PilotRatingSchema = z.preprocess(
-  normalizeEnum(PILOT_RATINGS, pilotRatingAliases),
-  z.enum(PILOT_RATINGS),
-);
+const PilotRatingSchema = z.enum(PILOT_RATINGS);
 
-const WingClassSchema = z.preprocess(
-  normalizeEnum(WING_CLASSES, wingClassAliases),
-  z.enum(WING_CLASSES),
-);
+const WingClassSchema = z.enum(WING_CLASSES);
 
 RoundStatusSchema satisfies z.ZodType<RoundStatus>;
 PilotSlotStatusSchema satisfies z.ZodType<PilotSlotStatus>;
