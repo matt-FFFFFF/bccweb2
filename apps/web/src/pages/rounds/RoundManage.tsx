@@ -1227,14 +1227,16 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
       if (editable && !loaded.briefer?.name && identity?.pilotId) {
         try {
           const me = await api.get<Pilot>(`pilots/${identity.pilotId}`);
+          const existing = loaded.briefer ?? {};
           loaded = {
             ...loaded,
             briefer: {
-              name: me.person?.fullName || undefined,
-              bhpaCoachLevel: me.coachType !== "None" ? me.coachType : undefined,
-              bhpaNumber: me.bhpaNumber != null ? String(me.bhpaNumber) : undefined,
-              phoneNumber: me.person?.phoneNumber || undefined,
-              emailAddress: identity.email || undefined,
+              ...existing,
+              name: existing.name || me.person?.fullName || undefined,
+              bhpaCoachLevel: existing.bhpaCoachLevel ?? (me.coachType !== "None" ? me.coachType : undefined),
+              bhpaNumber: existing.bhpaNumber ?? (me.bhpaNumber != null ? String(me.bhpaNumber) : undefined),
+              phoneNumber: existing.phoneNumber || me.person?.phoneNumber || undefined,
+              emailAddress: existing.emailAddress || identity.email || undefined,
             },
           };
         } catch {
