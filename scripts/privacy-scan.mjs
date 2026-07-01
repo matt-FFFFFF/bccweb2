@@ -24,9 +24,10 @@ import { findPiiInObject, PII_FIELDS } from "./lib/pii.mjs";
 
 const require = createRequire(import.meta.url);
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
+const blobResolveBases = [process.cwd(), resolve(scriptDir, "../apps/api")];
 let BlobServiceClient;
 let lastBlobImportError;
-for (const base of [process.cwd(), resolve(scriptDir, "../apps/api")]) {
+for (const base of blobResolveBases) {
   try {
     const resolved = require.resolve("@azure/storage-blob", { paths: [base] });
     ({ BlobServiceClient } = await import(pathToFileURL(resolved).href));
@@ -37,10 +38,7 @@ for (const base of [process.cwd(), resolve(scriptDir, "../apps/api")]) {
 }
 if (!BlobServiceClient) {
   throw new Error(
-    `Cannot load @azure/storage-blob from this workspace. Tried ${process.cwd()} and ${resolve(
-      scriptDir,
-      "../apps/api"
-    )}. Last error: ${lastBlobImportError?.message ?? "unknown"}`
+    `Cannot load @azure/storage-blob from this workspace. Tried ${blobResolveBases.join(" and ")}. Last error: ${lastBlobImportError?.message ?? "unknown"}`
   );
 }
 
