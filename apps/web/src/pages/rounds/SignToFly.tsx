@@ -1,9 +1,9 @@
 import { useState, useEffect } from "react";
 import { useParams, Link } from "react-router";
 import { api, ApiError } from "../../lib/api.js";
-import { sanitizeWordingHtml } from "../../lib/sanitize.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
 import { BriefImages } from "../../components/BriefImages.js";
+import { MarkdownView } from "../../components/MarkdownView.js";
 import type { SignToFlyWording, Round, RoundBrief } from "@bccweb/types";
 
 export default function SignToFly() {
@@ -124,8 +124,6 @@ export default function SignToFly() {
     );
   }
 
-  const sanitizedHtml = sanitizeWordingHtml(wording.html);
-
   const hasContent = Boolean(
     brief.siteName || 
     brief.briefingTime || 
@@ -190,7 +188,9 @@ export default function SignToFly() {
         </div>
       )}
 
-      <div style={{ marginBottom: "2rem", lineHeight: 1.6, color: "#333" }} dangerouslySetInnerHTML={{ __html: sanitizedHtml }} />
+      <div style={{ marginBottom: "2rem", lineHeight: 1.6, color: "#333" }}>
+        <MarkdownView markdown={wording.markdown} />
+      </div>
 
       <div style={{ background: "#fff", border: "2px solid #e9ecef", borderRadius: "0.5rem", padding: "1.5rem" }}>
         <label style={{ display: "flex", alignItems: "flex-start", gap: "0.75rem", cursor: "pointer" }}>
