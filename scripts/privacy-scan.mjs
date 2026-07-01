@@ -24,6 +24,8 @@ import { findPiiInObject, PII_FIELDS } from "./lib/pii.mjs";
 
 const require = createRequire(import.meta.url);
 const scriptDir = fileURLToPath(new URL(".", import.meta.url));
+// Privacy scan runs from repo root in CI; this fallback resolves api workspace deps
+// when npm keeps them nested rather than hoisting to root node_modules.
 const blobResolveBases = [process.cwd(), resolve(scriptDir, "../apps/api")];
 let BlobServiceClient;
 let lastBlobImportError;
@@ -38,7 +40,7 @@ for (const base of blobResolveBases) {
 }
 if (!BlobServiceClient) {
   throw new Error(
-    `Cannot load @azure/storage-blob from this workspace. Tried ${blobResolveBases.join(" and ")}. Last error: ${lastBlobImportError?.message ?? "unknown"}`
+    `Cannot load @azure/storage-blob from this workspace. Tried ${blobResolveBases.join(" and ")}. Last error: ${lastBlobImportError?.message ?? "unknown"}. Run npm ci from the repository root and ensure apps/api dependencies are installed.`
   );
 }
 
