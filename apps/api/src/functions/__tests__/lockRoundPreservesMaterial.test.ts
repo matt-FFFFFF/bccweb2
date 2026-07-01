@@ -304,7 +304,7 @@ describe("lockRound preserves the frozen material hash while refreshing teams (T
       buildBrief(ctx, {
         briefersNotes: "Authored briefer notes",
         briefingTime: "09:30",
-        briefer: { name: "Alice", bhpaCoachLevel: "Senior" },
+        briefer: { name: "Alice", bhpaCoachLevel: "SeniorCoach" },
       }),
     );
     const frozenHash = brief.hash!;
@@ -318,7 +318,7 @@ describe("lockRound preserves the frozen material hash while refreshing teams (T
     expect(after.briefersNotes).toBe("Authored briefer notes");
     expect(after.briefingTime).toBe("09:30");
     // Cosmetic briefer survives.
-    expect(after.briefer).toEqual({ name: "Alice", bhpaCoachLevel: "Senior" });
+    expect(after.briefer).toEqual({ name: "Alice", bhpaCoachLevel: "SeniorCoach" });
     // The frozen hash is byte-stable AND still consistent with the material.
     expect(after.hash).toBe(frozenHash);
     expect(computeBriefHash(after)).toBe(after.hash);
