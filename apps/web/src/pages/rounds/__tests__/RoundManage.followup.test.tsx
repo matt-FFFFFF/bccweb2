@@ -219,6 +219,31 @@ describe("RoundManage follow-up fixes", () => {
     expect(screen.queryByRole("button", { name: "+ Add Pilot" })).not.toBeInTheDocument();
     expect(screen.queryByRole("option", { name: "— none —" })).not.toBeInTheDocument();
   });
+
+  // ─── Cancel / uncancel round journey ──────────────────────────────────────────
+
+  it.each(["Proposed", "Confirmed"] as const)(
+    "offers Cancel Round at %s",
+    async (status) => {
+      state.round = makeRound({ status });
+      renderPage();
+      expect(await screen.findByRole("button", { name: "Cancel Round" })).toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Uncancel" })).not.toBeInTheDocument();
+    },
+  );
+
+  it("at Cancelled: offers Uncancel, hides Cancel + edit forms, shows the cancelled notice", async () => {
+    state.round = makeRound({ status: "Cancelled", teams: [makeTeam()] });
+    renderPage();
+    await screen.findByText("Alpha");
+    expect(screen.getByRole("button", { name: "Uncancel" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Cancel Round" })).not.toBeInTheDocument();
+    expect(screen.getByText(/No changes can be made/i)).toBeInTheDocument();
+    expect(screen.getByText(/Uncancel it to edit/i)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Save Brief" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Add Team" })).not.toBeInTheDocument();
+  });
 });
 
 function renderPage() {

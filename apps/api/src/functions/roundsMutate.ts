@@ -353,6 +353,10 @@ async function updateRound(
         throw new HttpError(500, "INTERNAL");
       }
 
+      if (r.status === "Cancelled") {
+        throw new HttpError(409, "ROUND_CANCELLED", "Round is cancelled — uncancel before editing");
+      }
+
       if (body.date) r.date = body.date;
       if (body.maxTeams !== undefined) r.maxTeams = body.maxTeams;
       if (body.minimumScore !== undefined) r.minimumScore = body.minimumScore;
@@ -1270,6 +1274,57 @@ async function unlockRound(
   return { status: 200, jsonBody: result };
 }
 
+// ─── POST /api/rounds/{id}/cancel ─────────────────────────────────────────────
+
+/**
+ * Proposed | Confirmed → Cancelled. A cancelled round accepts no field edits;
+ * updateRoundsIndex republishes the Cancelled status to the public rounds blob.
+ */
+async function cancelRound(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const id = req.params["id"];
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
+
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isCoord(caller.roles)) return forbiddenResponse();
+  await assertManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "cancelRound", "standard");
+
+  const result = await transition(req, id, ["Proposed", "Confirmed"], "Cancelled");
+  if ("status" in result && "jsonBody" in result) return result;
+  const updated = result as Round;
+  await updateRoundsIndex(updated);
+  return { status: 200, jsonBody: updated };
+}
+
+// ─── POST /api/rounds/{id}/uncancel ───────────────────────────────────────────
+
+/**
+ * Cancelled → Proposed. Republishes the restored status to the public blob.
+ */
+async function uncancelRound(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const id = req.params["id"];
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
+
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isCoord(caller.roles)) return forbiddenResponse();
+  await assertManageableRound(caller, id);
+  await mutationRateLimit(req, caller, "uncancelRound", "standard");
+
+  const result = await transition(req, id, ["Cancelled"], "Proposed");
+  if ("status" in result && "jsonBody" in result) return result;
+  const updated = result as Round;
+  await updateRoundsIndex(updated);
+  return { status: 200, jsonBody: updated };
+}
+
 // ─── POST /api/rounds/{id}/complete ───────────────────────────────────────────
 /**
  * Locked → Complete.
@@ -1406,6 +1461,20 @@ app.http("unlockRound", {
   authLevel: "anonymous",
   route: "rounds/{id}/unlock",
   handler: withErrorHandler(unlockRound),
+});
+
+app.http("cancelRound", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "rounds/{id}/cancel",
+  handler: withErrorHandler(cancelRound),
+});
+
+app.http("uncancelRound", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "rounds/{id}/uncancel",
+  handler: withErrorHandler(uncancelRound),
 });
 
 app.http("completeRound", {
