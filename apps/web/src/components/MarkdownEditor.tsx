@@ -1,14 +1,14 @@
 import React, { Suspense } from "react";
 import rehypeSanitize from "rehype-sanitize";
+import type { MDEditorProps } from "@uiw/react-md-editor";
 
 // Lazy load the editor
 const MDEditor = React.lazy(() => import("@uiw/react-md-editor"));
 
-interface MarkdownEditorProps {
+export type MarkdownEditorProps = Omit<MDEditorProps, "value" | "onChange"> & {
   value: string;
   onChange: (value?: string) => void;
-  [key: string]: any;
-}
+};
 
 export function MarkdownEditor({ value, onChange, ...props }: MarkdownEditorProps) {
   return (
@@ -18,7 +18,6 @@ export function MarkdownEditor({ value, onChange, ...props }: MarkdownEditorProp
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder="Loading editor..."
-          {...props}
         />
         <span>Loading...</span>
       </div>

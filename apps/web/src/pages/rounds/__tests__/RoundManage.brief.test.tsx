@@ -1,14 +1,14 @@
 import "../../../__tests__/setup.ts";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type { CallerIdentity, Round } from "@bccweb/types";
+import type { CallerIdentity, Round, RoundBrief } from "@bccweb/types";
 import RoundManage from "../RoundManage.js";
 
 const state = vi.hoisted(() => ({
   identity: null as CallerIdentity | null,
   round: null as Round | null,
-  brief: null as any,
+  brief: null as Partial<RoundBrief> | null,
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   apiPut: vi.fn(),
@@ -59,7 +59,7 @@ vi.mock("../../../lib/api.js", () => ({
 
 // Mock MarkdownEditor to be a simple textarea
 vi.mock("../../../components/MarkdownEditor.js", () => ({
-  MarkdownEditor: ({ value, onChange, placeholder }: any) => (
+  MarkdownEditor: ({ value, onChange, placeholder }: { value: string, onChange: (val: string) => void, placeholder?: string }) => (
     <textarea
       data-testid="markdown-editor"
       value={value}
@@ -70,7 +70,7 @@ vi.mock("../../../components/MarkdownEditor.js", () => ({
 }));
 
 vi.mock("../../../components/MarkdownView.js", () => ({
-  MarkdownView: ({ markdown }: any) => <div data-testid="markdown-view">{markdown}</div>,
+  MarkdownView: ({ markdown }: { markdown: string }) => <div data-testid="markdown-view">{markdown}</div>,
 }));
 
 describe("RoundManage Brief Section", () => {

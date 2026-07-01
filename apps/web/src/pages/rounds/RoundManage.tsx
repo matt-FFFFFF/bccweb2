@@ -1189,7 +1189,7 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
     let active = true;
     api.get<RoundBrief>(`rounds/${round.id}/brief`)
       .then(b => { if (active) { setBrief(b); setLoading(false); } })
-      .catch(e => {
+      .catch(_e => {
         if (active) {
           setBrief({}); // initialize empty
           setLoading(false);
@@ -1202,15 +1202,15 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
 
   const disabled = round.status === "BriefComplete" || round.status === "Locked" || round.status === "Complete";
 
-  const handleChange = (field: keyof RoundBrief, value: any) => {
+  const handleChange = <K extends keyof RoundBrief>(field: K, value: RoundBrief[K]) => {
     setBrief(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleBrieferChange = (field: string, value: string) => {
+  const handleBrieferChange = (field: keyof NonNullable<RoundBrief["briefer"]>, value: string) => {
     setBrief(prev => ({
       ...prev,
       briefer: { ...(prev?.briefer || {}), [field]: value }
-    } as any));
+    }));
   };
 
   const submit = async () => {
@@ -1245,9 +1245,9 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
       });
       if (!res.ok) throw new Error("Upload failed");
       const data = await res.json();
-      setBrief(prev => ({ ...prev, imagePaths: [...(prev?.imagePaths || []), data.path] } as any));
-    } catch (ex) {
-      setErr(ex instanceof Error ? ex.message : "Upload failed");
+      setBrief(prev => ({ ...prev, imagePaths: [...(prev?.imagePaths || []), data.path] }));
+    } catch (_ex) {
+      setErr(_ex instanceof Error ? _ex.message : "Upload failed");
     }
   };
 
@@ -1257,9 +1257,9 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
       setBrief(prev => {
         const paths = [...(prev?.imagePaths || [])];
         paths.splice(index, 1);
-        return { ...prev, imagePaths: paths } as any;
+        return { ...prev, imagePaths: paths };
       });
-    } catch (ex) {
+    } catch (_ex) {
       setErr("Failed to delete image");
     }
   };
