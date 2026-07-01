@@ -22,7 +22,10 @@ import type {
   ClubTeamSummary,
   ScoringType,
   Signature,
+  RoundBrief,
 } from "@bccweb/types";
+import { MarkdownEditor } from "../../components/MarkdownEditor.js";
+import { MarkdownView } from "../../components/MarkdownView.js";
 import { useBlob } from "../../hooks/useBlob.js";
 import { useAuth } from "../../hooks/useAuth.js";
 import { api, ApiError } from "../../lib/api.js";
@@ -125,7 +128,7 @@ function Banner({ msg, ok }: { msg: string; ok?: boolean }) {
 
 const WORKFLOW: Record<
   RoundStatus,
-  Array<{ label: string; endpoint: string; bg: string; color: string }>
+  Array<{ label: string; endpoint: string; bg: string; color: string; requiresConfirm?: boolean }>
 > = {
   Proposed: [
     { label: "Confirm", endpoint: "confirm", bg: "#cfe2ff", color: "#084298" },
@@ -136,6 +139,7 @@ const WORKFLOW: Record<
       endpoint: "brief-complete",
       bg: "#d0d0ff",
       color: "#3a00a8",
+      requiresConfirm: true,
     },
   ],
   BriefComplete: [
@@ -145,6 +149,13 @@ const WORKFLOW: Record<
       bg: "#fff3cd",
       color: "#664d03",
     },
+    {
+      label: "Reopen Brief",
+      endpoint: "reopen",
+      bg: "#e9ecef",
+      color: "#495057",
+      requiresConfirm: true,
+    }
   ],
   Locked: [
     {
@@ -1098,9 +1109,7 @@ function MetadataForm({
   const [form, setForm] = useState({
     maxTeams: String(round.maxTeams),
     minimumScore: String(round.minimumScore),
-    briefingTime: round.briefingTime ?? "",
-    checkInByTime: round.checkInByTime ?? "",
-    landByTime: round.landByTime ?? "",
+    
   });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -1119,9 +1128,7 @@ function MetadataForm({
       await api.put(`rounds/${round.id}`, {
         maxTeams: Number(form.maxTeams),
         minimumScore: Number(form.minimumScore),
-        briefingTime: form.briefingTime || undefined,
-        checkInByTime: form.checkInByTime || undefined,
-        landByTime: form.landByTime || undefined,
+        
       });
       setOk(true);
       onSaved();
@@ -1151,18 +1158,7 @@ function MetadataForm({
           <label style={{ fontSize: "0.8rem", color: "#555", display: "block" }}>Min Score</label>
           <input type="number" min={0} step={0.1} style={fi} value={form.minimumScore} onChange={(e) => setF("minimumScore", e.target.value)} />
         </div>
-        <div>
-          <label style={{ fontSize: "0.8rem", color: "#555", display: "block" }}>Briefing</label>
-          <input type="time" style={fi} value={form.briefingTime} onChange={(e) => setF("briefingTime", e.target.value)} />
-        </div>
-        <div>
-          <label style={{ fontSize: "0.8rem", color: "#555", display: "block" }}>Check-in By</label>
-          <input type="time" style={fi} value={form.checkInByTime} onChange={(e) => setF("checkInByTime", e.target.value)} />
-        </div>
-        <div>
-          <label style={{ fontSize: "0.8rem", color: "#555", display: "block" }}>Land By</label>
-          <input type="time" style={fi} value={form.landByTime} onChange={(e) => setF("landByTime", e.target.value)} />
-        </div>
+        
       </div>
       <div style={{ marginTop: "0.75rem", display: "flex", gap: "0.5rem", alignItems: "center" }}>
         <button
@@ -1179,55 +1175,170 @@ function MetadataForm({
   );
 }
 
-// ─── Narrative edit form ──────────────────────────────────────────────────────
 
-function NarrativeForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
-  const [text, setText] = useState(round.narrative ?? "");
-  const [busy, setBusy] = useState(false);
+// ─── Brief edit form ─────────────────────────────────────────────────────────
+
+function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
+  const [brief, setBrief] = useState<Partial<RoundBrief> | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [ok, setOk] = useState(false);
 
-  async function submit(e: React.FormEvent) {
-    e.preventDefault();
-    setBusy(true);
+  useEffect(() => {
+    let active = true;
+    api.get<RoundBrief>(`rounds/${round.id}/brief`)
+      .then(b => { if (active) { setBrief(b); setLoading(false); } })
+      .catch(e => {
+        if (active) {
+          setBrief({}); // initialize empty
+          setLoading(false);
+        }
+      });
+    return () => { active = false; };
+  }, [round.id]);
+
+  if (loading) return <div>Loading brief...</div>;
+
+  const disabled = round.status === "BriefComplete" || round.status === "Locked" || round.status === "Complete";
+
+  const handleChange = (field: keyof RoundBrief, value: any) => {
+    setBrief(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleBrieferChange = (field: string, value: string) => {
+    setBrief(prev => ({
+      ...prev,
+      briefer: { ...(prev?.briefer || {}), [field]: value }
+    } as any));
+  };
+
+  const submit = async () => {
+    setSaving(true);
     setErr(null);
     setOk(false);
     try {
-      await api.post(`rounds/${round.id}/narrative`, { narrative: text });
+      await api.put(`rounds/${round.id}/brief`, brief);
       setOk(true);
       onSaved();
     } catch (ex) {
       setErr(ex instanceof Error ? ex.message : "Failed");
     } finally {
-      setBusy(false);
+      setSaving(false);
     }
-  }
+  };
+
+  const uploadImage = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) { setErr("Image > 5MB"); return; }
+    
+    const token = localStorage.getItem("bcc_access_token");
+    const fd = new FormData();
+    fd.append("file", file);
+
+    try {
+      const res = await fetch(`/api/rounds/${round.id}/brief/images`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: fd
+      });
+      if (!res.ok) throw new Error("Upload failed");
+      const data = await res.json();
+      setBrief(prev => ({ ...prev, imagePaths: [...(prev?.imagePaths || []), data.path] } as any));
+    } catch (ex) {
+      setErr(ex instanceof Error ? ex.message : "Upload failed");
+    }
+  };
+
+  const removeImage = async (index: number) => {
+    try {
+      await api.delete(`rounds/${round.id}/brief/images/${index + 1}`);
+      setBrief(prev => {
+        const paths = [...(prev?.imagePaths || [])];
+        paths.splice(index, 1);
+        return { ...prev, imagePaths: paths } as any;
+      });
+    } catch (ex) {
+      setErr("Failed to delete image");
+    }
+  };
+
+  const fi = { ...inputStyle, width: "100%", opacity: disabled ? 0.6 : 1 };
+  const labelStyle = { fontSize: "0.8rem", color: "#555", display: "block" };
 
   return (
-    <form onSubmit={(e) => { void submit(e); }}>
-      <textarea
-        rows={6}
-        style={{ ...inputStyle, width: "100%", resize: "vertical" }}
-        value={text}
-        onChange={(e) => setText(e.target.value)}
-        placeholder="HTML narrative text…"
-      />
-      <div style={{ marginTop: "0.5rem", display: "flex", gap: "0.5rem" }}>
-        <button
-          type="submit"
-          disabled={busy}
-          style={btnStyle("#fff", busy ? "#6c757d" : "#0066cc")}
-        >
-          {busy ? "Saving…" : "Save Narrative"}
-        </button>
-        {ok && <Banner msg="Saved." ok />}
-        {err && <Banner msg={err} />}
+    <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem" }}>
+        <div><label style={labelStyle}>Briefing Time</label><input type="time" disabled={disabled} style={fi} value={brief?.briefingTime || ""} onChange={e => handleChange("briefingTime", e.target.value)} /></div>
+        <div><label style={labelStyle}>Check-in By</label><input type="time" disabled={disabled} style={fi} value={brief?.checkInByTime || ""} onChange={e => handleChange("checkInByTime", e.target.value)} /></div>
+        <div><label style={labelStyle}>Land By</label><input type="time" disabled={disabled} style={fi} value={brief?.landByTime || ""} onChange={e => handleChange("landByTime", e.target.value)} /></div>
+        <div><label style={labelStyle}>Takeoff W3W</label><input disabled={disabled} style={fi} value={brief?.takeOffW3W || ""} onChange={e => handleChange("takeOffW3W", e.target.value)} /></div>
+        <div><label style={labelStyle}>Briefing W3W</label><input disabled={disabled} style={fi} value={brief?.briefingW3W || ""} onChange={e => handleChange("briefingW3W", e.target.value)} /></div>
+        <div><label style={labelStyle}>Parking W3W</label><input disabled={disabled} style={fi} value={brief?.parkingW3W || ""} onChange={e => handleChange("parkingW3W", e.target.value)} /></div>
       </div>
-    </form>
+      
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem" }}>
+        <div><label style={labelStyle}>Wind Speed/Dir</label><input disabled={disabled} style={fi} value={brief?.windSpeedDirection || ""} onChange={e => handleChange("windSpeedDirection", e.target.value)} /></div>
+        <div><label style={labelStyle}>Direction of Flight</label><input disabled={disabled} style={fi} value={brief?.directionOfFlight || ""} onChange={e => handleChange("directionOfFlight", e.target.value)} /></div>
+        <div><label style={labelStyle}>Frequency (MHz)</label><input type="number" step="0.025" disabled={disabled} style={fi} value={brief?.frequencyMhz || ""} onChange={e => handleChange("frequencyMhz", e.target.value ? Number(e.target.value) : undefined)} /></div>
+      </div>
+
+      <div><label style={labelStyle}>NOTAMs</label><textarea disabled={disabled} style={{...fi, resize: "vertical"}} value={brief?.NOTAMs || ""} onChange={e => handleChange("NOTAMs", e.target.value)} /></div>
+      <div><label style={labelStyle}>BENO Line Description</label><textarea disabled={disabled} style={{...fi, resize: "vertical"}} value={brief?.BENO_LineDescription || ""} onChange={e => handleChange("BENO_LineDescription", e.target.value)} /></div>
+      
+      <div><label style={labelStyle}>Expected Landing Area</label>
+        <div style={{ border: "1px solid #ccc", padding: "0.5rem" }}>
+          {disabled ? <MarkdownView markdown={brief?.expectedLandingArea || ""} /> : <MarkdownEditor value={brief?.expectedLandingArea || ""} onChange={v => handleChange("expectedLandingArea", v)} />}
+        </div>
+      </div>
+      <div><label style={labelStyle}>Airspace & Hazards</label>
+        <div style={{ border: "1px solid #ccc", padding: "0.5rem" }}>
+          {disabled ? <MarkdownView markdown={brief?.airspaceAndHazards || ""} /> : <MarkdownEditor value={brief?.airspaceAndHazards || ""} onChange={v => handleChange("airspaceAndHazards", v)} />}
+        </div>
+      </div>
+      <div><label style={labelStyle}>Briefer's Notes</label>
+        <div style={{ border: "1px solid #ccc", padding: "0.5rem" }}>
+          {disabled ? <MarkdownView markdown={brief?.briefersNotes || ""} /> : <MarkdownEditor value={brief?.briefersNotes || ""} onChange={v => handleChange("briefersNotes", v)} />}
+        </div>
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
+        <div><label style={labelStyle}>Briefer Name</label><input disabled={disabled} style={fi} value={brief?.briefer?.name || ""} onChange={e => handleBrieferChange("name", e.target.value)} /></div>
+        <div><label style={labelStyle}>BHPA Level</label><input disabled={disabled} style={fi} value={brief?.briefer?.bhpaCoachLevel || ""} onChange={e => handleBrieferChange("bhpaCoachLevel", e.target.value)} /></div>
+        <div><label style={labelStyle}>BHPA Number</label><input disabled={disabled} style={fi} value={brief?.briefer?.bhpaNumber || ""} onChange={e => handleBrieferChange("bhpaNumber", e.target.value)} /></div>
+        <div><label style={labelStyle}>Phone</label><input disabled={disabled} style={fi} value={brief?.briefer?.phoneNumber || ""} onChange={e => handleBrieferChange("phoneNumber", e.target.value)} /></div>
+        <div><label style={labelStyle}>Email</label><input disabled={disabled} style={fi} value={brief?.briefer?.emailAddress || ""} onChange={e => handleBrieferChange("emailAddress", e.target.value)} /></div>
+      </div>
+
+      <div>
+        <label style={labelStyle}>Images</label>
+        <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+          {brief?.imagePaths?.map((p, i) => (
+            <div key={i} style={{ position: "relative", border: "1px solid #ccc", padding: "0.25rem" }}>
+              <img src={`/api/rounds/${round.id}/brief/images/${i + 1}`} style={{ height: "100px" }} alt="Brief" />
+              {!disabled && (
+                <button onClick={() => removeImage(i)} style={{ position: "absolute", top: 0, right: 0, background: "red", color: "white" }}>X</button>
+              )}
+            </div>
+          ))}
+        </div>
+        {!disabled && <input type="file" onChange={uploadImage} />}
+      </div>
+
+      {!disabled && (
+        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+          <button onClick={submit} disabled={saving} style={btnStyle("#fff", saving ? "#6c757d" : "#0066cc")}>{saving ? "Saving..." : "Save Brief"}</button>
+          {ok && <Banner msg="Saved." ok />}
+          {err && <Banner msg={err} />}
+        </div>
+      )}
+    </div>
   );
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
+
 
 export default function RoundManage() {
   const { id } = useParams<{ id: string }>();
@@ -1244,6 +1355,7 @@ export default function RoundManage() {
 
   const [actionErr, setActionErr] = useState<string | null>(null);
   const [actionBusy, setActionBusy] = useState<string | null>(null);
+  const [confirmModal, setConfirmModal] = useState<{ label: string; endpoint: string; count: number } | null>(null);
 
   const loadRound = useCallback(async () => {
     if (!id) return;
@@ -1398,15 +1510,43 @@ export default function RoundManage() {
               disabled={actionBusy !== null}
               style={btnStyle(a.color, a.bg)}
               onClick={() => {
-                void runAction(a.label, () =>
-                  api.post(`rounds/${r.id}/${a.endpoint}`)
-                );
+                if (a.requiresConfirm) {
+                  setActionErr(null);
+                  setActionBusy(a.label);
+                  api.post<{ invalidatedSignatureCount: number }>(`rounds/${r.id}/${a.endpoint}?dryRun=true`)
+                    .then(res => setConfirmModal({ label: a.label, endpoint: a.endpoint, count: res.invalidatedSignatureCount || 0 }))
+                    .catch(ex => setActionErr(ex instanceof Error ? ex.message : "Dry run failed"))
+                    .finally(() => setActionBusy(null));
+                } else {
+                  void runAction(a.label, () => api.post(`rounds/${r.id}/${a.endpoint}`));
+                }
               }}
             >
               {actionBusy === a.label ? "Working…" : a.label}
             </button>
           ))}
           {actionErr && <Banner msg={actionErr} />}
+          {confirmModal && (
+            <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+              <div style={{ background: "#fff", padding: "1.5rem", borderRadius: "0.5rem", maxWidth: "400px", width: "100%" }}>
+                <h3 style={{ marginTop: 0 }}>Confirm {confirmModal.label}</h3>
+                <p>This will reset <strong>{confirmModal.count}</strong> pilot signature(s) (their 'Sign To Fly' flags will be reset).</p>
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1.5rem" }}>
+                  <button onClick={() => setConfirmModal(null)} style={btnStyle("#333", "#e9ecef")}>Cancel</button>
+                  <button
+                    onClick={() => {
+                      const { label, endpoint } = confirmModal;
+                      setConfirmModal(null);
+                      void runAction(label, () => api.post(`rounds/${r.id}/${endpoint}`));
+                    }}
+                    style={btnStyle("#fff", "#dc3545")}
+                  >
+                    Confirm & {confirmModal.label.includes("Reopen") ? "Reopen" : "Proceed"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1424,11 +1564,10 @@ export default function RoundManage() {
         </section>
       )}
 
-      {/* Narrative */}
+      {/* Brief Form */}
       {canManage && (
         <section style={sectionStyle}>
-          <h2 style={{ fontSize: "1rem", margin: "0 0 0.75rem" }}>Narrative</h2>
-          <NarrativeForm round={r} onSaved={() => { void loadRound(); }} />
+          <BriefForm round={r} onSaved={() => { void loadRound(); }} />
         </section>
       )}
 
