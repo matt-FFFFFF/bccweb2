@@ -170,28 +170,40 @@ export const BriefSchema = z
 
 BriefSchema satisfies z.ZodType<RoundBrief>;
 
-// Coordinator-editable subset for PUT /rounds/{id}/brief. Excludes identity
-// (roundId/generatedAt/date/siteName) + derived state (teams/hash/
-// versionHistory/imagePaths) so a partial edit body validates WITHOUT them;
-// the full BriefSchema validates the merged result on write.
-export const BriefEditableSchema = BriefSchema.partial().pick({
-  briefingTime: true,
-  checkInByTime: true,
-  landByTime: true,
-  parkingW3W: true,
-  briefingW3W: true,
-  takeOffW3W: true,
-  windSpeedDirection: true,
-  directionOfFlight: true,
-  expectedLandingArea: true,
-  airspaceAndHazards: true,
-  NOTAMs: true,
-  BENO_LineDescription: true,
-  briefersNotes: true,
-  frequencyMhz: true,
-  briefer: true,
-});
+// Single source of truth for SAFETY-MATERIAL brief fields (B5 one-declaration):
+// editing any invalidates prior sign-to-fly signatures. The sign-to-fly hash
+// re-exports this; BRIEF_EDITABLE_KEYS derives from it — so neither can drift.
+// `satisfies keyof RoundBrief` rejects nested `site.*W3W` paths that once silently
+// dropped W3W edits from the hash.
+export const MATERIAL_BRIEF_FIELDS = [
+  "briefingTime",
+  "checkInByTime",
+  "landByTime",
+  "windSpeedDirection",
+  "directionOfFlight",
+  "expectedLandingArea",
+  "airspaceAndHazards",
+  "NOTAMs",
+  "BENO_LineDescription",
+  "briefersNotes",
+  "frequencyMhz",
+  "parkingW3W",
+  "briefingW3W",
+  "takeOffW3W",
+  "imagePaths",
+] as const satisfies readonly (keyof RoundBrief)[];
 
-export const BRIEF_EDITABLE_KEYS = Object.keys(
-  BriefEditableSchema.shape,
-) as Array<keyof typeof BriefEditableSchema.shape>;
+// PUT-editable subset = material fields MINUS imagePaths (image-endpoint-only) PLUS
+// the cosmetic `briefer` block (PUT-editable but non-material).
+export const BRIEF_EDITABLE_KEYS = [
+  ...MATERIAL_BRIEF_FIELDS.filter((f) => f !== "imagePaths"),
+  "briefer",
+] as const satisfies readonly (keyof RoundBrief)[];
+
+// Editable schema derived from the same key list (kept in lockstep). A partial edit
+// body validates without identity/derived fields; full BriefSchema validates the write.
+const briefEditableMask = Object.fromEntries(
+  BRIEF_EDITABLE_KEYS.map((key) => [key, true] as const),
+) as Record<(typeof BRIEF_EDITABLE_KEYS)[number], true>;
+
+export const BriefEditableSchema = BriefSchema.partial().pick(briefEditableMask);

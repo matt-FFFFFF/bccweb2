@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { RoundBrief } from "@bccweb/types";
+import { BRIEF_EDITABLE_KEYS } from "@bccweb/schemas";
 import {
   computeBriefHash,
   diffMaterialFields,
@@ -277,6 +278,19 @@ describe("B5: RoundBrief materiality classification (drift guard)", () => {
     expect(MATERIAL_BRIEF_FIELDS.length + COSMETIC_BRIEF_FIELDS.length).toBe(
       allKeys.size,
     );
+  });
+});
+
+describe("B5: BRIEF_EDITABLE_KEYS derives from the single MATERIAL_BRIEF_FIELDS source", () => {
+  it("is exactly material-minus-imagePaths-plus-briefer (re-exported material set in lockstep)", () => {
+    const derived = [
+      ...MATERIAL_BRIEF_FIELDS.filter((field) => field !== "imagePaths"),
+      "briefer",
+    ];
+
+    expect([...BRIEF_EDITABLE_KEYS].sort()).toEqual([...derived].sort());
+    expect([...BRIEF_EDITABLE_KEYS]).not.toContain("imagePaths");
+    expect([...BRIEF_EDITABLE_KEYS]).toContain("briefer");
   });
 });
 
