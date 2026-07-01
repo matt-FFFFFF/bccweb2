@@ -12,6 +12,7 @@
 
 import { useState, useEffect } from "react";
 import { Link, useParams } from "react-router";
+import { MarkdownView } from "../../components/MarkdownView.js";
 import type { RoundBrief as RoundBriefType, BriefTeamEntry, BriefPilotEntry, ManufacturerRef } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
 import { ApiError } from "../../lib/api.js";
@@ -63,14 +64,14 @@ function ManufacturerLink({ manufacturer, model }: { manufacturer?: Manufacturer
   );
 }
 
-const safetyFields: Array<{ label: string; value: (brief: RoundBriefType) => string | undefined }> = [
+const safetyFields: Array<{ label: string; value: (brief: RoundBriefType) => string | undefined; isProse?: boolean }> = [
   { label: "Wind Speed & Direction", value: (brief) => brief.windSpeedDirection },
   { label: "Direction of Flight", value: (brief) => brief.directionOfFlight },
-  { label: "Expected Landing Area", value: (brief) => brief.expectedLandingArea },
-  { label: "Airspace & Hazards", value: (brief) => brief.airspaceAndHazards },
+  { label: "Expected Landing Area", value: (brief) => brief.expectedLandingArea, isProse: true },
+  { label: "Airspace & Hazards", value: (brief) => brief.airspaceAndHazards, isProse: true },
   { label: "NOTAMs", value: (brief) => brief.NOTAMs },
   { label: "BENO Line Description", value: (brief) => brief.BENO_LineDescription },
-  { label: "Briefer's Notes", value: (brief) => brief.briefersNotes },
+  { label: "Briefer's Notes", value: (brief) => brief.briefersNotes, isProse: true },
 ];
 
 function W3WLink({ value, label }: { value?: string; label: string }) {
@@ -270,12 +271,19 @@ function SafetyBriefingSection({
           gap: "0.75rem",
         }}
       >
-        {safetyFields.map((field) => (
-          <div key={field.label} style={fieldStyle}>
-            <span style={labelStyle}>{field.label}</span>
-            <span style={valueStyle}>{displayValue(field.value(brief))}</span>
-          </div>
-        ))}
+        {safetyFields.map((field) => {
+          const v = field.value(brief);
+          return (
+            <div key={field.label} style={fieldStyle}>
+              <span style={labelStyle}>{field.label}</span>
+              {field.isProse ? (
+                v?.trim() ? <MarkdownView markdown={v} /> : <span style={valueStyle}>Not provided</span>
+              ) : (
+                <span style={valueStyle}>{displayValue(v)}</span>
+              )}
+            </div>
+          );
+        })}
       </div>
 
       <h3 style={{ fontSize: "0.95rem", margin: "1rem 0 0.6rem", color: "#1a4fa0" }}>

@@ -172,8 +172,24 @@ export default function SignToFly() {
             {brief.landByTime && <li><strong>Land-by Time:</strong> {brief.landByTime}</li>}
             {brief.windSpeedDirection && <li><strong>Wind Speed/Direction:</strong> {brief.windSpeedDirection}</li>}
             {brief.directionOfFlight && <li><strong>Direction of Flight:</strong> {brief.directionOfFlight}</li>}
-            {brief.expectedLandingArea && <li><strong>Expected Landing Area:</strong> {brief.expectedLandingArea}</li>}
-            {brief.airspaceAndHazards && <li><strong>Airspace and Hazards:</strong> {brief.airspaceAndHazards}</li>}
+            {brief.expectedLandingArea && (
+              <li>
+                <strong>Expected Landing Area:</strong>
+                <div style={{ marginTop: "0.25rem" }}><MarkdownView markdown={brief.expectedLandingArea} /></div>
+              </li>
+            )}
+            {brief.airspaceAndHazards && (
+              <li>
+                <strong>Airspace and Hazards:</strong>
+                <div style={{ marginTop: "0.25rem" }}><MarkdownView markdown={brief.airspaceAndHazards} /></div>
+              </li>
+            )}
+            {brief.briefersNotes && (
+              <li>
+                <strong>Briefer's Notes:</strong>
+                <div style={{ marginTop: "0.25rem" }}><MarkdownView markdown={brief.briefersNotes} /></div>
+              </li>
+            )}
             {brief.NOTAMs && <li><strong>NOTAMs:</strong> {brief.NOTAMs}</li>}
             {brief.BENO_LineDescription && <li><strong>BENO Line Description:</strong> {brief.BENO_LineDescription}</li>}
             {(brief.briefer?.name || brief.briefer?.phoneNumber) && (

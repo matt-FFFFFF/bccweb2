@@ -178,4 +178,45 @@ describe("SignToFly", () => {
 
     expect(await screen.findByText("This round is not yet ready for sign-to-fly. The briefing has to be marked complete first. Current status: Missing brief.")).toBeInTheDocument();
   });
+
+  it("renders briefing summary prose as markdown and literal for non-prose", async () => {
+    vi.mocked(api.get).mockImplementation(async (url) => {
+      if (url === "sign-to-fly/wording/active") {
+        return { markdown: "Text" };
+      }
+      if (url === "rounds/r1/brief") {
+        return { 
+          version: 2, 
+          teams: [],
+          airspaceAndHazards: "**A** " + XSS_CORPUS.join(" "),
+          expectedLandingArea: "**B**",
+          briefersNotes: "**C**",
+          windSpeedDirection: "**x**",
+        };
+      }
+      if (url === "rounds/r1") {
+        return {
+          id: "r1",
+          date: "2023-01-01T00:00:00.000Z",
+          teams: [{ id: "t1", teamName: "Test Team", pilots: [{ placeInTeam: 1, pilotId: "p1" }] }]
+        };
+      }
+      return null;
+    });
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByText("A").tagName).toBe("STRONG");
+    });
+
+    expect(screen.getByText("B").tagName).toBe("STRONG");
+    expect(screen.getByText("C").tagName).toBe("STRONG");
+    expect(screen.getByText("**x**")).toBeInTheDocument();
+
+    const html = document.body.innerHTML;
+    expect(html).not.toContain("<script>");
+    expect(html).not.toContain("onerror");
+  });
+
 });
