@@ -2,7 +2,7 @@
  * PUT /api/rounds/{id}/teams/{teamId}/captain
  *
  * Manual captain override — Admin or (RoundsCoord scoped to the round's
- * organising club). No lock-state restriction.
+ * organising club). Blocked once the round is Locked or Complete.
  *
  * Body: { pilotId: string | null }
  * - If pilotId is non-null the pilot must be a Filled member of the team.
@@ -97,6 +97,14 @@ async function setTeamCaptain(
       ) {
         throw new HttpError(403, "FORBIDDEN", "Not your round");
       }
+    }
+
+    if (round.status === "Locked" || round.status === "Complete") {
+      throw new HttpError(
+        409,
+        "ROUND_LOCKED",
+        "Cannot change the team captain after the round is locked",
+      );
     }
 
     const teamIdx = round.teams.findIndex((t) => t.id === teamId);

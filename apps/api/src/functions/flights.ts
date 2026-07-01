@@ -50,7 +50,7 @@ async function mutateLocked(
       if (err) {
         const e = new Error(err);
         (e as { isValidation?: boolean }).isValidation = true;
-        throw new HttpError(500, "INTERNAL");
+        throw e;
       }
       await writePrivateJson(path, RoundSchema, r, leaseId);
       return r;
@@ -188,7 +188,7 @@ async function logFlight(
     slot.flight = flight;
   });
 
-  if ("status" in result) return result as HttpResponseInit;
+  if (typeof (result as HttpResponseInit).status === "number") return result as HttpResponseInit;
   return { status: 201, jsonBody: result };
 }
 
@@ -262,7 +262,7 @@ async function updateFlight(
     if (body.awardedOverallPB !== undefined) slot.flight.awardedOverallPB = body.awardedOverallPB;
   });
 
-  if ("status" in result) return result as HttpResponseInit;
+  if (typeof (result as HttpResponseInit).status === "number") return result as HttpResponseInit;
   return { status: 200, jsonBody: result };
 }
 
@@ -301,9 +301,8 @@ async function deleteFlight(
   await mutationRateLimit(req, caller, "deleteFlight", "flights");
 
   const result = await mutateLocked(roundId, (r) => {
-    // Allow delete from Locked or Complete (admin correction)
-    if (r.status !== "Locked" && r.status !== "Complete") {
-      return `Can only delete flights from Locked or Complete rounds (currently ${r.status})`;
+    if (r.status !== "Locked") {
+      return `Flights can only be deleted when the round is Locked (currently ${r.status})`;
     }
 
     const slot = findSlotByFlight(r, flightId);
@@ -313,7 +312,7 @@ async function deleteFlight(
     slot.pilotPoints = 0;
   });
 
-  if ("status" in result) return result as HttpResponseInit;
+  if (typeof (result as HttpResponseInit).status === "number") return result as HttpResponseInit;
   return { status: 200, jsonBody: result };
 }
 
