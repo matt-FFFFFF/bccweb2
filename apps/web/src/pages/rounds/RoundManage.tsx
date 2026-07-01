@@ -24,7 +24,9 @@ import type {
   Signature,
   RoundBrief,
   Pilot,
+  CoachType,
 } from "@bccweb/types";
+import { COACH_TYPES, coachLabel } from "../../lib/coach.js";
 import { MarkdownEditor } from "../../components/MarkdownEditor.js";
 import { MarkdownView } from "../../components/MarkdownView.js";
 import { AuthImage } from "../../components/AuthImage.js";
@@ -107,13 +109,6 @@ const sectionStyle: React.CSSProperties = {
   borderRadius: "0.5rem",
 };
 
-const BRIEFER_BHPA_LEVELS = ["Club Coach", "Senior Coach", "Instructor", "Senior Instructor"] as const;
-const COACH_TYPE_TO_BHPA_LABEL: Record<string, string> = {
-  ClubCoach: "Club Coach",
-  SeniorCoach: "Senior Coach",
-  Instructor: "Instructor",
-  SeniorInstructor: "Senior Instructor",
-};
 
 // ─── Inline error/success banner ─────────────────────────────────────────────
 
@@ -610,11 +605,11 @@ function PilotRow({
   const isComplete = status === "Complete";
   const canFlight = isLocked;
 
-  async function toggleField(field: "accounted" | "sign-to-fly", current: boolean) {
+  async function toggleAccounted(current: boolean) {
     setActionErr(null);
     try {
       await api.put(
-        `rounds/${roundId}/teams/${team.id}/pilots/${slot.placeInTeam}/${field}`,
+        `rounds/${roundId}/teams/${team.id}/pilots/${slot.placeInTeam}/accounted`,
         { value: !current }
       );
       onChanged();
@@ -740,36 +735,21 @@ function PilotRow({
           </span>
         )}
 
-        {/* Accounted / sign-to-fly toggles (only when Locked) */}
+        {/* Accounted-for toggle (only when Locked) */}
         {canManage && isLocked && slot.status === "Filled" && (
-          <>
-            <button
-              title="Accounted for"
-              style={{
-                ...btnStyle(
-                  slot.accountedFor ? "#0a3622" : "#555",
-                  slot.accountedFor ? "#d1e7dd" : "#e9ecef"
-                ),
-                padding: "0.2rem 0.5rem",
-              }}
-              onClick={() => { void toggleField("accounted", slot.accountedFor); }}
-            >
-              {slot.accountedFor ? "✓ Acct" : "Acct"}
-            </button>
-            <button
-              title="Sign to fly"
-              style={{
-                ...btnStyle(
-                  slot.signToFly ? "#664d03" : "#555",
-                  slot.signToFly ? "#fff3cd" : "#e9ecef"
-                ),
-                padding: "0.2rem 0.5rem",
-              }}
-              onClick={() => { void toggleField("sign-to-fly", slot.signToFly); }}
-            >
-              {slot.signToFly ? "✓ S2F" : "S2F"}
-            </button>
-          </>
+          <button
+            title="Accounted for"
+            style={{
+              ...btnStyle(
+                slot.accountedFor ? "#0a3622" : "#555",
+                slot.accountedFor ? "#d1e7dd" : "#e9ecef"
+              ),
+              padding: "0.2rem 0.5rem",
+            }}
+            onClick={() => { void toggleAccounted(slot.accountedFor); }}
+          >
+            {slot.accountedFor ? "✓ Acct" : "Acct"}
+          </button>
         )}
 
         {/* Flight actions */}
@@ -1250,7 +1230,7 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
             ...loaded,
             briefer: {
               name: me.person?.fullName || undefined,
-              bhpaCoachLevel: COACH_TYPE_TO_BHPA_LABEL[me.coachType] || undefined,
+              bhpaCoachLevel: me.coachType !== "None" ? me.coachType : undefined,
               bhpaNumber: me.bhpaNumber != null ? String(me.bhpaNumber) : undefined,
               phoneNumber: me.person?.phoneNumber || undefined,
               emailAddress: identity.email || undefined,
@@ -1279,10 +1259,10 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
     setBrief(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleBrieferChange = (field: keyof NonNullable<RoundBrief["briefer"]>, value: string) => {
+  const handleBrieferChange = (field: keyof NonNullable<RoundBrief["briefer"]>, value: string | undefined) => {
     setBrief(prev => ({
       ...prev,
-      briefer: { ...(prev?.briefer || {}), [field]: value }
+      briefer: { ...(prev?.briefer || {}), [field]: value || undefined } as RoundBrief["briefer"],
     }));
   };
 
@@ -1339,11 +1319,6 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
 
   const fi = { ...inputStyle, width: "100%", opacity: disabled ? 0.6 : 1 };
   const labelStyle = { fontSize: "0.8rem", color: "#555", display: "block" };
-  const brieferLevel = brief?.briefer?.bhpaCoachLevel ?? "";
-  const bhpaLevelOptions =
-    brieferLevel && !(BRIEFER_BHPA_LEVELS as readonly string[]).includes(brieferLevel)
-      ? [brieferLevel, ...BRIEFER_BHPA_LEVELS]
-      : [...BRIEFER_BHPA_LEVELS];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -1371,7 +1346,7 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
         <div><label style={labelStyle}>Briefer Name</label><input disabled={disabled} style={fi} value={brief?.briefer?.name || ""} onChange={e => handleBrieferChange("name", e.target.value)} /></div>
-        <div><label style={labelStyle}>BHPA Level</label><select disabled={disabled} style={fi} value={brieferLevel} onChange={e => handleBrieferChange("bhpaCoachLevel", e.target.value)}><option value="">—</option>{bhpaLevelOptions.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
+        <div><label style={labelStyle}>BHPA Level</label><select disabled={disabled} style={fi} value={brief?.briefer?.bhpaCoachLevel ?? ""} onChange={e => handleBrieferChange("bhpaCoachLevel", e.target.value || undefined)}><option value="">—</option>{COACH_TYPES.filter(c => c !== "None").map(c => <option key={c} value={c}>{coachLabel[c]}</option>)}</select></div>
         <div><label style={labelStyle}>BHPA Number</label><input disabled={disabled} style={fi} value={brief?.briefer?.bhpaNumber || ""} onChange={e => handleBrieferChange("bhpaNumber", e.target.value)} /></div>
         <div><label style={labelStyle}>Phone</label><input disabled={disabled} style={fi} value={brief?.briefer?.phoneNumber || ""} onChange={e => handleBrieferChange("phoneNumber", e.target.value)} /></div>
         <div><label style={labelStyle}>Email</label><input disabled={disabled} style={fi} value={brief?.briefer?.emailAddress || ""} onChange={e => handleBrieferChange("emailAddress", e.target.value)} /></div>

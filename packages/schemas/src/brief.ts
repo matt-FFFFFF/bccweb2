@@ -7,6 +7,7 @@ import type {
   RoundBrief,
   WingClass,
 } from "@bccweb/types";
+import { COACH_TYPES } from "@bccweb/types";
 import * as z from "zod/v4";
 
 import { healed, healingArray, lenientOptional, normalizeEnum } from "./helpers.js";
@@ -154,7 +155,7 @@ export const BriefSchema = z
       z
         .object({
           name: lenientOptional(z.string()),
-          bhpaCoachLevel: lenientOptional(z.string()),
+          bhpaCoachLevel: lenientOptional(z.enum(COACH_TYPES)),
           bhpaNumber: lenientOptional(z.string()),
           phoneNumber: lenientOptional(z.string()),
           emailAddress: lenientOptional(z.string()),

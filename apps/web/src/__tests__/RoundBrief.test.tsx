@@ -36,7 +36,7 @@ function fullBrief(overrides: Partial<RoundBriefType> = {}): RoundBriefType {
     briefersNotes: "Watch sea breeze",
     briefer: {
       name: "Alex Briefer",
-      bhpaCoachLevel: "Senior Coach",
+      bhpaCoachLevel: "SeniorCoach",
       bhpaNumber: "12345",
       phoneNumber: "07123 456789",
       emailAddress: "alex@example.com",
