@@ -13,6 +13,8 @@
 import puppeteer from "puppeteer-core";
 import chromium from "@sparticuz/chromium";
 import Handlebars from "handlebars";
+import { marked } from "marked";
+import DOMPurify from "isomorphic-dompurify";
 import type { RoundBrief } from "@bccweb/types";
 
 // ─── Handlebars helpers ───────────────────────────────────────────────────────
@@ -37,6 +39,20 @@ Handlebars.registerHelper("w3wLink", (w3w: string) => {
   if (!w3w) return "";
   const clean = w3w.replace(/^\/\/\//, "");
   return `https://what3words.com/${clean}`;
+});
+/**
+ * Markdown → sanitised HTML for `{{{ }}}` prose cells. SECURITY: DOMPurify must
+ * strip scripts/handlers/dangerous URIs before the string reaches triple-mustache;
+ * raw `marked` output is never emitted. Empty → "Not provided" (also stops marked
+ * throwing on a non-string).
+ */
+Handlebars.registerHelper("markdown", (value: unknown) => {
+  if (typeof value !== "string" || value.trim().length === 0) {
+    return new Handlebars.SafeString("Not provided");
+  }
+  const rendered = marked.parse(value, { async: false });
+  const clean = DOMPurify.sanitize(rendered);
+  return new Handlebars.SafeString(clean);
 });
 
 // ─── Template ─────────────────────────────────────────────────────────────────
@@ -170,11 +186,11 @@ const TEMPLATE_SRC = `<!DOCTYPE html>
 <div class="safety-grid">
   <div class="safety-item"><label>Wind Speed &amp; Direction</label><div class="safety-value">{{default windSpeedDirection}}</div></div>
   <div class="safety-item"><label>Direction of Flight</label><div class="safety-value">{{default directionOfFlight}}</div></div>
-  <div class="safety-item"><label>Expected Landing Area</label><div class="safety-value">{{default expectedLandingArea}}</div></div>
-  <div class="safety-item"><label>Airspace &amp; Hazards</label><div class="safety-value">{{default airspaceAndHazards}}</div></div>
+  <div class="safety-item"><label>Expected Landing Area</label><div class="safety-value">{{{markdown expectedLandingArea}}}</div></div>
+  <div class="safety-item"><label>Airspace &amp; Hazards</label><div class="safety-value">{{{markdown airspaceAndHazards}}}</div></div>
   <div class="safety-item"><label>NOTAMs</label><div class="safety-value">{{default NOTAMs}}</div></div>
   <div class="safety-item"><label>BENO Line Description</label><div class="safety-value">{{default BENO_LineDescription}}</div></div>
-  <div class="safety-item"><label>Briefer's Notes</label><div class="safety-value">{{default briefersNotes}}</div></div>
+  <div class="safety-item"><label>Briefer's Notes</label><div class="safety-value">{{{markdown briefersNotes}}}</div></div>
 </div>
 <div class="info-grid" style="margin-top: 0.65rem;">
   <div class="info-item"><label>Briefer</label>{{default briefer.name}}</div>
@@ -251,6 +267,10 @@ const TEMPLATE_SRC = `<!DOCTYPE html>
 const compiledTemplate = Handlebars.compile(TEMPLATE_SRC);
 
 export function renderBriefPdfHtml(brief: RoundBrief): string {
+  // MEMORY: reuse isomorphic-dompurify's process-lifetime singleton jsdom window.
+  // Measured (see task-11 evidence): recreating the window per render via clearWindow()
+  // is ~6.6x WORSE — jsdom does not free the closed window, so each call retains a dead
+  // shell. Reusing the one window is the bounded choice on long-lived Functions hosts.
   return compiledTemplate({
     ...brief,
     generatedAt: new Date(brief.generatedAt).toLocaleString("en-GB", {
