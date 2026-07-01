@@ -231,22 +231,22 @@ export default function RoundDetail() {
           borderRadius: "0.5rem",
         }}
       >
-        {round.briefingTime && (
+        {brief?.briefingTime && (
           <div>
             <dt style={{ fontSize: "0.75rem", color: "#888", fontWeight: 600 }}>Briefing</dt>
-            <dd style={{ margin: 0, fontWeight: 500 }}>{round.briefingTime}</dd>
+            <dd style={{ margin: 0, fontWeight: 500 }}>{brief.briefingTime}</dd>
           </div>
         )}
-        {round.checkInByTime && (
+        {brief?.checkInByTime && (
           <div>
             <dt style={{ fontSize: "0.75rem", color: "#888", fontWeight: 600 }}>Check-in by</dt>
-            <dd style={{ margin: 0, fontWeight: 500 }}>{round.checkInByTime}</dd>
+            <dd style={{ margin: 0, fontWeight: 500 }}>{brief.checkInByTime}</dd>
           </div>
         )}
-        {round.landByTime && (
+        {brief?.landByTime && (
           <div>
             <dt style={{ fontSize: "0.75rem", color: "#888", fontWeight: 600 }}>Land by</dt>
-            <dd style={{ margin: 0, fontWeight: 500 }}>{round.landByTime}</dd>
+            <dd style={{ margin: 0, fontWeight: 500 }}>{brief.landByTime}</dd>
           </div>
         )}
         {round.organisingClub && (
@@ -296,16 +296,7 @@ export default function RoundDetail() {
         )}
       </section>
 
-      {/* ── Narrative ── */}
-      {round.narrative && (
-        <section style={{ marginBottom: "2rem" }}>
-          <h2 style={{ fontSize: "1.1rem" }}>Narrative</h2>
-          <div
-            style={{ lineHeight: 1.6, color: "#333" }}
-            dangerouslySetInnerHTML={{ __html: round.narrative }}
-          />
-        </section>
-      )}
+
 
       {/* ── Teams ── */}
       {round.teams.length > 0 && (

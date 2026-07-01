@@ -157,8 +157,8 @@ test.describe("sign-to-fly journey", () => {
 
   test("admin material brief edit invalidates existing signatures", async ({ page }) => {
     await login(page, "admin@example.test", PASSWORD, { skipGate: true, signedSlots: [1, 2] });
-    await page.goto(`/rounds/${ROUND_ID}/brief/edit`);
-    await expect(page.getByRole("heading", { name: /edit round brief/i })).toBeVisible({ timeout: 5000 });
+    await page.goto(`/rounds/${ROUND_ID}/manage`);
+    await expect(page.getByRole("button", { name: /save brief/i })).toBeVisible({ timeout: 5000 });
     await shot(page, "13-material-edit-form");
 
     await page.locator("label", { hasText: /notams/i }).locator("xpath=..").locator("textarea").fill("Material NOTAM update: airspace restriction active.");
@@ -182,8 +182,8 @@ test.describe("sign-to-fly journey", () => {
 
   test("admin cosmetic brief edit preserves existing signatures", async ({ page }) => {
     await login(page, "admin@example.test", PASSWORD, { skipGate: true, signedSlots: [1, 2] });
-    await page.goto(`/rounds/${ROUND_ID}/brief/edit`);
-    await expect(page.getByRole("heading", { name: /edit round brief/i })).toBeVisible({ timeout: 5000 });
+    await page.goto(`/rounds/${ROUND_ID}/manage`);
+    await expect(page.getByRole("button", { name: /save brief/i })).toBeVisible({ timeout: 5000 });
 
     await page.locator("section", { hasText: /^Briefer/ }).locator("label", { hasText: /^Phone$/i }).locator("xpath=..").locator("input").fill("07700 900123");
     await shot(page, "16-cosmetic-edit-form");
