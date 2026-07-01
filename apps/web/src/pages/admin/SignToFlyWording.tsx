@@ -191,7 +191,7 @@ export default function AdminSignToFlyWording() {
             <p style={{ fontSize: "0.8rem", color: "#666", margin: "0 0 0.5rem 0" }}>Displayed to users during sign-to-fly.</p>
             <MarkdownEditor
               value={formMarkdown}
-              onChange={setFormMarkdown}
+              onChange={(v) => setFormMarkdown(v ?? "")}
             />
           </div>
 
