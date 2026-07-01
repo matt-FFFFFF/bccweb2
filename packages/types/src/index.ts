@@ -47,6 +47,7 @@ export const ROUND_STATUSES = [
 export type RoundStatus = (typeof ROUND_STATUSES)[number];
 
 export { normalizeStatus, isRosterFrozen, rosterFrozenReason } from "./status.js";
+export type { FrozenRoundStatus } from "./status.js";
 
 export const PILOT_SLOT_STATUSES = ["Empty", "Filled"] as const;
 export type PilotSlotStatus = (typeof PILOT_SLOT_STATUSES)[number];
