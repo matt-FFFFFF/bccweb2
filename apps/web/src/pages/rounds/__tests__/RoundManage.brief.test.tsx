@@ -122,7 +122,7 @@ describe("RoundManage Brief Section", () => {
 
   it("MetadataForm no longer renders time inputs", async () => {
     renderPage();
-    await screen.findByText("Max Teams"); // Wait for MetadataForm
+    await screen.findByText("Check-in By", { selector: "label" });
     // They should exist ONLY once (in BriefForm, not in MetadataForm)
     expect(screen.getAllByText("Check-in By", { selector: "label" })).toHaveLength(1);
     expect(screen.getAllByText("Land By", { selector: "label" })).toHaveLength(1);
