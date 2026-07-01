@@ -137,6 +137,7 @@ const WORKFLOW: Record<
 > = {
   Proposed: [
     { label: "Confirm", endpoint: "confirm", bg: "#cfe2ff", color: "#084298" },
+    { label: "Cancel Round", endpoint: "cancel", bg: "#f8d7da", color: "#58151c" },
   ],
   Confirmed: [
     {
@@ -146,6 +147,7 @@ const WORKFLOW: Record<
       color: "#3a00a8",
       requiresConfirm: true,
     },
+    { label: "Cancel Round", endpoint: "cancel", bg: "#f8d7da", color: "#58151c" },
   ],
   BriefComplete: [
     {
@@ -177,7 +179,9 @@ const WORKFLOW: Record<
     },
   ],
   Complete: [],
-  Cancelled: [],
+  Cancelled: [
+    { label: "Uncancel", endpoint: "uncancel", bg: "#e9ecef", color: "#495057" },
+  ],
 };
 
 // ─── Add Team form ────────────────────────────────────────────────────────────
@@ -1250,7 +1254,7 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
 
   if (loading) return <div>Loading brief...</div>;
 
-  const disabled = round.status === "BriefComplete" || round.status === "Locked" || round.status === "Complete";
+  const disabled = round.status === "BriefComplete" || round.status === "Locked" || round.status === "Complete" || round.status === "Cancelled";
 
   const handleChange = <K extends keyof RoundBrief>(field: K, value: RoundBrief[K]) => {
     setBrief(prev => ({ ...prev, [field]: value }));
@@ -1538,6 +1542,12 @@ export default function RoundManage() {
         </div>
       </div>
 
+      {r.status === "Cancelled" && (
+        <div style={{ ...sectionStyle, background: "#f8d7da", color: "#58151c", border: "1px solid #f5c2c7" }}>
+          <strong>This round is cancelled.</strong> No changes can be made while it is cancelled. Use <strong>Uncancel</strong> to reopen it as Proposed.
+        </div>
+      )}
+
       {/* Workflow actions */}
       {canManage && workflowActions.length > 0 && (
         <div style={{ ...sectionStyle, display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
@@ -1592,7 +1602,11 @@ export default function RoundManage() {
       {canManage && (
         <section style={sectionStyle}>
           <h2 style={{ fontSize: "1rem", margin: "0 0 0.75rem" }}>Round Details</h2>
-          {r.isLocked ? (
+          {r.status === "Cancelled" ? (
+            <p style={{ color: "#888", fontSize: "0.85rem", margin: 0 }}>
+              This round is cancelled. Uncancel it to edit.
+            </p>
+          ) : r.isLocked ? (
             <p style={{ color: "#888", fontSize: "0.85rem", margin: 0 }}>
               Unlock the round to edit metadata.
             </p>
