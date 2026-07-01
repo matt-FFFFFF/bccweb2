@@ -13,6 +13,10 @@ import type {
   Team,
   WingClass,
 } from "@bccweb/types";
+import {
+  PILOT_RATINGS,
+  WING_CLASSES,
+} from "@bccweb/types";
 import * as z from "zod/v4";
 
 import { healed, healingArray, lenientOptional, normalizeEnum } from "./helpers.js";
@@ -28,15 +32,6 @@ const roundStatusValues = [
 
 const pilotSlotStatusValues = ["Empty", "Filled"] as const;
 const scoringTypeValues = ["XC", "Manual"] as const;
-const pilotRatingValues = ["Club Pilot", "Pilot", "Advanced Pilot"] as const;
-const wingClassValues = [
-  "EN A",
-  "EN B",
-  "EN C",
-  "EN C 2-liner",
-  "EN D",
-  "EN D 2-liner",
-] as const;
 
 const roundStatusAliases = {
   Draft: "Proposed",
@@ -131,13 +126,13 @@ export const ScoringTypeSchema = z.preprocess(
 );
 
 const PilotRatingSchema = z.preprocess(
-  normalizeEnum(pilotRatingValues, pilotRatingAliases),
-  z.enum(pilotRatingValues),
+  normalizeEnum(PILOT_RATINGS, pilotRatingAliases),
+  z.enum(PILOT_RATINGS),
 );
 
 const WingClassSchema = z.preprocess(
-  normalizeEnum(wingClassValues, wingClassAliases),
-  z.enum(wingClassValues),
+  normalizeEnum(WING_CLASSES, wingClassAliases),
+  z.enum(WING_CLASSES),
 );
 
 RoundStatusSchema satisfies z.ZodType<RoundStatus>;

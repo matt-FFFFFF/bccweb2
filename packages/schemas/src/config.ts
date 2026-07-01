@@ -1,16 +1,8 @@
 import type { Config } from "@bccweb/types";
+import { WING_CLASSES } from "@bccweb/types";
 import * as z from "zod/v4";
 
 import { healed, normalizeEnum } from "./helpers.js";
-
-const wingClassValues = [
-  "EN A",
-  "EN B",
-  "EN C",
-  "EN C 2-liner",
-  "EN D",
-  "EN D 2-liner",
-] as const;
 
 const wingClassAliases = {
   EN_A: "EN A",
@@ -23,7 +15,7 @@ const wingClassAliases = {
   EN_D_2_LINER_LOWER: "EN D 2-liner",
   ENC2Liner: "EN C 2-liner",
   END2Liner: "EN D 2-liner",
-} as const satisfies Record<string, (typeof wingClassValues)[number]>;
+} as const satisfies Record<string, (typeof WING_CLASSES)[number]>;
 
 const WingFactorSchema = healed(z.number(), 1);
 
@@ -55,7 +47,7 @@ export const ConfigSchema = z
         }
 
         const normalized: Record<string, unknown> = {};
-        const normalizeWingClass = normalizeEnum(wingClassValues, wingClassAliases);
+        const normalizeWingClass = normalizeEnum(WING_CLASSES, wingClassAliases);
 
         for (const [key, value] of Object.entries(raw)) {
           normalized[normalizeWingClass(key) ?? key] = value;

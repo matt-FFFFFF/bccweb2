@@ -7,7 +7,7 @@ import type {
   RoundBrief,
   WingClass,
 } from "@bccweb/types";
-import { COACH_TYPES } from "@bccweb/types";
+import { COACH_TYPES, PILOT_RATINGS, WING_CLASSES } from "@bccweb/types";
 import * as z from "zod/v4";
 
 import { healed, healingArray, lenientOptional, normalizeEnum } from "./helpers.js";
@@ -15,16 +15,6 @@ import { healed, healingArray, lenientOptional, normalizeEnum } from "./helpers.
 // Brief image uploads are capped by the API at 10 per brief. The schema enforces
 // that storage contract so over-cap blobs fail clearly instead of being silently
 // treated as valid brief documents.
-
-const pilotRatingValues = ["Club Pilot", "Pilot", "Advanced Pilot"] as const;
-const wingClassValues = [
-  "EN A",
-  "EN B",
-  "EN C",
-  "EN C 2-liner",
-  "EN D",
-  "EN D 2-liner",
-] as const;
 
 const pilotRatingAliases = {
   clubPilot: "Club Pilot",
@@ -34,7 +24,7 @@ const pilotRatingAliases = {
   advancedPilot: "Advanced Pilot",
   advanced_pilot: "Advanced Pilot",
   AdvancedPilot: "Advanced Pilot",
-} as const satisfies Record<string, (typeof pilotRatingValues)[number]>;
+} as const satisfies Record<string, (typeof PILOT_RATINGS)[number]>;
 
 const wingClassAliases = {
   EN_A: "EN A",
@@ -48,13 +38,13 @@ const wingClassAliases = {
 } as const satisfies Record<string, WingClass>;
 
 const PilotRatingSchema = z.preprocess(
-  normalizeEnum(pilotRatingValues, pilotRatingAliases),
-  z.enum(pilotRatingValues),
+  normalizeEnum(PILOT_RATINGS, pilotRatingAliases),
+  z.enum(PILOT_RATINGS),
 );
 
 const WingClassSchema = z.preprocess(
-  normalizeEnum(wingClassValues, wingClassAliases),
-  z.enum(wingClassValues),
+  normalizeEnum(WING_CLASSES, wingClassAliases),
+  z.enum(WING_CLASSES),
 );
 
 const ManufacturerRefSchema = z
