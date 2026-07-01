@@ -227,7 +227,7 @@ async function roundWithFlight(flightId: string, ownerPilotId: string): Promise<
         signToFly: false,
         noScore: false,
         pilotPoints: 0,
-        snapshot: null,
+        snapshot: { wingClass: "EN B", pilotRating: "Pilot" },
         flight: {
           id: flightId,
           distance: 10,
@@ -272,7 +272,7 @@ const CASES: CallSiteCase[] = [
   { file: "admin.ts", handler: "recomputeRound", endpoint: "recomputeRound", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("POST", { id: randomUUID() }) },
   { file: "admin.ts", handler: "updateConfig", endpoint: "updateConfig", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("PUT", {}, { maxTeamsInClub: 2 }) },
   { file: "admin.ts", handler: "setUserRoles", endpoint: "setUserRoles", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("PUT", { userId: randomUUID() }, { roles: ["Pilot"] }) },
-  { file: "adminWording.ts", handler: "addSignToFlyWording", endpoint: "addSignToFlyWording", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("POST", {}, { html: "<p>x</p>", plainText: "x" }) },
+  { file: "adminWording.ts", handler: "addSignToFlyWording", endpoint: "addSignToFlyWording", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("POST", {}, { markdown: "x" }) },
 
   { file: "brief.ts", handler: "updateRoundBrief", endpoint: "updateRoundBrief", tier: "heavy", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "PUT", params: { id: (await roundForOtherClub("Confirmed")).id }, body: {} } }) },
   { file: "brief.ts", handler: "uploadBriefImage", endpoint: "uploadBriefImage", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "POST", params: { id: (await roundForOtherClub("Confirmed")).id } } }) },
@@ -301,6 +301,7 @@ const CASES: CallSiteCase[] = [
   { file: "roundsMutate.ts", handler: "updateRound", endpoint: "updateRound", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("PUT", { id: randomUUID() }, { maxTeams: 4 }) },
   { file: "roundsMutate.ts", handler: "confirmRound", endpoint: "confirmRound", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },
   { file: "roundsMutate.ts", handler: "briefCompleteRound", endpoint: "briefCompleteRound", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },
+  { file: "roundsMutate.ts", handler: "reopenBrief", endpoint: "reopenBrief", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },
   { file: "roundsMutate.ts", handler: "lockRound", endpoint: "lockRound", tier: "heavy", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },
   { file: "roundsMutate.ts", handler: "unlockRound", endpoint: "unlockRound", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },
   { file: "roundsMutate.ts", handler: "completeRound", endpoint: "completeRound", tier: "heavy", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },

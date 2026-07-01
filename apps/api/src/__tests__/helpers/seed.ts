@@ -351,6 +351,12 @@ export async function makeRound(
 
   if (overrides.id || overrides.teams) {
     const targetId = overrides.id ?? round.id;
+    if (targetId !== round.id) {
+      // createRound seeded the brief under the original id; relocate it so
+      // brief-complete (which now requires an existing brief) finds it.
+      const brief = await readPrivateJson<Record<string, unknown>>(`round-briefs/${round.id}.json`);
+      if (brief) await writePrivateJson(`round-briefs/${targetId}.json`, { ...brief, roundId: targetId });
+    }
     round = {
       ...round,
       id: targetId,

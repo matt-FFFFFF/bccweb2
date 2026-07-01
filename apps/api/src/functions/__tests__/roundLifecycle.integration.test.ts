@@ -373,6 +373,15 @@ async function seedCreatedRoundViaHandlers(): Promise<LifecycleContext> {
   }));
   expect(addPilotRes.status).toBe(200);
 
+  // Filled slots need a snapshot to pass brief-complete's roster gate.
+  const created = (await readPrivateJson<Round>(`rounds/${roundId}.json`))!;
+  for (const team of created.teams) {
+    for (const slot of team.pilots) {
+      if (slot.status === "Filled" && slot.pilotId) slot.snapshot = { wingClass: "EN B", pilotRating: "Pilot" };
+    }
+  }
+  await writePrivateJson(`rounds/${roundId}.json`, created);
+
   return { ...base, roundId, teamId };
 }
 
@@ -394,9 +403,6 @@ async function seedLifecycleRound(opts: {
     isLocked: opts.isLocked ?? status === "Locked",
     maxTeams: 8,
     minimumScore: 0,
-    briefingTime: "10:00",
-    landByTime: "18:00",
-    checkInByTime: "19:00",
     site: { id: base.siteId, name: "Milk Hill", parkingW3W: "filled.count.soap", briefingW3W: "brief.count.soap", takeOffW3W: "takeoff.count.soap" },
     organisingClub: { id: base.clubId, name: "Test Club" },
     season: { year: base.year },
@@ -499,12 +505,11 @@ async function seedLockedScorableRound(opts: { complete?: boolean } = {}): Promi
 }
 
 async function seedWording(): Promise<void> {
-  const html = "<p>Sign to fly wording</p>";
+  const markdown = "Sign to fly wording";
   await writePrivateJson("sign-to-fly/wording/1.json", {
     version: 1,
-    hash: createHash("sha256").update(html, "utf8").digest("hex"),
-    html,
-    plainText: "Sign to fly wording",
+    hash: createHash("sha256").update(markdown, "utf8").digest("hex"),
+    markdown,
     createdAt: new Date().toISOString(),
     createdBy: "vitest",
   } satisfies SignToFlyWording);
