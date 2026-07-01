@@ -503,8 +503,7 @@ function createState(): E2EState {
     wording: {
       version: 1,
       hash: "mock-wording-hash",
-      html: "<h2>Legal acceptance text</h2><p>You confirm you have read the safety briefing and accept responsibility for your flight.</p>",
-      plainText: "Legal acceptance text",
+      markdown: "## Legal acceptance text\n\nYou confirm you have read the safety briefing and accept responsibility for your flight.",
       createdAt: new Date().toISOString(),
       createdBy: "e2e",
     },

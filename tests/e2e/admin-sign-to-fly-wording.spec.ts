@@ -64,10 +64,10 @@ test.describe("admin sign-to-fly wording", () => {
     await expect(page.getByText(/WORDING_NOT_SEEDED|Failed to load wording/i)).toHaveCount(0);
     await shot(page, "01-empty-state-form");
 
-    // --- Fill the publish form (HTML + plain text). ---
-    const textareas = page.locator("textarea");
-    await textareas.nth(0).fill("<p>QA wording v1</p>");
-    await textareas.nth(1).fill("QA wording v1");
+    // --- Fill the publish form (MarkdownEditor). ---
+    // @uiw/react-md-editor renders its editable area as .w-md-editor-text-input.
+    const mdInput = page.locator(".w-md-editor-text-input");
+    await mdInput.fill("## QA wording v1");
     await shot(page, "02-filled-form");
 
     // Empty state → active null → nextVersion 1 → button label "Publish Version 1".
@@ -83,10 +83,10 @@ test.describe("admin sign-to-fly wording", () => {
       const r = await fetch("/api/sign-to-fly/wording/active", {
         headers: { Authorization: `Bearer ${t}` },
       });
-      return r.json() as Promise<{ version: number; html: string }>;
+      return r.json() as Promise<{ version: number; markdown: string }>;
     });
     expect(active.version).toBe(1);
-    expect(active.html).toBe("<p>QA wording v1</p>");
+    expect(active.markdown).toBe("## QA wording v1");
 
     // --- History table: a real row, a valid date, no crash. ---
     const historyTable = page.locator("table");
