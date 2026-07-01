@@ -150,13 +150,13 @@ describe("PilotSchema", () => {
       ...minimal,
       legacyId: null,
       coachType: "None",
-      pilotRating: "Pilot",
+      pilotRating: "Club Pilot",
       seasonClubs: [],
       userId: null,
     });
   });
 
-  test("heals enum aliases and invalid optional scalar fields", () => {
+  test("heals invalid coach/rating/wing enums (no aliases) and strips bad optionals", () => {
     const parsed = PilotSchema.parse({
       ...validPilot,
       coachType: "senior_coach",
@@ -170,9 +170,9 @@ describe("PilotSchema", () => {
       },
     });
 
-    expect(parsed.coachType).toBe("SeniorCoach");
-    expect(parsed.pilotRating).toBe("Advanced Pilot");
-    expect(parsed.wingClass).toBe("EN C 2-liner");
+    expect(parsed.coachType).toBe("None");
+    expect(parsed.pilotRating).toBe("Club Pilot");
+    expect(parsed.wingClass).toBeUndefined();
     expect(parsed.pureTrackId).toBeUndefined();
     expect(parsed.wingManufacturer?.websiteUrl).toBeUndefined();
   });

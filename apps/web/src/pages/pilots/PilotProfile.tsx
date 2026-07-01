@@ -2,6 +2,7 @@ import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import type { Pilot, PilotClubMembership, CoachType, PilotRatingValue, WingClass, ManufacturerRef, ClubSummary } from "@bccweb/types";
+import { PILOT_RATINGS, WING_CLASSES } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
 import { useBlob } from "../../hooks/useBlob.js";
 import { api, ApiError } from "../../lib/api.js";
@@ -92,9 +93,6 @@ function Row({ label, value }: { label: string; value?: ReactNode }) {
 }
 
 // ─── Edit form ────────────────────────────────────────────────────────────────
-
-const PILOT_RATINGS: PilotRatingValue[] = ["Club Pilot", "Pilot", "Advanced Pilot"];
-const WING_CLASSES: WingClass[] = ["EN A", "EN B", "EN C", "EN C 2-liner", "EN D", "EN D 2-liner"];
 
 interface EditForm {
   coachType: CoachType;

@@ -19,18 +19,22 @@ export const COACH_TYPE_LABELS: Record<CoachType, string> = {
   SeniorInstructor: "Senior Instructor",
 };
 
-export type PilotRatingValue =
-  | "Club Pilot"
-  | "Pilot"
-  | "Advanced Pilot";
+export const PILOT_RATINGS = [
+  "Club Pilot",
+  "Pilot",
+  "Advanced Pilot",
+] as const;
+export type PilotRatingValue = (typeof PILOT_RATINGS)[number];
 
-export type WingClass =
-  | "EN A"
-  | "EN B"
-  | "EN C"
-  | "EN C 2-liner"
-  | "EN D"
-  | "EN D 2-liner";
+export const WING_CLASSES = [
+  "EN A",
+  "EN B",
+  "EN C",
+  "EN C 2-liner",
+  "EN D",
+  "EN D 2-liner",
+] as const;
+export type WingClass = (typeof WING_CLASSES)[number];
 
 export type RoundStatus =
   | "Proposed"
