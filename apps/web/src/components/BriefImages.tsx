@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 
 interface BriefImagesProps {
   imagePaths: string[];
@@ -8,6 +8,7 @@ interface BriefImagesProps {
 export function BriefImages({ imagePaths, roundId }: BriefImagesProps) {
   const [imageUrls, setImageUrls] = useState<string[]>([]);
   const [lightbox, setLightbox] = useState<{ url: string; alt: string } | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!roundId || !imagePaths || imagePaths.length === 0) {
@@ -47,9 +48,14 @@ export function BriefImages({ imagePaths, roundId }: BriefImagesProps) {
 
   useEffect(() => {
     if (!lightbox) return;
+    const previouslyFocused = document.activeElement as HTMLElement | null;
+    closeButtonRef.current?.focus();
     const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setLightbox(null); };
     window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      previouslyFocused?.focus?.();
+    };
   }, [lightbox]);
 
   if (!imagePaths || imagePaths.length === 0) return null;
@@ -119,6 +125,7 @@ export function BriefImages({ imagePaths, roundId }: BriefImagesProps) {
           />
           <button
             type="button"
+            ref={closeButtonRef}
             onClick={() => setLightbox(null)}
             aria-label="Close"
             style={{
