@@ -107,8 +107,12 @@ const validRound = {
 } as const;
 
 describe("RoundStatusSchema", () => {
-  test("heals legacy status values to canonical values", () => {
-    expect(RoundStatusSchema.parse("BriefingComplete")).toBe("BriefComplete");
+  test("round-trips canonical status values", () => {
+    expect(RoundStatusSchema.parse("BriefComplete")).toBe("BriefComplete");
+  });
+
+  test("heals an unknown status to the Proposed default (no aliases)", () => {
+    expect(RoundStatusSchema.parse("BriefingComplete")).toBe("Proposed");
   });
 });
 
@@ -225,7 +229,7 @@ describe("PilotSlotSchema and FlightSchema", () => {
   test("fills optional nested flight fields", () => {
     const parsed = PilotSlotSchema.parse({
       placeInTeam: 1,
-      status: "filled",
+      status: "Filled",
       pilotId: null,
       flight: {
         id: "flight-2",

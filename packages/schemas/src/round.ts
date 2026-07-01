@@ -13,56 +13,14 @@ import type {
 } from "@bccweb/types";
 import {
   PILOT_RATINGS,
+  PILOT_SLOT_STATUSES,
+  ROUND_STATUSES,
+  SCORING_TYPES,
   WING_CLASSES,
 } from "@bccweb/types";
 import * as z from "zod/v4";
 
-import { healed, healingArray, lenientOptional, normalizeEnum } from "./helpers.js";
-
-const roundStatusValues = [
-  "Proposed",
-  "Confirmed",
-  "BriefComplete",
-  "Locked",
-  "Complete",
-  "Cancelled",
-] as const;
-
-const pilotSlotStatusValues = ["Empty", "Filled"] as const;
-const scoringTypeValues = ["XC", "Manual"] as const;
-
-const roundStatusAliases = {
-  Draft: "Proposed",
-  draft: "Proposed",
-  proposed: "Proposed",
-  Active: "Confirmed",
-  active: "Confirmed",
-  confirmed: "Confirmed",
-  BriefingComplete: "BriefComplete",
-  briefingComplete: "BriefComplete",
-  briefing_complete: "BriefComplete",
-  brief_complete: "BriefComplete",
-  locked: "Locked",
-  completed: "Complete",
-  complete: "Complete",
-  cancelled: "Cancelled",
-  canceled: "Cancelled",
-} as const satisfies Record<string, RoundStatus>;
-
-const pilotSlotStatusAliases = {
-  empty: "Empty",
-  vacant: "Empty",
-  filled: "Filled",
-  assigned: "Filled",
-} as const satisfies Record<string, PilotSlotStatus>;
-
-const scoringTypeAliases = {
-  xc: "XC",
-  Xc: "XC",
-  puretrack: "XC",
-  PureTrack: "XC",
-  manual: "Manual",
-} as const satisfies Record<string, ScoringType>;
+import { healed, healingArray, lenientOptional } from "./helpers.js";
 
 const ClubRefSchema = z
   .object({
@@ -87,20 +45,11 @@ const SeasonRefSchema = z
   })
   .strip();
 
-export const RoundStatusSchema = z.preprocess(
-  normalizeEnum(roundStatusValues, roundStatusAliases),
-  z.enum(roundStatusValues).catch("Proposed"),
-);
+export const RoundStatusSchema = z.enum(ROUND_STATUSES).catch("Proposed");
 
-export const PilotSlotStatusSchema = z.preprocess(
-  normalizeEnum(pilotSlotStatusValues, pilotSlotStatusAliases),
-  z.enum(pilotSlotStatusValues).catch("Empty"),
-);
+export const PilotSlotStatusSchema = z.enum(PILOT_SLOT_STATUSES).catch("Empty");
 
-export const ScoringTypeSchema = z.preprocess(
-  normalizeEnum(scoringTypeValues, scoringTypeAliases),
-  z.enum(scoringTypeValues).catch("XC"),
-);
+export const ScoringTypeSchema = z.enum(SCORING_TYPES).catch("XC");
 
 const PilotRatingSchema = z.enum(PILOT_RATINGS);
 
