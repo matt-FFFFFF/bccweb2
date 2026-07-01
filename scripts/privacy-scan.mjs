@@ -24,9 +24,10 @@ import { findPiiInObject, PII_FIELDS } from "./lib/pii.mjs";
 const require = createRequire(import.meta.url);
 // Privacy scan runs from repo root in CI; this fallback resolves api workspace deps
 // when npm keeps them nested rather than hoisting to root node_modules.
+const DEFAULT_API_WORKSPACE_PATH = "apps/api";
 const apiWorkspaceDir = process.env["API_WORKSPACE_PATH"]
   ? resolve(process.cwd(), process.env["API_WORKSPACE_PATH"])
-  : resolve(process.cwd(), "apps/api");
+  : resolve(process.cwd(), DEFAULT_API_WORKSPACE_PATH);
 const blobResolveBases = [process.cwd(), apiWorkspaceDir];
 let BlobServiceClient;
 const blobImportAttempts = [];
@@ -41,7 +42,7 @@ for (const base of blobResolveBases) {
 }
 if (!BlobServiceClient) {
   throw new Error(
-    `Cannot load @azure/storage-blob from root or API workspace. Attempts: ${blobImportAttempts.join(" | ")}. Run npm ci from the repository root to install all workspace dependencies and set API_WORKSPACE_PATH (for example: apps/api) when using nested workspace installs.`
+    `Cannot load @azure/storage-blob from root or API workspace. Attempts: ${blobImportAttempts.join(" | ")}. Run npm ci from the repository root to install all workspace dependencies and set API_WORKSPACE_PATH (defaults to ${DEFAULT_API_WORKSPACE_PATH}) when using nested workspace installs.`
   );
 }
 
