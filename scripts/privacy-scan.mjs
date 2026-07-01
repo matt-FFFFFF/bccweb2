@@ -18,38 +18,30 @@ import RE2 from "re2";
 import { readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { findPiiInObject, PII_FIELDS } from "./lib/pii.mjs";
 
 const require = createRequire(import.meta.url);
-const scriptDir = fileURLToPath(new URL(".", import.meta.url));
 // Privacy scan runs from repo root in CI; this fallback resolves api workspace deps
 // when npm keeps them nested rather than hoisting to root node_modules.
 const apiWorkspaceDir = process.env["API_WORKSPACE_PATH"]
   ? resolve(process.cwd(), process.env["API_WORKSPACE_PATH"])
-  : resolve(scriptDir, "../apps/api");
+  : resolve(process.cwd(), "apps/api");
 const blobResolveBases = [process.cwd(), apiWorkspaceDir];
 let BlobServiceClient;
 const blobImportAttempts = [];
 for (const base of blobResolveBases) {
-  let resolved;
   try {
-    resolved = require.resolve("@azure/storage-blob", { paths: [base] });
-  } catch (err) {
-    blobImportAttempts.push(`[${base}] resolve failed: ${err.message}`);
-    continue;
-  }
-  try {
-    ({ BlobServiceClient } = await import(resolved));
+    const resolved = require.resolve("@azure/storage-blob", { paths: [base] });
+    ({ BlobServiceClient } = require(resolved));
     break;
   } catch (err) {
-    blobImportAttempts.push(`[${base}] import failed: ${err.message}`);
+    blobImportAttempts.push(`[${base}] load failed: ${err.message}`);
   }
 }
 if (!BlobServiceClient) {
   throw new Error(
-    `Cannot load @azure/storage-blob from this workspace. Attempts: ${blobImportAttempts.join(" | ")}. Run npm ci from the repository root to install all workspace dependencies and set API_WORKSPACE_PATH (for example: apps/api) when using nested workspace installs.`
+    `Cannot load @azure/storage-blob from root or API workspace. Attempts: ${blobImportAttempts.join(" | ")}. Run npm ci from the repository root to install all workspace dependencies and set API_WORKSPACE_PATH (for example: apps/api) when using nested workspace installs.`
   );
 }
 
