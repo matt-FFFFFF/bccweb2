@@ -613,7 +613,7 @@ function PilotRow({
     try {
       await api.put(
         `rounds/${roundId}/teams/${team.id}/pilots/${slot.placeInTeam}/accounted`,
-        { value: !current }
+        { accountedFor: !current }
       );
       onChanged();
     } catch (ex) {

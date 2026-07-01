@@ -305,6 +305,8 @@ const CASES: CallSiteCase[] = [
   { file: "roundsMutate.ts", handler: "lockRound", endpoint: "lockRound", tier: "heavy", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },
   { file: "roundsMutate.ts", handler: "unlockRound", endpoint: "unlockRound", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },
   { file: "roundsMutate.ts", handler: "completeRound", endpoint: "completeRound", tier: "heavy", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },
+  { file: "roundsMutate.ts", handler: "cancelRound", endpoint: "cancelRound", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },
+  { file: "roundsMutate.ts", handler: "uncancelRound", endpoint: "uncancelRound", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID() }) },
 
   { file: "seasonClubs.ts", handler: "createSeasonClub", endpoint: "createSeasonClub", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("POST", { year: "2026" }, { clubId: randomUUID(), numTeams: 1, acceptTsCs: true }) },
   { file: "seasonClubs.ts", handler: "updateSeasonClub", endpoint: "updateSeasonClub", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("PUT", { year: "2026", seasonClubId: randomUUID() }, { numTeams: 1 }) },
@@ -322,7 +324,29 @@ const CASES: CallSiteCase[] = [
   { file: "teams.ts", handler: "removeTeam", endpoint: "removeTeam", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("DELETE", { id: randomUUID(), teamId: randomUUID() }) },
   { file: "teams.ts", handler: "addPilot", endpoint: "addPilot", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("POST", { id: randomUUID(), teamId: randomUUID() }, { pilotId: randomUUID() }) },
   { file: "teams.ts", handler: "removePilot", endpoint: "removePilot", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("DELETE", { id: randomUUID(), teamId: randomUUID(), place: "1" }) },
-  { file: "teams.ts", handler: "updateAccounted", endpoint: "updateAccounted", tier: "standard", forbiddenKind: "coord-coarse", setup: coordCoarse("PUT", { id: randomUUID(), teamId: randomUUID(), place: "1" }, { accountedFor: true }) },
+  { file: "teams.ts", handler: "updateAccounted", endpoint: "updateAccounted", tier: "standard", forbiddenKind: "coord-scope", setup: async () => {
+    const clubId = randomUUID();
+    const team: Team = {
+      id: randomUUID(),
+      teamName: "Acct Team",
+      club: { id: clubId, name: "Acct Club" },
+      score: 0,
+      pilots: [{
+        placeInTeam: 1,
+        pilotId: randomUUID(),
+        isScoring: true,
+        status: "Filled",
+        accountedFor: false,
+        signToFly: false,
+        noScore: false,
+        pilotPoints: 0,
+        snapshot: { wingClass: "EN B", pilotRating: "Pilot" },
+        flight: null,
+      }],
+    };
+    const round = await makeRound({ organisingClubId: clubId, status: "Locked", teams: [team] });
+    return { forbidden: await crossClubCoord(), request: { method: "PUT", params: { id: round.id, teamId: team.id, place: "1" }, body: { accountedFor: true } } };
+  } },
 
   { file: "teamsCaptain.ts", handler: "setTeamCaptain", endpoint: "setTeamCaptain", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "PUT", params: { id: (await roundForOtherClub()).id, teamId: randomUUID() }, body: { pilotId: null } } }) },
 ];
