@@ -26,6 +26,7 @@ import type {
 } from "@bccweb/types";
 import { MarkdownEditor } from "../../components/MarkdownEditor.js";
 import { MarkdownView } from "../../components/MarkdownView.js";
+import { AuthImage } from "../../components/AuthImage.js";
 import { useBlob } from "../../hooks/useBlob.js";
 import { useAuth } from "../../hooks/useAuth.js";
 import { api, ApiError } from "../../lib/api.js";
@@ -1178,6 +1179,37 @@ function MetadataForm({
 
 // ─── Brief edit form ─────────────────────────────────────────────────────────
 
+function MarkdownBriefField({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: string;
+  disabled: boolean;
+  onChange: (v: string) => void;
+}) {
+  return (
+    <div>
+      <label style={{ fontSize: "0.8rem", color: "#555", display: "block" }}>{label}</label>
+      <div style={{ border: "1px solid #ccc", padding: "0.5rem" }}>
+        {disabled ? (
+          <MarkdownView markdown={value} />
+        ) : (
+          <>
+            <MarkdownEditor value={value} onChange={v => onChange(v ?? "")} preview="edit" />
+            <div style={{ marginTop: "0.5rem", borderTop: "1px solid #eee", paddingTop: "0.5rem" }}>
+              <div style={{ fontSize: "0.75rem", color: "#888", marginBottom: "0.25rem" }}>Preview</div>
+              <MarkdownView markdown={value} />
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
   const [brief, setBrief] = useState<Partial<RoundBrief> | null>(null);
   const [loading, setLoading] = useState(true);
@@ -1287,21 +1319,9 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
       <div><label style={labelStyle}>NOTAMs</label><textarea disabled={disabled} style={{...fi, resize: "vertical"}} value={brief?.NOTAMs || ""} onChange={e => handleChange("NOTAMs", e.target.value)} /></div>
       <div><label style={labelStyle}>BENO Line Description</label><textarea disabled={disabled} style={{...fi, resize: "vertical"}} value={brief?.BENO_LineDescription || ""} onChange={e => handleChange("BENO_LineDescription", e.target.value)} /></div>
       
-      <div><label style={labelStyle}>Expected Landing Area</label>
-        <div style={{ border: "1px solid #ccc", padding: "0.5rem" }}>
-          {disabled ? <MarkdownView markdown={brief?.expectedLandingArea || ""} /> : <MarkdownEditor value={brief?.expectedLandingArea || ""} onChange={v => handleChange("expectedLandingArea", v)} />}
-        </div>
-      </div>
-      <div><label style={labelStyle}>Airspace & Hazards</label>
-        <div style={{ border: "1px solid #ccc", padding: "0.5rem" }}>
-          {disabled ? <MarkdownView markdown={brief?.airspaceAndHazards || ""} /> : <MarkdownEditor value={brief?.airspaceAndHazards || ""} onChange={v => handleChange("airspaceAndHazards", v)} />}
-        </div>
-      </div>
-      <div><label style={labelStyle}>Briefer's Notes</label>
-        <div style={{ border: "1px solid #ccc", padding: "0.5rem" }}>
-          {disabled ? <MarkdownView markdown={brief?.briefersNotes || ""} /> : <MarkdownEditor value={brief?.briefersNotes || ""} onChange={v => handleChange("briefersNotes", v)} />}
-        </div>
-      </div>
+      <MarkdownBriefField label="Expected Landing Area" value={brief?.expectedLandingArea || ""} disabled={disabled} onChange={v => handleChange("expectedLandingArea", v)} />
+      <MarkdownBriefField label="Airspace & Hazards" value={brief?.airspaceAndHazards || ""} disabled={disabled} onChange={v => handleChange("airspaceAndHazards", v)} />
+      <MarkdownBriefField label="Briefer's Notes" value={brief?.briefersNotes || ""} disabled={disabled} onChange={v => handleChange("briefersNotes", v)} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
         <div><label style={labelStyle}>Briefer Name</label><input disabled={disabled} style={fi} value={brief?.briefer?.name || ""} onChange={e => handleBrieferChange("name", e.target.value)} /></div>
@@ -1316,7 +1336,7 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
           {brief?.imagePaths?.map((p, i) => (
             <div key={i} style={{ position: "relative", border: "1px solid #ccc", padding: "0.25rem" }}>
-              <img src={`/api/rounds/${round.id}/brief/images/${i + 1}`} style={{ height: "100px" }} alt="Brief" />
+              <AuthImage src={`/api/rounds/${round.id}/brief/images/${i + 1}`} style={{ height: "100px" }} alt="Brief" />
               {!disabled && (
                 <button onClick={() => removeImage(i)} style={{ position: "absolute", top: 0, right: 0, background: "red", color: "white" }}>X</button>
               )}
