@@ -141,3 +141,41 @@ describe("PUT accounted — lock-state (issue 3)", () => {
     expect(res.status).toBe(409);
   });
 });
+
+describe("roster mutations — frozen once brief is complete", () => {
+  beforeEach(() => resetAllBuckets());
+
+  it("removeTeam at BriefComplete (isLocked false): 409, team retained", async () => {
+    const { round, team } = await seedRoundWithFlight("BriefComplete");
+    const { user } = await makeUser({ roles: ["Admin"] });
+
+    const res = await invoke(
+      "removeTeam",
+      makeAuthRequest(user.id, user.email, {
+        method: "DELETE",
+        params: { id: round.id, teamId: team.id },
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    const after = await readPrivateJson<Round>(`rounds/${round.id}.json`);
+    expect(after?.teams).toHaveLength(1);
+  });
+
+  it("removePilot at BriefComplete (isLocked false): 409, slot retained", async () => {
+    const { round, team } = await seedRoundWithFlight("BriefComplete");
+    const { user } = await makeUser({ roles: ["Admin"] });
+
+    const res = await invoke(
+      "removePilot",
+      makeAuthRequest(user.id, user.email, {
+        method: "DELETE",
+        params: { id: round.id, teamId: team.id, place: "1" },
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    const after = await readPrivateJson<Round>(`rounds/${round.id}.json`);
+    expect(after?.teams[0].pilots).toHaveLength(1);
+  });
+});

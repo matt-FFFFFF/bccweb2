@@ -40,7 +40,7 @@ export type RoundStatus =
   | "Complete"
   | "Cancelled";
 
-export { normalizeStatus } from "./status.js";
+export { normalizeStatus, isRosterFrozen } from "./status.js";
 
 export type PilotSlotStatus = "Empty" | "Filled";
 

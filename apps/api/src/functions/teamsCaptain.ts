@@ -16,6 +16,7 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { Round } from "@bccweb/types";
+import { isRosterFrozen } from "@bccweb/types";
 import { RoundSchema } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
@@ -99,11 +100,11 @@ async function setTeamCaptain(
       }
     }
 
-    if (round.status === "Locked" || round.status === "Complete") {
+    if (isRosterFrozen(round.status)) {
       throw new HttpError(
         409,
         "ROUND_LOCKED",
-        "Cannot change the team captain after the round is locked",
+        "Cannot change the team captain once the brief is complete — reopen the brief to make changes",
       );
     }
 

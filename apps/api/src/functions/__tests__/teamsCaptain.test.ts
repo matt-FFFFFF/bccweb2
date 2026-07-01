@@ -278,4 +278,31 @@ describe("PUT /api/rounds/{id}/teams/{teamId}/captain", () => {
     expect(res.status).toBe(409);
     expect((res.jsonBody as { code: string }).code).toBe("ROUND_LOCKED");
   });
+
+  it("BriefComplete round (isLocked false): 409 ROUND_LOCKED, captain unchanged", async () => {
+    resetAllBuckets();
+    const { round, team, pilot } = await seedRoundWithTeam();
+    const stored = await readPrivateJson<Round>(`rounds/${round.id}.json`);
+    if (stored) {
+      stored.status = "BriefComplete";
+      stored.isLocked = false;
+      await writePrivateJson(`rounds/${round.id}.json`, stored);
+    }
+
+    const { user } = await makeUser({ roles: ["Admin"] });
+    const res = await invoke(
+      "setTeamCaptain",
+      makeAuthRequest(user.id, user.email, {
+        method: "PUT",
+        params: { id: round.id, teamId: team.id },
+        body: { pilotId: pilot.id },
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("ROUND_LOCKED");
+
+    const after = await readPrivateJson<Round>(`rounds/${round.id}.json`);
+    expect(after?.teams[0].captainPilotId ?? null).toBeNull();
+  });
 });

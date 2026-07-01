@@ -1,5 +1,5 @@
 import "../../../__tests__/setup.ts";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CallerIdentity, Round, RoundBrief, Team } from "@bccweb/types";
@@ -196,6 +196,28 @@ describe("RoundManage follow-up fixes", () => {
     renderPage();
     expect(await screen.findByRole("button", { name: "Acct" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "S2F" })).not.toBeInTheDocument();
+  });
+
+  // ─── Roster frozen once brief is complete (isLocked still false) ──────────────
+
+  it("shows roster-edit controls at Confirmed", async () => {
+    state.round = makeRound({ status: "Confirmed", teams: [makeTeam()] });
+    renderPage();
+    await screen.findByText("Alpha");
+    expect(screen.getByRole("button", { name: "Add Team" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Remove Team" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "+ Add Pilot" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "— none —" })).toBeInTheDocument();
+  });
+
+  it("hides every roster-edit control at BriefComplete", async () => {
+    state.round = makeRound({ status: "BriefComplete", isLocked: false, teams: [makeTeam({ captainPilotId: "pilot-1" })] });
+    renderPage();
+    await screen.findByText("Alpha");
+    expect(screen.queryByRole("button", { name: "Add Team" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Remove Team" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "+ Add Pilot" })).not.toBeInTheDocument();
+    expect(screen.queryByRole("option", { name: "— none —" })).not.toBeInTheDocument();
   });
 });
 

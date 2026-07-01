@@ -16,6 +16,7 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type { CallerIdentity, ClubTeamSummary, Round, Team, PilotSlot } from "@bccweb/types";
+import { isRosterFrozen } from "@bccweb/types";
 import { ClubTeamSummarySchema, PilotSchema, RoundSchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
 import { getBlobClient, getPrivateBlobClient, withPrivateLease } from "../lib/blob.js";
@@ -163,7 +164,7 @@ async function addTeam(
   };
 
   const result = await mutateLocked(id, caller, (r) => {
-    if (r.isLocked) return "Round is locked";
+    if (isRosterFrozen(r.status)) return "The roster is frozen once the brief is complete — reopen the brief to change teams or pilots";
     if (r.teams.length >= r.maxTeams) {
       return `Round is full (max ${r.maxTeams} teams)`;
     }
@@ -201,7 +202,7 @@ async function removeTeam(
   await mutationRateLimit(req, caller, "removeTeam", "standard");
 
   const result = await mutateLocked(id, caller, (r) => {
-    if (r.isLocked) return "Round is locked";
+    if (isRosterFrozen(r.status)) return "The roster is frozen once the brief is complete — reopen the brief to change teams or pilots";
     const idx = r.teams.findIndex((t) => t.id === teamId);
     if (idx === -1) return "Team not found";
     r.teams.splice(idx, 1);
@@ -250,7 +251,7 @@ async function addPilot(
   }
 
   const result = await mutateLocked(id, caller, (r) => {
-    if (r.isLocked) return "Round is locked";
+    if (isRosterFrozen(r.status)) return "The roster is frozen once the brief is complete — reopen the brief to change teams or pilots";
 
     const teamIdx = r.teams.findIndex((t) => t.id === teamId);
     if (teamIdx === -1) return "Team not found";
@@ -319,7 +320,7 @@ async function removePilot(
   }
 
   const result = await mutateLocked(id, caller, (r) => {
-    if (r.isLocked) return "Round is locked";
+    if (isRosterFrozen(r.status)) return "The roster is frozen once the brief is complete — reopen the brief to change teams or pilots";
 
     const teamIdx = r.teams.findIndex((t) => t.id === teamId);
     if (teamIdx === -1) return "Team not found";
