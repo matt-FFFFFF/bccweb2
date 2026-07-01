@@ -193,8 +193,14 @@ describe("RoundSchema", () => {
       pdfPath: "y",
       generatedAt: "z",
     } as const;
-
+ 
     expect(RoundSchema.parse({ ...validRound, brief }).brief).toEqual(brief);
+  });
+
+  test("preserves narrative content for round detail rendering", () => {
+    const narrative = "<p>Safe narrative</p><script>alert(1)</script>";
+
+    expect(RoundSchema.parse({ ...validRound, narrative }).narrative).toBe(narrative);
   });
 
   test("fills optional fields with undefined when invalid", () => {

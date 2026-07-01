@@ -254,6 +254,7 @@ export const RoundSchema = z
     organisingClub: lenientOptional(ClubRefSchema),
     season: SeasonRefSchema,
     teams: healingArray(TeamSchema).default([]),
+    narrative: lenientOptional(z.string()),
     brief: lenientOptional(
       z
         .object({

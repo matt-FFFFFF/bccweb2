@@ -6,6 +6,7 @@ import { useAuth } from "../../hooks/useAuth.js";
 import { api, ApiError } from "../../lib/api.js";
 import { StatusBadge } from "../../components/StatusBadge.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
+import { sanitizeRoundNarrativeHtml } from "../../lib/sanitize.js";
 
 type BriefWithVersion = RoundBrief & { version?: number };
 
@@ -137,6 +138,7 @@ export default function RoundDetail() {
   const canRegister = isPilot && registrationOpen && !pilotSlot && eligibleTeams.length > 0;
   const canUnregister = isPilot && registrationOpen && pilotSlot && !pilotSlot.slot.signToFly;
   const signedSlot = isPilot && pilotSlot?.slot.signToFly;
+  const sanitizedNarrative = round.narrative ? sanitizeRoundNarrativeHtml(round.narrative) : "";
 
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto" }}>
@@ -296,7 +298,14 @@ export default function RoundDetail() {
         )}
       </section>
 
-
+      {round.narrative && sanitizedNarrative && (
+       <section style={{ marginBottom: "2rem" }}>
+         <div
+           style={{ lineHeight: 1.6, color: "#333" }}
+           dangerouslySetInnerHTML={{ __html: sanitizedNarrative }}
+         />
+       </section>
+      )}
 
       {/* ── Teams ── */}
       {round.teams.length > 0 && (

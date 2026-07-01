@@ -368,6 +368,7 @@ export interface Round {
   organisingClub?: ClubRef;
   season: { year: number };
   teams: Team[];
+  narrative?: string;
   createdAt?: string;
   updatedAt?: string;
   updatedBy?: string;
