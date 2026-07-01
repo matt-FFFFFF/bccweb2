@@ -326,8 +326,8 @@ async function updateRoundBrief(
       }
     }
 
-    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, next as RoundBrief, briefLeaseId);
-    return next as RoundBrief;
+    await writePrivateJson(`round-briefs/${id}.json`, BriefSchema, next as unknown as RoundBrief, briefLeaseId);
+    return next as unknown as RoundBrief;
   });
 
   return { status: 200, jsonBody: merged };
