@@ -94,12 +94,14 @@ describe("brief PDF markdown sanitisation (prose fields)", () => {
     expect(html).toContain("bold");
   });
 
-  it("renders the mixed markdown+HTML payload: keeps the markdown image, drops onerror", () => {
-    // "![x](x)" is a markdown image; the trailing raw <img onerror> must be sanitised.
+  it("drops ALL prose-markdown images (SSRF hardening) plus the onerror payload", () => {
+    // Prose is rendered by Chromium server-side, so <img> is forbidden — an
+    // attacker-controlled src must never trigger an outbound fetch. Brief images
+    // use the separate authenticated pipeline, never inline prose markdown.
     const html = renderBriefPdfHtml(brief({ briefersNotes: "![x](x) <img src=x onerror=alert(1)>" }));
 
     expect(html).not.toMatch(/onerror/i);
-    expect(html).toContain("<img"); // markdown image survives, sanitised
+    expect(html).not.toContain("<img");
   });
 
   it("keeps non-prose fields HTML-escaped (double-mustache), not markdown-rendered", () => {

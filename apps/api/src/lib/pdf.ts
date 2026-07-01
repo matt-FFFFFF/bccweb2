@@ -43,15 +43,17 @@ Handlebars.registerHelper("w3wLink", (w3w: string) => {
 /**
  * Markdown → sanitised HTML for `{{{ }}}` prose cells. SECURITY: DOMPurify must
  * strip scripts/handlers/dangerous URIs before the string reaches triple-mustache;
- * raw `marked` output is never emitted. Empty → "Not provided" (also stops marked
- * throwing on a non-string).
+ * raw `marked` output is never emitted. `<img>` is forbidden too — the PDF is
+ * rendered by Chromium, so an attacker-controlled `![](http://…)` would make the
+ * Functions host fetch it (SSRF/beacon); brief images use the separate authed
+ * pipeline. Empty → "Not provided" (also stops marked throwing on a non-string).
  */
 Handlebars.registerHelper("markdown", (value: unknown) => {
   if (typeof value !== "string" || value.trim().length === 0) {
     return new Handlebars.SafeString("Not provided");
   }
   const rendered = marked.parse(value, { async: false });
-  const clean = DOMPurify.sanitize(rendered);
+  const clean = DOMPurify.sanitize(rendered, { FORBID_TAGS: ["img"] });
   return new Handlebars.SafeString(clean);
 });
 
