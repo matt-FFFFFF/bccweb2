@@ -36,12 +36,6 @@ async function signOwnSlot(
 ): Promise<HttpResponseInit> {
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
-  if (caller.roles.includes("Admin") || caller.roles.includes("RoundsCoord")) {
-    throw new HttpError(403, "NOT_YOUR_SLOT_USE_OVERRIDE");
-  }
-  if (!caller.roles.includes("Pilot") || !caller.pilotId) {
-    throw new HttpError(403, "NOT_YOUR_SLOT");
-  }
 
   const { roundId, teamId, place } = req.params as {
     roundId?: string;
@@ -58,7 +52,15 @@ async function signOwnSlot(
 
   const round = await readRound(roundId);
   const slot = findSlot(round, teamId, placeNum);
-  if (slot?.pilotId !== caller.pilotId) {
+  // Authorised by slot OWNERSHIP, not role. A caller may self-sign only their
+  // own slot; an Admin/RoundsCoord signing ANOTHER pilot's slot must use the
+  // override endpoint. Signing one's OWN slot is a normal self-sign even for an
+  // Admin/Coord who also holds a Pilot profile — so this role gate lives inside
+  // the not-owned branch, never before the ownership check.
+  if (!caller.pilotId || slot?.pilotId !== caller.pilotId) {
+    if (caller.roles.includes("Admin") || caller.roles.includes("RoundsCoord")) {
+      throw new HttpError(403, "NOT_YOUR_SLOT_USE_OVERRIDE");
+    }
     throw new HttpError(403, "NOT_YOUR_SLOT");
   }
   if (round.status !== "BriefComplete") {

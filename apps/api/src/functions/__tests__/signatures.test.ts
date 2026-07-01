@@ -32,9 +32,29 @@ describe("signature endpoints", () => {
     expect((res.jsonBody as { code: string }).code).toBe("NOT_YOUR_SLOT");
   });
 
-  it("admin/coord tries to sign -> 403 NOT_YOUR_SLOT_USE_OVERRIDE", async () => {
+  it("admin/coord tries to sign ANOTHER pilot's slot -> 403 NOT_YOUR_SLOT_USE_OVERRIDE", async () => {
     const ctx = await seedSignableRound();
-    const { user } = await makeUser({ roles: ["Admin"], pilotId: ctx.pilotId });
+    const { user } = await makeUser({ roles: ["Admin"], pilotId: randomUUID() });
+
+    const res = await sign(ctx, user.id, user.email);
+
+    expect(res.status).toBe(403);
+    expect((res.jsonBody as { code: string }).code).toBe("NOT_YOUR_SLOT_USE_OVERRIDE");
+  });
+
+  it("admin/coord who OWNS the slot self-signs -> 201 (role never blocks own-slot sign)", async () => {
+    const ctx = await seedSignableRound();
+    const { user } = await makeUser({ roles: ["Admin", "Pilot"], pilotId: ctx.pilotId });
+
+    const res = await sign(ctx, user.id, user.email);
+
+    expect(res.status).toBe(201);
+    expect((res.jsonBody as Signature).pilotId).toBe(ctx.pilotId);
+  });
+
+  it("admin who is ALSO a pilot but does NOT own the slot -> 403 NOT_YOUR_SLOT_USE_OVERRIDE (isSelf must be per-slot, not per-role)", async () => {
+    const ctx = await seedSignableRound();
+    const { user } = await makeUser({ roles: ["Admin", "Pilot"], pilotId: randomUUID() });
 
     const res = await sign(ctx, user.id, user.email);
 
