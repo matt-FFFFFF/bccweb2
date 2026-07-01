@@ -492,6 +492,14 @@ textarea:focus {
   box-shadow: none;
 }
 
+/* The reset above leaves the focused textarea with no visible indicator (the
+   library sets outline:0 on it), so restore a keyboard focus ring on the
+   wrapper via :focus-within to preserve WCAG focus-visible. */
+.w-md-editor:focus-within {
+  outline: 2px solid var(--bcc-coral);
+  outline-offset: 1px;
+}
+
 /* --- Responsive ---------------------------------------- */
 @media (max-width: 640px) {
   .bcc-nav__logo img { height: 34px; }
