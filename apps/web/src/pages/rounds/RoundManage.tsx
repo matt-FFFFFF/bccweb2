@@ -23,6 +23,7 @@ import type {
   ScoringType,
   Signature,
   RoundBrief,
+  Pilot,
 } from "@bccweb/types";
 import { MarkdownEditor } from "../../components/MarkdownEditor.js";
 import { MarkdownView } from "../../components/MarkdownView.js";
@@ -104,6 +105,14 @@ const sectionStyle: React.CSSProperties = {
   padding: "1rem",
   border: "1px solid #dee2e6",
   borderRadius: "0.5rem",
+};
+
+const BRIEFER_BHPA_LEVELS = ["Club Coach", "Senior Coach", "Instructor", "Senior Instructor"] as const;
+const COACH_TYPE_TO_BHPA_LABEL: Record<string, string> = {
+  ClubCoach: "Club Coach",
+  SeniorCoach: "Senior Coach",
+  Instructor: "Instructor",
+  SeniorInstructor: "Senior Instructor",
 };
 
 // ─── Inline error/success banner ─────────────────────────────────────────────
@@ -599,7 +608,7 @@ function PilotRow({
 
   const isLocked = status === "Locked";
   const isComplete = status === "Complete";
-  const canFlight = isLocked || isComplete;
+  const canFlight = isLocked;
 
   async function toggleField(field: "accounted" | "sign-to-fly", current: boolean) {
     setActionErr(null);
@@ -961,6 +970,7 @@ function TeamCard({
   pilots,
   status,
   canOverrideSign,
+  canManage,
   canManageCaptain,
   canEditTeam,
   onChanged,
@@ -970,6 +980,7 @@ function TeamCard({
   pilots: PilotSummary[] | null;
   status: RoundStatus;
   canOverrideSign: boolean;
+  canManage: boolean;
   canManageCaptain: boolean;
   canEditTeam: boolean;
   onChanged: () => void;
@@ -1067,7 +1078,7 @@ function TeamCard({
             pilots={pilots}
             status={status}
             canOverrideSign={canOverrideSign}
-            canManage={canManageCaptain}
+            canManage={canManage}
             canEditTeam={canEditTeam}
             onChanged={onChanged}
           />
@@ -1195,7 +1206,9 @@ function MarkdownBriefField({
       <label style={{ fontSize: "0.8rem", color: "#555", display: "block" }}>{label}</label>
       <div style={{ border: "1px solid #ccc", padding: "0.5rem" }}>
         {disabled ? (
-          <MarkdownView markdown={value} />
+          <div style={{ opacity: 0.6 }}>
+            <MarkdownView markdown={value} />
+          </div>
         ) : (
           <>
             <MarkdownEditor value={value} onChange={v => onChange(v ?? "")} preview="edit" />
@@ -1211,6 +1224,7 @@ function MarkdownBriefField({
 }
 
 function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
+  const { identity } = useAuth();
   const [brief, setBrief] = useState<Partial<RoundBrief> | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1219,16 +1233,43 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
 
   useEffect(() => {
     let active = true;
-    api.get<RoundBrief>(`rounds/${round.id}/brief`)
-      .then(b => { if (active) { setBrief(b); setLoading(false); } })
-      .catch(_e => {
-        if (active) {
-          setBrief({}); // initialize empty
-          setLoading(false);
+    const editable = round.status === "Proposed" || round.status === "Confirmed";
+
+    async function load() {
+      let loaded: Partial<RoundBrief>;
+      try {
+        loaded = await api.get<RoundBrief>(`rounds/${round.id}/brief`);
+      } catch {
+        loaded = {};
+      }
+
+      if (editable && !loaded.briefer?.name && identity?.pilotId) {
+        try {
+          const me = await api.get<Pilot>(`pilots/${identity.pilotId}`);
+          loaded = {
+            ...loaded,
+            briefer: {
+              name: me.person?.fullName || undefined,
+              bhpaCoachLevel: COACH_TYPE_TO_BHPA_LABEL[me.coachType] || undefined,
+              bhpaNumber: me.bhpaNumber != null ? String(me.bhpaNumber) : undefined,
+              phoneNumber: me.person?.phoneNumber || undefined,
+              emailAddress: identity.email || undefined,
+            },
+          };
+        } catch {
+          // best-effort: no linked pilot profile, leave the briefer blank
         }
-      });
+      }
+
+      if (active) {
+        setBrief(loaded);
+        setLoading(false);
+      }
+    }
+
+    void load();
     return () => { active = false; };
-  }, [round.id]);
+  }, [round.id, round.status, identity?.pilotId, identity?.email]);
 
   if (loading) return <div>Loading brief...</div>;
 
@@ -1298,6 +1339,11 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
 
   const fi = { ...inputStyle, width: "100%", opacity: disabled ? 0.6 : 1 };
   const labelStyle = { fontSize: "0.8rem", color: "#555", display: "block" };
+  const brieferLevel = brief?.briefer?.bhpaCoachLevel ?? "";
+  const bhpaLevelOptions =
+    brieferLevel && !(BRIEFER_BHPA_LEVELS as readonly string[]).includes(brieferLevel)
+      ? [brieferLevel, ...BRIEFER_BHPA_LEVELS]
+      : [...BRIEFER_BHPA_LEVELS];
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
@@ -1325,7 +1371,7 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
         <div><label style={labelStyle}>Briefer Name</label><input disabled={disabled} style={fi} value={brief?.briefer?.name || ""} onChange={e => handleBrieferChange("name", e.target.value)} /></div>
-        <div><label style={labelStyle}>BHPA Level</label><input disabled={disabled} style={fi} value={brief?.briefer?.bhpaCoachLevel || ""} onChange={e => handleBrieferChange("bhpaCoachLevel", e.target.value)} /></div>
+        <div><label style={labelStyle}>BHPA Level</label><select disabled={disabled} style={fi} value={brieferLevel} onChange={e => handleBrieferChange("bhpaCoachLevel", e.target.value)}><option value="">—</option>{bhpaLevelOptions.map(l => <option key={l} value={l}>{l}</option>)}</select></div>
         <div><label style={labelStyle}>BHPA Number</label><input disabled={disabled} style={fi} value={brief?.briefer?.bhpaNumber || ""} onChange={e => handleBrieferChange("bhpaNumber", e.target.value)} /></div>
         <div><label style={labelStyle}>Phone</label><input disabled={disabled} style={fi} value={brief?.briefer?.phoneNumber || ""} onChange={e => handleBrieferChange("phoneNumber", e.target.value)} /></div>
         <div><label style={labelStyle}>Email</label><input disabled={disabled} style={fi} value={brief?.briefer?.emailAddress || ""} onChange={e => handleBrieferChange("emailAddress", e.target.value)} /></div>
@@ -1461,7 +1507,7 @@ export default function RoundManage() {
   const isRoundsCoord = identity.roles.includes("RoundsCoord");
   
   const canManage = isAdmin || (isRoundsCoord && myClubId !== null && myClubId === r.organisingClub?.id);
-  const canManageCaptain = canManage;
+  const canManageCaptain = canManage && r.status !== "Locked" && r.status !== "Complete";
   const canOverrideSign = r.status === "BriefComplete" && canManage;
 
   return (
@@ -1610,6 +1656,7 @@ export default function RoundManage() {
                 pilots={pilotsIndex}
                 status={r.status}
                 canOverrideSign={canOverrideSign}
+                canManage={canManage}
                 canManageCaptain={canManageCaptain}
                 canEditTeam={canEditTeam}
                 onChanged={() => { void loadRound(); }}

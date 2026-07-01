@@ -366,6 +366,9 @@ async function updateAccounted(
   const placeNum = parseInt(place, 10);
 
   const result = await mutateLocked(id, caller, (r) => {
+    if (r.status !== "Locked") {
+      return `Accounted-for can only be changed while the round is Locked (currently ${r.status})`;
+    }
     const team = r.teams.find((t) => t.id === teamId);
     if (!team) return "Team not found";
 
