@@ -10,6 +10,19 @@ export function isRosterFrozen(status: RoundStatus): boolean {
   return status !== "Proposed" && status !== "Confirmed";
 }
 
+/**
+ * Status-accurate remediation clause for a frozen-roster rejection. "Reopen the
+ * brief" only applies at BriefComplete; a Cancelled round must be uncancelled,
+ * and Locked/Complete rounds cannot be reopened at all.
+ */
+export function rosterFrozenReason(status: RoundStatus): string {
+  if (status === "Cancelled") return "the round is cancelled (uncancel it first)";
+  if (status === "Locked" || status === "Complete") {
+    return `the round is ${status.toLowerCase()}`;
+  }
+  return "the brief is complete (reopen the brief first)";
+}
+
 export function normalizeStatus(raw: string): RoundStatus {
   const value = raw.trim();
 
