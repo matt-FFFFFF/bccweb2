@@ -16,7 +16,7 @@
     "@azure/communication-email": "1.1.0",
     "@azure/functions": "4.16.1",
     "@azure/identity": "4.13.1",
-    "@azure/storage-blob": "12.32.0",
+    "@azure/storage-blob": "12.33.0",
     "@bccweb/scoring": "*",
     "@bccweb/types": "*",
     "@opentelemetry/api": "1.9.1",
@@ -27,7 +27,7 @@
     "isomorphic-dompurify": "3.18.0",
     "jsonwebtoken": "9.0.3",
     "marked": "18.0.5",
-    "puppeteer-core": "25.2.1"
+    "puppeteer-core": "25.3.0"
   },
   "devDependencies": {
     "@opentelemetry/sdk-logs": "0.219.0",
