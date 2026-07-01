@@ -29,7 +29,11 @@ import {
   forbiddenResponse,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
-import { assertCanManageRound, assertCanRegisterForClub } from "../lib/roundAuth.js";
+import {
+  assertCanAccountForSlot,
+  assertCanManageRound,
+  assertCanRegisterForClub,
+} from "../lib/roundAuth.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 import { recomputeTeamCaptain } from "../lib/teamCaptain.js";
 
@@ -49,15 +53,6 @@ async function loadRound(id: string): Promise<Round> {
     }
     throw new HttpError(500, "INTERNAL");
   }
-}
-
-async function loadManageableRound(
-  caller: CallerIdentity,
-  id: string,
-): Promise<Round> {
-  const round = await loadRound(id);
-  assertCanManageRound(caller, round);
-  return round;
 }
 
 function authorizeTeamRegistration(
@@ -345,7 +340,6 @@ async function updateAccounted(
 ): Promise<HttpResponseInit> {
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
-  if (!isCoord(caller.roles)) return forbiddenResponse();
 
   const { id, teamId, place } = req.params as {
     id?: string;
@@ -356,9 +350,6 @@ async function updateAccounted(
     throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
   }
 
-  await loadManageableRound(caller, id);
-  await mutationRateLimit(req, caller, "updateAccounted", "standard");
-
   const body = (await req.json()) as { accountedFor?: boolean };
   if (typeof body.accountedFor !== "boolean") {
     throw new HttpError(400, "INVALID_BODY", "accountedFor (boolean) is required");
@@ -366,18 +357,34 @@ async function updateAccounted(
 
   const placeNum = parseInt(place, 10);
 
-  const result = await mutateLocked(id, caller, (r) => {
-    if (r.status !== "Locked") {
-      return `Accounted-for can only be changed while the round is Locked (currently ${r.status})`;
-    }
+  const authorizeSlot = (r: Round): void => {
     const team = r.teams.find((t) => t.id === teamId);
-    if (!team) return "Team not found";
-
+    if (!team) throw new HttpError(404, "TEAM_NOT_FOUND", "Team not found");
     const slot = team.pilots.find((s) => s.placeInTeam === placeNum);
-    if (!slot) return "Pilot slot not found";
+    if (!slot) throw new HttpError(404, "SLOT_NOT_FOUND", "Pilot slot not found");
+    assertCanAccountForSlot(caller, r, team, slot);
+  };
 
-    slot.accountedFor = body.accountedFor!;
-  });
+  authorizeSlot(await loadRound(id));
+  await mutationRateLimit(req, caller, "updateAccounted", "standard");
+
+  const result = await mutateLocked(
+    id,
+    caller,
+    (r) => {
+      if (r.status !== "Locked") {
+        return `Accounted-for can only be changed while the round is Locked (currently ${r.status})`;
+      }
+      const team = r.teams.find((t) => t.id === teamId);
+      if (!team) return "Team not found";
+
+      const slot = team.pilots.find((s) => s.placeInTeam === placeNum);
+      if (!slot) return "Pilot slot not found";
+
+      slot.accountedFor = body.accountedFor!;
+    },
+    authorizeSlot,
+  );
 
   if (typeof (result as HttpResponseInit).status === "number") return result as HttpResponseInit;
   return { status: 200, jsonBody: result };
