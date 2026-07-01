@@ -56,7 +56,7 @@ dev: docker-up ## Start full local dev stack (Docker Compose)
 
 .PHONY: dev-api
 dev-api: build-types build-scoring build-api ## Start Azure Functions host (requires Azurite)
-	@test -f .dev-credentials || touch .dev-credentials
+	@test -f .dev-credentials || { rm -rf .dev-credentials; touch .dev-credentials; }
 	npm run start --workspace=apps/api
 
 .PHONY: dev-web
@@ -65,7 +65,7 @@ dev-web: ## Start Vite dev server on :5173
 
 .PHONY: docker-up
 docker-up: ## Start Azurite + API + Web via Docker Compose
-	@test -f .dev-credentials || touch .dev-credentials
+	@test -f .dev-credentials || { rm -rf .dev-credentials; touch .dev-credentials; }
 	$(CONTAINER_RUNTIME) compose up --build
 
 .PHONY: docker-down
