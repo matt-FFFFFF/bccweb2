@@ -33,6 +33,8 @@ let BlobServiceClient;
 const blobImportErrors = [];
 for (const base of blobResolveBases) {
   try {
+    // ESM import() does not support custom resolution search paths, so we use
+    // createRequire + require.resolve/require to probe workspace-local installs.
     const resolved = require.resolve("@azure/storage-blob", { paths: [base] });
     ({ BlobServiceClient } = require(resolved));
     break;
@@ -42,7 +44,7 @@ for (const base of blobResolveBases) {
 }
 if (!BlobServiceClient) {
   throw new Error(
-    `Cannot load @azure/storage-blob from root or API workspace. Attempts: ${blobImportErrors.join(" | ")}. Run npm ci from the repository root to install all workspace dependencies and set API_WORKSPACE_PATH (defaults to ${DEFAULT_API_WORKSPACE_PATH}) when using nested workspace installs.`
+    `Cannot load @azure/storage-blob from root or API workspace.\nAttempts: ${blobImportErrors.join(" | ")}\nRun npm ci from the repository root to install all workspace dependencies and set API_WORKSPACE_PATH (defaults to ${DEFAULT_API_WORKSPACE_PATH}) when using nested workspace installs.`
   );
 }
 
