@@ -482,6 +482,16 @@ textarea:focus {
   box-shadow: 0 0 0 3px rgba(224,85,85,0.15);
 }
 
+/* The markdown editor overlays a transparent <textarea> on a highlight layer;
+   the global textarea border/focus-ring above leaks onto it and draws a stray
+   coral line. Reset it back to the borderless overlay the library expects. */
+.w-md-editor-text-input,
+.w-md-editor-text-input:focus {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+}
+
 /* --- Responsive ---------------------------------------- */
 @media (max-width: 640px) {
   .bcc-nav__logo img { height: 34px; }

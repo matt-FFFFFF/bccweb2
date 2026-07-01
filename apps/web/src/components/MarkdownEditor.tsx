@@ -12,24 +12,29 @@ export type MarkdownEditorProps = Omit<MDEditorProps, "value" | "onChange"> & {
 
 export function MarkdownEditor({ value, onChange, ...props }: MarkdownEditorProps) {
   return (
-    <Suspense fallback={
-      <div className="markdown-editor-fallback">
-        <textarea
+    // data-color-mode pins light; without it the editor follows OS dark mode.
+    <div data-color-mode="light">
+      <Suspense fallback={
+        <div className="markdown-editor-fallback">
+          <textarea
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder="Loading editor..."
+          />
+          <span>Loading...</span>
+        </div>
+      }>
+        <MDEditor
           value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder="Loading editor..."
+          onChange={onChange}
+          height={300}
+          previewOptions={{
+            rehypePlugins: [[rehypeSanitize]]
+          }}
+          extraCommands={[]}
+          {...props}
         />
-        <span>Loading...</span>
-      </div>
-    }>
-      <MDEditor
-        value={value}
-        onChange={onChange}
-        previewOptions={{
-          rehypePlugins: [[rehypeSanitize]]
-        }}
-        {...props}
-      />
-    </Suspense>
+      </Suspense>
+    </div>
   );
 }
