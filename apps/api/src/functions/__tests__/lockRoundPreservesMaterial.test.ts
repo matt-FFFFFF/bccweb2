@@ -69,17 +69,15 @@ vi.mock("../../lib/email.js", () => ({
 // on a blob heal) is a safe no-op while `trackTrace` is the spy we assert on.
 const telemetryMock = vi.hoisted(() => {
   const trackTrace = vi.fn();
-  const client = new Proxy(
-    { trackTrace } as Record<string | symbol, unknown>,
-    {
-      get(target, prop) {
-        if (prop in target) return target[prop];
-        const stub = vi.fn();
-        target[prop] = stub;
-        return stub;
-      },
+  const target: Record<string | symbol, unknown> = { trackTrace };
+  const client = new Proxy(target, {
+    get(proxyTarget, prop) {
+      if (prop in proxyTarget) return proxyTarget[prop];
+      const stub = vi.fn();
+      proxyTarget[prop] = stub;
+      return stub;
     },
-  );
+  });
   return { trackTrace, client };
 });
 vi.mock("../../lib/telemetry.js", () => ({
@@ -390,9 +388,7 @@ describe("lockRound preserves the frozen material hash while refreshing teams (T
       ([arg]) => (arg as { message?: string }).message === "brief.lockHashMismatch",
     );
     expect(mismatchTraces).toHaveLength(1);
-    expect((mismatchTraces[0]![0] as { properties?: { roundId?: string } }).properties?.roundId).toBe(
-      ctx.roundId,
-    );
+    expect((mismatchTraces[0][0] as { properties?: { roundId?: string } }).properties?.roundId).toBe(ctx.roundId);
   });
 
   it("hard-fails (non-2xx) and leaves the round BriefComplete when the brief-JSON write throws", async () => {
