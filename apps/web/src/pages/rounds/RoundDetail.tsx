@@ -135,7 +135,7 @@ export default function RoundDetail() {
     } catch (err) {
       setActionError(err as Error);
     } finally {
-      setAccountBusy(null);
+      setAccountBusy((cur) => (cur === key ? null : cur));
     }
   }
 

@@ -48,6 +48,7 @@ async function seedRound(
         pilots: [
           slot(1, captainPilotId),
           slot(2, memberPilotId),
+          { ...slot(3, captainPilotId), status: "Empty", pilotId: null },
         ],
       },
       {
@@ -236,6 +237,16 @@ describe("updateAccounted — who can mark a pilot accounted for", () => {
 
     expect(res.status).toBe(400);
     expect((res.jsonBody as { code: string }).code).toBe("INVALID_PLACE");
+  });
+
+  it("empty slot -> 409 SLOT_EMPTY", async () => {
+    const ctx = await seedRound();
+    const { user } = await makeUser({ roles: ["Admin"] });
+
+    const res = await account(ctx, user, ctx.team1Id, 3);
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("SLOT_EMPTY");
   });
 
   it("round not Locked -> 409 (accounted-for is Locked-only)", async () => {

@@ -383,6 +383,9 @@ async function updateAccounted(
 
       const slot = team.pilots.find((s) => s.placeInTeam === placeNum);
       if (!slot) return "Pilot slot not found";
+      if (slot.status !== "Filled") {
+        throw new HttpError(409, "SLOT_EMPTY", "Cannot account for an empty slot");
+      }
 
       slot.accountedFor = body.accountedFor!;
     },
