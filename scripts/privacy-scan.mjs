@@ -18,7 +18,7 @@ import RE2 from "re2";
 import { readFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { findPiiInObject, PII_FIELDS } from "./lib/pii.mjs";
 
@@ -38,7 +38,7 @@ for (const base of blobResolveBases) {
     continue;
   }
   try {
-    ({ BlobServiceClient } = await import(pathToFileURL(resolved).href));
+    ({ BlobServiceClient } = await import(resolved));
     break;
   } catch (err) {
     blobImportAttempts.push(`[${base}] import failed: ${err.message}`);
@@ -46,7 +46,7 @@ for (const base of blobResolveBases) {
 }
 if (!BlobServiceClient) {
   throw new Error(
-    `Cannot load @azure/storage-blob from this workspace. Attempts: ${blobImportAttempts.join(" | ")}. Run npm ci from the repository root and ensure apps/api dependencies are installed.`
+    `Cannot load @azure/storage-blob from this workspace. Attempts: ${blobImportAttempts.join(" | ")}. Run npm ci from the repository root to install all workspace dependencies.`
   );
 }
 
