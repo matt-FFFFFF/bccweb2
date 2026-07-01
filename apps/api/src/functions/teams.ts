@@ -16,7 +16,7 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "crypto";
 import type { CallerIdentity, ClubTeamSummary, Round, Team, PilotSlot } from "@bccweb/types";
-import { isRosterFrozen } from "@bccweb/types";
+import { isRosterFrozen, rosterFrozenReason } from "@bccweb/types";
 import { ClubTeamSummarySchema, PilotSchema, RoundSchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
 import { getBlobClient, getPrivateBlobClient, withPrivateLease } from "../lib/blob.js";
@@ -159,7 +159,7 @@ async function addTeam(
   };
 
   const result = await mutateLocked(id, caller, (r) => {
-    if (isRosterFrozen(r.status)) return "The roster is frozen once the brief is complete — reopen the brief to change teams or pilots";
+    if (isRosterFrozen(r.status)) return `Cannot change teams or pilots while ${rosterFrozenReason(r.status)}`;
     if (r.teams.length >= r.maxTeams) {
       return `Round is full (max ${r.maxTeams} teams)`;
     }
@@ -197,7 +197,7 @@ async function removeTeam(
   await mutationRateLimit(req, caller, "removeTeam", "standard");
 
   const result = await mutateLocked(id, caller, (r) => {
-    if (isRosterFrozen(r.status)) return "The roster is frozen once the brief is complete — reopen the brief to change teams or pilots";
+    if (isRosterFrozen(r.status)) return `Cannot change teams or pilots while ${rosterFrozenReason(r.status)}`;
     const idx = r.teams.findIndex((t) => t.id === teamId);
     if (idx === -1) return "Team not found";
     r.teams.splice(idx, 1);
@@ -246,7 +246,7 @@ async function addPilot(
   }
 
   const result = await mutateLocked(id, caller, (r) => {
-    if (isRosterFrozen(r.status)) return "The roster is frozen once the brief is complete — reopen the brief to change teams or pilots";
+    if (isRosterFrozen(r.status)) return `Cannot change teams or pilots while ${rosterFrozenReason(r.status)}`;
 
     const teamIdx = r.teams.findIndex((t) => t.id === teamId);
     if (teamIdx === -1) return "Team not found";
@@ -315,7 +315,7 @@ async function removePilot(
   }
 
   const result = await mutateLocked(id, caller, (r) => {
-    if (isRosterFrozen(r.status)) return "The roster is frozen once the brief is complete — reopen the brief to change teams or pilots";
+    if (isRosterFrozen(r.status)) return `Cannot change teams or pilots while ${rosterFrozenReason(r.status)}`;
 
     const teamIdx = r.teams.findIndex((t) => t.id === teamId);
     if (teamIdx === -1) return "Team not found";
@@ -355,7 +355,7 @@ async function updateAccounted(
     throw new HttpError(400, "INVALID_BODY", "accountedFor (boolean) is required");
   }
 
-  const placeNum = parseInt(place, 10);
+  const placeNum = Number(place);
   if (!Number.isInteger(placeNum)) {
     throw new HttpError(400, "INVALID_PLACE", "place must be a number");
   }

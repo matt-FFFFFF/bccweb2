@@ -44,7 +44,7 @@ export type RoundStatus =
   | "Complete"
   | "Cancelled";
 
-export { normalizeStatus, isRosterFrozen } from "./status.js";
+export { normalizeStatus, isRosterFrozen, rosterFrozenReason } from "./status.js";
 
 export type PilotSlotStatus = "Empty" | "Filled";
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeStatus, isRosterFrozen } from "../status.js";
+import { normalizeStatus, isRosterFrozen, rosterFrozenReason } from "../status.js";
 
 describe("normalizeStatus", () => {
   it.each([
@@ -44,4 +44,15 @@ describe("isRosterFrozen", () => {
       expect(isRosterFrozen(status)).toBe(true);
     },
   );
+});
+
+describe("rosterFrozenReason", () => {
+  it.each([
+    ["BriefComplete", "the brief is complete (reopen the brief first)"],
+    ["Locked", "the round is locked"],
+    ["Complete", "the round is complete"],
+    ["Cancelled", "the round is cancelled (uncancel it first)"],
+  ] as const)("gives a status-accurate remediation for %s", (status, expected) => {
+    expect(rosterFrozenReason(status)).toBe(expected);
+  });
 });
