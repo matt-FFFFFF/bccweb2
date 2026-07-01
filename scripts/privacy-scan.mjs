@@ -28,19 +28,25 @@ const scriptDir = fileURLToPath(new URL(".", import.meta.url));
 // when npm keeps them nested rather than hoisting to root node_modules.
 const blobResolveBases = [process.cwd(), resolve(scriptDir, "../apps/api")];
 let BlobServiceClient;
-let lastBlobImportError;
+const blobImportAttempts = [];
 for (const base of blobResolveBases) {
+  let resolved;
   try {
-    const resolved = require.resolve("@azure/storage-blob", { paths: [base] });
+    resolved = require.resolve("@azure/storage-blob", { paths: [base] });
+  } catch (err) {
+    blobImportAttempts.push(`[${base}] resolve failed: ${err.message}`);
+    continue;
+  }
+  try {
     ({ BlobServiceClient } = await import(pathToFileURL(resolved).href));
     break;
   } catch (err) {
-    lastBlobImportError = err;
+    blobImportAttempts.push(`[${base}] import failed: ${err.message}`);
   }
 }
 if (!BlobServiceClient) {
   throw new Error(
-    `Cannot load @azure/storage-blob from this workspace. Tried ${blobResolveBases.join(" and ")}. Last error: ${lastBlobImportError?.message ?? "unknown"}. Run npm ci from the repository root and ensure apps/api dependencies are installed.`
+    `Cannot load @azure/storage-blob from this workspace. Attempts: ${blobImportAttempts.join(" | ")}. Run npm ci from the repository root and ensure apps/api dependencies are installed.`
   );
 }
 
