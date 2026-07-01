@@ -36,19 +36,23 @@ export const WING_CLASSES = [
 ] as const;
 export type WingClass = (typeof WING_CLASSES)[number];
 
-export type RoundStatus =
-  | "Proposed"
-  | "Confirmed"
-  | "BriefComplete"
-  | "Locked"
-  | "Complete"
-  | "Cancelled";
+export const ROUND_STATUSES = [
+  "Proposed",
+  "Confirmed",
+  "BriefComplete",
+  "Locked",
+  "Complete",
+  "Cancelled",
+] as const;
+export type RoundStatus = (typeof ROUND_STATUSES)[number];
 
 export { normalizeStatus, isRosterFrozen, rosterFrozenReason } from "./status.js";
 
-export type PilotSlotStatus = "Empty" | "Filled";
+export const PILOT_SLOT_STATUSES = ["Empty", "Filled"] as const;
+export type PilotSlotStatus = (typeof PILOT_SLOT_STATUSES)[number];
 
-export type ScoringType = "XC" | "Manual";
+export const SCORING_TYPES = ["XC", "Manual"] as const;
+export type ScoringType = (typeof SCORING_TYPES)[number];
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
