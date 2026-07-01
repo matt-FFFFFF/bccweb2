@@ -24,8 +24,8 @@ import type {
   Signature,
   RoundBrief,
   Pilot,
-  CoachType,
 } from "@bccweb/types";
+import { isRosterFrozen } from "@bccweb/types";
 import { COACH_TYPES, coachLabel } from "../../lib/coach.js";
 import { MarkdownEditor } from "../../components/MarkdownEditor.js";
 import { MarkdownView } from "../../components/MarkdownView.js";
@@ -602,7 +602,6 @@ function PilotRow({
   const [overrideBusy, setOverrideBusy] = useState(false);
 
   const isLocked = status === "Locked";
-  const isComplete = status === "Complete";
   const canFlight = isLocked;
 
   async function toggleAccounted(current: boolean) {
@@ -793,7 +792,7 @@ function PilotRow({
         )}
 
         {/* Remove pilot */}
-        {canEditTeam && !isLocked && !isComplete && slot.status === "Filled" && (
+        {canEditTeam && !isRosterFrozen(status) && slot.status === "Filled" && (
           <button
             style={{ ...btnStyle("#58151c", "#f8d7da"), padding: "0.2rem 0.5rem" }}
             onClick={() => { void removePilot(); }}
@@ -968,9 +967,7 @@ function TeamCard({
   const [showAddPilot, setShowAddPilot] = useState(false);
   const [removeErr, setRemoveErr] = useState<string | null>(null);
 
-  const isLocked = status === "Locked";
-  const isComplete = status === "Complete";
-  const canEdit = !isLocked && !isComplete && canEditTeam;
+  const canEdit = !isRosterFrozen(status) && canEditTeam;
 
   async function removeTeam() {
     if (!confirm(`Remove team "${team.teamName}"?`)) return;
@@ -1482,7 +1479,7 @@ export default function RoundManage() {
   const isRoundsCoord = identity.roles.includes("RoundsCoord");
   
   const canManage = isAdmin || (isRoundsCoord && myClubId !== null && myClubId === r.organisingClub?.id);
-  const canManageCaptain = canManage && r.status !== "Locked" && r.status !== "Complete";
+  const canManageCaptain = canManage && !isRosterFrozen(r.status);
   const canOverrideSign = r.status === "BriefComplete" && canManage;
 
   return (
@@ -1640,7 +1637,7 @@ export default function RoundManage() {
           })}
 
         {/* Add team form — only when not locked/complete */}
-        {r.status !== "Locked" && r.status !== "Complete" && r.status !== "Cancelled" && (canManage || myClubId != null) && (
+        {!isRosterFrozen(r.status) && (canManage || myClubId != null) && (
           <div style={{ marginTop: "0.5rem" }}>
             <strong style={{ fontSize: "0.85rem" }}>Add Team</strong>
             <AddTeamForm

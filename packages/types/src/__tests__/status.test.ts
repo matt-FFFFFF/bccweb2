@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeStatus } from "../status.js";
+import { normalizeStatus, isRosterFrozen } from "../status.js";
 
 describe("normalizeStatus", () => {
   it.each([
@@ -28,4 +28,20 @@ describe("normalizeStatus", () => {
       "Unknown status:   weird status  "
     );
   });
+});
+
+describe("isRosterFrozen", () => {
+  it.each(["Proposed", "Confirmed"] as const)(
+    "roster editable at %s",
+    (status) => {
+      expect(isRosterFrozen(status)).toBe(false);
+    },
+  );
+
+  it.each(["BriefComplete", "Locked", "Complete", "Cancelled"] as const)(
+    "roster frozen at %s",
+    (status) => {
+      expect(isRosterFrozen(status)).toBe(true);
+    },
+  );
 });
