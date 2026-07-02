@@ -1,3 +1,47 @@
+function pick(row, names) {
+  for (const name of names) {
+    if (Object.prototype.hasOwnProperty.call(row, name) && row[name] != null) return row[name];
+  }
+  return null;
+}
+
+async function safeQuery(pool, query) {
+  try {
+    return (await pool.request().query(query)).recordset;
+  } catch (err) {
+    if (err?.number === 208 || /Invalid object name/i.test(err?.message ?? "")) return [];
+    throw err;
+  }
+}
+
+/**
+ * Normalize legacy PilotClub/PilotClubs rows to the singular shape consumed by buildPilotClubHistory.
+ *
+ * @param {Array<Record<string, unknown>>} rawRows
+ * @returns {Array<{ID:unknown, Pilot_ID:unknown, Club_ID:unknown, JoinedAt:unknown, LeftAt:unknown}>}
+ */
+export function normalizePilotClubRows(rawRows) {
+  return rawRows.map((row) => ({
+    ID: pick(row, ["ID"]),
+    Pilot_ID: pick(row, ["Pilot_ID", "PilotID"]),
+    Club_ID: pick(row, ["Club_ID", "ClubID"]),
+    JoinedAt: pick(row, ["JoinedAt"]),
+    LeftAt: pick(row, ["LeftAt"]),
+  }));
+}
+
+/**
+ * Query PilotClubs first (bacpac ground truth) and fall back to legacy PilotClub when absent.
+ *
+ * @param {{request: () => {query: (sql:string) => Promise<{recordset:Array<Record<string, unknown>>}>}}} pool
+ * @returns {Promise<Array<{ID:unknown, Pilot_ID:unknown, Club_ID:unknown, JoinedAt:unknown, LeftAt:unknown}>>}
+ */
+export async function queryPilotClubRows(pool) {
+  let rows = await safeQuery(pool, "SELECT * FROM PilotClubs");
+  if (rows.length === 0) rows = await safeQuery(pool, "SELECT * FROM PilotClub");
+  return normalizePilotClubRows(rows);
+}
+
 /**
  * Pure transformation: SQL PilotClub rows + lookup maps → Map<pilotId, memberships[]>.
  * No external dependencies — safe to import from any test context.
