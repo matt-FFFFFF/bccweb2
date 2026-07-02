@@ -2,7 +2,9 @@
  * PUT /api/rounds/{id}/teams/{teamId}/captain
  *
  * Manual captain override — Admin or (RoundsCoord scoped to the round's
- * organising club). No lock-state restriction.
+ * organising club). Blocked once the roster is frozen — i.e. any status
+ * past Confirmed (BriefComplete, Locked, Complete) and Cancelled — via
+ * isRosterFrozen(status).
  *
  * Body: { pilotId: string | null }
  * - If pilotId is non-null the pilot must be a Filled member of the team.
@@ -16,6 +18,7 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { Round } from "@bccweb/types";
+import { isRosterFrozen, rosterFrozenReason } from "@bccweb/types";
 import { RoundSchema } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
@@ -97,6 +100,14 @@ async function setTeamCaptain(
       ) {
         throw new HttpError(403, "FORBIDDEN", "Not your round");
       }
+    }
+
+    if (isRosterFrozen(round.status)) {
+      throw new HttpError(
+        409,
+        "ROUND_LOCKED",
+        `Cannot change the team captain while ${rosterFrozenReason(round.status)}`,
+      );
     }
 
     const teamIdx = round.teams.findIndex((t) => t.id === teamId);

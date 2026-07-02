@@ -1,58 +1,13 @@
-import type { Pilot, PilotSummary } from "@bccweb/types";
+import {
+  COACH_TYPES,
+  PILOT_RATINGS,
+  WING_CLASSES,
+  type Pilot,
+  type PilotSummary,
+} from "@bccweb/types";
 import * as z from "zod/v4";
 
-import { healed, healingArray, lenientOptional, normalizeEnum } from "./helpers.js";
-
-const coachTypeValues = [
-  "None",
-  "ClubCoach",
-  "SeniorCoach",
-  "Instructor",
-  "SeniorInstructor",
-] as const;
-
-const pilotRatingValues = ["Club Pilot", "Pilot", "Advanced Pilot"] as const;
-
-const wingClassValues = [
-  "EN A",
-  "EN B",
-  "EN C",
-  "EN C 2-liner",
-  "EN D",
-  "EN D 2-liner",
-] as const;
-
-const coachTypeAliases = {
-  none: "None",
-  clubCoach: "ClubCoach",
-  club_coach: "ClubCoach",
-  seniorCoach: "SeniorCoach",
-  senior_coach: "SeniorCoach",
-  instructor: "Instructor",
-  seniorInstructor: "SeniorInstructor",
-  senior_instructor: "SeniorInstructor",
-} as const satisfies Record<string, (typeof coachTypeValues)[number]>;
-
-const pilotRatingAliases = {
-  clubPilot: "Club Pilot",
-  club_pilot: "Club Pilot",
-  ClubPilot: "Club Pilot",
-  pilot: "Pilot",
-  advancedPilot: "Advanced Pilot",
-  advanced_pilot: "Advanced Pilot",
-  AdvancedPilot: "Advanced Pilot",
-} as const satisfies Record<string, (typeof pilotRatingValues)[number]>;
-
-const wingClassAliases = {
-  EN_A: "EN A",
-  EN_B: "EN B",
-  EN_C: "EN C",
-  EN_C_2_LINER: "EN C 2-liner",
-  EN_D: "EN D",
-  EN_D_2_LINER: "EN D 2-liner",
-  ENC2Liner: "EN C 2-liner",
-  END2Liner: "EN D 2-liner",
-} as const satisfies Record<string, (typeof wingClassValues)[number]>;
+import { healed, healingArray, lenientOptional } from "./helpers.js";
 
 const HealedLegacyIdSchema = healed(z.number().nullable(), null).default(null);
 const NullableStringSchema = z.string().nullable();
@@ -90,20 +45,11 @@ const PilotSeasonClubSchema = z
   })
   .strip();
 
-const CoachTypeSchema = z.preprocess(
-  normalizeEnum(coachTypeValues, coachTypeAliases),
-  z.enum(coachTypeValues),
-);
+const CoachTypeSchema = z.enum(COACH_TYPES);
 
-const PilotRatingSchema = z.preprocess(
-  normalizeEnum(pilotRatingValues, pilotRatingAliases),
-  z.enum(pilotRatingValues),
-);
+const PilotRatingSchema = z.enum(PILOT_RATINGS);
 
-const WingClassSchema = z.preprocess(
-  normalizeEnum(wingClassValues, wingClassAliases),
-  z.enum(wingClassValues),
-);
+const WingClassSchema = z.enum(WING_CLASSES);
 
 export const PilotSummarySchema = z
   .object({
@@ -123,7 +69,7 @@ export const PilotSchema = z
     legacyId: HealedLegacyIdSchema,
     bhpaNumber: lenientOptional(z.number()),
     coachType: healed(CoachTypeSchema, "None").default("None"),
-    pilotRating: healed(PilotRatingSchema, "Pilot").default("Pilot"),
+    pilotRating: healed(PilotRatingSchema, "Club Pilot").default("Club Pilot"),
     pureTrackId: lenientOptional(z.number()),
     pureTrackLink: lenientOptional(z.string()),
     helmetColour: lenientOptional(z.string()),

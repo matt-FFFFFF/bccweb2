@@ -23,7 +23,10 @@ import type {
   ScoringType,
   Signature,
   RoundBrief,
+  Pilot,
 } from "@bccweb/types";
+import { isRosterFrozen } from "@bccweb/types";
+import { COACH_TYPES, coachLabel } from "../../lib/coach.js";
 import { MarkdownEditor } from "../../components/MarkdownEditor.js";
 import { MarkdownView } from "../../components/MarkdownView.js";
 import { AuthImage } from "../../components/AuthImage.js";
@@ -106,6 +109,7 @@ const sectionStyle: React.CSSProperties = {
   borderRadius: "0.5rem",
 };
 
+
 // ─── Inline error/success banner ─────────────────────────────────────────────
 
 function Banner({ msg, ok }: { msg: string; ok?: boolean }) {
@@ -133,6 +137,7 @@ const WORKFLOW: Record<
 > = {
   Proposed: [
     { label: "Confirm", endpoint: "confirm", bg: "#cfe2ff", color: "#084298" },
+    { label: "Cancel Round", endpoint: "cancel", bg: "#f8d7da", color: "#58151c" },
   ],
   Confirmed: [
     {
@@ -142,6 +147,7 @@ const WORKFLOW: Record<
       color: "#3a00a8",
       requiresConfirm: true,
     },
+    { label: "Cancel Round", endpoint: "cancel", bg: "#f8d7da", color: "#58151c" },
   ],
   BriefComplete: [
     {
@@ -173,7 +179,9 @@ const WORKFLOW: Record<
     },
   ],
   Complete: [],
-  Cancelled: [],
+  Cancelled: [
+    { label: "Uncancel", endpoint: "uncancel", bg: "#e9ecef", color: "#495057" },
+  ],
 };
 
 // ─── Add Team form ────────────────────────────────────────────────────────────
@@ -598,15 +606,14 @@ function PilotRow({
   const [overrideBusy, setOverrideBusy] = useState(false);
 
   const isLocked = status === "Locked";
-  const isComplete = status === "Complete";
-  const canFlight = isLocked || isComplete;
+  const canFlight = isLocked;
 
-  async function toggleField(field: "accounted" | "sign-to-fly", current: boolean) {
+  async function toggleAccounted(current: boolean) {
     setActionErr(null);
     try {
       await api.put(
-        `rounds/${roundId}/teams/${team.id}/pilots/${slot.placeInTeam}/${field}`,
-        { value: !current }
+        `rounds/${roundId}/teams/${team.id}/pilots/${slot.placeInTeam}/accounted`,
+        { accountedFor: !current }
       );
       onChanged();
     } catch (ex) {
@@ -731,36 +738,21 @@ function PilotRow({
           </span>
         )}
 
-        {/* Accounted / sign-to-fly toggles (only when Locked) */}
+        {/* Accounted-for toggle (only when Locked) */}
         {canManage && isLocked && slot.status === "Filled" && (
-          <>
-            <button
-              title="Accounted for"
-              style={{
-                ...btnStyle(
-                  slot.accountedFor ? "#0a3622" : "#555",
-                  slot.accountedFor ? "#d1e7dd" : "#e9ecef"
-                ),
-                padding: "0.2rem 0.5rem",
-              }}
-              onClick={() => { void toggleField("accounted", slot.accountedFor); }}
-            >
-              {slot.accountedFor ? "✓ Acct" : "Acct"}
-            </button>
-            <button
-              title="Sign to fly"
-              style={{
-                ...btnStyle(
-                  slot.signToFly ? "#664d03" : "#555",
-                  slot.signToFly ? "#fff3cd" : "#e9ecef"
-                ),
-                padding: "0.2rem 0.5rem",
-              }}
-              onClick={() => { void toggleField("sign-to-fly", slot.signToFly); }}
-            >
-              {slot.signToFly ? "✓ S2F" : "S2F"}
-            </button>
-          </>
+          <button
+            title="Accounted for"
+            style={{
+              ...btnStyle(
+                slot.accountedFor ? "#0a3622" : "#555",
+                slot.accountedFor ? "#d1e7dd" : "#e9ecef"
+              ),
+              padding: "0.2rem 0.5rem",
+            }}
+            onClick={() => { void toggleAccounted(slot.accountedFor); }}
+          >
+            {slot.accountedFor ? "✓ Acct" : "Acct"}
+          </button>
         )}
 
         {/* Flight actions */}
@@ -804,7 +796,7 @@ function PilotRow({
         )}
 
         {/* Remove pilot */}
-        {canEditTeam && !isLocked && !isComplete && slot.status === "Filled" && (
+        {canEditTeam && !isRosterFrozen(status) && slot.status === "Filled" && (
           <button
             style={{ ...btnStyle("#58151c", "#f8d7da"), padding: "0.2rem 0.5rem" }}
             onClick={() => { void removePilot(); }}
@@ -961,6 +953,7 @@ function TeamCard({
   pilots,
   status,
   canOverrideSign,
+  canManage,
   canManageCaptain,
   canEditTeam,
   onChanged,
@@ -970,6 +963,7 @@ function TeamCard({
   pilots: PilotSummary[] | null;
   status: RoundStatus;
   canOverrideSign: boolean;
+  canManage: boolean;
   canManageCaptain: boolean;
   canEditTeam: boolean;
   onChanged: () => void;
@@ -977,9 +971,7 @@ function TeamCard({
   const [showAddPilot, setShowAddPilot] = useState(false);
   const [removeErr, setRemoveErr] = useState<string | null>(null);
 
-  const isLocked = status === "Locked";
-  const isComplete = status === "Complete";
-  const canEdit = !isLocked && !isComplete && canEditTeam;
+  const canEdit = !isRosterFrozen(status) && canEditTeam;
 
   async function removeTeam() {
     if (!confirm(`Remove team "${team.teamName}"?`)) return;
@@ -1067,7 +1059,7 @@ function TeamCard({
             pilots={pilots}
             status={status}
             canOverrideSign={canOverrideSign}
-            canManage={canManageCaptain}
+            canManage={canManage}
             canEditTeam={canEditTeam}
             onChanged={onChanged}
           />
@@ -1195,7 +1187,9 @@ function MarkdownBriefField({
       <label style={{ fontSize: "0.8rem", color: "#555", display: "block" }}>{label}</label>
       <div style={{ border: "1px solid #ccc", padding: "0.5rem" }}>
         {disabled ? (
-          <MarkdownView markdown={value} />
+          <div style={{ opacity: 0.6 }}>
+            <MarkdownView markdown={value} />
+          </div>
         ) : (
           <>
             <MarkdownEditor value={value} onChange={v => onChange(v ?? "")} preview="edit" />
@@ -1211,6 +1205,7 @@ function MarkdownBriefField({
 }
 
 function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
+  const { identity } = useAuth();
   const [brief, setBrief] = useState<Partial<RoundBrief> | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -1219,29 +1214,58 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
 
   useEffect(() => {
     let active = true;
-    api.get<RoundBrief>(`rounds/${round.id}/brief`)
-      .then(b => { if (active) { setBrief(b); setLoading(false); } })
-      .catch(_e => {
-        if (active) {
-          setBrief({}); // initialize empty
-          setLoading(false);
+    const editable = round.status === "Proposed" || round.status === "Confirmed";
+
+    async function load() {
+      let loaded: Partial<RoundBrief>;
+      try {
+        loaded = await api.get<RoundBrief>(`rounds/${round.id}/brief`);
+      } catch {
+        loaded = {};
+      }
+
+      if (editable && !loaded.briefer?.name && identity?.pilotId) {
+        try {
+          const me = await api.get<Pilot>(`pilots/${identity.pilotId}`);
+          const existing = loaded.briefer ?? {};
+          loaded = {
+            ...loaded,
+            briefer: {
+              ...existing,
+              name: existing.name || me.person?.fullName || undefined,
+              bhpaCoachLevel: existing.bhpaCoachLevel ?? (me.coachType !== "None" ? me.coachType : undefined),
+              bhpaNumber: existing.bhpaNumber ?? (me.bhpaNumber != null ? String(me.bhpaNumber) : undefined),
+              phoneNumber: existing.phoneNumber || me.person?.phoneNumber || undefined,
+              emailAddress: existing.emailAddress || identity.email || undefined,
+            },
+          };
+        } catch {
+          // best-effort: no linked pilot profile, leave the briefer blank
         }
-      });
+      }
+
+      if (active) {
+        setBrief(loaded);
+        setLoading(false);
+      }
+    }
+
+    void load();
     return () => { active = false; };
-  }, [round.id]);
+  }, [round.id, round.status, identity?.pilotId, identity?.email]);
 
   if (loading) return <div>Loading brief...</div>;
 
-  const disabled = round.status === "BriefComplete" || round.status === "Locked" || round.status === "Complete";
+  const disabled = round.status === "BriefComplete" || round.status === "Locked" || round.status === "Complete" || round.status === "Cancelled";
 
   const handleChange = <K extends keyof RoundBrief>(field: K, value: RoundBrief[K]) => {
     setBrief(prev => ({ ...prev, [field]: value }));
   };
 
-  const handleBrieferChange = (field: keyof NonNullable<RoundBrief["briefer"]>, value: string) => {
+  const handleBrieferChange = (field: keyof NonNullable<RoundBrief["briefer"]>, value: string | undefined) => {
     setBrief(prev => ({
       ...prev,
-      briefer: { ...(prev?.briefer || {}), [field]: value }
+      briefer: { ...(prev?.briefer || {}), [field]: value || undefined } as RoundBrief["briefer"],
     }));
   };
 
@@ -1325,7 +1349,7 @@ function BriefForm({ round, onSaved }: { round: Round; onSaved: () => void }) {
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
         <div><label style={labelStyle}>Briefer Name</label><input disabled={disabled} style={fi} value={brief?.briefer?.name || ""} onChange={e => handleBrieferChange("name", e.target.value)} /></div>
-        <div><label style={labelStyle}>BHPA Level</label><input disabled={disabled} style={fi} value={brief?.briefer?.bhpaCoachLevel || ""} onChange={e => handleBrieferChange("bhpaCoachLevel", e.target.value)} /></div>
+        <div><label style={labelStyle}>BHPA Level</label><select disabled={disabled} style={fi} value={brief?.briefer?.bhpaCoachLevel && brief.briefer.bhpaCoachLevel !== "None" ? brief.briefer.bhpaCoachLevel : ""} onChange={e => handleBrieferChange("bhpaCoachLevel", e.target.value || undefined)}><option value="">—</option>{COACH_TYPES.filter(c => c !== "None").map(c => <option key={c} value={c}>{coachLabel[c]}</option>)}</select></div>
         <div><label style={labelStyle}>BHPA Number</label><input disabled={disabled} style={fi} value={brief?.briefer?.bhpaNumber || ""} onChange={e => handleBrieferChange("bhpaNumber", e.target.value)} /></div>
         <div><label style={labelStyle}>Phone</label><input disabled={disabled} style={fi} value={brief?.briefer?.phoneNumber || ""} onChange={e => handleBrieferChange("phoneNumber", e.target.value)} /></div>
         <div><label style={labelStyle}>Email</label><input disabled={disabled} style={fi} value={brief?.briefer?.emailAddress || ""} onChange={e => handleBrieferChange("emailAddress", e.target.value)} /></div>
@@ -1461,7 +1485,7 @@ export default function RoundManage() {
   const isRoundsCoord = identity.roles.includes("RoundsCoord");
   
   const canManage = isAdmin || (isRoundsCoord && myClubId !== null && myClubId === r.organisingClub?.id);
-  const canManageCaptain = canManage;
+  const canManageCaptain = canManage && !isRosterFrozen(r.status);
   const canOverrideSign = r.status === "BriefComplete" && canManage;
 
   return (
@@ -1520,6 +1544,12 @@ export default function RoundManage() {
         </div>
       </div>
 
+      {r.status === "Cancelled" && (
+        <div style={{ ...sectionStyle, background: "#f8d7da", color: "#58151c", border: "1px solid #f5c2c7" }}>
+          <strong>This round is cancelled.</strong> No changes can be made while it is cancelled. Use <strong>Uncancel</strong> to reopen it as Proposed.
+        </div>
+      )}
+
       {/* Workflow actions */}
       {canManage && workflowActions.length > 0 && (
         <div style={{ ...sectionStyle, display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
@@ -1574,7 +1604,11 @@ export default function RoundManage() {
       {canManage && (
         <section style={sectionStyle}>
           <h2 style={{ fontSize: "1rem", margin: "0 0 0.75rem" }}>Round Details</h2>
-          {r.isLocked ? (
+          {r.status === "Cancelled" ? (
+            <p style={{ color: "#888", fontSize: "0.85rem", margin: 0 }}>
+              This round is cancelled. Uncancel it to edit.
+            </p>
+          ) : r.isLocked ? (
             <p style={{ color: "#888", fontSize: "0.85rem", margin: 0 }}>
               Unlock the round to edit metadata.
             </p>
@@ -1610,6 +1644,7 @@ export default function RoundManage() {
                 pilots={pilotsIndex}
                 status={r.status}
                 canOverrideSign={canOverrideSign}
+                canManage={canManage}
                 canManageCaptain={canManageCaptain}
                 canEditTeam={canEditTeam}
                 onChanged={() => { void loadRound(); }}
@@ -1618,7 +1653,7 @@ export default function RoundManage() {
           })}
 
         {/* Add team form — only when not locked/complete */}
-        {r.status !== "Locked" && r.status !== "Complete" && r.status !== "Cancelled" && (canManage || myClubId != null) && (
+        {!isRosterFrozen(r.status) && (canManage || myClubId != null) && (
           <div style={{ marginTop: "0.5rem" }}>
             <strong style={{ fontSize: "0.85rem" }}>Add Team</strong>
             <AddTeamForm

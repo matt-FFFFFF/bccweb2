@@ -1,7 +1,6 @@
 import type {
   ClubRef,
   Flight,
-  PilotRatingValue,
   PilotSlot,
   PilotSlotStatus,
   PilotSnapshot,
@@ -11,86 +10,17 @@ import type {
   ScoringType,
   SiteRef,
   Team,
-  WingClass,
+} from "@bccweb/types";
+import {
+  PILOT_RATINGS,
+  PILOT_SLOT_STATUSES,
+  ROUND_STATUSES,
+  SCORING_TYPES,
+  WING_CLASSES,
 } from "@bccweb/types";
 import * as z from "zod/v4";
 
-import { healed, healingArray, lenientOptional, normalizeEnum } from "./helpers.js";
-
-const roundStatusValues = [
-  "Proposed",
-  "Confirmed",
-  "BriefComplete",
-  "Locked",
-  "Complete",
-  "Cancelled",
-] as const;
-
-const pilotSlotStatusValues = ["Empty", "Filled"] as const;
-const scoringTypeValues = ["XC", "Manual"] as const;
-const pilotRatingValues = ["Club Pilot", "Pilot", "Advanced Pilot"] as const;
-const wingClassValues = [
-  "EN A",
-  "EN B",
-  "EN C",
-  "EN C 2-liner",
-  "EN D",
-  "EN D 2-liner",
-] as const;
-
-const roundStatusAliases = {
-  Draft: "Proposed",
-  draft: "Proposed",
-  proposed: "Proposed",
-  Active: "Confirmed",
-  active: "Confirmed",
-  confirmed: "Confirmed",
-  BriefingComplete: "BriefComplete",
-  briefingComplete: "BriefComplete",
-  briefing_complete: "BriefComplete",
-  brief_complete: "BriefComplete",
-  locked: "Locked",
-  completed: "Complete",
-  complete: "Complete",
-  cancelled: "Cancelled",
-  canceled: "Cancelled",
-} as const satisfies Record<string, RoundStatus>;
-
-const pilotSlotStatusAliases = {
-  empty: "Empty",
-  vacant: "Empty",
-  filled: "Filled",
-  assigned: "Filled",
-} as const satisfies Record<string, PilotSlotStatus>;
-
-const scoringTypeAliases = {
-  xc: "XC",
-  Xc: "XC",
-  puretrack: "XC",
-  PureTrack: "XC",
-  manual: "Manual",
-} as const satisfies Record<string, ScoringType>;
-
-const pilotRatingAliases = {
-  clubPilot: "Club Pilot",
-  club_pilot: "Club Pilot",
-  ClubPilot: "Club Pilot",
-  pilot: "Pilot",
-  advancedPilot: "Advanced Pilot",
-  advanced_pilot: "Advanced Pilot",
-  AdvancedPilot: "Advanced Pilot",
-} as const satisfies Record<string, PilotRatingValue>;
-
-const wingClassAliases = {
-  EN_A: "EN A",
-  EN_B: "EN B",
-  EN_C: "EN C",
-  EN_C_2_LINER: "EN C 2-liner",
-  EN_D: "EN D",
-  EN_D_2_LINER: "EN D 2-liner",
-  ENC2Liner: "EN C 2-liner",
-  END2Liner: "EN D 2-liner",
-} as const satisfies Record<string, WingClass>;
+import { healed, healingArray, lenientOptional } from "./helpers.js";
 
 const ClubRefSchema = z
   .object({
@@ -115,30 +45,15 @@ const SeasonRefSchema = z
   })
   .strip();
 
-export const RoundStatusSchema = z.preprocess(
-  normalizeEnum(roundStatusValues, roundStatusAliases),
-  z.enum(roundStatusValues).catch("Proposed"),
-);
+export const RoundStatusSchema = z.enum(ROUND_STATUSES).catch("Proposed");
 
-export const PilotSlotStatusSchema = z.preprocess(
-  normalizeEnum(pilotSlotStatusValues, pilotSlotStatusAliases),
-  z.enum(pilotSlotStatusValues).catch("Empty"),
-);
+export const PilotSlotStatusSchema = z.enum(PILOT_SLOT_STATUSES).catch("Empty");
 
-export const ScoringTypeSchema = z.preprocess(
-  normalizeEnum(scoringTypeValues, scoringTypeAliases),
-  z.enum(scoringTypeValues).catch("XC"),
-);
+export const ScoringTypeSchema = z.enum(SCORING_TYPES).catch("XC");
 
-const PilotRatingSchema = z.preprocess(
-  normalizeEnum(pilotRatingValues, pilotRatingAliases),
-  z.enum(pilotRatingValues),
-);
+const PilotRatingSchema = z.enum(PILOT_RATINGS);
 
-const WingClassSchema = z.preprocess(
-  normalizeEnum(wingClassValues, wingClassAliases),
-  z.enum(wingClassValues),
-);
+const WingClassSchema = z.enum(WING_CLASSES);
 
 RoundStatusSchema satisfies z.ZodType<RoundStatus>;
 PilotSlotStatusSchema satisfies z.ZodType<PilotSlotStatus>;

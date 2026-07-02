@@ -2,39 +2,58 @@
 
 export type UserRole = "Admin" | "RoundsCoord" | "Pilot";
 
-export type CoachType =
-  | "None"
-  | "ClubCoach"
-  | "SeniorCoach"
-  | "Instructor"
-  | "SeniorInstructor";
+export const COACH_TYPES = [
+  "None",
+  "ClubCoach",
+  "SeniorCoach",
+  "Instructor",
+  "SeniorInstructor",
+] as const;
+export type CoachType = (typeof COACH_TYPES)[number];
 
-export type PilotRatingValue =
-  | "Club Pilot"
-  | "Pilot"
-  | "Advanced Pilot";
+export const COACH_TYPE_LABELS: Record<CoachType, string> = {
+  None: "Not a coach",
+  ClubCoach: "Club Coach",
+  SeniorCoach: "Senior Coach",
+  Instructor: "Instructor",
+  SeniorInstructor: "Senior Instructor",
+};
 
-export type WingClass =
-  | "EN A"
-  | "EN B"
-  | "EN C"
-  | "EN C 2-liner"
-  | "EN D"
-  | "EN D 2-liner";
+export const PILOT_RATINGS = [
+  "Club Pilot",
+  "Pilot",
+  "Advanced Pilot",
+] as const;
+export type PilotRatingValue = (typeof PILOT_RATINGS)[number];
 
-export type RoundStatus =
-  | "Proposed"
-  | "Confirmed"
-  | "BriefComplete"
-  | "Locked"
-  | "Complete"
-  | "Cancelled";
+export const WING_CLASSES = [
+  "EN A",
+  "EN B",
+  "EN C",
+  "EN C 2-liner",
+  "EN D",
+  "EN D 2-liner",
+] as const;
+export type WingClass = (typeof WING_CLASSES)[number];
 
-export { normalizeStatus } from "./status.js";
+export const ROUND_STATUSES = [
+  "Proposed",
+  "Confirmed",
+  "BriefComplete",
+  "Locked",
+  "Complete",
+  "Cancelled",
+] as const;
+export type RoundStatus = (typeof ROUND_STATUSES)[number];
 
-export type PilotSlotStatus = "Empty" | "Filled";
+export { normalizeStatus, isRosterFrozen, rosterFrozenReason } from "./status.js";
+export type { FrozenRoundStatus } from "./status.js";
 
-export type ScoringType = "XC" | "Manual";
+export const PILOT_SLOT_STATUSES = ["Empty", "Filled"] as const;
+export type PilotSlotStatus = (typeof PILOT_SLOT_STATUSES)[number];
+
+export const SCORING_TYPES = ["XC", "Manual"] as const;
+export type ScoringType = (typeof SCORING_TYPES)[number];
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
@@ -467,7 +486,7 @@ export interface RoundBrief {
   frequencyMhz?: number;
   briefer?: {
     name?: string;
-    bhpaCoachLevel?: string;
+    bhpaCoachLevel?: CoachType;
     bhpaNumber?: string;
     phoneNumber?: string;
     emailAddress?: string;

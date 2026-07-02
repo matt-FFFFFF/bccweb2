@@ -175,6 +175,60 @@ describe("round lifecycle integration", () => {
     expect((res.jsonBody as { error?: string }).error).toBe("Conflict");
   });
 
+  it.each(["Proposed", "Confirmed"] as const)(
+    "cancelRound from %s flips Cancelled and republishes it to public rounds.json",
+    async (status) => {
+      const ctx = await seedLifecycleRound({ status });
+
+      const res = await cancelRound(ctx);
+
+      expect(res.status).toBe(200);
+      expect((await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))?.status).toBe("Cancelled");
+      const idx = (await readPublicJson<Array<{ id: string; status: string }>>("rounds.json"))!;
+      expect(idx.find((round) => round.id === ctx.roundId)?.status).toBe("Cancelled");
+    },
+  );
+
+  it("cancelRound from BriefComplete returns 409 and leaves status unchanged", async () => {
+    const ctx = await seedLifecycleRound({ status: "BriefComplete" });
+
+    const res = await cancelRound(ctx);
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("CONFLICT");
+    expect((await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))?.status).toBe("BriefComplete");
+  });
+
+  it("uncancelRound from Cancelled flips Proposed and republishes it to public rounds.json", async () => {
+    const ctx = await seedLifecycleRound({ status: "Cancelled" });
+
+    const res = await uncancelRound(ctx);
+
+    expect(res.status).toBe(200);
+    expect((await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))?.status).toBe("Proposed");
+    const idx = (await readPublicJson<Array<{ id: string; status: string }>>("rounds.json"))!;
+    expect(idx.find((round) => round.id === ctx.roundId)?.status).toBe("Proposed");
+  });
+
+  it("uncancelRound from Proposed returns 409", async () => {
+    const ctx = await seedLifecycleRound({ status: "Proposed" });
+
+    const res = await uncancelRound(ctx);
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("CONFLICT");
+  });
+
+  it("updateRound on a Cancelled round returns 409 ROUND_CANCELLED and leaves fields unchanged", async () => {
+    const ctx = await seedLifecycleRound({ status: "Cancelled" });
+
+    const res = await updateRoundMeta(ctx, { maxTeams: 4 });
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("ROUND_CANCELLED");
+    expect((await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))?.maxTeams).toBe(8);
+  });
+
   it("brief edit when round is Locked returns 409 BRIEF_LOCKED", async () => {
     const ctx = await seedLifecycleRound({ status: "Locked", isLocked: true });
     await seedBrief(ctx);
@@ -561,6 +615,28 @@ function completeRound(ctx: LifecycleContext) {
   return invoke("completeRound", makeAuthRequest(ctx.adminUserId, ctx.adminEmail, {
     method: "POST",
     params: { id: ctx.roundId },
+  }));
+}
+
+function cancelRound(ctx: LifecycleContext) {
+  return invoke("cancelRound", makeAuthRequest(ctx.adminUserId, ctx.adminEmail, {
+    method: "POST",
+    params: { id: ctx.roundId },
+  }));
+}
+
+function uncancelRound(ctx: LifecycleContext) {
+  return invoke("uncancelRound", makeAuthRequest(ctx.adminUserId, ctx.adminEmail, {
+    method: "POST",
+    params: { id: ctx.roundId },
+  }));
+}
+
+function updateRoundMeta(ctx: LifecycleContext, body: Record<string, unknown>) {
+  return invoke("updateRound", makeAuthRequest(ctx.adminUserId, ctx.adminEmail, {
+    method: "PUT",
+    params: { id: ctx.roundId },
+    body,
   }));
 }
 

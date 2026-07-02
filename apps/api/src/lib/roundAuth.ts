@@ -9,7 +9,13 @@
  * makes it reusable so every round-scoped handler shares one correct definition.
  */
 
-import type { CallerIdentity, PilotSnapshot, Round } from "@bccweb/types";
+import type {
+  CallerIdentity,
+  PilotSlot,
+  PilotSnapshot,
+  Round,
+  Team,
+} from "@bccweb/types";
 import { HttpError } from "./http.js";
 
 type RoundClubScope = Pick<Round, "organisingClub">;
@@ -77,6 +83,42 @@ export function assertCanRegisterForClub(
       403,
       "FORBIDDEN",
       "You can only register teams and pilots for your own club",
+    );
+  }
+}
+
+/**
+ * True when the caller may mark ONE pilot slot as accounted-for. Three tiers:
+ * - a manager (Admin / organising-club coord) — ANY slot in the round;
+ * - the slot's team captain — ANY slot in THEIR team;
+ * - the pilot themselves — their OWN slot only.
+ */
+export function canAccountForSlot(
+  caller: CallerIdentity,
+  round: RoundClubScope,
+  team: Pick<Team, "captainPilotId">,
+  slot: Pick<PilotSlot, "pilotId">,
+): boolean {
+  if (canManageRound(caller, round)) return true;
+  if (caller.pilotId == null) return false;
+  if (team.captainPilotId != null && team.captainPilotId === caller.pilotId) {
+    return true;
+  }
+  return slot.pilotId != null && slot.pilotId === caller.pilotId;
+}
+
+/** Throw 403 unless the caller may mark this slot as accounted-for. */
+export function assertCanAccountForSlot(
+  caller: CallerIdentity,
+  round: RoundClubScope,
+  team: Pick<Team, "captainPilotId">,
+  slot: Pick<PilotSlot, "pilotId">,
+): void {
+  if (!canAccountForSlot(caller, round, team, slot)) {
+    throw new HttpError(
+      403,
+      "FORBIDDEN",
+      "Only an admin, the organising club's coordinator, the team captain, or the pilot themselves can mark this slot accounted for",
     );
   }
 }

@@ -2,10 +2,12 @@ import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router";
 import type { Pilot, PilotClubMembership, CoachType, PilotRatingValue, WingClass, ManufacturerRef, ClubSummary } from "@bccweb/types";
+import { PILOT_RATINGS, WING_CLASSES } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
 import { useBlob } from "../../hooks/useBlob.js";
 import { api, ApiError } from "../../lib/api.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
+import { COACH_TYPES, coachLabel } from "../../lib/coach.js";
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
@@ -91,10 +93,6 @@ function Row({ label, value }: { label: string; value?: ReactNode }) {
 }
 
 // ─── Edit form ────────────────────────────────────────────────────────────────
-
-const COACH_TYPES: CoachType[] = ["None", "ClubCoach", "SeniorCoach", "Instructor", "SeniorInstructor"];
-const PILOT_RATINGS: PilotRatingValue[] = ["Club Pilot", "Pilot", "Advanced Pilot"];
-const WING_CLASSES: WingClass[] = ["EN A", "EN B", "EN C", "EN C 2-liner", "EN D", "EN D 2-liner"];
 
 interface EditForm {
   coachType: CoachType;
@@ -224,7 +222,7 @@ function EditProfileForm({
         <div>
           <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Coach / Instructor</label>
           <select style={inputStyle} value={form.coachType} onChange={(e) => setF("coachType", e.target.value as CoachType)}>
-            {COACH_TYPES.map((c) => <option key={c} value={c}>{c}</option>)}
+            {COACH_TYPES.map((c) => <option key={c} value={c}>{coachLabel[c]}</option>)}
           </select>
         </div>
         <div>
@@ -323,14 +321,6 @@ function EditProfileForm({
 }
 
 // ─── Main page ────────────────────────────────────────────────────────────────
-
-const coachLabel: Record<string, string> = {
-  None: "Not a coach",
-  ClubCoach: "Club Coach",
-  SeniorCoach: "Senior Coach",
-  Instructor: "Instructor",
-  SeniorInstructor: "Senior Instructor",
-};
 
 export default function PilotProfile() {
   const { id } = useParams<{ id: string }>();

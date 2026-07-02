@@ -49,6 +49,7 @@ export default function RoundDetail() {
   const [actionError, setActionError] = useState<Error | null>(null);
   const [unregistering, setUnregistering] = useState(false);
   const [notFound, setNotFound] = useState(false);
+  const [accountBusy, setAccountBusy] = useState<string | null>(null);
 
   const loadRound = useCallback(() => {
     if (!id) {
@@ -118,6 +119,23 @@ export default function RoundDetail() {
       setActionError(err as Error);
     } finally {
       setUnregistering(false);
+    }
+  }
+
+  async function toggleAccounted(teamId: string, place: number, current: boolean) {
+    if (!round) return;
+    const key = `${teamId}:${place}`;
+    setAccountBusy(key);
+    setActionError(null);
+    try {
+      await api.put(`rounds/${round.id}/teams/${teamId}/pilots/${place}/accounted`, {
+        accountedFor: !current,
+      });
+      loadRound();
+    } catch (err) {
+      setActionError(err as Error);
+    } finally {
+      setAccountBusy((cur) => (cur === key ? null : cur));
     }
   }
 
@@ -424,6 +442,44 @@ export default function RoundDetail() {
                                   ) : null}
                                 </div>
                               )}
+                              {round.status === "Locked" &&
+                                slot.status === "Filled" &&
+                                (canManage ||
+                                  (!!identity?.pilotId &&
+                                    team.captainPilotId === identity.pilotId) ||
+                                  (!!identity?.pilotId &&
+                                    slot.pilotId === identity.pilotId)) && (
+                                  <div style={{ marginTop: "0.4rem" }}>
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        void toggleAccounted(
+                                          team.id,
+                                          slot.placeInTeam,
+                                          slot.accountedFor,
+                                        );
+                                      }}
+                                      disabled={
+                                        accountBusy === `${team.id}:${slot.placeInTeam}`
+                                      }
+                                      style={{
+                                        display: "inline-block",
+                                        padding: "0.25rem 0.5rem",
+                                        background: slot.accountedFor ? "#d1e7dd" : "#e9ecef",
+                                        color: slot.accountedFor ? "#0a3622" : "#555",
+                                        border: 0,
+                                        borderRadius: "0.2rem",
+                                        fontWeight: 600,
+                                        fontSize: "0.75rem",
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      {slot.accountedFor
+                                        ? "✓ Accounted for"
+                                        : "Mark accounted for"}
+                                    </button>
+                                  </div>
+                                )}
                             </td>
                             <td
                               style={{
