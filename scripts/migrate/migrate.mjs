@@ -41,7 +41,8 @@ import { getOrCreateUuid, saveIdMap } from "./id-map.mjs";
 import { normalizeStatus } from "../lib/status.mjs";
 import { buildPilotClubHistory } from "./pilot-club-history-logic.mjs";
 import { writeDiscardedCounts } from "./discarded-counts.mjs";
-import { assertSeasonYear, briefImageBlobFromLegacy, briefImagePath, normalizeWebsiteUrl, parseFrequencyMhz, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
+import { createTally, normalizePilotRating, normalizeWingClass } from "./enum-normalize.mjs";
+import { assertSeasonYear, briefImageBlobFromLegacy, briefImagePath, ensureNonEmpty, normalizeWebsiteUrl, parseFrequencyMhz, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
 
 // ─── CLI flags ────────────────────────────────────────────────────────────────
 
@@ -245,6 +246,8 @@ async function main() {
   const ratingUuid = new Map();    // SQL int ID → uuid
   const frequencyUuid = new Map(); // SQL int ID → uuid
   const freqMhzByYearClub = new Map(); // `${seasonYear}:${clubUuid}` → number (MHz)
+  const tally = createTally();
+  let nonEmptyPersonNameFixes = 0;
 
   // ── 1. config.json ──────────────────────────────────────────────────────────
   console.log("Step 1: config.json");
@@ -513,11 +516,16 @@ async function main() {
       r.FullName?.trim() ||
       [r.FirstName, r.LastName].filter(Boolean).join(" ") ||
       "Unknown";
-    const firstName = r.FirstName?.trim() ?? "";
-    const lastName = r.LastName?.trim() ?? "";
+    const firstName = ensureNonEmpty(r.FirstName, fullName || "Unknown");
+    const lastName = ensureNonEmpty(r.LastName, fullName || "Unknown");
+    if ((r.FirstName == null || String(r.FirstName).trim().length === 0) ||
+        (r.LastName == null || String(r.LastName).trim().length === 0)) {
+      nonEmptyPersonNameFixes++;
+    }
 
     const ratingEntry = ratingsList.find((x) => x.legacyId === r.Pilot_Rating_ID);
-    const pilotRating = ratingEntry?.description ?? "Pilot";
+    const pilotRating = normalizePilotRating(ratingEntry?.description, tally) ?? "Pilot";
+    const wingClass = normalizeWingClass(r.WingClass, tally);
 
     const coachType = COACH_TYPE_MAP[r.CoachType] ?? "None";
 
@@ -544,7 +552,7 @@ async function main() {
       ...(r.EmergencyContactName ? { emergencyContactName: r.EmergencyContactName } : {}),
       ...(r.EmergencyPhoneNumber ? { emergencyPhoneNumber: r.EmergencyPhoneNumber } : {}),
       ...(r.MedicalInfo ? { medicalInfo: r.MedicalInfo } : {}),
-      ...(r.WingClass ? { wingClass: r.WingClass } : {}),
+      ...(r.WingClass && wingClass ? { wingClass } : {}),
       ...(wingManufacturer ? { wingManufacturer } : {}),
       ...(r.WingModel ? { wingModel: r.WingModel } : {}),
       ...(r.WingColours ? { wingColours: r.WingColours } : {}),
@@ -561,8 +569,6 @@ async function main() {
         ? { currentClub: { id: currentSeasonClub.clubId, name: currentSeasonClub.clubName } }
         : {}),
       seasonClubs,
-      // email sourced from AspNetUser — used for pilot auto-linking at registration
-      ...(r.UserEmail ? { email: r.UserEmail } : {}),
       userId: null, // no user accounts migrated — pilots self-register post-migration
     };
 
