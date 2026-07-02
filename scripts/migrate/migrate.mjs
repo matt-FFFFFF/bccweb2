@@ -40,7 +40,7 @@ import { BlobServiceClient } from "@azure/storage-blob";
 import { getOrCreateUuid, saveIdMap } from "./id-map.mjs";
 import { buildPilotClubHistory, queryPilotClubRows } from "./pilot-club-history-logic.mjs";
 import { writeDiscardedCounts } from "./discarded-counts.mjs";
-import { createTally, normalizePilotRating, normalizeRoundStatus, normalizeScoringType, normalizeWingClass } from "./enum-normalize.mjs";
+import { createTally, normalizeCoachType, normalizePilotRating, normalizeRoundStatus, normalizeScoringType, normalizeWingClass } from "./enum-normalize.mjs";
 import { assertSeasonYear, briefImageBlobFromLegacy, briefImagePath, ensureNonEmpty, normalizeWebsiteUrl, parseFrequencyMhz, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
 
 // ─── CLI flags ────────────────────────────────────────────────────────────────
@@ -245,6 +245,7 @@ async function main() {
   let sentinelSiteRounds = 0;
   let fallbackClubTeams = 0;
   let legacySignaturesStamped = 0;
+  let briefsFrequencyMhz = 0;
 
   // ── 1. config.json ──────────────────────────────────────────────────────────
   console.log("Step 1: config.json");
@@ -913,12 +914,18 @@ async function main() {
     if (imageBytes) {
       await uploadPrivateBinaryBlob(imagePaths[0], imageBytes, "image/png");
     }
+    const generatedAt = new Date().toISOString();
+    const briefDate = r.RoundDate ? new Date(r.RoundDate).toISOString().slice(0, 10) : roundDoc?.date;
+    const brieferCoachRaw = r.BrieferBHPA_CoachLevel;
+    const brieferCoachLevel = normalizeCoachType(brieferCoachRaw, tally);
+    const freqMhz = freqMhzByYearClub.get(`${roundDoc?.season?.year}:${roundDoc?.organisingClub?.id}`);
+    if (freqMhz != null) briefsFrequencyMhz++;
     const brief = {
       roundId,
       legacyId: r.ID,
-      generatedAt: new Date().toISOString(),
-      date: r.RoundDate ? new Date(r.RoundDate).toISOString().slice(0, 10) : (roundDoc?.date ?? null),
-      siteName: r.SiteName ?? roundDoc?.site?.name ?? "",
+      generatedAt,
+      date: ensureNonEmpty(briefDate, generatedAt.slice(0, 10)),
+      siteName: ensureNonEmpty(r.SiteName ?? roundDoc?.site?.name, "Unknown site"),
       ...(roundDoc?.site?.parkingW3W ? { parkingW3W: roundDoc.site.parkingW3W } : {}),
       ...(roundDoc?.site?.briefingW3W ? { briefingW3W: roundDoc.site.briefingW3W } : {}),
       ...(roundDoc?.site?.takeOffW3W ? { takeOffW3W: roundDoc.site.takeOffW3W } : {}),
@@ -935,9 +942,10 @@ async function main() {
       ...(r.NOTAMs ? { NOTAMs: r.NOTAMs } : {}),
       ...(r.BENO_LineDescription ? { BENO_LineDescription: r.BENO_LineDescription } : {}),
       ...(r.BriefersNotes ? { briefersNotes: r.BriefersNotes } : {}),
+      ...(freqMhz != null ? { frequencyMhz: freqMhz } : {}),
       briefer: {
         ...(r.BrieferName ? { name: r.BrieferName } : {}),
-        ...(r.BrieferBHPA_CoachLevel ? { bhpaCoachLevel: r.BrieferBHPA_CoachLevel } : {}),
+        ...(brieferCoachLevel ? { bhpaCoachLevel: brieferCoachLevel } : {}),
         ...(r.BrieferBHPA_Number ? { bhpaNumber: r.BrieferBHPA_Number } : {}),
         ...(r.BrieferPhoneNumber ? { phoneNumber: r.BrieferPhoneNumber } : {}),
         ...(r.BrieferEmailAddress ? { emailAddress: r.BrieferEmailAddress } : {}),
