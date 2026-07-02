@@ -134,7 +134,7 @@ NODE
 trap cleanup EXIT
 
 if [[ ! -f "$SCHEMAS_DIST" ]]; then
-  fail "@bccweb/schemas built package is absent at packages/schemas/dist/index.js; run make build before validate-bacpac"
+  fail "the built schemas package is absent at packages/schemas/dist/index.js; run make build before validate-bacpac"
 fi
 
 if [[ -z "${BACPAC_TARGET_CONN:-}" ]]; then

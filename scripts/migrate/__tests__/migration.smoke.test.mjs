@@ -40,13 +40,14 @@ const MIGRATE_SCRIPT = join(MIGRATE_DIR, "migrate.mjs");
 const VALIDATE_SCRIPT = join(MIGRATE_DIR, "validate.mjs");
 const RECONCILE_SCRIPT = join(MIGRATE_DIR, "reconcile.mjs");
 const PRIVACY_SCRIPT = join(REPO_ROOT, "scripts", "privacy-scan.mjs");
+const SCHEMAS_DIST = resolve(REPO_ROOT, "packages", "schemas", "dist", "index.js");
 
 const AZURITE_CS =
   "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
   "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;" +
   "BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;";
 
-// Hardcoded from packages/types/src/index.ts; do not import @bccweb/* here.
+// Hardcoded from packages/types/src/index.ts; do not import the workspace types/schemas packages here.
 const COACH_TYPES = ["None", "ClubCoach", "SeniorCoach", "Instructor", "SeniorInstructor"];
 const PILOT_RATINGS = ["Club Pilot", "Pilot", "Advanced Pilot"];
 const WING_CLASSES = ["EN A", "EN B", "EN C", "EN C 2-liner", "EN D", "EN D 2-liner"];
@@ -74,11 +75,7 @@ async function checkAzurite() {
 }
 
 function checkSchemasAvailable() {
-  const r = spawnSync("node", ["-e", "import('@bccweb/schemas')"], {
-    cwd: REPO_ROOT,
-    stdio: "ignore",
-  });
-  return r.status === 0;
+  return existsSync(SCHEMAS_DIST);
 }
 
 const dockerOk = checkDocker();
@@ -95,7 +92,7 @@ if (!azuriteOk) {
 }
 if (!schemasOk) {
   console.log(
-    "[SKIP:SCHEMA-GATE:LOUD] migration.smoke: @bccweb/schemas is unavailable; run `make build` from the worktree root before validating migrated blobs.",
+    "[SKIP:SCHEMA-GATE:LOUD] migration.smoke: the built schemas package (packages/schemas/dist) is unavailable; run `make build` from the worktree root before validating migrated blobs.",
   );
 }
 
