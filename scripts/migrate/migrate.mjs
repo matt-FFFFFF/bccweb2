@@ -40,6 +40,7 @@ import { BlobServiceClient } from "@azure/storage-blob";
 import { getOrCreateUuid, saveIdMap } from "./id-map.mjs";
 import { buildPilotClubHistory, queryPilotClubRows } from "./pilot-club-history-logic.mjs";
 import { writeDiscardedCounts } from "./discarded-counts.mjs";
+import { writeNormalizationCounts } from "./normalization-counts.mjs";
 import { createTally, normalizeCoachType, normalizePilotRating, normalizeRoundStatus, normalizeScoringType, normalizeWingClass } from "./enum-normalize.mjs";
 import { assertSeasonYear, briefImageBlobFromLegacy, briefImagePath, ensureNonEmpty, normalizeWebsiteUrl, parseFrequencyMhz, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
 
@@ -1025,6 +1026,35 @@ async function main() {
 
   await pool.close();
   saveIdMap();
+
+  const sortObject = (obj) => Object.fromEntries(
+    Object.entries(obj).sort(([a], [b]) => a.localeCompare(b)),
+  );
+  const normalizationCounts = {
+    driftFixes: sortObject({
+      briefsFrequencyMhz,
+      fallbackClubTeams,
+      legacySignaturesStamped,
+      nonEmptyPersonNameFixes,
+      sentinelSiteRounds,
+    }),
+    normalization: sortObject(
+      Object.fromEntries(
+        Object.entries(tally).map(([field, counts]) => [field, sortObject(counts)]),
+      ),
+    ),
+  };
+  writeNormalizationCounts(normalizationCounts);
+  console.log("\nMigration normalization summary:");
+  console.log("  driftFixes:");
+  for (const [name, count] of Object.entries(normalizationCounts.driftFixes)) {
+    console.log(`    ${name}: ${count}`);
+  }
+  console.log("  normalization:");
+  for (const [field, counts] of Object.entries(normalizationCounts.normalization)) {
+    const parts = Object.entries(counts).map(([name, count]) => `${name}=${count}`).join(", ");
+    console.log(`    ${field}: ${parts}`);
+  }
   console.log("\nMigration complete.");
 }
 

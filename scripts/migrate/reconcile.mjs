@@ -17,6 +17,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { readDiscardedCounts } from "./discarded-counts.mjs";
+import { readNormalizationCounts } from "./normalization-counts.mjs";
 
 const STATE_DIR = ".migration-state";
 const MAP_PATH = join(STATE_DIR, "id-map.json");
@@ -184,6 +185,7 @@ const perEntity = buildPerEntity(byEntity);
 const anomalies = baseAnomalies(idMap);
 const allUuids = Object.values(idMap);
 const discarded = readDiscardedCounts(STATE_DIR) ?? {};
+const normalizationCounts = readNormalizationCounts(STATE_DIR) ?? {};
 
 let source;
 let prodRows;
@@ -215,6 +217,7 @@ const report = {
   perEntity,
   ...(prodRows ? { prodRows, stdoutExpectedCounts } : {}),
   discarded,
+  normalizationCounts,
   anomalies,
 };
 
@@ -240,6 +243,23 @@ if (Object.keys(discarded).length > 0) {
   console.log("Discarded (counted but not migrated):");
   for (const [entity, count] of Object.entries(discarded)) {
     console.log(`  ${entity}: ${count} rows`);
+  }
+}
+if (Object.keys(normalizationCounts).length > 0) {
+  console.log("Normalization and drift fixes:");
+  for (const [section, values] of Object.entries(normalizationCounts).sort(([a], [b]) => a.localeCompare(b))) {
+    console.log(`  ${section}:`);
+    for (const [name, value] of Object.entries(values).sort(([a], [b]) => a.localeCompare(b))) {
+      if (value && typeof value === "object") {
+        const parts = Object.entries(value)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([key, count]) => `${key}=${count}`)
+          .join(", ");
+        console.log(`    ${name}: ${parts}`);
+      } else {
+        console.log(`    ${name}: ${value}`);
+      }
+    }
   }
 }
 if (anomalies.length > 0) {
