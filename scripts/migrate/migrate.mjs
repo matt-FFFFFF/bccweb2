@@ -928,7 +928,6 @@ async function main() {
     if (freqMhz != null) briefsFrequencyMhz++;
     const brief = {
       roundId,
-      legacyId: r.ID,
       generatedAt,
       date: ensureNonEmpty(briefDate, generatedAt.slice(0, 10)),
       siteName: ensureNonEmpty(r.SiteName ?? roundDoc?.site?.name, "Unknown site"),

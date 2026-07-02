@@ -27,7 +27,8 @@ import { findPiiInObject, PII_FIELDS } from "../lib/pii.mjs";
 const PUBLIC_CONTAINER = process.env.BLOB_CONTAINER_NAME ?? process.env.BLOB_CONTAINER ?? "data";
 const PRIVATE_CONTAINER = process.env.BLOB_PRIVATE_CONTAINER_NAME ?? process.env.BLOB_PRIVATE_CONTAINER ?? "data-private";
 
-export const EXPECTED_HEALS = new Set(["sites:clubId"]);
+// Null → "" coercions from healed(z.string(), "") for legacy missing FKs.
+export const EXPECTED_HEALS = new Set(["sites:clubId", "rounds:siteId"]);
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -444,8 +445,8 @@ async function main() {
   const seasons = await readBlob(publicClient, "seasons.json");
   const seasonsOk = assertArray("seasons.json", seasons);
 
-  await readBlob(publicClient, "manufacturers.json");
-  await readBlob(publicClient, "pilot-ratings.json");
+  await readBlob(privateClient, "manufacturers.json");
+  await readBlob(privateClient, "pilot-ratings.json");
 
   console.log("");
 
