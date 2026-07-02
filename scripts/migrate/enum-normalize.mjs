@@ -60,7 +60,8 @@ const ROUND_STATUS_ALIASES = {
   cancelled: "Cancelled",
   canceled: "Cancelled",
   deleted: "Cancelled",
-  // Legacy Inactive rounds are omitted by callers using normalizeRoundStatus(raw) ?? "Proposed".
+  // Legacy "Inactive" → null here, so callers using `normalizeRoundStatus(raw) ?? "Proposed"`
+  // relabel Inactive rounds to the "Proposed" default (the round is kept, not dropped).
   inactive: null,
 };
 
