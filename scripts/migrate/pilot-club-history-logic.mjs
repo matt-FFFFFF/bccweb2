@@ -30,8 +30,20 @@ export function normalizePilotClubRows(rawRows) {
   }));
 }
 
+function compareIds(a, b) {
+  const na = a == null ? Number.NEGATIVE_INFINITY : Number(a);
+  const nb = b == null ? Number.NEGATIVE_INFINITY : Number(b);
+  if (Number.isNaN(na) || Number.isNaN(nb)) {
+    return String(a ?? "").localeCompare(String(b ?? ""));
+  }
+  return na - nb;
+}
+
 /**
  * Query PilotClubs first (bacpac ground truth) and fall back to legacy PilotClub when absent.
+ * `SELECT *` has no guaranteed row order, so the normalized rows are sorted by (Pilot_ID, ID)
+ * — matching the legacy `ORDER BY pc.Pilot_ID, pc.ID` — to keep club-history output and the
+ * dry-run byte-identical determinism check stable.
  *
  * @param {{request: () => {query: (sql:string) => Promise<{recordset:Array<Record<string, unknown>>}>}}} pool
  * @returns {Promise<Array<{ID:unknown, Pilot_ID:unknown, Club_ID:unknown, JoinedAt:unknown, LeftAt:unknown}>>}
@@ -39,7 +51,9 @@ export function normalizePilotClubRows(rawRows) {
 export async function queryPilotClubRows(pool) {
   let rows = await safeQuery(pool, "SELECT * FROM PilotClubs");
   if (rows.length === 0) rows = await safeQuery(pool, "SELECT * FROM PilotClub");
-  return normalizePilotClubRows(rows);
+  return normalizePilotClubRows(rows).sort(
+    (a, b) => compareIds(a.Pilot_ID, b.Pilot_ID) || compareIds(a.ID, b.ID),
+  );
 }
 
 /**
