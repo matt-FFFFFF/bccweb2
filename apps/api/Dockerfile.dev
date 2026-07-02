@@ -48,3 +48,7 @@ COPY --from=build /build/apps/api/host.json    ./
 COPY --from=build /build/apps/api/package.json ./
 COPY --from=build /build/apps/api/dist         ./dist
 COPY --from=build /build/node_modules          ./node_modules
+# npm does not hoist puppeteer-core / @puppeteer/browsers to the root
+# node_modules (version conflicts force them nested under the workspace).
+# Merge apps/api's nested node_modules in so runtime deps resolve.
+COPY --from=build /build/apps/api/node_modules  ./node_modules
