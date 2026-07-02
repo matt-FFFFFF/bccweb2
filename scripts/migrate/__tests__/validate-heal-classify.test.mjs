@@ -76,3 +76,26 @@ test("Given unexpected scalar heal When parse gate evaluates it Then heal is not
 
   assert.deepEqual(result, { validated: true, rejects: [], strips: [], heals: [{ keyPath: "distance", allowed: false }] });
 });
+
+test("Given a heal nested inside an array When parse gate normalizes the key Then the dot after the array index is kept", () => {
+  const schema = z
+    .object({ slots: z.array(z.object({ distance: z.number().catch(0) }).strip()) })
+    .strip();
+  const raw = { slots: [{ distance: "bad" }] };
+
+  const result = evaluateSchemaParse({
+    family: "rounds",
+    schema,
+    raw,
+    expectedHeals: new Set(["rounds:slots.distance"]),
+  });
+
+  // Regression: the raw path slots[0].distance must normalize to slots.distance
+  // (not slotsdistance), so the allowlist key rounds:slots.distance matches.
+  assert.deepEqual(result, {
+    validated: true,
+    rejects: [],
+    strips: [],
+    heals: [{ keyPath: "slots.distance", allowed: true }],
+  });
+});

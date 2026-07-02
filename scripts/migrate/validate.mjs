@@ -61,7 +61,7 @@ function childPath(parent, child) {
 }
 
 function normalizeKeyPath(path) {
-  return path.replaceAll(/\[\d+\]\.?/g, "").replaceAll("..", ".").replace(/^\./u, "").replace(/\.$/u, "");
+  return path.replaceAll(/\[\d+\]/g, "").replaceAll("..", ".").replace(/^\./u, "").replace(/\.$/u, "");
 }
 
 function valuesMatch(raw, parsed) {
