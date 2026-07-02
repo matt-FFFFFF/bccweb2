@@ -244,7 +244,6 @@ async function main() {
   const mfrUuid = new Map();       // SQL int ID → uuid
   const mfrNameBySqlId = new Map(); // SQL int ID → manufacturer name
   const ratingUuid = new Map();    // SQL int ID → uuid
-  const frequencyUuid = new Map(); // SQL int ID → uuid
   const freqMhzByYearClub = new Map(); // `${seasonYear}:${clubUuid}` → number (MHz)
   const tally = createTally();
   let nonEmptyPersonNameFixes = 0;
@@ -284,23 +283,19 @@ async function main() {
     return mfr;
   });
   await uploadPrivateBlob("manufacturers.json", manufacturersList);
-  for (const m of manufacturersList) {
-    await uploadPrivateBlob(`manufacturers/${m.id}.json`, m);
-  }
   saveIdMap();
   console.log(`  wrote ${manufacturersList.length} manufacturers\n`);
 
   // ── 3. Pilot ratings ────────────────────────────────────────────────────────
-  console.log("Step 3: pilot-ratings.json");
+  console.log("Step 3: pilot ratings (lookup table — no blob written)");
   const ratings = await pool.request().query("SELECT ID, Description FROM PilotRatings ORDER BY ID");
   const ratingsList = ratings.recordset.map((r) => {
     const id = getOrCreateUuid("rating", r.ID);
     ratingUuid.set(r.ID, id);
     return { id, legacyId: r.ID, description: r.Description };
   });
-  await uploadPrivateBlob("pilot-ratings.json", ratingsList);
   saveIdMap();
-  console.log(`  wrote ${ratingsList.length} pilot ratings\n`);
+  console.log(`  resolved ${ratingsList.length} pilot ratings for lookup\n`);
 
   // ── 4. Clubs ────────────────────────────────────────────────────────────────
   console.log("Step 4: clubs.json + clubs/{uuid}.json");
@@ -318,20 +313,8 @@ async function main() {
   saveIdMap();
   console.log(`  wrote ${clubsList.length} clubs\n`);
 
-  console.log("Step 5: frequencies.json + season-clubs/{year}/{clubId}.json");
+  console.log("Step 5: season-clubs/{year}/{clubId}.json");
   const frequencyRows = await safeQuery(pool, "SELECT * FROM Frequencies ORDER BY ID");
-  const frequenciesList = frequencyRows.map((r, i) => {
-    const legacyId = pick(r, ["ID", "Id", "FrequencyID", "Frequency_ID"]);
-    const id = getOrCreateUuid("frequency", legacyId ?? `row-${i + 1}`);
-    if (legacyId != null) frequencyUuid.set(legacyId, id);
-    return {
-      id,
-      ...(legacyId != null ? { legacyId } : {}),
-      label: String(pick(r, ["Label", "Name", "Description", "Frequency", "Freq", "Title"]) ?? `Frequency ${i + 1}`),
-      position: Number(pick(r, ["Position", "SortOrder", "DisplayOrder", "Order"]) ?? i + 1),
-    };
-  });
-  await uploadPrivateBlob("frequencies.json", frequenciesList);
 
   let seasonClubFrequencyRows = await safeQuery(pool, "SELECT * FROM SeasonClubFrequencies");
   if (seasonClubFrequencyRows.length === 0) {
@@ -393,7 +376,7 @@ async function main() {
     await uploadBlob(`season-clubs/${year}/index.json`, index);
   }
   saveIdMap();
-  console.log(`  wrote ${frequenciesList.length} frequencies and ${seasonClubRows.length} season club rows\n`);
+  console.log(`  wrote ${seasonClubRows.length} season club rows\n`);
 
   // ── 5. Sites ────────────────────────────────────────────────────────────────
   console.log("Step 6: sites.json + sites/{uuid}.json");

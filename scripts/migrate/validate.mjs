@@ -260,8 +260,6 @@ function schemaMaps(schemas) {
 
 function unvalidatedReason(path) {
   if (/^manufacturers(?:\/|\.json$)/u.test(path)) return "manufacturers has no schema";
-  if (path === "pilot-ratings.json") return "pilot ratings have no schema";
-  if (path === "frequencies.json" || /^frequencies\//u.test(path)) return "frequencies have no schema";
   if (/^results\//u.test(path)) return "results have no schema";
   if (/^club-history\//u.test(path) || path === "club-history.json") return "club history has no schema";
   if (/^season-clubs\/index\.json$/u.test(path) || /^season-clubs\/[^/]+\/index\.json$/u.test(path)) return "season-club index has no schema";
@@ -446,7 +444,6 @@ async function main() {
   const seasonsOk = assertArray("seasons.json", seasons);
 
   await readBlob(privateClient, "manufacturers.json");
-  await readBlob(privateClient, "pilot-ratings.json");
 
   console.log("");
 
