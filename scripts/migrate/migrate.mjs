@@ -41,7 +41,7 @@ import { getOrCreateUuid, saveIdMap } from "./id-map.mjs";
 import { normalizeStatus } from "../lib/status.mjs";
 import { buildPilotClubHistory } from "./pilot-club-history-logic.mjs";
 import { writeDiscardedCounts } from "./discarded-counts.mjs";
-import { briefImageBlobFromLegacy, briefImagePath, normalizeWebsiteUrl, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
+import { assertSeasonYear, briefImageBlobFromLegacy, briefImagePath, normalizeWebsiteUrl, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
 
 // ─── CLI flags ────────────────────────────────────────────────────────────────
 
@@ -225,6 +225,13 @@ async function main() {
   // Connect to SQL
   const pool = await sql.connect(SQL_CS);
   console.log("Connected to SQL Server\n");
+
+  // Preflight data-shape checks that must fail before any blob write occurs.
+  const seasonYearRows = await pool.request().query("SELECT ID, Year FROM Seasons");
+  for (const r of seasonYearRows.recordset) {
+    assertSeasonYear(r.Year);
+  }
+  console.log(`Preflight: validated ${seasonYearRows.recordset.length} season years\n`);
 
   // ID → UUID maps (populated as we migrate each entity; used for cross-references)
   const clubUuid = new Map();      // SQL int ID → uuid
