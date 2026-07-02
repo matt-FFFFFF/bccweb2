@@ -144,23 +144,35 @@ test("specific migration aliases stay locked", () => {
   assert.equal(normalizeWingClass("EN_B"), "EN B");
 });
 
+test("case-variant canonical values normalize to proper-case canonical values", () => {
+  assert.equal(normalizeWingClass("en b"), "EN B");
+  assert.equal(normalizeWingClass("EN B"), "EN B");
+  assert.equal(normalizeWingClass("en c 2-liner"), "EN C 2-liner");
+  assert.equal(normalizePilotRating("club pilot"), "Club Pilot");
+  assert.equal(normalizePilotRating("ADVANCED PILOT"), "Advanced Pilot");
+  assert.equal(normalizeCoachType("seniorcoach"), "SeniorCoach");
+  assert.equal(normalizeRoundStatus("briefcomplete"), "BriefComplete");
+});
+
 test("tally records rewritten, passthrough, and unmapped counts per normalizer", () => {
   const tally = createTally();
 
   assert.equal(normalizeCoachType("None", tally), "None");
+  assert.equal(normalizeCoachType("seniorcoach", tally), "SeniorCoach");
   assert.equal(normalizeCoachType("Club Coach", tally), "ClubCoach");
   assert.equal(normalizeCoachType("bogus", tally), null);
   assert.equal(normalizeCoachType(null, tally), null);
 
   assert.equal(normalizeRoundStatus("Confirmed", tally), "Confirmed");
+  assert.equal(normalizeRoundStatus("briefcomplete", tally), "BriefComplete");
   assert.equal(normalizeRoundStatus("active", tally), "Confirmed");
   assert.equal(normalizeRoundStatus("Inactive", tally), null);
 
   assert.deepEqual(tally, {
-    coachType: { rewritten: 1, passthrough: 1, unmapped: 1 },
+    coachType: { rewritten: 2, passthrough: 1, unmapped: 1 },
     pilotRating: { rewritten: 0, passthrough: 0, unmapped: 0 },
     wingClass: { rewritten: 0, passthrough: 0, unmapped: 0 },
-    roundStatus: { rewritten: 1, passthrough: 1, unmapped: 1 },
+    roundStatus: { rewritten: 2, passthrough: 1, unmapped: 1 },
     scoringType: { rewritten: 0, passthrough: 0, unmapped: 0 },
   });
 });

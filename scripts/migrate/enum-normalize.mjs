@@ -102,12 +102,14 @@ function normalizeEnum(raw, canonicalValues, aliasTable, tallyEntry) {
   const value = String(raw).trim();
   if (value.length === 0) return null;
 
-  if (canonicalValues.includes(value)) {
-    tallyEntry && (tallyEntry.passthrough += 1);
-    return value;
+  const lower = value.toLowerCase();
+  const canonical = canonicalValues.find((c) => c.toLowerCase() === lower);
+  if (canonical != null) {
+    tallyEntry && (value === canonical ? (tallyEntry.passthrough += 1) : (tallyEntry.rewritten += 1));
+    return canonical;
   }
 
-  const normalized = aliasTable[value.toLowerCase()];
+  const normalized = aliasTable[lower];
   if (normalized == null) {
     tallyEntry && (tallyEntry.unmapped += 1);
     return null;
