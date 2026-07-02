@@ -33,15 +33,21 @@
  *  11. Recompute seasons/{year}.json (league) + results/{year}.json
  */
 
+// Deps-current note (T14): mssql@12.6.0 and @azure/storage-blob@12.33.0 are
+// already at current versions (bumped historically in #84/#86). PR #112, which
+// updates root-workspace apps/api storage-blob/puppeteer-core and apps/web
+// react-router, does NOT touch this standalone scripts/migrate package.
+
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import sql from "mssql";
 import { BlobServiceClient } from "@azure/storage-blob";
 import { getOrCreateUuid, saveIdMap } from "./id-map.mjs";
-import { normalizeStatus } from "../lib/status.mjs";
-import { buildPilotClubHistory } from "./pilot-club-history-logic.mjs";
+import { buildPilotClubHistory, queryPilotClubRows } from "./pilot-club-history-logic.mjs";
 import { writeDiscardedCounts } from "./discarded-counts.mjs";
-import { briefImageBlobFromLegacy, briefImagePath, normalizeWebsiteUrl, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
+import { writeNormalizationCounts } from "./normalization-counts.mjs";
+import { createTally, normalizeCoachType, normalizePilotRating, normalizeRoundStatus, normalizeScoringType, normalizeWingClass } from "./enum-normalize.mjs";
+import { assertSeasonYear, briefImageBlobFromLegacy, briefImagePath, ensureNonEmpty, normalizeWebsiteUrl, parseFrequencyMhz, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
 
 // ─── CLI flags ────────────────────────────────────────────────────────────────
 
@@ -170,13 +176,8 @@ const COACH_TYPE_MAP = {
 // 1:Proposed, 2:Confirmed, 3:Cancelled, 4:Submitted, 5:Verified,
 // 6:Active, 7:Inactive, 8:Locked, 9:Complete, 10:Deleted, 11:Brief Complete
 // Round statuses used in new app: Proposed | Confirmed | BriefComplete | Locked | Complete | Cancelled
-function mapStatus(description) {
-  if (!description) return "Proposed";
-  try {
-    return normalizeStatus(description);
-  } catch {
-    return description.trim();
-  }
+function mapStatus(description, tally) {
+  return normalizeRoundStatus(description, tally) ?? "Proposed";
 }
 
 function mapSiteStatus(description) {
@@ -226,6 +227,13 @@ async function main() {
   const pool = await sql.connect(SQL_CS);
   console.log("Connected to SQL Server\n");
 
+  // Preflight data-shape checks that must fail before any blob write occurs.
+  const seasonYearRows = await pool.request().query("SELECT ID, Year FROM Seasons");
+  for (const r of seasonYearRows.recordset) {
+    assertSeasonYear(r.Year);
+  }
+  console.log(`Preflight: validated ${seasonYearRows.recordset.length} season years\n`);
+
   // ID → UUID maps (populated as we migrate each entity; used for cross-references)
   const clubUuid = new Map();      // SQL int ID → uuid
   const siteUuid = new Map();      // SQL int ID → uuid
@@ -236,7 +244,13 @@ async function main() {
   const mfrUuid = new Map();       // SQL int ID → uuid
   const mfrNameBySqlId = new Map(); // SQL int ID → manufacturer name
   const ratingUuid = new Map();    // SQL int ID → uuid
-  const frequencyUuid = new Map(); // SQL int ID → uuid
+  const freqMhzByYearClub = new Map(); // `${seasonYear}:${clubUuid}` → number (MHz)
+  const tally = createTally();
+  let nonEmptyPersonNameFixes = 0;
+  let sentinelSiteRounds = 0;
+  let fallbackClubTeams = 0;
+  let legacySignaturesStamped = 0;
+  let briefsFrequencyMhz = 0;
 
   // ── 1. config.json ──────────────────────────────────────────────────────────
   console.log("Step 1: config.json");
@@ -269,23 +283,19 @@ async function main() {
     return mfr;
   });
   await uploadPrivateBlob("manufacturers.json", manufacturersList);
-  for (const m of manufacturersList) {
-    await uploadPrivateBlob(`manufacturers/${m.id}.json`, m);
-  }
   saveIdMap();
   console.log(`  wrote ${manufacturersList.length} manufacturers\n`);
 
   // ── 3. Pilot ratings ────────────────────────────────────────────────────────
-  console.log("Step 3: pilot-ratings.json");
+  console.log("Step 3: pilot ratings (lookup table — no blob written)");
   const ratings = await pool.request().query("SELECT ID, Description FROM PilotRatings ORDER BY ID");
   const ratingsList = ratings.recordset.map((r) => {
     const id = getOrCreateUuid("rating", r.ID);
     ratingUuid.set(r.ID, id);
     return { id, legacyId: r.ID, description: r.Description };
   });
-  await uploadPrivateBlob("pilot-ratings.json", ratingsList);
   saveIdMap();
-  console.log(`  wrote ${ratingsList.length} pilot ratings\n`);
+  console.log(`  resolved ${ratingsList.length} pilot ratings for lookup\n`);
 
   // ── 4. Clubs ────────────────────────────────────────────────────────────────
   console.log("Step 4: clubs.json + clubs/{uuid}.json");
@@ -303,28 +313,20 @@ async function main() {
   saveIdMap();
   console.log(`  wrote ${clubsList.length} clubs\n`);
 
-  console.log("Step 5: frequencies.json + season-clubs/{year}/{clubId}.json");
+  console.log("Step 5: season-clubs/{year}/{clubId}.json");
   const frequencyRows = await safeQuery(pool, "SELECT * FROM Frequencies ORDER BY ID");
-  const frequenciesList = frequencyRows.map((r, i) => {
-    const legacyId = pick(r, ["ID", "Id", "FrequencyID", "Frequency_ID"]);
-    const id = getOrCreateUuid("frequency", legacyId ?? `row-${i + 1}`);
-    if (legacyId != null) frequencyUuid.set(legacyId, id);
-    return {
-      id,
-      ...(legacyId != null ? { legacyId } : {}),
-      label: String(pick(r, ["Label", "Name", "Description", "Frequency", "Title"]) ?? `Frequency ${i + 1}`),
-      position: Number(pick(r, ["Position", "SortOrder", "DisplayOrder", "Order"]) ?? i + 1),
-    };
-  });
-  await uploadPrivateBlob("frequencies.json", frequenciesList);
 
-  const seasonClubFrequencyRows = await safeQuery(pool, "SELECT * FROM SeasonClubFrequency");
-  const frequencyBySeasonClubLegacyId = new Map();
+  let seasonClubFrequencyRows = await safeQuery(pool, "SELECT * FROM SeasonClubFrequencies");
+  if (seasonClubFrequencyRows.length === 0) {
+    seasonClubFrequencyRows = await safeQuery(pool, "SELECT * FROM SeasonClubFrequency");
+  }
+  const frequencyLegacyIdBySeasonClubLegacyId = new Map();
   for (const r of seasonClubFrequencyRows) {
-    const seasonClubLegacyId = pick(r, ["SeasonClub_ID", "SeasonClubID", "seasonClub_ID", "seasonClubID"]);
+    const seasonClubLegacyId = pick(r, ["SeasonClub_ID", "SeasonClubID", "seasonClub_ID", "seasonClubID", "ID"]);
     const frequencyLegacyId = pick(r, ["Frequency_ID", "FrequencyID", "frequency_ID", "frequencyID"]);
-    const frequencyId = frequencyLegacyId != null ? frequencyUuid.get(frequencyLegacyId) : null;
-    if (seasonClubLegacyId != null && frequencyId) frequencyBySeasonClubLegacyId.set(seasonClubLegacyId, frequencyId);
+    if (seasonClubLegacyId != null && frequencyLegacyId != null) {
+      frequencyLegacyIdBySeasonClubLegacyId.set(seasonClubLegacyId, frequencyLegacyId);
+    }
   }
 
   const seasonClubRows = await safeQuery(pool, "SELECT * FROM SeasonClubs ORDER BY ID");
@@ -339,10 +341,13 @@ async function main() {
     const clubId = clubLegacyId != null ? clubUuid.get(clubLegacyId) : null;
     const club = clubId ? clubsList.find((c) => c.id === clubId) : null;
     if (!seasonYear || !club) continue;
-    const frequencyId = legacyId != null ? frequencyBySeasonClubLegacyId.get(legacyId) : null;
-    const frequency = frequencyId ? frequenciesList.find((f) => f.id === frequencyId) : undefined;
-    const acceptedAtRaw = pick(r, ["AcceptedTsCsAt", "AcceptedTcsAt", "TermsAcceptedAt", "CreatedAt", "DateCreated"]);
-    const acceptedTsCsAt = acceptedAtRaw ? new Date(acceptedAtRaw).toISOString() : null;
+    const frequencyLegacyId = legacyId != null ? frequencyLegacyIdBySeasonClubLegacyId.get(legacyId) : null;
+    const frequency = frequencyLegacyId != null ? frequencyRows.find((f) => pick(f, ["ID", "Id", "FrequencyID", "Frequency_ID"]) === frequencyLegacyId) : undefined;
+    const frequencyMhz = parseFrequencyMhz(frequency ? pick(frequency, ["Freq", "Label", "Name", "Description", "Frequency", "Title"]) : null);
+    if (frequencyMhz !== undefined) freqMhzByYearClub.set(`${seasonYear}:${club.id}`, frequencyMhz);
+    const acceptedAtRaw = pick(r, ["AcceptedTsCsAt", "AcceptedTcsAt", "TermsAcceptedAt"]);
+    const acceptedTsCsAt = acceptedAtRaw ? new Date(acceptedAtRaw).toISOString() : undefined;
+    const acceptedTsCs = Boolean(pick(r, ["AcceptTsCs", "AcceptedTsCs", "acceptTsCs"]));
     const numTeams = Number(pick(r, ["NumTeams", "numTeams", "NumberOfTeams", "NoTeams"]) ?? 1);
     const id = getOrCreateUuid("season-club", `${seasonYear}-${club.id}`);
     const seasonClub = {
@@ -351,10 +356,8 @@ async function main() {
       seasonYear,
       clubId: club.id,
       numTeams,
-      acceptedTsCs: true,
-      acceptedTsCsAt,
-      acceptedTsCsBy: null,
-      ...(frequency ? { frequency, frequencyId: frequency.id } : {}),
+      acceptedTsCs,
+      ...(acceptedTsCsAt ? { acceptedTsCsAt } : {}),
     };
     await uploadPrivateBlob(`season-clubs/${seasonYear}/${club.id}.json`, seasonClub);
     if (!seasonClubIndexByYear.has(seasonYear)) seasonClubIndexByYear.set(seasonYear, []);
@@ -364,8 +367,7 @@ async function main() {
       clubId: club.id,
       clubName: club.name,
       numTeams,
-      ...(frequency ? { frequencyId: frequency.id, frequencyLabel: frequency.label } : {}),
-      acceptedTsCs: true,
+      acceptedTsCs,
       ...(acceptedTsCsAt ? { acceptedTsCsAt } : {}),
     });
   }
@@ -374,7 +376,7 @@ async function main() {
     await uploadBlob(`season-clubs/${year}/index.json`, index);
   }
   saveIdMap();
-  console.log(`  wrote ${frequenciesList.length} frequencies and ${seasonClubRows.length} season club rows\n`);
+  console.log(`  wrote ${seasonClubRows.length} season club rows\n`);
 
   // ── 5. Sites ────────────────────────────────────────────────────────────────
   console.log("Step 6: sites.json + sites/{uuid}.json");
@@ -501,11 +503,16 @@ async function main() {
       r.FullName?.trim() ||
       [r.FirstName, r.LastName].filter(Boolean).join(" ") ||
       "Unknown";
-    const firstName = r.FirstName?.trim() ?? "";
-    const lastName = r.LastName?.trim() ?? "";
+    const firstName = ensureNonEmpty(r.FirstName, fullName || "Unknown");
+    const lastName = ensureNonEmpty(r.LastName, fullName || "Unknown");
+    if ((r.FirstName == null || String(r.FirstName).trim().length === 0) ||
+        (r.LastName == null || String(r.LastName).trim().length === 0)) {
+      nonEmptyPersonNameFixes++;
+    }
 
     const ratingEntry = ratingsList.find((x) => x.legacyId === r.Pilot_Rating_ID);
-    const pilotRating = ratingEntry?.description ?? "Pilot";
+    const pilotRating = normalizePilotRating(ratingEntry?.description, tally) ?? "Pilot";
+    const wingClass = normalizeWingClass(r.WingClass, tally);
 
     const coachType = COACH_TYPE_MAP[r.CoachType] ?? "None";
 
@@ -532,7 +539,7 @@ async function main() {
       ...(r.EmergencyContactName ? { emergencyContactName: r.EmergencyContactName } : {}),
       ...(r.EmergencyPhoneNumber ? { emergencyPhoneNumber: r.EmergencyPhoneNumber } : {}),
       ...(r.MedicalInfo ? { medicalInfo: r.MedicalInfo } : {}),
-      ...(r.WingClass ? { wingClass: r.WingClass } : {}),
+      ...(r.WingClass && wingClass ? { wingClass } : {}),
       ...(wingManufacturer ? { wingManufacturer } : {}),
       ...(r.WingModel ? { wingModel: r.WingModel } : {}),
       ...(r.WingColours ? { wingColours: r.WingColours } : {}),
@@ -549,8 +556,6 @@ async function main() {
         ? { currentClub: { id: currentSeasonClub.clubId, name: currentSeasonClub.clubName } }
         : {}),
       seasonClubs,
-      // email sourced from AspNetUser — used for pilot auto-linking at registration
-      ...(r.UserEmail ? { email: r.UserEmail } : {}),
       userId: null, // no user accounts migrated — pilots self-register post-migration
     };
 
@@ -575,11 +580,7 @@ async function main() {
 
   // ── 7b. Pilot club history ───────────────────────────────────────────────────
   console.log("Step 7b: pilots/{uuid}/club-history.json");
-  const pilotClubResult = await pool.request().query(`
-    SELECT pc.ID, pc.Pilot_ID, pc.Club_ID, pc.JoinedAt, pc.LeftAt
-    FROM PilotClub pc
-    ORDER BY pc.Pilot_ID, pc.ID
-  `);
+  const pilotClubRows = await queryPilotClubRows(pool);
 
   const pilotsWithCurrentClub = pilotsResult.recordset
     .map((r) => {
@@ -592,7 +593,7 @@ async function main() {
     .filter(Boolean);
 
   const historyByPilot = buildPilotClubHistory(
-    pilotClubResult.recordset,
+    pilotClubRows,
     pilotUuid,
     clubUuid,
     clubsList,
@@ -605,7 +606,7 @@ async function main() {
     historyBlobCount++;
   }
   saveIdMap();
-  console.log(`  wrote ${historyBlobCount} pilot club-history blobs (${pilotClubResult.recordset.length} legacy rows)\n`);
+  console.log(`  wrote ${historyBlobCount} pilot club-history blobs (${pilotClubRows.length} legacy rows)\n`);
 
   // ── 9. Rounds (with teams, pilot slots, flights) ────────────────────────────
   console.log("Step 9: rounds.json + rounds/{uuid}.json");
@@ -724,8 +725,8 @@ async function main() {
 
         const snapshot = hasPilot
           ? {
-              wingClass: place.WingClass ?? "EN B",
-              pilotRating: place.PilotRatingDesc ?? "Pilot",
+              wingClass: normalizeWingClass(place.WingClass, tally) ?? "EN B",
+              pilotRating: normalizePilotRating(place.PilotRatingDesc, tally) ?? "Pilot",
               ...(place.PhoneNumber ? { phoneNumber: place.PhoneNumber } : {}),
               ...(place.HelmetColour ? { helmetColour: place.HelmetColour } : {}),
               ...(place.HarnessType ? { harnessType: place.HarnessType } : {}),
@@ -745,7 +746,7 @@ async function main() {
               distance: Number(flight.Distance) || 0,
               url: flight.url ?? null,
               dateTime: flight.DateTime ? new Date(flight.DateTime).toISOString() : null,
-              scoringType: flight.ScoringType ?? "XC",
+              scoringType: normalizeScoringType(flight.ScoringType, tally) ?? "XC",
               score: 0, // recomputed below if round is Complete
               wingFactor: 1.0,
               isManualLog: !!flight.isManualLog,
@@ -762,6 +763,7 @@ async function main() {
           : null;
 
         if (hasPilot && !!place.SignToFly && pilotId) {
+          legacySignaturesStamped++;
           legacySignatures.push(legacyMigratedSignature({
             roundId: id,
             teamId: rtId,
@@ -786,10 +788,12 @@ async function main() {
         };
       });
 
+      if (!clubDoc) fallbackClubTeams++;
+
       return {
         id: rtId,
-        teamName: rt.TeamName ?? "",
-        club: clubDoc ? { id: clubDoc.id, name: clubDoc.name } : { id: null, name: "" },
+        teamName: ensureNonEmpty(rt.TeamName, "Unknown team"),
+        club: clubDoc ? { id: clubDoc.id, name: clubDoc.name } : { id: "legacy-no-club", name: "Unknown club" },
         score: Number(rt.TeamScore) || 0,
         ...(rt.PureTrackGroup_ID ? { pureTrackGroupId: rt.PureTrackGroup_ID } : {}),
         ...(rt.PureTrackGroupSlug ? { pureTrackGroupSlug: rt.PureTrackGroupSlug } : {}),
@@ -804,7 +808,8 @@ async function main() {
       delete team.__legacySignatures;
     }
 
-    const status = mapStatus(r.StatusDesc);
+    const status = mapStatus(r.StatusDesc, tally);
+    if (!siteId) sentinelSiteRounds++;
 
     const roundDoc = {
       id,
@@ -822,8 +827,8 @@ async function main() {
         ? { pureTrackGroupSlug: r.PureTrackGroupSlug }
         : {}),
       site: {
-        id: siteId ?? null,
-        name: r.SiteName ?? "",
+        id: siteId ?? "legacy-no-site",
+        name: ensureNonEmpty(r.SiteName, "Unknown site"),
         ...(r.ParkingW3W ? { parkingW3W: r.ParkingW3W } : {}),
         ...(r.BriefingW3W ? { briefingW3W: r.BriefingW3W } : {}),
         ...(r.TakeOffW3W ? { takeOffW3W: r.TakeOffW3W } : {}),
@@ -898,12 +903,17 @@ async function main() {
     if (imageBytes) {
       await uploadPrivateBinaryBlob(imagePaths[0], imageBytes, "image/png");
     }
+    const generatedAt = new Date().toISOString();
+    const briefDate = r.RoundDate ? new Date(r.RoundDate).toISOString().slice(0, 10) : roundDoc?.date;
+    const brieferCoachRaw = r.BrieferBHPA_CoachLevel;
+    const brieferCoachLevel = normalizeCoachType(brieferCoachRaw, tally);
+    const freqMhz = freqMhzByYearClub.get(`${roundDoc?.season?.year}:${roundDoc?.organisingClub?.id}`);
+    if (freqMhz != null) briefsFrequencyMhz++;
     const brief = {
       roundId,
-      legacyId: r.ID,
-      generatedAt: new Date().toISOString(),
-      date: r.RoundDate ? new Date(r.RoundDate).toISOString().slice(0, 10) : (roundDoc?.date ?? null),
-      siteName: r.SiteName ?? roundDoc?.site?.name ?? "",
+      generatedAt,
+      date: ensureNonEmpty(briefDate, generatedAt.slice(0, 10)),
+      siteName: ensureNonEmpty(r.SiteName ?? roundDoc?.site?.name, "Unknown site"),
       ...(roundDoc?.site?.parkingW3W ? { parkingW3W: roundDoc.site.parkingW3W } : {}),
       ...(roundDoc?.site?.briefingW3W ? { briefingW3W: roundDoc.site.briefingW3W } : {}),
       ...(roundDoc?.site?.takeOffW3W ? { takeOffW3W: roundDoc.site.takeOffW3W } : {}),
@@ -920,9 +930,10 @@ async function main() {
       ...(r.NOTAMs ? { NOTAMs: r.NOTAMs } : {}),
       ...(r.BENO_LineDescription ? { BENO_LineDescription: r.BENO_LineDescription } : {}),
       ...(r.BriefersNotes ? { briefersNotes: r.BriefersNotes } : {}),
+      ...(freqMhz != null ? { frequencyMhz: freqMhz } : {}),
       briefer: {
         ...(r.BrieferName ? { name: r.BrieferName } : {}),
-        ...(r.BrieferBHPA_CoachLevel ? { bhpaCoachLevel: r.BrieferBHPA_CoachLevel } : {}),
+        ...(brieferCoachLevel ? { bhpaCoachLevel: brieferCoachLevel } : {}),
         ...(r.BrieferBHPA_Number ? { bhpaNumber: r.BrieferBHPA_Number } : {}),
         ...(r.BrieferPhoneNumber ? { phoneNumber: r.BrieferPhoneNumber } : {}),
         ...(r.BrieferEmailAddress ? { emailAddress: r.BrieferEmailAddress } : {}),
@@ -1002,6 +1013,35 @@ async function main() {
 
   await pool.close();
   saveIdMap();
+
+  const sortObject = (obj) => Object.fromEntries(
+    Object.entries(obj).sort(([a], [b]) => a.localeCompare(b)),
+  );
+  const normalizationCounts = {
+    driftFixes: sortObject({
+      briefsFrequencyMhz,
+      fallbackClubTeams,
+      legacySignaturesStamped,
+      nonEmptyPersonNameFixes,
+      sentinelSiteRounds,
+    }),
+    normalization: sortObject(
+      Object.fromEntries(
+        Object.entries(tally).map(([field, counts]) => [field, sortObject(counts)]),
+      ),
+    ),
+  };
+  writeNormalizationCounts(normalizationCounts);
+  console.log("\nMigration normalization summary:");
+  console.log("  driftFixes:");
+  for (const [name, count] of Object.entries(normalizationCounts.driftFixes)) {
+    console.log(`    ${name}: ${count}`);
+  }
+  console.log("  normalization:");
+  for (const [field, counts] of Object.entries(normalizationCounts.normalization)) {
+    const parts = Object.entries(counts).map(([name, count]) => `${name}=${count}`).join(", ");
+    console.log(`    ${field}: ${parts}`);
+  }
   console.log("\nMigration complete.");
 }
 

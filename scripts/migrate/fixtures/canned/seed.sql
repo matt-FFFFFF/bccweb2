@@ -6,7 +6,7 @@
 -- phone numbers are RFC 5733 reserved ranges.
 --
 -- Counts:
---   Statuses          : 5
+--   Statuses          : 6
 --   Manufacturers     : 3
 --   PilotRatings      : 3
 --   Clubs             : 3
@@ -14,14 +14,14 @@
 --   Sites             : 3
 --   Seasons           : 2
 --   SeasonClubs       : 3 (one per club in 2026)
---   SeasonClubFreq    : 3
+--   SeasonClubFreqs   : 3
 --   People            : 3
 --   AspNetUsers       : 3
 --   Pilots            : 3
 --   PilotSeasonClubs  : 3
 --   PilotClub         : 3
 --   Teams             : 3
---   Rounds            : 2 (1 Confirmed proposed, 1 Complete)
+--   Rounds            : 3 (1 Confirmed proposed, 1 Complete, 1 Deleted/siteless)
 --   RoundTeams        : 3 (all in the Complete round)
 --   RoundTeamPilots   : 3
 --   RoundTeamPlaces   : 9 (3 places per team)
@@ -35,6 +35,7 @@ INSERT INTO Statuses (ID, Description) VALUES
   (2, 'Confirmed'),
   (6, 'Active'),
   (9, 'Complete'),
+  (10, 'Deleted'),
   (11, 'Brief Complete');
 
 -- ── Manufacturers ────────────────────────────────────────────────────────────
@@ -47,7 +48,7 @@ INSERT INTO Manufacturers (ID, Name, WebsiteUrl) VALUES
 INSERT INTO PilotRatings (ID, Description) VALUES
   (1, 'CP'),
   (2, 'Pilot'),
-  (3, 'Instructor');
+  (3, 'Advanced Pilot');
 
 -- ── Clubs ────────────────────────────────────────────────────────────────────
 INSERT INTO Clubs (ID, Name) VALUES
@@ -73,22 +74,22 @@ INSERT INTO Seasons (ID, Year, MaxTeams, active) VALUES
   (2, 2026, 8, 1);
 
 -- ── SeasonClubs ──────────────────────────────────────────────────────────────
-INSERT INTO SeasonClubs (ID, Season_ID, Club_ID, NumTeams, AcceptedTsCsAt) VALUES
-  (1, 2, 1, 2, '2026-01-15T09:00:00'),
-  (2, 2, 2, 1, '2026-01-16T10:00:00'),
-  (3, 2, 3, 1, NULL);
+INSERT INTO SeasonClubs (ID, Season_ID, Club_ID, NumTeams, AcceptTsCs) VALUES
+  (1, 2, 1, 2, 1),
+  (2, 2, 2, 1, 1),
+  (3, 2, 3, 1, 0);
 
--- ── SeasonClubFrequency ──────────────────────────────────────────────────────
-INSERT INTO SeasonClubFrequency (ID, SeasonClub_ID, Frequency_ID) VALUES
-  (1, 1, 1),
-  (2, 2, 2),
-  (3, 3, 3);
+-- ── SeasonClubFrequencies ─────────────────────────────────────────────────────
+INSERT INTO SeasonClubFrequencies (ID, Frequency_ID) VALUES
+  (1, 1),
+  (2, 2),
+  (3, 3);
 
 -- ── People ───────────────────────────────────────────────────────────────────
 INSERT INTO People (ID, FirstName, LastName, FullName, PhoneNumber) VALUES
   (101, 'Synthetic', 'Alpha',   'Synthetic Alpha',   '+44-1632-960001'),
   (102, 'Synthetic', 'Bravo',   'Synthetic Bravo',   '+44-1632-960002'),
-  (103, 'Synthetic', 'Charlie', 'Synthetic Charlie', NULL);
+  (103, '',          'Charlie', 'Synthetic Charlie', NULL);
 
 -- ── AspNetUsers ──────────────────────────────────────────────────────────────
 INSERT INTO AspNetUsers (Id, Email) VALUES
@@ -126,11 +127,12 @@ INSERT INTO PilotClub (ID, Pilot_ID, Club_ID, JoinedAt, LeftAt) VALUES
 INSERT INTO Teams (ID, ClubID, SeasonID, TeamName) VALUES
   (301, 1, 2, 'Test Club Alpha A'),
   (302, 2, 2, 'Test Club Bravo A'),
-  (303, 3, 2, 'Test Club Charlie A');
+  (303, NULL, 2, 'Test Club Charlie A');
 
 -- ── Rounds ───────────────────────────────────────────────────────────────────
 -- Round 401: Confirmed, no teams (no flights), no brief
 -- Round 402: Complete, 3 teams each with a flight; one brief
+-- Round 403: Deleted legacy row with no site
 INSERT INTO Rounds (ID, Date, SiteID, StatusID, isLocked, OrganisingClub_ID, Season_ID, MaxTeams, MinimumScore,
                     BriefingTime, LandByTime, CheckInByTime, Narrative,
                     PureTrackGroupName, PureTrackGroupSlug, PureTrackGroup_ID) VALUES
@@ -139,7 +141,10 @@ INSERT INTO Rounds (ID, Date, SiteID, StatusID, isLocked, OrganisingClub_ID, Sea
    'Not set yet...', 'Not set yet...', NULL),
   (402, '2026-05-20T00:00:00', 2, 9, 1, 2, 2, 8, 0,
    '2026-05-20T08:30:00', '2026-05-20T17:30:00', '2026-05-20T09:30:00', 'Synthetic complete round.',
-   'BCC 2026 Round 1', 'bcc-2026-r1', 9001);
+   'BCC 2026 Round 1', 'bcc-2026-r1', 9001),
+  (403, '2026-07-11T00:00:00', NULL, 10, 0, 3, 2, 8, 0,
+   NULL, NULL, NULL, 'Synthetic deleted siteless round.',
+   'Not set yet...', 'Not set yet...', NULL);
 
 -- ── RoundTeams (only round 402) ──────────────────────────────────────────────
 INSERT INTO RoundTeams (ID, RoundID, TeamID, TeamScore, PureTrackGroupName, PureTrackGroupSlug, PureTrackGroup_ID) VALUES
@@ -151,7 +156,7 @@ INSERT INTO RoundTeams (ID, RoundID, TeamID, TeamScore, PureTrackGroupName, Pure
 INSERT INTO RoundTeamPilots (ID, Pilot_ID, noScore, PilotPoints, PhoneNumber, Pilot_Rating_ID, WingClass, Manufacturer_ID,
                              WingModel, WingColours, HelmetColour, HarnessType, HarnessColour,
                              EmergencyContactName, EmergencyPhoneNumber, MedicalInfo, AccountedFor, SignToFly) VALUES
-  (601, 201, 0, 0.0, '+44-1632-960001', 2, 'EN B',         1, 'Mentor 7', 'Red/Blue',     'Red',   'Pod',        'Black', 'Synthetic ICE Alpha',   '+44-1632-960101', NULL,   1, 1),
+  (601, 201, 0, 0.0, '+44-1632-960001', 2, 'EN_B',         1, 'Mentor 7', 'Red/Blue',     'Red',   'Pod',        'Black', 'Synthetic ICE Alpha',   '+44-1632-960101', NULL,   1, 1),
   (602, 202, 0, 0.0, '+44-1632-960002', 1, 'EN D 2-liner', 2, 'Zeno 2',   'Yellow/Green', 'White', 'Reversible', 'Blue',  'Synthetic ICE Bravo',   '+44-1632-960102', 'None', 1, 1),
   (603, 203, 0, 0.0, NULL,              3, 'EN A',         3, NULL,       NULL,           NULL,    NULL,         NULL,    NULL,                    NULL,              NULL,   1, 0);
 
@@ -171,9 +176,9 @@ INSERT INTO RoundTeamPlaces (ID, PlaceInTeam, IsScoring, Status, RoundTeam_ID, R
 INSERT INTO Flights (ID, PilotID, RoundID, DateTime, Distance, url, ScoringType, isManualLog,
                      IsOverallPB, AwardedOverallPB, IsUKPersonalBest, AwardedUKPersonalBest,
                      IsFirstXC, AwardedFirstXC, IsFirstUKXC, AwardedFirstUKXC, roundTeamPlace_ID) VALUES
-  (801, 201, 402, '2026-05-20T11:00:00', 42.500, 'https://example.test/tracks/801', 'XC', 0,
+  (801, 201, 402, '2026-05-20T11:00:00', 42.500, 'https://example.test/tracks/801', 'puretrack', 0,
    1, 1, 0, 0, 0, 0, 0, 0, 701),
-  (802, 202, 402, '2026-05-20T11:30:00', 71.250, 'https://example.test/tracks/802', 'XC', 0,
+  (802, 202, 402, '2026-05-20T11:30:00', 71.250, 'https://example.test/tracks/802', 'manual', 1,
    0, 0, 1, 1, 0, 0, 0, 0, 704),
   (803, 203, 402, '2026-05-20T10:45:00', 18.000, 'https://example.test/tracks/803', 'XC', 0,
    0, 0, 0, 0, 1, 1, 1, 1, 707);
@@ -185,7 +190,7 @@ INSERT INTO RoundBriefs (ID, RoundID, SiteName, BrieferName, BrieferBHPA_CoachLe
                          WindSpeed_Direction, DirectionOfFlight, ExpectedLandingArea,
                          AirspaceAndHazards, NOTAMs, BENO_LineDescription, BriefersNotes, Image) VALUES
   (901, 402, 'Test Site Bravo', 'Synthetic Briefer', 'Club Coach', '99999',
-   '+44-1632-960900', 'briefer@example.test', '2026-05-20T00:00:00', 'Test Club Bravo',
+   '+44-1632-960900', 'briefer@example.test', NULL, 'Test Club Bravo',
    '2026-05-20T08:30:00', '2026-05-20T17:30:00', '2026-05-20T09:30:00', 3, 3,
    '10 kt W', 'NNE', 'Synthetic LZ 1km east of takeoff',
    'Synthetic airspace notes', 'Synthetic NOTAM text', 'Synthetic BENO line',

@@ -54,12 +54,11 @@ CREATE TABLE SeasonClubs (
   Season_ID INT NULL,
   Club_ID INT NULL,
   NumTeams INT NULL,
-  AcceptedTsCsAt DATETIME2 NULL
+  AcceptTsCs BIT NOT NULL
 );
 
-CREATE TABLE SeasonClubFrequency (
+CREATE TABLE SeasonClubFrequencies (
   ID INT NOT NULL PRIMARY KEY,
-  SeasonClub_ID INT NOT NULL,
   Frequency_ID INT NOT NULL
 );
 
@@ -114,7 +113,7 @@ CREATE TABLE PilotClub (
 
 CREATE TABLE Teams (
   ID INT NOT NULL PRIMARY KEY,
-  ClubID INT NOT NULL,
+  ClubID INT NULL,
   SeasonID INT NULL,
   TeamName NVARCHAR(128) NOT NULL
 );
