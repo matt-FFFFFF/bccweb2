@@ -295,13 +295,10 @@ export function evaluateSchemaParse({ family, schema, raw, expectedHeals = EXPEC
     validated: true,
     rejects: [],
     strips: diff.strips.map((keyPath) => normalizeKeyPath(keyPath)),
-    heals: diff.changes.map((keyPath) => {
-      const normalized = normalizeKeyPath(keyPath);
-      return {
-        keyPath: normalized,
-        allowed: expectedHeals.has(`${family}:${normalized}`),
-      };
-    }),
+    heals: diff.changes.map((keyPath) => ({
+      keyPath: normalizeKeyPath(keyPath),
+      allowed: expectedHeals.has(healKey(family, keyPath)),
+    })),
   };
 }
 
@@ -316,10 +313,10 @@ function newSchemaStats() {
   };
 }
 
-function recordHeal(stats, family, keyPath, path) {
+function recordHeal(stats, family, keyPath, path, allowed) {
   const normalized = normalizeKeyPath(keyPath);
   const key = `${family}.${normalized}`;
-  const current = stats.heals.get(key) ?? { count: 0, allowed: EXPECTED_HEALS.has(healKey(family, keyPath)), paths: new Set() };
+  const current = stats.heals.get(key) ?? { count: 0, allowed, paths: new Set() };
   current.count++;
   current.paths.add(path);
   stats.heals.set(key, current);
@@ -338,7 +335,7 @@ async function validateBlobWithSchema(containerName, path, raw, mapping, stats) 
 
   stats.validated++;
   result.strips.forEach((keyPath) => stats.strips.push({ containerName, family: mapping.family, path, keyPath }));
-  result.heals.forEach((heal) => recordHeal(stats, mapping.family, heal.keyPath, path));
+  result.heals.forEach((heal) => recordHeal(stats, mapping.family, heal.keyPath, path, heal.allowed));
 }
 
 async function runSchemaGate(containerName, client, mappings, stats) {
