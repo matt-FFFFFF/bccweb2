@@ -39,7 +39,7 @@ import sql from "mssql";
 import { BlobServiceClient } from "@azure/storage-blob";
 import { getOrCreateUuid, saveIdMap } from "./id-map.mjs";
 import { normalizeStatus } from "../lib/status.mjs";
-import { buildPilotClubHistory } from "./pilot-club-history-logic.mjs";
+import { buildPilotClubHistory, queryPilotClubRows } from "./pilot-club-history-logic.mjs";
 import { writeDiscardedCounts } from "./discarded-counts.mjs";
 import { createTally, normalizePilotRating, normalizeWingClass } from "./enum-normalize.mjs";
 import { assertSeasonYear, briefImageBlobFromLegacy, briefImagePath, ensureNonEmpty, normalizeWebsiteUrl, parseFrequencyMhz, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
@@ -593,11 +593,7 @@ async function main() {
 
   // ── 7b. Pilot club history ───────────────────────────────────────────────────
   console.log("Step 7b: pilots/{uuid}/club-history.json");
-  const pilotClubResult = await pool.request().query(`
-    SELECT pc.ID, pc.Pilot_ID, pc.Club_ID, pc.JoinedAt, pc.LeftAt
-    FROM PilotClub pc
-    ORDER BY pc.Pilot_ID, pc.ID
-  `);
+  const pilotClubRows = await queryPilotClubRows(pool);
 
   const pilotsWithCurrentClub = pilotsResult.recordset
     .map((r) => {
@@ -610,7 +606,7 @@ async function main() {
     .filter(Boolean);
 
   const historyByPilot = buildPilotClubHistory(
-    pilotClubResult.recordset,
+    pilotClubRows,
     pilotUuid,
     clubUuid,
     clubsList,
@@ -623,7 +619,7 @@ async function main() {
     historyBlobCount++;
   }
   saveIdMap();
-  console.log(`  wrote ${historyBlobCount} pilot club-history blobs (${pilotClubResult.recordset.length} legacy rows)\n`);
+  console.log(`  wrote ${historyBlobCount} pilot club-history blobs (${pilotClubRows.length} legacy rows)\n`);
 
   // ── 9. Rounds (with teams, pilot slots, flights) ────────────────────────────
   console.log("Step 9: rounds.json + rounds/{uuid}.json");
