@@ -4,8 +4,9 @@
  *
  * Post-migration validation: verifies expected blobs, scans public JSON for PII,
  * and mirrors the API read path by parsing produced blobs through
- * @bccweb/schemas. The schema gate imports the built package from
- * packages/schemas/dist, so run `make build` before this validator.
+ * @bccweb/schemas. The gate imports @bccweb/schemas by package name (whose `main`
+ * resolves to packages/schemas/dist via the workspace root node_modules), so run
+ * `make build` before this validator.
  *
  * Usage:
  *   BLOB_CONNECTION_STRING="DefaultEndpointsProtocol=https;AccountName=...;..."  \
@@ -261,7 +262,7 @@ function schemaMaps(schemas) {
 function unvalidatedReason(path) {
   if (/^manufacturers(?:\/|\.json$)/u.test(path)) return "manufacturers has no schema";
   if (/^results\//u.test(path)) return "results have no schema";
-  if (/^club-history\//u.test(path) || path === "club-history.json") return "club history has no schema";
+  if (/(?:^|\/)club-history\.json$/u.test(path)) return "club history has no schema";
   if (/^season-clubs\/index\.json$/u.test(path) || /^season-clubs\/[^/]+\/index\.json$/u.test(path)) return "season-club index has no schema";
   if (path === "user-index.json" || /^users\//u.test(path) || /^auth\//u.test(path)) return "auth/user blobs are outside the migration schema gate";
   return "no schema mapping";
