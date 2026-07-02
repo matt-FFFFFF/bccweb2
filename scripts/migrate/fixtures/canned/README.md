@@ -7,10 +7,20 @@ Synthetic legacy BCCWeb schema + data for the migration smoke test
 
 - `schema.sql` — `CREATE TABLE` definitions for every legacy table the
   migration reads (or counts).
-- `seed.sql` — `INSERT` statements: 2–3 rows per entity, covering both
-  the happy path (Complete round with flights + brief) and minimal
-  edges (Confirmed round with no teams, pilot with null person fields,
-  manufacturer with null website, site with null status).
+- `seed.sql` — `INSERT` statements: 2–3 rows per entity, plus targeted
+  drift-healing edges. Counts: 6 statuses, 3 manufacturers, 3 pilot
+  ratings, 3 clubs, 3 frequencies, 3 sites, 2 seasons, 3 season clubs,
+  3 season-club frequencies, 3 people, 3 users, 3 pilots, 3 pilot-season
+  clubs, 3 pilot-club rows, 3 teams, 3 rounds, 3 round teams,
+  3 round-team pilots, 9 round-team places, 3 flights, 1 round brief, and
+  2 round-club-pilot rows.
+- Happy path: one Complete round with flights, a dateless brief, a briefer
+  with the legacy `Club Coach` label, and an organising-club season frequency
+  that yields `frequencyMhz`.
+- Drift edges: a Deleted/siteless round, a blank first-name person, a
+  clubless team, legacy SignToFly rows, `EN_B` wing-class alias,
+  `puretrack`/`manual` scoring aliases, `Advanced Pilot` plus `CP` pilot
+  rating aliases, and one season club with `AcceptTsCs = 0`.
 
 ## PII safety
 
