@@ -2,6 +2,8 @@
 // Note: manufacturerFromLegacyRow / legacyMigratedSignature call getOrCreateUuid(), which may read/write .migration-state/id-map.json — i.e. these two are not strictly side-effect-free.
 import { getOrCreateUuid } from "./id-map.mjs";
 
+export const LEGACY_SIGNATURE_USER_ID = "legacy-import";
+
 export function briefImageBlobFromLegacy(image) {
   if (image == null) return null;
   if (Buffer.isBuffer(image)) return image.length > 0 ? image : null;
@@ -26,6 +28,27 @@ export function normalizeWebsiteUrl(value) {
   return trimmed.length > 0 ? trimmed : undefined;
 }
 
+export function parseFrequencyMhz(raw) {
+  if (typeof raw !== "string") return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0) return undefined;
+  const frequencyMhz = Number(trimmed);
+  return Number.isFinite(frequencyMhz) && frequencyMhz > 0 && frequencyMhz < 1000 ? frequencyMhz : undefined;
+}
+
+export function ensureNonEmpty(value, fallback) {
+  const trimmed = value == null ? "" : String(value).trim();
+  return trimmed.length > 0 ? trimmed : fallback;
+}
+
+export function assertSeasonYear(raw) {
+  const year = Number(raw);
+  if (!Number.isInteger(year) || year < 2000 || year > 9999) {
+    throw new Error(`Season year out of range: ${raw} — fix the source data`);
+  }
+  return year;
+}
+
 export function manufacturerFromLegacyRow(r) {
   const websiteUrl = normalizeWebsiteUrl(r.WebsiteUrl);
   return {
@@ -47,7 +70,7 @@ export function legacyMigratedSignature({ roundId, teamId, place, pilotId, stabl
     teamId,
     place,
     pilotId,
-    userId: null,
+    userId: LEGACY_SIGNATURE_USER_ID,
     signedAt: null,
     briefVersion: null,
     briefHash: null,
