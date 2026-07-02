@@ -25,7 +25,7 @@ mask_connection_string() {
     console.log(value
       .replace(/Password=[^;]+/gi, "Password=***")
       .replace(/AccountKey=[^;]+/gi, "AccountKey=***")
-      .replace(/SharedAccessSignature=[^?&"\x27\s]+/gi, "SharedAccessSignature=***"));
+      .replace(/SharedAccessSignature=[^;]+/gi, "SharedAccessSignature=***"));
   ' "${1:-}"
 }
 
