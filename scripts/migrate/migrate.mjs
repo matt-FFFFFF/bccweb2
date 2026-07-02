@@ -33,6 +33,11 @@
  *  11. Recompute seasons/{year}.json (league) + results/{year}.json
  */
 
+// Deps-current note (T14): mssql@12.6.0 and @azure/storage-blob@12.33.0 are
+// already at current versions (bumped historically in #84/#86). PR #112, which
+// updates root-workspace apps/api storage-blob/puppeteer-core and apps/web
+// react-router, does NOT touch this standalone scripts/migrate package.
+
 import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import sql from "mssql";
