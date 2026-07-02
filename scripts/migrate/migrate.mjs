@@ -41,7 +41,7 @@ import { getOrCreateUuid, saveIdMap } from "./id-map.mjs";
 import { normalizeStatus } from "../lib/status.mjs";
 import { buildPilotClubHistory } from "./pilot-club-history-logic.mjs";
 import { writeDiscardedCounts } from "./discarded-counts.mjs";
-import { assertSeasonYear, briefImageBlobFromLegacy, briefImagePath, normalizeWebsiteUrl, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
+import { assertSeasonYear, briefImageBlobFromLegacy, briefImagePath, normalizeWebsiteUrl, parseFrequencyMhz, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
 
 // ─── CLI flags ────────────────────────────────────────────────────────────────
 
@@ -244,6 +244,7 @@ async function main() {
   const mfrNameBySqlId = new Map(); // SQL int ID → manufacturer name
   const ratingUuid = new Map();    // SQL int ID → uuid
   const frequencyUuid = new Map(); // SQL int ID → uuid
+  const freqMhzByYearClub = new Map(); // `${seasonYear}:${clubUuid}` → number (MHz)
 
   // ── 1. config.json ──────────────────────────────────────────────────────────
   console.log("Step 1: config.json");
@@ -319,19 +320,23 @@ async function main() {
     return {
       id,
       ...(legacyId != null ? { legacyId } : {}),
-      label: String(pick(r, ["Label", "Name", "Description", "Frequency", "Title"]) ?? `Frequency ${i + 1}`),
+      label: String(pick(r, ["Label", "Name", "Description", "Frequency", "Freq", "Title"]) ?? `Frequency ${i + 1}`),
       position: Number(pick(r, ["Position", "SortOrder", "DisplayOrder", "Order"]) ?? i + 1),
     };
   });
   await uploadPrivateBlob("frequencies.json", frequenciesList);
 
-  const seasonClubFrequencyRows = await safeQuery(pool, "SELECT * FROM SeasonClubFrequency");
-  const frequencyBySeasonClubLegacyId = new Map();
+  let seasonClubFrequencyRows = await safeQuery(pool, "SELECT * FROM SeasonClubFrequencies");
+  if (seasonClubFrequencyRows.length === 0) {
+    seasonClubFrequencyRows = await safeQuery(pool, "SELECT * FROM SeasonClubFrequency");
+  }
+  const frequencyLegacyIdBySeasonClubLegacyId = new Map();
   for (const r of seasonClubFrequencyRows) {
-    const seasonClubLegacyId = pick(r, ["SeasonClub_ID", "SeasonClubID", "seasonClub_ID", "seasonClubID"]);
+    const seasonClubLegacyId = pick(r, ["SeasonClub_ID", "SeasonClubID", "seasonClub_ID", "seasonClubID", "ID"]);
     const frequencyLegacyId = pick(r, ["Frequency_ID", "FrequencyID", "frequency_ID", "frequencyID"]);
-    const frequencyId = frequencyLegacyId != null ? frequencyUuid.get(frequencyLegacyId) : null;
-    if (seasonClubLegacyId != null && frequencyId) frequencyBySeasonClubLegacyId.set(seasonClubLegacyId, frequencyId);
+    if (seasonClubLegacyId != null && frequencyLegacyId != null) {
+      frequencyLegacyIdBySeasonClubLegacyId.set(seasonClubLegacyId, frequencyLegacyId);
+    }
   }
 
   const seasonClubRows = await safeQuery(pool, "SELECT * FROM SeasonClubs ORDER BY ID");
@@ -346,10 +351,13 @@ async function main() {
     const clubId = clubLegacyId != null ? clubUuid.get(clubLegacyId) : null;
     const club = clubId ? clubsList.find((c) => c.id === clubId) : null;
     if (!seasonYear || !club) continue;
-    const frequencyId = legacyId != null ? frequencyBySeasonClubLegacyId.get(legacyId) : null;
-    const frequency = frequencyId ? frequenciesList.find((f) => f.id === frequencyId) : undefined;
-    const acceptedAtRaw = pick(r, ["AcceptedTsCsAt", "AcceptedTcsAt", "TermsAcceptedAt", "CreatedAt", "DateCreated"]);
-    const acceptedTsCsAt = acceptedAtRaw ? new Date(acceptedAtRaw).toISOString() : null;
+    const frequencyLegacyId = legacyId != null ? frequencyLegacyIdBySeasonClubLegacyId.get(legacyId) : null;
+    const frequency = frequencyLegacyId != null ? frequencyRows.find((f) => pick(f, ["ID", "Id", "FrequencyID", "Frequency_ID"]) === frequencyLegacyId) : undefined;
+    const frequencyMhz = parseFrequencyMhz(frequency ? pick(frequency, ["Freq", "Label", "Name", "Description", "Frequency", "Title"]) : null);
+    if (frequencyMhz !== undefined) freqMhzByYearClub.set(`${seasonYear}:${club.id}`, frequencyMhz);
+    const acceptedAtRaw = pick(r, ["AcceptedTsCsAt", "AcceptedTcsAt", "TermsAcceptedAt"]);
+    const acceptedTsCsAt = acceptedAtRaw ? new Date(acceptedAtRaw).toISOString() : undefined;
+    const acceptedTsCs = Boolean(pick(r, ["AcceptTsCs", "AcceptedTsCs", "acceptTsCs"]));
     const numTeams = Number(pick(r, ["NumTeams", "numTeams", "NumberOfTeams", "NoTeams"]) ?? 1);
     const id = getOrCreateUuid("season-club", `${seasonYear}-${club.id}`);
     const seasonClub = {
@@ -358,10 +366,8 @@ async function main() {
       seasonYear,
       clubId: club.id,
       numTeams,
-      acceptedTsCs: true,
-      acceptedTsCsAt,
-      acceptedTsCsBy: null,
-      ...(frequency ? { frequency, frequencyId: frequency.id } : {}),
+      acceptedTsCs,
+      ...(acceptedTsCsAt ? { acceptedTsCsAt } : {}),
     };
     await uploadPrivateBlob(`season-clubs/${seasonYear}/${club.id}.json`, seasonClub);
     if (!seasonClubIndexByYear.has(seasonYear)) seasonClubIndexByYear.set(seasonYear, []);
@@ -371,8 +377,7 @@ async function main() {
       clubId: club.id,
       clubName: club.name,
       numTeams,
-      ...(frequency ? { frequencyId: frequency.id, frequencyLabel: frequency.label } : {}),
-      acceptedTsCs: true,
+      acceptedTsCs,
       ...(acceptedTsCsAt ? { acceptedTsCsAt } : {}),
     });
   }
