@@ -127,6 +127,9 @@ function Footer() {
       <a href="https://www.advance.swiss/en/" target="_blank" rel="noreferrer" title="ADVANCE">
         <img src="/images/AdvanceLogo.jpg" alt="Advance" />
       </a>
+      <a href="https://pgcomps.org.uk/" target="_blank" rel="noreferrer" title="British Paragliding Competitions">
+        <img src="/images/PgcompsLogo100x100alt.jpg" alt="British Paragliding Competitions" />
+      </a>
     </footer>
   );
 }
