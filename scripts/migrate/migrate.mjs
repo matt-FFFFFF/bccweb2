@@ -38,10 +38,9 @@ import { pathToFileURL } from "node:url";
 import sql from "mssql";
 import { BlobServiceClient } from "@azure/storage-blob";
 import { getOrCreateUuid, saveIdMap } from "./id-map.mjs";
-import { normalizeStatus } from "../lib/status.mjs";
 import { buildPilotClubHistory, queryPilotClubRows } from "./pilot-club-history-logic.mjs";
 import { writeDiscardedCounts } from "./discarded-counts.mjs";
-import { createTally, normalizePilotRating, normalizeWingClass } from "./enum-normalize.mjs";
+import { createTally, normalizePilotRating, normalizeRoundStatus, normalizeScoringType, normalizeWingClass } from "./enum-normalize.mjs";
 import { assertSeasonYear, briefImageBlobFromLegacy, briefImagePath, ensureNonEmpty, normalizeWebsiteUrl, parseFrequencyMhz, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
 
 // ─── CLI flags ────────────────────────────────────────────────────────────────
@@ -171,13 +170,8 @@ const COACH_TYPE_MAP = {
 // 1:Proposed, 2:Confirmed, 3:Cancelled, 4:Submitted, 5:Verified,
 // 6:Active, 7:Inactive, 8:Locked, 9:Complete, 10:Deleted, 11:Brief Complete
 // Round statuses used in new app: Proposed | Confirmed | BriefComplete | Locked | Complete | Cancelled
-function mapStatus(description) {
-  if (!description) return "Proposed";
-  try {
-    return normalizeStatus(description);
-  } catch {
-    return description.trim();
-  }
+function mapStatus(description, tally) {
+  return normalizeRoundStatus(description, tally) ?? "Proposed";
 }
 
 function mapSiteStatus(description) {
@@ -248,6 +242,9 @@ async function main() {
   const freqMhzByYearClub = new Map(); // `${seasonYear}:${clubUuid}` → number (MHz)
   const tally = createTally();
   let nonEmptyPersonNameFixes = 0;
+  let sentinelSiteRounds = 0;
+  let fallbackClubTeams = 0;
+  let legacySignaturesStamped = 0;
 
   // ── 1. config.json ──────────────────────────────────────────────────────────
   console.log("Step 1: config.json");
@@ -738,8 +735,8 @@ async function main() {
 
         const snapshot = hasPilot
           ? {
-              wingClass: place.WingClass ?? "EN B",
-              pilotRating: place.PilotRatingDesc ?? "Pilot",
+              wingClass: normalizeWingClass(place.WingClass, tally) ?? "EN B",
+              pilotRating: normalizePilotRating(place.PilotRatingDesc, tally) ?? "Pilot",
               ...(place.PhoneNumber ? { phoneNumber: place.PhoneNumber } : {}),
               ...(place.HelmetColour ? { helmetColour: place.HelmetColour } : {}),
               ...(place.HarnessType ? { harnessType: place.HarnessType } : {}),
@@ -759,7 +756,7 @@ async function main() {
               distance: Number(flight.Distance) || 0,
               url: flight.url ?? null,
               dateTime: flight.DateTime ? new Date(flight.DateTime).toISOString() : null,
-              scoringType: flight.ScoringType ?? "XC",
+              scoringType: normalizeScoringType(flight.ScoringType, tally) ?? "XC",
               score: 0, // recomputed below if round is Complete
               wingFactor: 1.0,
               isManualLog: !!flight.isManualLog,
@@ -776,6 +773,7 @@ async function main() {
           : null;
 
         if (hasPilot && !!place.SignToFly && pilotId) {
+          legacySignaturesStamped++;
           legacySignatures.push(legacyMigratedSignature({
             roundId: id,
             teamId: rtId,
@@ -800,10 +798,12 @@ async function main() {
         };
       });
 
+      if (!clubDoc) fallbackClubTeams++;
+
       return {
         id: rtId,
-        teamName: rt.TeamName ?? "",
-        club: clubDoc ? { id: clubDoc.id, name: clubDoc.name } : { id: null, name: "" },
+        teamName: ensureNonEmpty(rt.TeamName, "Unknown team"),
+        club: clubDoc ? { id: clubDoc.id, name: clubDoc.name } : { id: "legacy-no-club", name: "Unknown club" },
         score: Number(rt.TeamScore) || 0,
         ...(rt.PureTrackGroup_ID ? { pureTrackGroupId: rt.PureTrackGroup_ID } : {}),
         ...(rt.PureTrackGroupSlug ? { pureTrackGroupSlug: rt.PureTrackGroupSlug } : {}),
@@ -818,7 +818,8 @@ async function main() {
       delete team.__legacySignatures;
     }
 
-    const status = mapStatus(r.StatusDesc);
+    const status = mapStatus(r.StatusDesc, tally);
+    if (!siteId) sentinelSiteRounds++;
 
     const roundDoc = {
       id,
@@ -836,8 +837,8 @@ async function main() {
         ? { pureTrackGroupSlug: r.PureTrackGroupSlug }
         : {}),
       site: {
-        id: siteId ?? null,
-        name: r.SiteName ?? "",
+        id: siteId ?? "legacy-no-site",
+        name: ensureNonEmpty(r.SiteName, "Unknown site"),
         ...(r.ParkingW3W ? { parkingW3W: r.ParkingW3W } : {}),
         ...(r.BriefingW3W ? { briefingW3W: r.BriefingW3W } : {}),
         ...(r.TakeOffW3W ? { takeOffW3W: r.TakeOffW3W } : {}),
