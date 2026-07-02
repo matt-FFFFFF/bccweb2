@@ -446,6 +446,13 @@ a:hover {
   transform: translateY(-1px);
 }
 
+.bcc-footer a:focus-visible {
+  outline: 2px solid var(--bcc-coral);
+  outline-offset: 2px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.35);
+  transform: translateY(-1px);
+}
+
 .bcc-footer img {
   height: 36px;
   object-fit: contain;

@@ -121,13 +121,13 @@ function Nav() {
 function Footer() {
   return (
     <footer className="bcc-footer">
-      <a href="https://www.bhpa.co.uk" target="_blank" rel="noreferrer" title="British Hang Gliding & Paragliding Association">
+      <a href="https://www.bhpa.co.uk" target="_blank" rel="noopener noreferrer" title="British Hang Gliding & Paragliding Association">
         <img src="/images/bhpa.png" alt="BHPA" />
       </a>
-      <a href="https://www.advance.swiss/en/" target="_blank" rel="noreferrer" title="ADVANCE">
+      <a href="https://www.advance.swiss/en/" target="_blank" rel="noopener noreferrer" title="ADVANCE">
         <img src="/images/AdvanceLogo.jpg" alt="Advance" />
       </a>
-      <a href="https://pgcomps.org.uk/" target="_blank" rel="noreferrer" title="British Paragliding Competitions">
+      <a href="https://pgcomps.org.uk/" target="_blank" rel="noopener noreferrer" title="British Paragliding Competitions">
         <img src="/images/PgcompsLogo100x100alt.jpg" alt="British Paragliding Competitions" />
       </a>
     </footer>
