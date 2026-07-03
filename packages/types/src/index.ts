@@ -79,6 +79,10 @@ export interface User {
   acceptedTsCsVersion?: number;
 }
 
+export interface AdminUserView extends User {
+  emailVerified: boolean;
+}
+
 /** email → user UUID */
 export type UserIndex = Record<string, string>;
 
