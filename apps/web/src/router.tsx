@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useLocation, type NavLinkRenderProps } from "react-router";
+import { useState, useRef, useEffect } from "react";
 import * as z from "zod/v4";
 import { SeasonSummarySchema } from "@bccweb/schemas";
 import { useAuth, loginUrl } from "./hooks/useAuth.js";
@@ -39,7 +40,87 @@ import "./bcc-theme.css";
 
 const navLinkClass = ({ isActive }: NavLinkRenderProps) => (isActive ? "active" : "");
 
-function Nav() {
+// Mounted only for admins, so its document-level listeners never attach for other roles.
+function AdminMenu() {
+  const location = useLocation();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onPointerDown(event: MouseEvent) {
+      if (ref.current && !ref.current.contains(event.target as Node)) {
+        setOpen(false);
+      }
+    }
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    setOpen(false);
+  }, [location.pathname]);
+
+  return (
+    <div className="bcc-nav__dropdown" ref={ref}>
+      <button
+        type="button"
+        className="bcc-nav__dropdown-trigger"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((o) => !o)}
+      >
+        Admin
+        <svg
+          className="bcc-nav__caret"
+          width="10"
+          height="10"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          aria-hidden="true"
+          focusable="false"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {open && (
+        <div className="bcc-nav__menu">
+          <NavLink to="/admin/sites" className={navLinkClass}>
+            Sites
+          </NavLink>
+          <NavLink to="/admin/users" className={navLinkClass}>
+            Users
+          </NavLink>
+          <NavLink to="/admin/clubs" className={navLinkClass}>
+            Clubs
+          </NavLink>
+          <NavLink to="/admin/seasons" className={navLinkClass}>
+            Seasons
+          </NavLink>
+          <NavLink to="/admin/sign-to-fly-wording" className={navLinkClass}>
+            Sign-to-fly wording
+          </NavLink>
+          <NavLink to="/admin/config" className={navLinkClass}>
+            Config
+          </NavLink>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export function Nav() {
   const { identity, loading, logout } = useAuth();
 
   const isCoord =
@@ -76,30 +157,12 @@ function Nav() {
             My Club
           </NavLink>
         )}
-        {isCoord && (
+        {isCoord && !isAdmin && (
           <NavLink to="/admin/sites" className={navLinkClass}>
             Sites
           </NavLink>
         )}
-        {isAdmin && (
-          <>
-            <NavLink to="/admin/users" className={navLinkClass}>
-              Users
-            </NavLink>
-            <NavLink to="/admin/clubs" className={navLinkClass}>
-              Clubs
-            </NavLink>
-            <NavLink to="/admin/seasons" className={navLinkClass}>
-              Seasons
-            </NavLink>
-            <NavLink to="/admin/sign-to-fly-wording" className={navLinkClass}>
-              Sign-to-fly wording
-            </NavLink>
-            <NavLink to="/admin/config" className={navLinkClass}>
-              Config
-            </NavLink>
-          </>
-        )}
+        {isAdmin && <AdminMenu />}
       </div>
 
       <div className="bcc-nav__auth">
