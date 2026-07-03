@@ -13,6 +13,20 @@ import { isUserDeleted, UserDeletedError } from "./accountMutation.js";
 
 const StringRecordSchema = z.record(z.string(), z.string());
 
+export class EmailIndexConflictError extends Error {
+  readonly existingId: string;
+
+  constructor(existingId: string) {
+    super("Email already claimed by a different id");
+    this.name = "EmailIndexConflictError";
+    this.existingId = existingId;
+  }
+}
+
+interface GetOrCreateUserOptions {
+  readonly onIndexConflict?: "throw" | "swallow";
+}
+
 // ─── JWT validation ────────────────────────────────────────────────────────
 
 interface AccessTokenClaims {
@@ -45,7 +59,8 @@ function validateJwt(token: string): AccessTokenClaims {
 
 export async function getOrCreateUser(
   userId: string,
-  email: string
+  email: string,
+  opts: GetOrCreateUserOptions = {},
 ): Promise<User> {
   const userPath = `users/${userId}.json`;
   const blobClient = getPrivateBlobClient(userPath);
@@ -58,6 +73,30 @@ export async function getOrCreateUser(
 
     if (await isUserDeleted(userId)) {
       throw new UserDeletedError(userId);
+    }
+
+    const createdAt = new Date().toISOString();
+
+    if (opts.onIndexConflict === "swallow") {
+      try {
+        await updateUserIndex(email, userId);
+      } catch (err: unknown) {
+        if (err instanceof EmailIndexConflictError) {
+          console.warn("[auth] user-index claim conflict", {
+            userId,
+            existingId: err.existingId,
+          });
+          return {
+            id: userId,
+            email,
+            roles: [],
+            pilotId: null,
+            clubId: null,
+            createdAt,
+          };
+        }
+        throw err;
+      }
     }
 
     let pilotId: string | null = null;
@@ -94,11 +133,13 @@ export async function getOrCreateUser(
       roles: pilotId ? ["Pilot"] : [],
       pilotId,
       clubId,
-      createdAt: new Date().toISOString(),
+      createdAt,
     };
 
     await writePrivateJson(userPath, UserSchema, newUser);
-    await updateUserIndex(email, userId);
+    if (opts.onIndexConflict !== "swallow") {
+      await updateUserIndex(email, userId);
+    }
 
     return newUser;
   }
@@ -121,7 +162,10 @@ async function updateUserIndex(email: string, userId: string): Promise<void> {
       // index doesn't exist yet; start fresh
     }
 
-    index[email.toLowerCase()] = userId;
+    const key = email.toLowerCase();
+    const owner = index[key];
+    if (owner && owner !== userId) throw new EmailIndexConflictError(owner);
+    index[key] = userId;
     await writePrivateJson(indexPath, StringRecordSchema, index, leaseId);
   });
 }
@@ -143,7 +187,10 @@ export async function updatePilotEmailIndex(email: string, pilotId: string): Pro
       if (statusCode !== 404) throw err;
       // no-op
     }
-    index[email.toLowerCase()] = pilotId;
+    const key = email.toLowerCase();
+    const owner = index[key];
+    if (owner && owner !== pilotId) throw new EmailIndexConflictError(owner);
+    index[key] = pilotId;
     await writePrivateJson(indexPath, StringRecordSchema, index, leaseId);
   });
 }
@@ -172,7 +219,9 @@ export async function getCallerIdentity(
 
   if (await isUserDeleted(claims.sub)) return null;
 
-  const user = await getOrCreateUser(claims.sub, claims.email);
+  const user = await getOrCreateUser(claims.sub, claims.email, {
+    onIndexConflict: "swallow",
+  });
 
   return {
     userId: claims.sub,
