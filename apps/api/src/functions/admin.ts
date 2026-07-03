@@ -507,7 +507,7 @@ async function updateUserEmail(
         await writePrivateJson(userPath, UserSchema, updatedUser, leaseId);
       });
 
-      await bestEffortDeleteAuthArtifacts(userId, ctx);
+      await bestEffortDeleteAuthArtifacts(userId, ctx, "updateUserEmail");
       return { ...updatedUser, emailVerified: false };
     });
   } catch (err: unknown) {
@@ -615,7 +615,7 @@ async function bestEffortDeleteAuthArtifacts(
     await getPrivateBlobClient(`auth/verification-state/${userId}.json`).deleteIfExists();
     const container = getPrivateContainer();
     for await (const item of container.listBlobsFlat({ prefix: "auth/tokens/" })) {
-      await deleteTokenIfOwnedBy(item.name, userId, ctx);
+      await deleteTokenIfOwnedBy(item.name, userId, ctx, source);
     }
   } catch (err: unknown) {
     ctx.warn(`[${source}] auth artifact GC failed for ${userId}: ${String(err)}`);
@@ -626,6 +626,7 @@ async function deleteTokenIfOwnedBy(
   path: string,
   userId: string,
   ctx: InvocationContext,
+  source: string,
 ): Promise<void> {
   try {
     const token = await readJson(
@@ -637,7 +638,7 @@ async function deleteTokenIfOwnedBy(
       await getPrivateBlobClient(path).deleteIfExists();
     }
   } catch (err: unknown) {
-    ctx.warn(`[updateUserEmail] auth token GC skipped ${path}: ${String(err)}`);
+    ctx.warn(`[${source}] auth token GC skipped ${path}: ${String(err)}`);
   }
 }
 
