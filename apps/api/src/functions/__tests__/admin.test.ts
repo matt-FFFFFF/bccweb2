@@ -13,6 +13,7 @@
 import { describe, expect, test } from "vitest";
 import { randomUUID } from "node:crypto";
 import type { Config, User } from "@bccweb/types";
+import type { AuthCredential } from "../../lib/authHelpers.js";
 import { getRegisteredHandler } from "../../__tests__/helpers/setup.js";
 import { makeAuthRequest } from "../../__tests__/helpers/api.js";
 import {
@@ -214,5 +215,54 @@ describe("PUT /api/manage/users/{userId}/roles — schema validation & lease", (
     expect(persisted?.roles).toEqual(["Admin", "Pilot"]);
     expect(persisted?.pilotId).toBe("p-1");
     expect(persisted?.clubId).toBe("c-1");
+  });
+});
+
+describe("POST /api/manage/users/{userId}/verify-email — admin force-verify", () => {
+  test("happy path: sets emailVerified=true on an unverified user", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: target } = await makeUser({ emailVerified: false });
+
+    const credBefore = await readPrivateJson<AuthCredential>(`auth/${target.id}.json`);
+    expect(credBefore?.emailVerified).toBe(false);
+
+    const req = makeAuthRequest(admin.id, admin.email, {
+      method: "POST",
+      params: { userId: target.id },
+    });
+
+    const res = await invoke("adminVerifyEmail", req);
+    expect(res.status).toBe(200);
+    expect((res.jsonBody as { ok: boolean }).ok).toBe(true);
+
+    const credAfter = await readPrivateJson<AuthCredential>(`auth/${target.id}.json`);
+    expect(credAfter?.emailVerified).toBe(true);
+  });
+
+  test("returns 404 when auth blob is absent", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const ghostId = randomUUID();
+
+    const req = makeAuthRequest(admin.id, admin.email, {
+      method: "POST",
+      params: { userId: ghostId },
+    });
+
+    const res = await invoke("adminVerifyEmail", req);
+    expect(res.status).toBe(404);
+    expect((res.jsonBody as { code?: string }).code).toBe("NOT_FOUND");
+  });
+
+  test("returns 403 for non-admin caller", async () => {
+    const { user: pilot } = await makeUser({ roles: ["Pilot"] });
+    const { user: target } = await makeUser({ emailVerified: false });
+
+    const req = makeAuthRequest(pilot.id, pilot.email, {
+      method: "POST",
+      params: { userId: target.id },
+    });
+
+    const res = await invoke("adminVerifyEmail", req);
+    expect(res.status).toBe(403);
   });
 });
