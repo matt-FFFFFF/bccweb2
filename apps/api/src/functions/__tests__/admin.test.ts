@@ -11,7 +11,7 @@
  */
 
 import { describe, expect, test } from "vitest";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { HttpRequest } from "@azure/functions";
 import type { AdminUserView, Config, User } from "@bccweb/types";
 import { getCallerIdentity } from "../../lib/auth.js";
@@ -622,6 +622,177 @@ describe("PUT /api/manage/users/{userId}/email — admin change email", () => {
     const authAfter = await readPrivateJson<AuthCredential>(`auth/${target.id}.json`);
     expect(authAfter?.emailVerified).toBe(false);
     expect(authAfter?.tokenVersion).toBe((authBefore.tokenVersion ?? 0) + 1);
+  });
+});
+
+describe("DELETE /api/manage/users/{userId} — account-only delete", () => {
+  test("happy path: tombstones first, removes account auth/indexes and unlinks linked pilot", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const email = `delete-linked-${randomUUID().slice(0, 8)}@example.com`;
+    const pilot = await makePilot({ email });
+    const { user: target } = await makeUser({ email, emailVerified: false });
+    expect(target.pilotId).toBe(pilot.id);
+    const token = await generateShortLivedToken(target.id, "verify", 1);
+    await writePrivateJson(`auth/verification-state/${target.id}.json`, {
+      token: "pending-token",
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+    });
+
+    const res = await invoke(
+      "deleteUser",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "DELETE",
+        params: { userId: target.id },
+      }),
+    );
+
+    expect(res.status).toBe(204);
+    expect(await privateBlobExists(`users/${target.id}.json`)).toBe(false);
+    expect(await privateBlobExists(`auth/${target.id}.json`)).toBe(false);
+    expect(await privateBlobExists(`auth/verification-state/${target.id}.json`)).toBe(false);
+
+    const tombstone = await readPrivateJson<{
+      email?: string | null;
+      pilotId: string | null;
+      deletedAt: string;
+    }>(`users/deleted/${target.id}.json`);
+    expect(tombstone?.email).toBe(email);
+    expect(tombstone?.pilotId).toBe(pilot.id);
+    expect(typeof tombstone?.deletedAt).toBe("string");
+
+    const userIndex = await readPrivateJson<Record<string, string>>("user-index.json");
+    expect(userIndex?.[email]).toBeUndefined();
+
+    const tokenHash = createHash("sha256").update(token).digest("hex");
+    expect(await privateBlobExists(`auth/tokens/${tokenHash}.json`)).toBe(false);
+
+    const pilotAfter = await readPrivateJson<{ userId?: string | null }>(`pilots/${pilot.id}.json`);
+    expect(pilotAfter?.userId).toBeNull();
+    const pilotEmailIndex = await readPrivateJson<Record<string, string>>("pilot-email-index.json");
+    expect(pilotEmailIndex?.[email]).toBeUndefined();
+  });
+
+  test("rejects self-delete with 400 CANNOT_DELETE_SELF", async () => {
+    const { user: admin } = await bootstrapAdmin();
+
+    const res = await invoke(
+      "deleteUser",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "DELETE",
+        params: { userId: admin.id },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect((res.jsonBody as { code?: string }).code).toBe("CANNOT_DELETE_SELF");
+  });
+
+  test("returns 409 LAST_ADMIN when deleting the only live admin", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: targetAdmin } = await makeUser({
+      emailVerified: true,
+      roles: ["Admin"],
+    });
+    await tombstoneIndexedAdminsExcept(targetAdmin.id);
+
+    const res = await invoke(
+      "deleteUser",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "DELETE",
+        params: { userId: targetAdmin.id },
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code?: string }).code).toBe("LAST_ADMIN");
+    expect(await privateBlobExists(`users/${targetAdmin.id}.json`)).toBe(true);
+    expect(await privateBlobExists(`users/deleted/${targetAdmin.id}.json`)).toBe(false);
+  });
+
+  test("returns 404 for an unknown user when no tombstone exists", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const ghostId = randomUUID();
+
+    const res = await invoke(
+      "deleteUser",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "DELETE",
+        params: { userId: ghostId },
+      }),
+    );
+
+    expect(res.status).toBe(404);
+    expect((res.jsonBody as { code?: string }).code).toBe("NOT_FOUND");
+  });
+
+  test("returns 403 for a non-admin caller", async () => {
+    const { user: pilot } = await makeUser({ roles: ["Pilot"] });
+    const { user: target } = await makeUser({ emailVerified: true });
+
+    const res = await invoke(
+      "deleteUser",
+      makeAuthRequest(pilot.id, pilot.email, {
+        method: "DELETE",
+        params: { userId: target.id },
+      }),
+    );
+
+    expect(res.status).toBe(403);
+    expect(await privateBlobExists(`users/${target.id}.json`)).toBe(true);
+  });
+
+  test("retry-continuation: existing tombstone plus present user completes cleanup and skips last-admin guard", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const email = `retry-linked-${randomUUID().slice(0, 8)}@example.com`;
+    const pilot = await makePilot({ email });
+    const { user: targetAdmin } = await makeUser({
+      email,
+      emailVerified: true,
+      roles: ["Admin"],
+    });
+    expect(targetAdmin.pilotId).toBe(pilot.id);
+    await tombstoneIndexedAdminsExcept(targetAdmin.id);
+    await writePrivateJson(`users/deleted/${targetAdmin.id}.json`, {
+      email,
+      pilotId: pilot.id,
+      deletedAt: new Date().toISOString(),
+    });
+
+    const res = await invoke(
+      "deleteUser",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "DELETE",
+        params: { userId: targetAdmin.id },
+      }),
+    );
+
+    expect(res.status).toBe(204);
+    expect(await privateBlobExists(`users/${targetAdmin.id}.json`)).toBe(false);
+    const userIndex = await readPrivateJson<Record<string, string>>("user-index.json");
+    expect(userIndex?.[email]).toBeUndefined();
+    const pilotAfter = await readPrivateJson<{ userId?: string | null }>(`pilots/${pilot.id}.json`);
+    expect(pilotAfter?.userId).toBeNull();
+  });
+
+  test("token-GC read failure still returns 204 after required deletes", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: target } = await makeUser({ emailVerified: true });
+    await writePrivateJson(`auth/tokens/bad-${target.id}.json`, "not-an-object");
+
+    const res = await invoke(
+      "deleteUser",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "DELETE",
+        params: { userId: target.id },
+      }),
+    );
+
+    expect(res.status).toBe(204);
+    expect(await privateBlobExists(`users/${target.id}.json`)).toBe(false);
+    expect(await privateBlobExists(`auth/${target.id}.json`)).toBe(false);
+    const userIndex = await readPrivateJson<Record<string, string>>("user-index.json");
+    expect(userIndex?.[target.email]).toBeUndefined();
   });
 });
 
