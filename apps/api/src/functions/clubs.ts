@@ -1,22 +1,10 @@
-/**
- * Club endpoints — Phase 2 + Phase 5
- *
- * GET  /api/clubs      — club list (public)
- * POST /api/clubs      — create club (Admin) — Phase 5
- * PUT  /api/clubs/{id} — update club (Admin) — Phase 5
- */
-
-import {
-  app,
-  HttpRequest,
-  HttpResponseInit,
-  InvocationContext,
-} from "@azure/functions";
+import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
+import { BlobServiceClient, ContainerClient } from "@azure/storage-blob";
 import { randomUUID } from "crypto";
 import type { Club, ClubSummary } from "@bccweb/types";
-import { ClubSchema, ClubSummarySchema } from "@bccweb/schemas";
+import { ClubSchema, ClubSummarySchema, ClubTeamSummarySchema, SeasonClubSchema, SeasonSummarySchema, SiteSummarySchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
-import { getBlobClient, getPrivateBlobClient } from "../lib/blob.js";
+import { ensureJsonIndexBlob, getBlobClient, getPrivateBlobClient, withLeaseRetry } from "../lib/blob.js";
 import { readJson, writeJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
@@ -27,6 +15,37 @@ import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 
 const ClubsIndexSchema = z.array(ClubSummarySchema);
+const ClubTeamsIndexSchema = z.array(ClubTeamSummarySchema);
+const SitesIndexSchema = z.array(SiteSummarySchema);
+const SeasonsIndexSchema = z.array(SeasonSummarySchema);
+
+const SeasonClubIndexSchema = z.array(z
+  .object({
+    id: z.string().min(1),
+    seasonYear: z.number().int(),
+    clubId: z.string().min(1),
+    clubName: z.string().min(1),
+    numTeams: z.number().int(),
+    acceptedTsCs: z.boolean(),
+    acceptedTsCsAt: z.string().min(1).optional(),
+  })
+  .strip());
+
+let privateContainer: ContainerClient | null = null;
+
+interface ClubPatch {
+  readonly name?: string;
+  readonly sites?: string[];
+}
+
+function getPrivateContainer(): ContainerClient {
+  if (privateContainer) return privateContainer;
+  const connectionString = process.env["BLOB_CONNECTION_STRING"];
+  if (!connectionString) throw new Error("BLOB_CONNECTION_STRING environment variable is not set");
+  const containerName = process.env["BLOB_PRIVATE_CONTAINER_NAME"] ?? "data-private";
+  privateContainer = BlobServiceClient.fromConnectionString(connectionString).getContainerClient(containerName);
+  return privateContainer;
+}
 
 // ─── GET /api/clubs ───────────────────────────────────────────────────────────
 
@@ -114,9 +133,9 @@ async function updateClub(
     throw new HttpError(500, "INTERNAL");
   }
 
-  let body: Partial<Club>;
+  let body: ClubPatch;
   try {
-    body = (await req.json()) as Partial<Club>;
+    body = (await req.json()) as ClubPatch;
   } catch {
     throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
@@ -125,7 +144,6 @@ async function updateClub(
     ...existing,
     name: body.name?.trim() ?? existing.name,
     sites: body.sites ?? existing.sites,
-    teams: body.teams ?? existing.teams,
     id: existing.id, // immutable
   };
 
@@ -133,6 +151,92 @@ async function updateClub(
   await upsertClubInIndex({ id, name: updated.name });
 
   return { status: 200, jsonBody: updated };
+}
+
+// ─── DELETE /api/clubs/{id} ────────────────────────────────────────────────────
+
+async function deleteClub(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!caller.roles.includes("Admin")) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "deleteClub", "standard");
+
+  const id = req.params["id"];
+  if (!id) throw new HttpError(400, "MISSING_CLUB_ID", "Missing club id");
+
+  try {
+    await readJson(
+      getPrivateBlobClient(`clubs/${id}.json`),
+      ClubSchema,
+      `clubs/${id}.json`,
+    );
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Club not found");
+    }
+    throw new HttpError(500, "INTERNAL");
+  }
+
+  await assertClubHasNoReferences(id);
+
+  await removeClubFromIndex(id);
+  await getPrivateBlobClient(`clubs/${id}.json`).deleteIfExists();
+
+  return { status: 204 };
+}
+
+async function assertClubHasNoReferences(id: string): Promise<void> {
+  try {
+    const clubTeams = await readJson(getBlobClient("club-teams.json"), ClubTeamsIndexSchema, "club-teams.json").catch((err: unknown) => {
+      if ((err as { statusCode?: number }).statusCode === 404) return [];
+      throw err;
+    });
+    if (clubTeams.some((team) => team.clubId === id)) {
+      throw new HttpError(409, "CLUB_IN_USE", "Club team references this club");
+    }
+
+    const sites = await readJson(getBlobClient("sites.json"), SitesIndexSchema, "sites.json").catch((err: unknown) => {
+      if ((err as { statusCode?: number }).statusCode === 404) return [];
+      throw err;
+    });
+    if (sites.some((site) => site.clubId === id)) {
+      throw new HttpError(409, "CLUB_IN_USE", "Site references this club");
+    }
+
+    const seasons = await readJson(getBlobClient("seasons.json"), SeasonsIndexSchema, "seasons.json").catch((err: unknown) => {
+      if ((err as { statusCode?: number }).statusCode === 404) return [];
+      throw err;
+    });
+    for (const season of seasons) {
+      if (await seasonClubReferencesClub(season, id)) {
+        throw new HttpError(409, "CLUB_IN_USE", "Season-club registration references this club");
+      }
+    }
+  } catch (err: unknown) {
+    if (err instanceof HttpError && err.code === "CLUB_IN_USE") throw err;
+    throw new HttpError(500, "CLUB_GUARD_UNVERIFIABLE", "Club references could not be fully verified");
+  }
+}
+
+async function seasonClubReferencesClub(season: { year: number }, clubId: string): Promise<boolean> {
+  const indexPath = `season-clubs/${season.year}/index.json`;
+  const index = await readJson(getBlobClient(indexPath), SeasonClubIndexSchema, indexPath).catch((err: unknown) => {
+    if ((err as { statusCode?: number }).statusCode === 404) return [];
+    throw err;
+  });
+  if (index.some((entry) => entry.clubId === clubId)) return true;
+  if (index.length > 0) return false;
+
+  const prefix = `season-clubs/${season.year}/`;
+  for await (const item of getPrivateContainer().listBlobsFlat({ prefix })) {
+    if (!item.name.endsWith(".json") || item.name.endsWith("index.json")) continue;
+    const seasonClub = await readJson(getPrivateBlobClient(item.name), SeasonClubSchema, item.name);
+    if (seasonClub.clubId === clubId) return true;
+  }
+  return false;
 }
 
 // ─── Index helper ─────────────────────────────────────────────────────────────
@@ -160,25 +264,26 @@ async function upsertClubInIndex(summary: ClubSummary): Promise<void> {
   await writeJson("clubs.json", ClubsIndexSchema, index);
 }
 
+async function removeClubFromIndex(id: string): Promise<void> {
+  await ensureJsonIndexBlob("clubs.json", "[]");
+  await withLeaseRetry("clubs.json", async (leaseId) => {
+    let index: ClubSummary[] = [];
+    try {
+      index = await readJson(
+        getBlobClient("clubs.json"),
+        ClubsIndexSchema,
+        "clubs.json",
+      );
+    } catch (err: unknown) {
+      if ((err as { statusCode?: number }).statusCode !== 404) throw err;
+    }
+    await writeJson("clubs.json", ClubsIndexSchema, index.filter((club) => club.id !== id), leaseId);
+  });
+}
+
 // ─── Registration ─────────────────────────────────────────────────────────────
 
-app.http("getClubs", {
-  methods: ["GET"],
-  authLevel: "anonymous",
-  route: "clubs",
-  handler: withErrorHandler(getClubs),
-});
-
-app.http("createClub", {
-  methods: ["POST"],
-  authLevel: "anonymous",
-  route: "clubs",
-  handler: withErrorHandler(createClub),
-});
-
-app.http("updateClub", {
-  methods: ["PUT"],
-  authLevel: "anonymous",
-  route: "clubs/{id}",
-  handler: withErrorHandler(updateClub),
-});
+app.http("getClubs", { methods: ["GET"], authLevel: "anonymous", route: "clubs", handler: withErrorHandler(getClubs) });
+app.http("createClub", { methods: ["POST"], authLevel: "anonymous", route: "clubs", handler: withErrorHandler(createClub) });
+app.http("updateClub", { methods: ["PUT"], authLevel: "anonymous", route: "clubs/{id}", handler: withErrorHandler(updateClub) });
+app.http("deleteClub", { methods: ["DELETE"], authLevel: "anonymous", route: "clubs/{id}", handler: withErrorHandler(deleteClub) });
