@@ -14,12 +14,14 @@ import {
   HttpResponseInit,
   InvocationContext,
 } from "@azure/functions";
+import { BlobServiceClient, type ContainerClient } from "@azure/storage-blob";
 import type { AdminUserView, Config, Round, User } from "@bccweb/types";
 import { AuthCredentialSchema, ConfigSchema, RoundSchema, UserSchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
 import {
   getPrivateBlobClient,
   withPrivateLease,
+  withPrivateLeaseRetry,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
@@ -38,10 +40,38 @@ function isAdmin(roles: string[]): boolean {
   return roles.includes("Admin");
 }
 
+const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function statusCodeOf(err: unknown): number | undefined {
   return (err as { statusCode?: number }).statusCode;
+}
+
+const StringRecordSchema = z.record(z.string(), z.string());
+
+const EmailPayloadSchema = z
+  .object({
+    email: z.string(),
+  })
+  .strict();
+
+const AuthTokenUserSchema = z
+  .object({
+    userId: z.string(),
+  })
+  .passthrough();
+
+function getPrivateContainer(): ContainerClient {
+  const connectionString = process.env["BLOB_CONNECTION_STRING"];
+  const containerName = process.env["BLOB_PRIVATE_CONTAINER_NAME"];
+  if (!connectionString) {
+    throw new Error("BLOB_CONNECTION_STRING environment variable is not set");
+  }
+  if (!containerName) {
+    throw new Error("BLOB_PRIVATE_CONTAINER_NAME environment variable is not set");
+  }
+  return BlobServiceClient.fromConnectionString(connectionString).getContainerClient(containerName);
 }
 
 /**
@@ -401,6 +431,195 @@ async function setUserRoles(
   return { status: 200, jsonBody: updated };
 }
 
+// ─── PUT /api/manage/users/{userId}/email ────────────────────────────────────
+
+async function updateUserEmail(
+  req: HttpRequest,
+  ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "updateUserEmail", "standard");
+
+  const userId = req.params["userId"];
+  if (!userId) throw new HttpError(400, "MISSING_USER_ID", "Missing userId");
+
+  let rawBody: unknown;
+  try {
+    rawBody = await req.json();
+  } catch {
+    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
+  }
+
+  const parsed = EmailPayloadSchema.safeParse(rawBody);
+  if (!parsed.success || !EMAIL_REGEX.test(parsed.data.email)) {
+    throw new HttpError(400, "INVALID_EMAIL", "Invalid email address");
+  }
+  const newEmail = parsed.data.email.toLowerCase();
+
+  let updated: AdminUserView | null = null;
+  try {
+    updated = await withAccountMutationLock(async () => {
+      const userPath = `users/${userId}.json`;
+      const user = await readUserLocked(userPath);
+      const oldEmail = user.email.toLowerCase();
+      const pilotId = user.pilotId;
+
+      const userIndex = await readStringIndexLocked("user-index.json");
+      const existingUserId = userIndex[newEmail];
+      if (existingUserId && existingUserId !== userId) {
+        throw new HttpError(409, "EMAIL_TAKEN", "Email already belongs to another user");
+      }
+
+      if (pilotId) {
+        const pilotEmailIndex = await readStringIndexLocked("pilot-email-index.json");
+        const existingPilotId = pilotEmailIndex[newEmail];
+        if (existingPilotId && existingPilotId !== pilotId) {
+          throw new HttpError(409, "PILOT_EMAIL_TAKEN", "Email already belongs to another pilot");
+        }
+      }
+
+      await writeUserIndexEmail(oldEmail, newEmail, userId);
+
+      const updatedUser: User = { ...user, email: newEmail };
+      await withPrivateLeaseRetry(userPath, async (leaseId) => {
+        await writePrivateJson(userPath, UserSchema, updatedUser, leaseId);
+      });
+
+      await markAuthEmailUnverified(userId);
+
+      if (pilotId) {
+        await writePilotEmailIndex(oldEmail, newEmail, pilotId);
+      }
+
+      await bestEffortDeleteAuthArtifacts(userId, ctx);
+      return { ...updatedUser, emailVerified: false };
+    });
+  } catch (err: unknown) {
+    if (err instanceof HttpError) throw err;
+    if (statusCodeOf(err) === 404) {
+      throw new HttpError(404, "NOT_FOUND", "User not found");
+    }
+    rethrowLeaseConflict(err);
+  }
+
+  return { status: 200, jsonBody: updated };
+}
+
+async function readUserLocked(userPath: string): Promise<User> {
+  try {
+    return await withPrivateLeaseRetry(userPath, () =>
+      readJson(getPrivateBlobClient(userPath), UserSchema, userPath)
+    );
+  } catch (err: unknown) {
+    if (statusCodeOf(err) === 404) {
+      throw new HttpError(404, "NOT_FOUND", "User not found");
+    }
+    throw err;
+  }
+}
+
+async function readStringIndexLocked(path: string): Promise<Record<string, string>> {
+  try {
+    return await withPrivateLeaseRetry(path, () =>
+      readJson(getPrivateBlobClient(path), StringRecordSchema, path)
+    );
+  } catch (err: unknown) {
+    if (statusCodeOf(err) === 404) return {};
+    throw err;
+  }
+}
+
+async function writeUserIndexEmail(
+  oldEmail: string,
+  newEmail: string,
+  userId: string,
+): Promise<void> {
+  await ensurePrivateBlob("user-index.json", StringRecordSchema, {});
+  await withPrivateLeaseRetry("user-index.json", async (leaseId) => {
+    const index = await readJson(
+      getPrivateBlobClient("user-index.json"),
+      StringRecordSchema,
+      "user-index.json",
+    );
+    delete index[oldEmail];
+    index[newEmail] = userId;
+    await writePrivateJson("user-index.json", StringRecordSchema, index, leaseId);
+  });
+}
+
+async function writePilotEmailIndex(
+  oldEmail: string,
+  newEmail: string,
+  pilotId: string,
+): Promise<void> {
+  await ensurePrivateBlob("pilot-email-index.json", StringRecordSchema, {});
+  await withPrivateLeaseRetry("pilot-email-index.json", async (leaseId) => {
+    const index = await readJson(
+      getPrivateBlobClient("pilot-email-index.json"),
+      StringRecordSchema,
+      "pilot-email-index.json",
+    );
+    delete index[oldEmail];
+    index[newEmail] = pilotId;
+    await writePrivateJson("pilot-email-index.json", StringRecordSchema, index, leaseId);
+  });
+}
+
+async function markAuthEmailUnverified(userId: string): Promise<void> {
+  const authPath = `auth/${userId}.json`;
+  try {
+    await withPrivateLeaseRetry(authPath, async (leaseId) => {
+      const credential = await readJson(
+        getPrivateBlobClient(authPath),
+        AuthCredentialSchema,
+        authPath,
+      );
+      credential.emailVerified = false;
+      credential.tokenVersion = (credential.tokenVersion ?? 0) + 1;
+      await writePrivateJson(authPath, AuthCredentialSchema, credential, leaseId);
+    });
+  } catch (err: unknown) {
+    if (statusCodeOf(err) === 404) return;
+    throw err;
+  }
+}
+
+async function bestEffortDeleteAuthArtifacts(
+  userId: string,
+  ctx: InvocationContext,
+): Promise<void> {
+  try {
+    await getPrivateBlobClient(`auth/verification-state/${userId}.json`).deleteIfExists();
+    const container = getPrivateContainer();
+    for await (const item of container.listBlobsFlat({ prefix: "auth/tokens/" })) {
+      await deleteTokenIfOwnedBy(item.name, userId, ctx);
+    }
+  } catch (err: unknown) {
+    ctx.warn(`[updateUserEmail] auth artifact GC failed for ${userId}: ${String(err)}`);
+  }
+}
+
+async function deleteTokenIfOwnedBy(
+  path: string,
+  userId: string,
+  ctx: InvocationContext,
+): Promise<void> {
+  try {
+    const token = await readJson(
+      getPrivateBlobClient(path),
+      AuthTokenUserSchema,
+      path,
+    );
+    if (token.userId === userId) {
+      await getPrivateBlobClient(path).deleteIfExists();
+    }
+  } catch (err: unknown) {
+    ctx.warn(`[updateUserEmail] auth token GC skipped ${path}: ${String(err)}`);
+  }
+}
+
 // ─── POST /api/manage/users/{userId}/verify-email ────────────────────────────
 
 async function adminVerifyEmail(
@@ -481,6 +700,13 @@ app.http("setUserRoles", {
   authLevel: "anonymous",
   route: "manage/users/{userId}/roles",
   handler: withErrorHandler(setUserRoles),
+});
+
+app.http("updateUserEmail", {
+  methods: ["PUT"],
+  authLevel: "anonymous",
+  route: "manage/users/{userId}/email",
+  handler: withErrorHandler(updateUserEmail),
 });
 
 app.http("adminVerifyEmail", {

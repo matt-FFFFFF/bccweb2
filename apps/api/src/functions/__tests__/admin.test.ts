@@ -30,6 +30,7 @@ import { getRegisteredHandler } from "../../__tests__/helpers/setup.js";
 import { makeAuthRequest, makeRequest } from "../../__tests__/helpers/api.js";
 import {
   bootstrapAdmin,
+  makePilot,
   makeUser,
   privateBlobExists,
   readPrivateJson,
@@ -434,6 +435,193 @@ describe("shared account-mutation invariants", () => {
 
     await expect(Promise.all([first, second])).resolves.toEqual(["ok", "ok"]);
     expect(maxActiveHolders).toBe(1);
+  });
+});
+
+describe("PUT /api/manage/users/{userId}/email — admin change email", () => {
+  test("happy path: rewrites user email, user-index, auth verification state and tokenVersion", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: target, credential: authBefore } = await makeUser({
+      emailVerified: true,
+    });
+    const oldEmail = target.email;
+    const newEmail = `Updated-${target.id.slice(0, 8)}@Example.COM`;
+    const newEmailLower = newEmail.toLowerCase();
+
+    const res = await invoke(
+      "updateUserEmail",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "PUT",
+        params: { userId: target.id },
+        body: { email: newEmail },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const view = res.jsonBody as AdminUserView;
+    expect(view.email).toBe(newEmailLower);
+    expect(view.emailVerified).toBe(false);
+
+    const persisted = await readPrivateJson<User>(`users/${target.id}.json`);
+    expect(persisted?.email).toBe(newEmailLower);
+
+    const userIndex = await readPrivateJson<Record<string, string>>("user-index.json");
+    expect(userIndex?.[oldEmail]).toBeUndefined();
+    expect(userIndex?.[newEmailLower]).toBe(target.id);
+
+    const authAfter = await readPrivateJson<AuthCredential>(`auth/${target.id}.json`);
+    expect(authAfter?.passwordHash).toBe(authBefore.passwordHash);
+    expect(authAfter?.emailVerified).toBe(false);
+    expect(authAfter?.tokenVersion).toBe((authBefore.tokenVersion ?? 0) + 1);
+  });
+
+  test("linked pilot: moves pilot-email-index from old email to new email", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const oldEmail = `linked-${randomUUID().slice(0, 8)}@example.com`;
+    const pilot = await makePilot({ email: oldEmail });
+    const { user: target } = await makeUser({
+      email: oldEmail,
+      emailVerified: true,
+    });
+    expect(target.pilotId).toBe(pilot.id);
+    const newEmail = `linked-new-${randomUUID().slice(0, 8)}@example.com`;
+
+    const res = await invoke(
+      "updateUserEmail",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "PUT",
+        params: { userId: target.id },
+        body: { email: newEmail },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    const pilotIndex = await readPrivateJson<Record<string, string>>(
+      "pilot-email-index.json",
+    );
+    expect(pilotIndex?.[oldEmail]).toBeUndefined();
+    expect(pilotIndex?.[newEmail]).toBe(pilot.id);
+  });
+
+  test("EMAIL_TAKEN collision leaves user, user-index and auth credential untouched", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: target } = await makeUser({ emailVerified: true });
+    const { user: other } = await makeUser({ emailVerified: true });
+    const userBefore = await readPrivateJson<User>(`users/${target.id}.json`);
+    const indexBefore = await readPrivateJson<Record<string, string>>("user-index.json");
+    const authBefore = await readPrivateJson<AuthCredential>(`auth/${target.id}.json`);
+
+    const res = await invoke(
+      "updateUserEmail",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "PUT",
+        params: { userId: target.id },
+        body: { email: other.email.toUpperCase() },
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code?: string }).code).toBe("EMAIL_TAKEN");
+    expect(await readPrivateJson<User>(`users/${target.id}.json`)).toEqual(userBefore);
+    expect(await readPrivateJson<Record<string, string>>("user-index.json")).toEqual(indexBefore);
+    expect(await readPrivateJson<AuthCredential>(`auth/${target.id}.json`)).toEqual(authBefore);
+  });
+
+  test("PILOT_EMAIL_TAKEN collision rejects cross-pilot repoint and leaves indexes untouched", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const oldEmail = `pilot-one-${randomUUID().slice(0, 8)}@example.com`;
+    const newEmail = `pilot-two-${randomUUID().slice(0, 8)}@example.com`;
+    const pilotOne = await makePilot({ email: oldEmail });
+    const pilotTwo = await makePilot({ email: newEmail });
+    const { user: target } = await makeUser({
+      email: oldEmail,
+      emailVerified: true,
+    });
+    expect(target.pilotId).toBe(pilotOne.id);
+    const userIndexBefore = await readPrivateJson<Record<string, string>>("user-index.json");
+    const pilotIndexBefore = await readPrivateJson<Record<string, string>>(
+      "pilot-email-index.json",
+    );
+
+    const res = await invoke(
+      "updateUserEmail",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "PUT",
+        params: { userId: target.id },
+        body: { email: newEmail },
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code?: string }).code).toBe("PILOT_EMAIL_TAKEN");
+    expect(await readPrivateJson<Record<string, string>>("user-index.json")).toEqual(userIndexBefore);
+    expect(await readPrivateJson<Record<string, string>>("pilot-email-index.json")).toEqual(pilotIndexBefore);
+    expect(pilotIndexBefore?.[oldEmail]).toBe(pilotOne.id);
+    expect(pilotIndexBefore?.[newEmail]).toBe(pilotTwo.id);
+  });
+
+  test("unknown user returns 404 and leaves user-index unchanged", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    await makeUser({ emailVerified: true });
+    const indexBefore = await readPrivateJson<Record<string, string>>("user-index.json");
+
+    const res = await invoke(
+      "updateUserEmail",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "PUT",
+        params: { userId: randomUUID() },
+        body: { email: `ghost-${randomUUID().slice(0, 8)}@example.com` },
+      }),
+    );
+
+    expect(res.status).toBe(404);
+    expect((res.jsonBody as { code?: string }).code).toBe("NOT_FOUND");
+    expect(await readPrivateJson<Record<string, string>>("user-index.json")).toEqual(indexBefore);
+  });
+
+  test("returns 403 for non-admin caller", async () => {
+    const { user: pilot } = await makeUser({ roles: ["Pilot"] });
+    const { user: target } = await makeUser({ emailVerified: true });
+
+    const res = await invoke(
+      "updateUserEmail",
+      makeAuthRequest(pilot.id, pilot.email, {
+        method: "PUT",
+        params: { userId: target.id },
+        body: { email: `denied-${randomUUID().slice(0, 8)}@example.com` },
+      }),
+    );
+
+    expect(res.status).toBe(403);
+  });
+
+  test("tokenVersion bump invalidates a previously minted verify token", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: target, credential: authBefore } = await makeUser({
+      emailVerified: false,
+    });
+    const token = await generateShortLivedToken(target.id, "verify", 24);
+
+    const updateRes = await invoke(
+      "updateUserEmail",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "PUT",
+        params: { userId: target.id },
+        body: { email: `token-bump-${randomUUID().slice(0, 8)}@example.com` },
+      }),
+    );
+    expect(updateRes.status).toBe(200);
+
+    const verifyRes = await invoke(
+      "authVerifyEmail",
+      makeRequest({ method: "GET", query: { token } }),
+    );
+
+    expect(verifyRes.status).toBe(400);
+    expect((verifyRes.jsonBody as { code?: string }).code).toBe("INVALID_TOKEN");
+    const authAfter = await readPrivateJson<AuthCredential>(`auth/${target.id}.json`);
+    expect(authAfter?.emailVerified).toBe(false);
+    expect(authAfter?.tokenVersion).toBe((authBefore.tokenVersion ?? 0) + 1);
   });
 });
 
