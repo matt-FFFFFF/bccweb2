@@ -16,12 +16,14 @@ import {
 } from "@azure/functions";
 import { BlobServiceClient, type ContainerClient } from "@azure/storage-blob";
 import type { AdminUserView, Config, Round, User } from "@bccweb/types";
-import { AuthCredentialSchema, ConfigSchema, RoundSchema, UserSchema } from "@bccweb/schemas";
+import { AuthCredentialSchema, ConfigSchema, PilotSchema, RoundSchema, UserSchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
 import {
   getPrivateBlobClient,
+  readBlob,
   withPrivateLease,
   withPrivateLeaseRetry,
+  writePrivateBlob,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
@@ -61,6 +63,16 @@ const AuthTokenUserSchema = z
     userId: z.string(),
   })
   .passthrough();
+
+const DeletedUserTombstoneSchema = z
+  .object({
+    email: z.string().nullable().optional(),
+    pilotId: z.string().nullable(),
+    deletedAt: z.string(),
+  })
+  .strict();
+
+type DeletedUserTombstone = z.infer<typeof DeletedUserTombstoneSchema>;
 
 function getPrivateContainer(): ContainerClient {
   const connectionString = process.env["BLOB_CONNECTION_STRING"];
@@ -589,6 +601,7 @@ async function markAuthEmailUnverified(userId: string): Promise<void> {
 async function bestEffortDeleteAuthArtifacts(
   userId: string,
   ctx: InvocationContext,
+  source = "updateUserEmail",
 ): Promise<void> {
   try {
     await getPrivateBlobClient(`auth/verification-state/${userId}.json`).deleteIfExists();
@@ -597,7 +610,7 @@ async function bestEffortDeleteAuthArtifacts(
       await deleteTokenIfOwnedBy(item.name, userId, ctx);
     }
   } catch (err: unknown) {
-    ctx.warn(`[updateUserEmail] auth artifact GC failed for ${userId}: ${String(err)}`);
+    ctx.warn(`[${source}] auth artifact GC failed for ${userId}: ${String(err)}`);
   }
 }
 
@@ -618,6 +631,150 @@ async function deleteTokenIfOwnedBy(
   } catch (err: unknown) {
     ctx.warn(`[updateUserEmail] auth token GC skipped ${path}: ${String(err)}`);
   }
+}
+
+// ─── DELETE /api/manage/users/{userId} ───────────────────────────────────────
+
+async function deleteUser(
+  req: HttpRequest,
+  ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "deleteUser", "standard");
+
+  const userId = req.params["userId"];
+  if (!userId) throw new HttpError(400, "MISSING_USER_ID", "Missing userId");
+  if (userId === caller.userId) {
+    throw new HttpError(400, "CANNOT_DELETE_SELF", "Cannot delete your own account");
+  }
+
+  try {
+    await withAccountMutationLock(async () => {
+      const tombstonePath = `users/deleted/${userId}.json`;
+      const existingTombstone = await readDeletedUserTombstone(tombstonePath);
+      let tombstone = existingTombstone;
+
+      if (!tombstone) {
+        const user = await readDeleteTargetUser(userId);
+        if (user.roles.includes("Admin")) {
+          await assertNotLastAdmin(userId);
+        }
+        tombstone = {
+          email: user.email,
+          pilotId: user.pilotId,
+          deletedAt: new Date().toISOString(),
+        };
+        await createDeletedUserTombstone(tombstonePath, tombstone);
+      }
+
+      await removeUserIndexEntry(userId, tombstone.email ?? null);
+      await deleteRequiredAccountAuthBlobs(userId);
+      await bestEffortDeleteAuthArtifacts(userId, ctx, "deleteUser");
+
+      if (tombstone.pilotId) {
+        await unlinkPilotAccount(tombstone.pilotId);
+        await removePilotEmailIndexEntry(tombstone.pilotId);
+      }
+
+      await getPrivateBlobClient(`users/${userId}.json`).deleteIfExists();
+    });
+  } catch (err: unknown) {
+    if (err instanceof HttpError) throw err;
+    rethrowLeaseConflict(err);
+  }
+
+  return { status: 204 };
+}
+
+async function readDeletedUserTombstone(path: string): Promise<DeletedUserTombstone | null> {
+  try {
+    return DeletedUserTombstoneSchema.parse(await readBlob(getPrivateBlobClient(path)));
+  } catch (err: unknown) {
+    if (statusCodeOf(err) === 404) return null;
+    throw err;
+  }
+}
+
+async function readDeleteTargetUser(userId: string): Promise<User> {
+  const userPath = `users/${userId}.json`;
+  try {
+    return await readJson(getPrivateBlobClient(userPath), UserSchema, userPath);
+  } catch (err: unknown) {
+    if (statusCodeOf(err) === 404) {
+      throw new HttpError(404, "NOT_FOUND", "User not found");
+    }
+    throw err;
+  }
+}
+
+async function createDeletedUserTombstone(
+  path: string,
+  tombstone: DeletedUserTombstone,
+): Promise<void> {
+  try {
+    await writePrivateBlob(path, tombstone, undefined, { ifNoneMatch: "*" });
+  } catch (err: unknown) {
+    const status = statusCodeOf(err);
+    if (status === 409 || status === 412) return;
+    throw err;
+  }
+}
+
+async function removeUserIndexEntry(
+  userId: string,
+  email: string | null,
+): Promise<void> {
+  await ensurePrivateBlob("user-index.json", StringRecordSchema, {});
+  await withPrivateLeaseRetry("user-index.json", async (leaseId) => {
+    const index = await readJson(
+      getPrivateBlobClient("user-index.json"),
+      StringRecordSchema,
+      "user-index.json",
+    );
+    const lowerEmail = email?.toLowerCase() ?? null;
+    if (lowerEmail && index[lowerEmail] === userId) {
+      delete index[lowerEmail];
+    }
+    for (const [key, value] of Object.entries(index)) {
+      if (value === userId) delete index[key];
+    }
+    await writePrivateJson("user-index.json", StringRecordSchema, index, leaseId);
+  });
+}
+
+async function deleteRequiredAccountAuthBlobs(userId: string): Promise<void> {
+  await getPrivateBlobClient(`auth/${userId}.json`).deleteIfExists();
+  await getPrivateBlobClient(`auth/verification-state/${userId}.json`).deleteIfExists();
+}
+
+async function unlinkPilotAccount(pilotId: string): Promise<void> {
+  const pilotPath = `pilots/${pilotId}.json`;
+  try {
+    await withPrivateLeaseRetry(pilotPath, async (leaseId) => {
+      const pilot = await readJson(getPrivateBlobClient(pilotPath), PilotSchema, pilotPath);
+      await writePrivateJson(pilotPath, PilotSchema, { ...pilot, userId: null }, leaseId);
+    });
+  } catch (err: unknown) {
+    if (statusCodeOf(err) === 404) return;
+    throw err;
+  }
+}
+
+async function removePilotEmailIndexEntry(pilotId: string): Promise<void> {
+  await ensurePrivateBlob("pilot-email-index.json", StringRecordSchema, {});
+  await withPrivateLeaseRetry("pilot-email-index.json", async (leaseId) => {
+    const index = await readJson(
+      getPrivateBlobClient("pilot-email-index.json"),
+      StringRecordSchema,
+      "pilot-email-index.json",
+    );
+    for (const [key, value] of Object.entries(index)) {
+      if (value === pilotId) delete index[key];
+    }
+    await writePrivateJson("pilot-email-index.json", StringRecordSchema, index, leaseId);
+  });
 }
 
 // ─── POST /api/manage/users/{userId}/verify-email ────────────────────────────
@@ -707,6 +864,13 @@ app.http("updateUserEmail", {
   authLevel: "anonymous",
   route: "manage/users/{userId}/email",
   handler: withErrorHandler(updateUserEmail),
+});
+
+app.http("deleteUser", {
+  methods: ["DELETE"],
+  authLevel: "anonymous",
+  route: "manage/users/{userId}",
+  handler: withErrorHandler(deleteUser),
 });
 
 app.http("adminVerifyEmail", {
