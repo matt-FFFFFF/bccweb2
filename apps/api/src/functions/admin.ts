@@ -25,11 +25,9 @@ import {
   getBlobClient,
   getBlockBlobClient,
   getPrivateBlobClient,
-  readBlob,
   withLeaseRetry,
   withPrivateLease,
   withPrivateLeaseRetry,
-  writePrivateBlob,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
@@ -498,17 +496,16 @@ async function updateUserEmail(
       }
 
       await writeUserIndexEmail(oldEmail, newEmail, userId);
-
-      const updatedUser: User = { ...user, email: newEmail };
-      await withPrivateLeaseRetry(userPath, async (leaseId) => {
-        await writePrivateJson(userPath, UserSchema, updatedUser, leaseId);
-      });
-
       await markAuthEmailUnverified(userId);
 
       if (pilotId) {
         await writePilotEmailIndex(oldEmail, newEmail, pilotId);
       }
+
+      const updatedUser: User = { ...user, email: newEmail };
+      await withPrivateLeaseRetry(userPath, async (leaseId) => {
+        await writePrivateJson(userPath, UserSchema, updatedUser, leaseId);
+      });
 
       await bestEffortDeleteAuthArtifacts(userId, ctx);
       return { ...updatedUser, emailVerified: false };
@@ -560,6 +557,9 @@ async function writeUserIndexEmail(
       StringRecordSchema,
       "user-index.json",
     );
+    if (index[newEmail] && index[newEmail] !== userId) {
+      throw new HttpError(409, "EMAIL_TAKEN", "Email already belongs to another user");
+    }
     delete index[oldEmail];
     index[newEmail] = userId;
     await writePrivateJson("user-index.json", StringRecordSchema, index, leaseId);
@@ -578,6 +578,9 @@ async function writePilotEmailIndex(
       StringRecordSchema,
       "pilot-email-index.json",
     );
+    if (index[newEmail] && index[newEmail] !== pilotId) {
+      throw new HttpError(409, "PILOT_EMAIL_TAKEN", "Email already belongs to another pilot");
+    }
     delete index[oldEmail];
     index[newEmail] = pilotId;
     await writePrivateJson("pilot-email-index.json", StringRecordSchema, index, leaseId);
@@ -695,7 +698,7 @@ async function deleteUser(
 
 async function readDeletedUserTombstone(path: string): Promise<DeletedUserTombstone | null> {
   try {
-    return DeletedUserTombstoneSchema.parse(await readBlob(getPrivateBlobClient(path)));
+    return await readJson(getPrivateBlobClient(path), DeletedUserTombstoneSchema, path);
   } catch (err: unknown) {
     if (statusCodeOf(err) === 404) return null;
     throw err;
@@ -719,7 +722,7 @@ async function createDeletedUserTombstone(
   tombstone: DeletedUserTombstone,
 ): Promise<void> {
   try {
-    await writePrivateBlob(path, tombstone, undefined, { ifNoneMatch: "*" });
+    await writePrivateJson(path, DeletedUserTombstoneSchema, tombstone, undefined, { ifNoneMatch: "*" });
   } catch (err: unknown) {
     const status = statusCodeOf(err);
     if (status === 409 || status === 412) return;

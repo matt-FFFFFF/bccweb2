@@ -82,10 +82,11 @@ async function createPilotForUser(
   );
 }
 
-async function tombstoneIndexedAdminsExcept(keepUserId: string): Promise<void> {
+async function tombstoneIndexedAdminsExcept(...keepUserIds: readonly string[]): Promise<void> {
+  const keepUserIdSet = new Set(keepUserIds);
   const index = await readPrivateJson<Record<string, string>>("user-index.json");
   for (const userId of new Set(Object.values(index ?? {}))) {
-    if (userId === keepUserId) continue;
+    if (keepUserIdSet.has(userId)) continue;
     const user = await readPrivateJson<User>(`users/${userId}.json`);
     if (user?.roles.includes("Admin")) {
       await writePrivateJson(`users/deleted/${userId}.json`, {});
@@ -305,6 +306,48 @@ describe("PUT /api/manage/users/{userId}/roles — schema validation & lease", (
 
     expect(res.status).toBe(200);
     expect((res.jsonBody as User).roles).toEqual(["Pilot"]);
+  });
+
+  test("concurrent demotions of the last two admins leave exactly one live admin", async () => {
+    const { user: firstAdmin } = await bootstrapAdmin();
+    const { user: secondAdmin } = await makeUser({
+      emailVerified: true,
+      roles: ["Admin"],
+    });
+    await tombstoneIndexedAdminsExcept(firstAdmin.id, secondAdmin.id);
+
+    const demote = (target: User) =>
+      invoke(
+        "setUserRoles",
+        makeAuthRequest(firstAdmin.id, firstAdmin.email, {
+          method: "PUT",
+          params: { userId: target.id },
+          body: { roles: ["Pilot"] },
+        }),
+      );
+
+    const results = await Promise.all([demote(firstAdmin), demote(secondAdmin)]);
+
+    expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
+    const rejected = results.find((result) => result.status === 409);
+    expect((rejected?.jsonBody as { code?: string } | undefined)?.code).toBe("LAST_ADMIN");
+
+    const index = await readPrivateJson<Record<string, string>>("user-index.json");
+    let liveAdminCount = 0;
+    for (const userId of new Set(Object.values(index ?? {}))) {
+      if (await privateBlobExists(`users/deleted/${userId}.json`)) continue;
+      const user = await readPrivateJson<User>(`users/${userId}.json`);
+      if (user?.roles.includes("Admin")) liveAdminCount += 1;
+    }
+    expect(liveAdminCount).toBe(1);
+
+    const firstAdminAfter = await readPrivateJson<User>(`users/${firstAdmin.id}.json`);
+    if (firstAdminAfter && !firstAdminAfter.roles.includes("Admin")) {
+      await writePrivateJson(`users/${firstAdmin.id}.json`, {
+        ...firstAdminAfter,
+        roles: ["Admin", ...firstAdminAfter.roles],
+      });
+    }
   });
 });
 
@@ -547,6 +590,41 @@ describe("PUT /api/manage/users/{userId}/email — admin change email", () => {
     expect(await readPrivateJson<User>(`users/${target.id}.json`)).toEqual(userBefore);
     expect(await readPrivateJson<Record<string, string>>("user-index.json")).toEqual(indexBefore);
     expect(await readPrivateJson<AuthCredential>(`auth/${target.id}.json`)).toEqual(authBefore);
+  });
+
+  test("concurrent email changes to the same new email allow exactly one claim", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: firstUser } = await makeUser({ emailVerified: true });
+    const { user: secondUser } = await makeUser({ emailVerified: true });
+    const newEmail = `shared-${randomUUID().slice(0, 8)}@example.com`;
+
+    const changeEmail = (target: User) =>
+      invoke(
+        "updateUserEmail",
+        makeAuthRequest(admin.id, admin.email, {
+          method: "PUT",
+          params: { userId: target.id },
+          body: { email: newEmail },
+        }),
+      );
+
+    const settled = await Promise.allSettled([
+      changeEmail(firstUser),
+      changeEmail(secondUser),
+    ]);
+
+    expect(settled.every((result) => result.status === "fulfilled")).toBe(true);
+    const results = settled.flatMap((result) =>
+      result.status === "fulfilled" ? [result.value] : [],
+    );
+    expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
+    const rejected = results.find((result) => result.status === 409);
+    expect((rejected?.jsonBody as { code?: string } | undefined)?.code).toBe("EMAIL_TAKEN");
+
+    const index = await readPrivateJson<Record<string, string>>("user-index.json");
+    const claimedUserId = index?.[newEmail];
+    expect([firstUser.id, secondUser.id]).toContain(claimedUserId);
+    expect(Object.entries(index ?? {}).filter(([email]) => email === newEmail)).toHaveLength(1);
   });
 
   test("PILOT_EMAIL_TAKEN collision rejects cross-pilot repoint and leaves indexes untouched", async () => {
