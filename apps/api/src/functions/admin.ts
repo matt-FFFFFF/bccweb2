@@ -15,7 +15,7 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import type { Config, Round, User } from "@bccweb/types";
-import { ConfigSchema, RoundSchema, UserSchema } from "@bccweb/schemas";
+import { AuthCredentialSchema, ConfigSchema, RoundSchema, UserSchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
 import {
   getPrivateBlobClient,
@@ -368,6 +368,51 @@ async function setUserRoles(
   return { status: 200, jsonBody: updated };
 }
 
+// ─── POST /api/manage/users/{userId}/verify-email ────────────────────────────
+
+async function adminVerifyEmail(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "adminVerifyEmail", "standard");
+
+  const userId = req.params["userId"];
+  if (!userId) throw new HttpError(400, "MISSING_USER_ID", "Missing userId");
+
+  const credPath = `auth/${userId}.json`;
+  try {
+    await withPrivateLease(credPath, async (leaseId) => {
+      let cred;
+      try {
+        cred = await readJson(
+          getPrivateBlobClient(credPath),
+          AuthCredentialSchema,
+          credPath,
+        );
+      } catch (err: unknown) {
+        if (statusCodeOf(err) === 404) {
+          throw new HttpError(404, "NOT_FOUND", "Auth credential not found");
+        }
+        throw err;
+      }
+
+      cred.emailVerified = true;
+      await writePrivateJson(credPath, AuthCredentialSchema, cred, leaseId);
+    });
+  } catch (err: unknown) {
+    if (err instanceof HttpError) throw err;
+    if (statusCodeOf(err) === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Auth credential not found");
+    }
+    rethrowLeaseConflict(err);
+  }
+
+  return { status: 200, jsonBody: { ok: true } };
+}
+
 // ─── Registration ─────────────────────────────────────────────────────────────
 
 app.http("recomputeRound", {
@@ -403,4 +448,11 @@ app.http("setUserRoles", {
   authLevel: "anonymous",
   route: "manage/users/{userId}/roles",
   handler: withErrorHandler(setUserRoles),
+});
+
+app.http("adminVerifyEmail", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "manage/users/{userId}/verify-email",
+  handler: withErrorHandler(adminVerifyEmail),
 });
