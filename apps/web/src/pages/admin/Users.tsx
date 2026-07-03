@@ -103,7 +103,7 @@ function UserEditRow({
       if (ex instanceof ApiError && ex.code === "EMAIL_TAKEN") {
         setMsg("Email already in use.");
       } else {
-        setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed to update email");
+        setMsg(ex instanceof ApiError ? (ex.detail ?? ex.message) : ex instanceof Error ? ex.message : "Failed to update email");
       }
       setMsgOk(false);
     } finally {
@@ -118,7 +118,7 @@ function UserEditRow({
       await api.post(`manage/users/${user.id}/verify-email`);
       onRefresh();
     } catch (ex) {
-      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed to verify email");
+      setMsg(ex instanceof ApiError ? (ex.detail ?? ex.message) : ex instanceof Error ? ex.message : "Failed to verify email");
       setMsgOk(false);
     } finally {
       setBusy(false);
@@ -139,7 +139,7 @@ function UserEditRow({
       setMsgOk(true);
       onRefresh();
     } catch (ex) {
-      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed to save roles");
+      setMsg(ex instanceof ApiError ? (ex.detail ?? ex.message) : ex instanceof Error ? ex.message : "Failed to save roles");
       setMsgOk(false);
     } finally {
       setBusy(false);
@@ -154,7 +154,7 @@ function UserEditRow({
       const resp = await api.post<{ pilot: Pilot }>(`manage/users/${user.id}/pilot`, { firstName, lastName });
       navigate(`/pilots/${resp.pilot.id}`);
     } catch (ex) {
-      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed to create pilot profile");
+      setMsg(ex instanceof ApiError ? (ex.detail ?? ex.message) : ex instanceof Error ? ex.message : "Failed to create pilot profile");
       setMsgOk(false);
       setBusy(false);
     }
@@ -168,7 +168,7 @@ function UserEditRow({
       await api.delete(`manage/users/${user.id}`);
       onRefresh();
     } catch (ex) {
-      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Delete failed");
+      setMsg(ex instanceof ApiError ? (ex.detail ?? ex.message) : ex instanceof Error ? ex.message : "Delete failed");
       setMsgOk(false);
       setBusy(false);
     }

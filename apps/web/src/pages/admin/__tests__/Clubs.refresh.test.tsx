@@ -142,7 +142,7 @@ describe("AdminClubs refresh", () => {
   it("keeps the club listed and surfaces CLUB_IN_USE when delete returns 409", async () => {
     vi.spyOn(window, "confirm").mockReturnValue(true);
     const inUseMessage = "Club still has teams, sites, or season registrations.";
-    vi.mocked(api.delete).mockRejectedValueOnce(new ApiError(409, "CLUB_IN_USE", inUseMessage));
+    vi.mocked(api.delete).mockRejectedValueOnce(new ApiError(409, "CLUB_IN_USE", "Conflict", undefined, inUseMessage));
 
     render(
       <MemoryRouter>

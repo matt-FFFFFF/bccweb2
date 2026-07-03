@@ -213,7 +213,7 @@ function ClubEditRow({
       setMsgOk(true);
       onClubSaved();
     } catch (ex) {
-      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed");
+      setMsg(ex instanceof ApiError ? (ex.detail ?? ex.message) : ex instanceof Error ? ex.message : "Failed");
       setMsgOk(false);
     } finally {
       setBusy(false);
@@ -228,7 +228,7 @@ function ClubEditRow({
       await api.delete(`clubs/${club.id}`);
       onClubDeleted();
     } catch (ex) {
-      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Delete failed");
+      setMsg(ex instanceof ApiError ? (ex.detail ?? ex.message) : ex instanceof Error ? ex.message : "Delete failed");
       setMsgOk(false);
       setBusy(false);
     }
