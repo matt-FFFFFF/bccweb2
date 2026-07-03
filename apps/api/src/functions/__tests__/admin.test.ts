@@ -13,7 +13,7 @@
 import { describe, expect, test } from "vitest";
 import { randomUUID } from "node:crypto";
 import type { HttpRequest } from "@azure/functions";
-import type { Config, User } from "@bccweb/types";
+import type { AdminUserView, Config, User } from "@bccweb/types";
 import { getCallerIdentity } from "../../lib/auth.js";
 import {
   assertNotLastAdmin,
@@ -483,5 +483,77 @@ describe("POST /api/manage/users/{userId}/verify-email — admin force-verify", 
 
     const res = await invoke("adminVerifyEmail", req);
     expect(res.status).toBe(403);
+  });
+});
+
+describe("GET /api/manage/users — listUsers with emailVerified", () => {
+  test("returns 200 with array and all entries have boolean emailVerified", async () => {
+    const { user: admin } = await bootstrapAdmin();
+
+    const res = await invoke(
+      "listUsers",
+      makeAuthRequest(admin.id, admin.email, { method: "GET" }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = res.jsonBody as AdminUserView[];
+    expect(Array.isArray(body)).toBe(true);
+    for (const u of body) {
+      expect(typeof u.emailVerified).toBe("boolean");
+    }
+  });
+
+  test("happy path: verified user has emailVerified=true, unverified has emailVerified=false", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: verified } = await makeUser({ emailVerified: true });
+    const { user: unverified } = await makeUser({ emailVerified: false });
+
+    const res = await invoke(
+      "listUsers",
+      makeAuthRequest(admin.id, admin.email, { method: "GET" }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = res.jsonBody as AdminUserView[];
+    const verifiedRow = body.find((u) => u.id === verified.id);
+    const unverifiedRow = body.find((u) => u.id === unverified.id);
+
+    expect(verifiedRow).toBeDefined();
+    expect(typeof verifiedRow?.emailVerified).toBe("boolean");
+    expect(verifiedRow?.emailVerified).toBe(true);
+
+    expect(unverifiedRow).toBeDefined();
+    expect(typeof unverifiedRow?.emailVerified).toBe("boolean");
+    expect(unverifiedRow?.emailVerified).toBe(false);
+  });
+
+  test("resilience: user with no auth blob returns emailVerified=false, not 500", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const ghostUserId = randomUUID();
+    const ghostEmail = `ghost-${ghostUserId.slice(0, 8)}@example.com`;
+
+    const index =
+      (await readPrivateJson<Record<string, string>>("user-index.json")) ?? {};
+    index[ghostEmail] = ghostUserId;
+    await writePrivateJson("user-index.json", index);
+    await writePrivateJson(`users/${ghostUserId}.json`, {
+      id: ghostUserId,
+      email: ghostEmail,
+      roles: ["Pilot"],
+      pilotId: null,
+      clubId: null,
+      createdAt: new Date().toISOString(),
+    });
+
+    const res = await invoke(
+      "listUsers",
+      makeAuthRequest(admin.id, admin.email, { method: "GET" }),
+    );
+
+    expect(res.status).toBe(200);
+    const body = res.jsonBody as AdminUserView[];
+    const ghostRow = body.find((u) => u.id === ghostUserId);
+    expect(ghostRow).toBeDefined();
+    expect(ghostRow?.emailVerified).toBe(false);
   });
 });

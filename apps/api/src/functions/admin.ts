@@ -14,7 +14,7 @@ import {
   HttpResponseInit,
   InvocationContext,
 } from "@azure/functions";
-import type { Config, Round, User } from "@bccweb/types";
+import type { AdminUserView, Config, Round, User } from "@bccweb/types";
 import { AuthCredentialSchema, ConfigSchema, RoundSchema, UserSchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
 import {
@@ -248,7 +248,7 @@ async function runConfigRmw(
 
 async function listUsers(
   req: HttpRequest,
-  _ctx: InvocationContext
+  ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
@@ -262,7 +262,7 @@ async function listUsers(
       "user-index.json",
     );
   } catch {
-    return { status: 200, jsonBody: [] };
+    return { status: 200, jsonBody: [] as AdminUserView[] };
   }
 
   const userIds = Object.values(index);
@@ -279,7 +279,29 @@ async function listUsers(
   const valid = users.flatMap((u) => (u === null ? [] : [u]));
   valid.sort((a, b) => a.email.localeCompare(b.email));
 
-  return { status: 200, jsonBody: valid };
+  const views: AdminUserView[] = await Promise.all(
+    valid.map(async (user): Promise<AdminUserView> => {
+      let emailVerified = false;
+      try {
+        const cred = await readJson(
+          getPrivateBlobClient(`auth/${user.id}.json`),
+          AuthCredentialSchema,
+          `auth/${user.id}.json`,
+        );
+        emailVerified = cred.emailVerified;
+      } catch (err: unknown) {
+        const code = statusCodeOf(err);
+        if (code !== 404) {
+          ctx.error(
+            `[listUsers] failed to read auth/${user.id}.json (status=${code ?? "unknown"}): ${String(err)}`,
+          );
+        }
+      }
+      return { ...user, emailVerified };
+    })
+  );
+
+  return { status: 200, jsonBody: views };
 }
 
 // ─── PUT /api/admin/users/{userId}/roles ─────────────────────────────────────
