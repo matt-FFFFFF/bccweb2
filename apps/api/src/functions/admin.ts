@@ -14,13 +14,19 @@ import {
   HttpResponseInit,
   InvocationContext,
 } from "@azure/functions";
+import { createHash, randomUUID } from "node:crypto";
 import { BlobServiceClient, type ContainerClient } from "@azure/storage-blob";
-import type { AdminUserView, Config, Round, User } from "@bccweb/types";
-import { AuthCredentialSchema, ConfigSchema, PilotSchema, RoundSchema, UserSchema } from "@bccweb/schemas";
+import type { AdminUserView, Config, Pilot, PilotEmailIndex, PilotSummary, Round, User } from "@bccweb/types";
+import { AuthCredentialSchema, ConfigSchema, PilotSchema, PilotSummarySchema, RoundSchema, UserSchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
 import {
+  ensureJsonIndexBlob,
+  ensurePrivateJsonIndexBlob,
+  getBlobClient,
+  getBlockBlobClient,
   getPrivateBlobClient,
   readBlob,
+  withLeaseRetry,
   withPrivateLease,
   withPrivateLeaseRetry,
   writePrivateBlob,
@@ -51,26 +57,27 @@ function statusCodeOf(err: unknown): number | undefined {
 }
 
 const StringRecordSchema = z.record(z.string(), z.string());
+const PilotsIndexSchema = z.array(PilotSummarySchema);
 
-const EmailPayloadSchema = z
+const AdminCreatePilotBodySchema = z
   .object({
-    email: z.string(),
-  })
-  .strict();
+    firstName: z.string(),
+    lastName: z.string(),
+  });
 
-const AuthTokenUserSchema = z
-  .object({
-    userId: z.string(),
-  })
-  .passthrough();
+const EmailPayloadSchema = z.strictObject({
+  email: z.string(),
+});
 
-const DeletedUserTombstoneSchema = z
-  .object({
-    email: z.string().nullable().optional(),
-    pilotId: z.string().nullable(),
-    deletedAt: z.string(),
-  })
-  .strict();
+const AuthTokenUserSchema = z.looseObject({
+  userId: z.string(),
+});
+
+const DeletedUserTombstoneSchema = z.strictObject({
+  email: z.string().nullable().optional(),
+  pilotId: z.string().nullable(),
+  deletedAt: z.string(),
+});
 
 type DeletedUserTombstone = z.infer<typeof DeletedUserTombstoneSchema>;
 
@@ -351,13 +358,11 @@ async function listUsers(
 // Client-input role validation (inline). UserSchema's `roles` field uses
 // preprocess+normalisation for stored-blob healing; this stricter schema
 // rejects unknown roles outright on the API edge.
-const RolesPayloadSchema = z
-  .object({
-    roles: z.array(z.enum(["Admin", "RoundsCoord", "Pilot"])).optional(),
-    pilotId: z.string().nullable().optional(),
-    clubId: z.string().nullable().optional(),
-  })
-  .strict();
+const RolesPayloadSchema = z.strictObject({
+  roles: z.array(z.enum(["Admin", "RoundsCoord", "Pilot"])).optional(),
+  pilotId: z.string().nullable().optional(),
+  clubId: z.string().nullable().optional(),
+});
 
 async function setUserRoles(
   req: HttpRequest,
@@ -822,6 +827,220 @@ async function adminVerifyEmail(
   return { status: 200, jsonBody: { ok: true } };
 }
 
+// ─── POST /api/manage/users/{userId}/pilot ───────────────────────────────────
+
+async function adminCreatePilotForUser(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isAdmin(caller.roles)) return forbiddenResponse();
+  await mutationRateLimit(req, caller, "adminCreatePilotForUser", "standard");
+
+  const userId = req.params["userId"];
+  if (!userId) throw new HttpError(400, "MISSING_USER_ID", "Missing userId");
+
+  const names = await parseAdminPilotNames(req);
+  let result: { status: 200 | 201; pilot: Pilot } | null = null;
+
+  try {
+    result = await withAccountMutationLock(async () => {
+      const user = await readAdminPilotTargetUser(userId);
+      const pilotId = deterministicPilotId(userId);
+
+      if (user.pilotId) {
+        if (user.pilotId !== pilotId) {
+          throw new HttpError(409, "ALREADY_LINKED", "User is already linked to a different pilot");
+        }
+        const pilot = await ensureAdminPilotExists({ pilotId, user, names, updatedBy: caller.userId });
+        await upsertAdminPilotInIndex(pilot);
+        await claimPilotEmailForAdminUser(user.email, pilotId);
+        return { status: 200, pilot };
+      }
+
+      await claimPilotEmailForAdminUser(user.email, pilotId);
+      const pilot = buildAdminPilot({ pilotId, user, names, updatedBy: caller.userId });
+      await writePrivateJson(`pilots/${pilotId}.json`, PilotSchema, pilot);
+      await upsertAdminPilotInIndex(pilot);
+      await linkAdminUserToPilotLast(userId, pilotId);
+      return { status: 201, pilot };
+    });
+  } catch (err: unknown) {
+    if (err instanceof HttpError) throw err;
+    if (statusCodeOf(err) === 404) {
+      throw new HttpError(404, "NOT_FOUND", "User not found");
+    }
+    rethrowLeaseConflict(err);
+  }
+
+  if (!result) throw new HttpError(500, "INTERNAL");
+  return { status: result.status, jsonBody: { pilot: result.pilot } };
+}
+
+interface AdminPilotNames {
+  firstName: string;
+  lastName: string;
+}
+
+interface BuildAdminPilotInput {
+  pilotId: string;
+  user: User;
+  names: AdminPilotNames;
+  updatedBy: string;
+}
+
+async function parseAdminPilotNames(req: HttpRequest): Promise<AdminPilotNames> {
+  let rawBody: unknown;
+  try {
+    rawBody = await req.json();
+  } catch {
+    throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
+  }
+
+  const parsed = AdminCreatePilotBodySchema.safeParse(rawBody);
+  if (!parsed.success) {
+    throw new HttpError(400, "INVALID_NAME", "firstName and lastName are required");
+  }
+
+  const firstName = parsed.data.firstName.trim();
+  const lastName = parsed.data.lastName.trim();
+  if (!firstName || !lastName) {
+    throw new HttpError(400, "INVALID_NAME", "firstName and lastName are required");
+  }
+  return { firstName, lastName };
+}
+
+async function readAdminPilotTargetUser(userId: string): Promise<User> {
+  const userPath = `users/${userId}.json`;
+  try {
+    return await readJson(getPrivateBlobClient(userPath), UserSchema, userPath);
+  } catch (err: unknown) {
+    if (statusCodeOf(err) === 404) {
+      throw new HttpError(404, "NOT_FOUND", "User not found");
+    }
+    throw err;
+  }
+}
+
+function deterministicPilotId(userId: string): string {
+  const hex = createHash("sha256").update(`admin-pilot:${userId}`).digest("hex").slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+async function claimPilotEmailForAdminUser(email: string, pilotId: string): Promise<void> {
+  const emailKey = email.toLowerCase();
+  await ensurePrivateJsonIndexBlob("pilot-email-index.json", "{}");
+  await withPrivateLeaseRetry("pilot-email-index.json", async (leaseId) => {
+    let index: PilotEmailIndex = {};
+    try {
+      index = await readJson(
+        getPrivateBlobClient("pilot-email-index.json"),
+        StringRecordSchema,
+        "pilot-email-index.json",
+      );
+    } catch (err: unknown) {
+      if (statusCodeOf(err) !== 404) throw err;
+    }
+
+    const existingPilotId = index[emailKey];
+    if (existingPilotId && existingPilotId !== pilotId) {
+      throw new HttpError(409, "PILOT_EMAIL_TAKEN", "Email already belongs to another pilot");
+    }
+    index[emailKey] = pilotId;
+    await writePrivateJson("pilot-email-index.json", StringRecordSchema, index, leaseId);
+  });
+}
+
+async function ensureAdminPilotExists(input: BuildAdminPilotInput): Promise<Pilot> {
+  const pilotPath = `pilots/${input.pilotId}.json`;
+  try {
+    return await readJson(getPrivateBlobClient(pilotPath), PilotSchema, pilotPath);
+  } catch (err: unknown) {
+    if (statusCodeOf(err) !== 404) throw err;
+  }
+
+  const pilot = buildAdminPilot(input);
+  await writePrivateJson(pilotPath, PilotSchema, pilot);
+  return pilot;
+}
+
+function buildAdminPilot(input: BuildAdminPilotInput): Pilot {
+  const now = new Date().toISOString();
+  const fullName = `${input.names.firstName} ${input.names.lastName}`;
+  return {
+    id: input.pilotId,
+    legacyId: null,
+    coachType: "None",
+    pilotRating: "Pilot",
+    person: {
+      id: randomUUID(),
+      firstName: input.names.firstName,
+      lastName: input.names.lastName,
+      fullName,
+    },
+    seasonClubs: [],
+    userId: input.user.id,
+    createdAt: now,
+    updatedAt: now,
+    updatedBy: input.updatedBy,
+    profileUpdatedAt: now,
+  };
+}
+
+async function upsertAdminPilotInIndex(pilot: Pilot): Promise<void> {
+  await ensureJsonIndexBlob("pilots.json", "[]");
+  await withLeaseRetry("pilots.json", async (leaseId) => {
+    let index: PilotSummary[] = [];
+    try {
+      index = await readJson(
+        getBlobClient("pilots.json"),
+        PilotsIndexSchema,
+        "pilots.json",
+      );
+    } catch (err: unknown) {
+      if (statusCodeOf(err) !== 404) throw err;
+    }
+
+    const entry: PilotSummary = {
+      id: pilot.id,
+      legacyId: pilot.legacyId,
+      name: pilot.person.fullName,
+      clubId: undefined,
+      rating: pilot.pilotRating,
+    };
+    const idx = index.findIndex((p) => p.id === pilot.id);
+    if (idx >= 0) {
+      index[idx] = entry;
+    } else {
+      index.push(entry);
+    }
+    index.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
+
+    const content = JSON.stringify(index, null, 2);
+    await getBlockBlobClient("pilots.json").uploadData(Buffer.from(content), {
+      blobHTTPHeaders: { blobContentType: "application/json" },
+      conditions: { leaseId },
+    });
+  });
+}
+
+async function linkAdminUserToPilotLast(userId: string, pilotId: string): Promise<void> {
+  const userPath = `users/${userId}.json`;
+  await withPrivateLeaseRetry(userPath, async (leaseId) => {
+    const user = await readJson(getPrivateBlobClient(userPath), UserSchema, userPath);
+    if (user.pilotId && user.pilotId !== pilotId) {
+      throw new HttpError(409, "ALREADY_LINKED", "User is already linked to a different pilot");
+    }
+    const updated: User = {
+      ...user,
+      pilotId,
+      roles: user.roles.includes("Pilot") ? user.roles : [...user.roles, "Pilot"],
+    };
+    await writePrivateJson(userPath, UserSchema, updated, leaseId);
+  });
+}
+
 // ─── Registration ─────────────────────────────────────────────────────────────
 
 app.http("recomputeRound", {
@@ -878,4 +1097,11 @@ app.http("adminVerifyEmail", {
   authLevel: "anonymous",
   route: "manage/users/{userId}/verify-email",
   handler: withErrorHandler(adminVerifyEmail),
+});
+
+app.http("adminCreatePilotForUser", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "manage/users/{userId}/pilot",
+  handler: withErrorHandler(adminCreatePilotForUser),
 });

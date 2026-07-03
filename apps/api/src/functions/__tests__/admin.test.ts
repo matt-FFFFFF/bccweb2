@@ -13,7 +13,7 @@
 import { describe, expect, test } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import type { HttpRequest } from "@azure/functions";
-import type { AdminUserView, Config, User } from "@bccweb/types";
+import type { AdminUserView, Config, Pilot, PilotEmailIndex, PilotSummary, User } from "@bccweb/types";
 import { getCallerIdentity } from "../../lib/auth.js";
 import {
   assertNotLastAdmin,
@@ -34,7 +34,9 @@ import {
   makeUser,
   privateBlobExists,
   readPrivateJson,
+  readPublicJson,
   writePrivateJson,
+  writePublicJson,
 } from "../../__tests__/helpers/seed.js";
 import "../admin.js";
 import "../authFunctions.js";
@@ -58,6 +60,26 @@ async function invoke(
   const entry = getRegisteredHandler(name);
   if (!entry) throw new Error(`${name} not registered`);
   return (await entry.handler(req, ctx)) as HandlerResult;
+}
+
+function deterministicPilotId(userId: string): string {
+  const hex = createHash("sha256").update(`admin-pilot:${userId}`).digest("hex").slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+async function createPilotForUser(
+  admin: User,
+  userId: string,
+  body: { firstName: string; lastName: string },
+): Promise<HandlerResult> {
+  return invoke(
+    "adminCreatePilotForUser",
+    makeAuthRequest(admin.id, admin.email, {
+      method: "POST",
+      params: { userId },
+      body,
+    }),
+  );
 }
 
 async function tombstoneIndexedAdminsExcept(keepUserId: string): Promise<void> {
@@ -842,6 +864,159 @@ describe("POST /api/manage/users/{userId}/verify-email — admin force-verify", 
 
     const res = await invoke("adminVerifyEmail", req);
     expect(res.status).toBe(403);
+  });
+});
+
+describe("POST /api/manage/users/{userId}/pilot — admin create and link", () => {
+  test("happy path: creates deterministic pilot, indexes email, and links the user last", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: target } = await makeUser({ pilotId: null });
+    const expectedPilotId = deterministicPilotId(target.id);
+
+    const res = await createPilotForUser(admin, target.id, {
+      firstName: "  Ada ",
+      lastName: " Lovelace  ",
+    });
+
+    expect(res.status).toBe(201);
+    const pilot = (res.jsonBody as { pilot: Pilot }).pilot;
+    expect(pilot.id).toBe(expectedPilotId);
+    expect(pilot.userId).toBe(target.id);
+    expect(pilot.person).toMatchObject({
+      firstName: "Ada",
+      lastName: "Lovelace",
+      fullName: "Ada Lovelace",
+    });
+    expect(pilot.coachType).toBe("None");
+    expect(pilot.pilotRating).toBe("Pilot");
+    expect(pilot.seasonClubs).toEqual([]);
+
+    const persistedPilot = await readPrivateJson<Pilot>(`pilots/${expectedPilotId}.json`);
+    expect(persistedPilot?.userId).toBe(target.id);
+
+    const persistedUser = await readPrivateJson<User>(`users/${target.id}.json`);
+    expect(persistedUser?.pilotId).toBe(expectedPilotId);
+    expect(persistedUser?.roles).toContain("Pilot");
+
+    const publicIndex = (await readPublicJson<PilotSummary[]>("pilots.json")) ?? [];
+    expect(publicIndex).toContainEqual({
+      id: expectedPilotId,
+      legacyId: null,
+      name: "Ada Lovelace",
+      rating: "Pilot",
+    });
+    expect(publicIndex.find((entry) => entry.id === expectedPilotId)?.clubId).toBeUndefined();
+
+    const emailIndex = await readPrivateJson<PilotEmailIndex>("pilot-email-index.json");
+    expect(emailIndex?.[target.email.toLowerCase()]).toBe(expectedPilotId);
+  });
+
+  test("returns 409 ALREADY_LINKED when the user is linked to a different pilot", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: target } = await makeUser({ pilotId: "existing-pilot-id" });
+
+    const res = await createPilotForUser(admin, target.id, {
+      firstName: "Grace",
+      lastName: "Hopper",
+    });
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code?: string }).code).toBe("ALREADY_LINKED");
+  });
+
+  test("idempotent retry repairs missing pilot and empty indexes when user already has deterministic pilotId", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: target } = await makeUser({ pilotId: null });
+    const expectedPilotId = deterministicPilotId(target.id);
+    const linkedUser: User = {
+      ...target,
+      pilotId: expectedPilotId,
+      roles: target.roles.includes("Pilot") ? target.roles : [...target.roles, "Pilot"],
+    };
+    await writePrivateJson(`users/${target.id}.json`, linkedUser);
+    await writePublicJson("pilots.json", []);
+    await writePrivateJson("pilot-email-index.json", {});
+
+    const res = await createPilotForUser(admin, target.id, {
+      firstName: "Katherine",
+      lastName: "Johnson",
+    });
+
+    expect(res.status).toBe(200);
+    const pilot = (res.jsonBody as { pilot: Pilot }).pilot;
+    expect(pilot.id).toBe(expectedPilotId);
+    expect(pilot.userId).toBe(target.id);
+
+    const publicIndex = (await readPublicJson<PilotSummary[]>("pilots.json")) ?? [];
+    expect(publicIndex.filter((entry) => entry.id === expectedPilotId)).toHaveLength(1);
+    const emailIndex = await readPrivateJson<PilotEmailIndex>("pilot-email-index.json");
+    expect(emailIndex).toEqual({ [target.email.toLowerCase()]: expectedPilotId });
+  });
+
+  test("returns 409 PILOT_EMAIL_TAKEN before creating a pilot blob", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: target } = await makeUser({ pilotId: null });
+    const expectedPilotId = deterministicPilotId(target.id);
+    await writePrivateJson("pilot-email-index.json", {
+      [target.email.toLowerCase()]: "other-pilot-id",
+    });
+
+    const res = await createPilotForUser(admin, target.id, {
+      firstName: "Mary",
+      lastName: "Jackson",
+    });
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code?: string }).code).toBe("PILOT_EMAIL_TAKEN");
+    expect(await privateBlobExists(`pilots/${expectedPilotId}.json`)).toBe(false);
+  });
+
+  test("returns 400 INVALID_NAME for blank names", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: target } = await makeUser({ pilotId: null });
+
+    const res = await createPilotForUser(admin, target.id, {
+      firstName: "  ",
+      lastName: "Name",
+    });
+
+    expect(res.status).toBe(400);
+    expect((res.jsonBody as { code?: string }).code).toBe("INVALID_NAME");
+  });
+
+  test("returns 403 for non-admin caller", async () => {
+    const { user: pilotCaller } = await makeUser({ roles: ["Pilot"] });
+    const { user: target } = await makeUser({ pilotId: null });
+
+    const res = await invoke(
+      "adminCreatePilotForUser",
+      makeAuthRequest(pilotCaller.id, pilotCaller.email, {
+        method: "POST",
+        params: { userId: target.id },
+        body: { firstName: "No", lastName: "Admin" },
+      }),
+    );
+
+    expect(res.status).toBe(403);
+  });
+
+  test("near-simultaneous POSTs converge on one deterministic pilot and one email-index entry", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: target } = await makeUser({ pilotId: null });
+    const expectedPilotId = deterministicPilotId(target.id);
+
+    const results = await Promise.all([
+      createPilotForUser(admin, target.id, { firstName: "Rosalind", lastName: "Franklin" }),
+      createPilotForUser(admin, target.id, { firstName: "Rosalind", lastName: "Franklin" }),
+    ]);
+
+    expect(results.map((result) => result.status).sort()).toEqual([200, 201]);
+    const publicIndex = (await readPublicJson<PilotSummary[]>("pilots.json")) ?? [];
+    expect(publicIndex.filter((entry) => entry.id === expectedPilotId)).toHaveLength(1);
+    const emailIndex = await readPrivateJson<PilotEmailIndex>("pilot-email-index.json");
+    expect(Object.values(emailIndex ?? {}).filter((pilotId) => pilotId === expectedPilotId)).toHaveLength(1);
+    const persistedUser = await readPrivateJson<User>(`users/${target.id}.json`);
+    expect(persistedUser?.pilotId).toBe(expectedPilotId);
   });
 });
 
