@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import type { Club, ClubSummary, ClubTeam, ClubTeamSummary, SeasonSummary } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
-import { api } from "../../lib/api.js";
+import { api, ApiError } from "../../lib/api.js";
 import { useBlob } from "../../hooks/useBlob.js";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
 
@@ -172,23 +172,25 @@ function AddTeamForm({
   );
 }
 
-// ─── Club card with teams section ─────────────────────────────────────────────
+// ─── Club edit row (edit/close toggle → save, guarded delete, teams) ──────────
 
-function ClubCard({
+function ClubEditRow({
   club,
   teams,
   activeSeasonYear,
   onClubSaved,
+  onClubDeleted,
   onTeamChanged,
 }: {
   club: ClubSummary;
   teams: ClubTeamSummary[];
   activeSeasonYear: number | null;
   onClubSaved: () => void;
+  onClubDeleted: () => void;
   onTeamChanged: () => void;
 }) {
+  const [open, setOpen] = useState(false);
   const [name, setName] = useState(club.name);
-  const [expanded, setExpanded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [msgOk, setMsgOk] = useState(false);
@@ -211,70 +213,89 @@ function ClubCard({
       setMsgOk(true);
       onClubSaved();
     } catch (ex) {
-      setMsg(ex instanceof Error ? ex.message : "Failed");
+      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed");
       setMsgOk(false);
     } finally {
       setBusy(false);
     }
   }
 
+  async function handleDelete() {
+    if (!window.confirm(`Delete club "${club.name}"? Blocked if it still has teams, sites, or season registrations.`)) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.delete(`clubs/${club.id}`);
+      onClubDeleted();
+    } catch (ex) {
+      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Delete failed");
+      setMsgOk(false);
+      setBusy(false);
+    }
+  }
+
+  const fi = { ...inputStyle, width: "100%" };
+
   return (
-    <div style={{ border: "1px solid #dee2e6", borderRadius: "0.5rem", marginBottom: "0.75rem", overflow: "hidden" }}>
-      {/* Club header row */}
-      <div style={{ display: "flex", alignItems: "center", gap: "0.5rem", padding: "0.5rem 0.75rem", background: "#f8f9fa", flexWrap: "wrap" }}>
-        <span style={{ fontSize: "0.7rem", color: "#aaa", fontFamily: "monospace", minWidth: 72 }}>{club.id.slice(0, 8)}…</span>
-        <form onSubmit={(e) => { void saveClub(e); }} style={{ display: "flex", gap: "0.5rem", alignItems: "center", flex: 1, flexWrap: "wrap" }}>
-          <input
-            required
-            style={{ ...inputStyle, minWidth: 180, flex: 1 }}
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-          />
-          <button type="submit" disabled={busy} style={btnStyle("#fff", busy ? "#6c757d" : "#0066cc")}>
-            {busy ? "Saving…" : "Save"}
-          </button>
-          {msg && <Banner msg={msg} ok={msgOk} />}
-        </form>
-        <button
-          onClick={() => setExpanded((v) => !v)}
-          style={{ ...btnStyle("#333", "#e9ecef"), marginLeft: "auto" }}
-        >
-          {expanded ? "Hide Teams" : `Teams (${teams.length})`}
+    <div style={{ borderBottom: "1px solid #f0f0f0", padding: "0.5rem 0" }}>
+      <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+        <span style={{ flex: 1, fontSize: "0.9rem" }}>
+          <strong>{club.name}</strong>
+        </span>
+        <button style={btnStyle("#333", "#e9ecef")} onClick={() => setOpen((v) => !v)}>
+          {open ? "Close" : "Edit"}
         </button>
       </div>
 
-      {/* Teams panel */}
-      {expanded && (
-        <div style={{ padding: "0.75rem 1rem" }}>
-          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap" }}>
-            <strong style={{ fontSize: "0.85rem" }}>Season:</strong>
-            <select
-              style={{ ...inputStyle }}
-              value={selectedYear ?? ""}
-              onChange={(e) => setSelectedYear(e.target.value ? parseInt(e.target.value, 10) : null)}
-            >
-              {seasonYears.map((y) => (
-                <option key={y} value={y}>{y}</option>
-              ))}
-              {seasonYears.length === 0 && <option value="">No seasons</option>}
-            </select>
+      {open && (
+        <div style={{ marginTop: "0.75rem" }}>
+          <form onSubmit={(e) => { void saveClub(e); }} style={{ display: "grid", gap: "0.5rem" }}>
+            <div>
+              <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Name *</label>
+              <input required style={fi} value={name} onChange={(e) => setName(e.target.value)} />
+            </div>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+              <button type="submit" disabled={busy} style={btnStyle("#fff", busy ? "#6c757d" : "#0066cc")}>
+                {busy ? "Saving…" : "Save"}
+              </button>
+              <button type="button" disabled={busy} onClick={() => { void handleDelete(); }} style={btnStyle("#fff", busy ? "#6c757d" : "#b02a37")}>
+                Delete Club
+              </button>
+              {msg && <Banner msg={msg} ok={msgOk} />}
+            </div>
+          </form>
+
+          <div style={{ marginTop: "1rem", paddingTop: "0.75rem", borderTop: "1px solid #f0f0f0" }}>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginBottom: "0.75rem", flexWrap: "wrap" }}>
+              <strong style={{ fontSize: "0.85rem" }}>Teams — Season:</strong>
+              <select
+                style={{ ...inputStyle }}
+                value={selectedYear ?? ""}
+                onChange={(e) => setSelectedYear(e.target.value ? parseInt(e.target.value, 10) : null)}
+              >
+                {seasonYears.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+                {seasonYears.length === 0 && <option value="">No seasons</option>}
+              </select>
+            </div>
+
+            {filteredTeams.length === 0 ? (
+              <p style={{ fontSize: "0.8rem", color: "#888", margin: "0 0 0.5rem" }}>No teams for this season.</p>
+            ) : (
+              filteredTeams.map((t) => (
+                <TeamRow key={t.id} team={t} onSaved={onTeamChanged} onDeleted={onTeamChanged} />
+              ))
+            )}
+
+            {selectedYear && (
+              <AddTeamForm
+                clubId={club.id}
+                seasonYear={selectedYear}
+                onCreated={onTeamChanged}
+              />
+            )}
           </div>
-
-          {filteredTeams.length === 0 ? (
-            <p style={{ fontSize: "0.8rem", color: "#888", margin: "0 0 0.5rem" }}>No teams for this season.</p>
-          ) : (
-            filteredTeams.map((t) => (
-              <TeamRow key={t.id} team={t} onSaved={onTeamChanged} onDeleted={onTeamChanged} />
-            ))
-          )}
-
-          {selectedYear && (
-            <AddTeamForm
-              clubId={club.id}
-              seasonYear={selectedYear}
-              onCreated={onTeamChanged}
-            />
-          )}
         </div>
       )}
     </div>
@@ -366,18 +387,24 @@ export default function AdminClubs() {
     <div style={{ maxWidth: 760, margin: "0 auto" }}>
       <h1 style={{ fontSize: "1.5rem", marginBottom: "1.5rem" }}>Clubs</h1>
 
-      {clubList.map((c) => (
-        <ClubCard
-          key={c.id}
-          club={c}
-          teams={teamIndex.filter((t) => t.clubId === c.id)}
-          activeSeasonYear={activeSeasonYear}
-          onClubSaved={refreshClubs}
-          onTeamChanged={refreshTeams}
-        />
-      ))}
+      <div style={{ border: "1px solid #dee2e6", borderRadius: "0.5rem", padding: "0.75rem 1rem" }}>
+        {clubList.length === 0 && (
+          <p style={{ color: "#888", fontSize: "0.85rem", margin: "0.25rem 0" }}>No clubs yet.</p>
+        )}
+        {clubList.map((c) => (
+          <ClubEditRow
+            key={c.id}
+            club={c}
+            teams={teamIndex.filter((t) => t.clubId === c.id)}
+            activeSeasonYear={activeSeasonYear}
+            onClubSaved={refreshClubs}
+            onClubDeleted={refreshClubs}
+            onTeamChanged={refreshTeams}
+          />
+        ))}
 
-      <CreateClubForm onCreated={refreshClubs} />
+        <CreateClubForm onCreated={refreshClubs} />
+      </div>
     </div>
   );
 }
