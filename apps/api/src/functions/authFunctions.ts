@@ -33,7 +33,12 @@ const VerificationStateSchema = z.object({
   createdAt: z.string(),
   expiresAt: z.string(),
 });
-import { getCallerIdentity, getOrCreateUser, unauthorizedResponse } from "../lib/auth.js";
+import {
+  EmailIndexConflictError,
+  getCallerIdentity,
+  getOrCreateUser,
+  unauthorizedResponse,
+} from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { extractIp } from "../lib/signTofly/ledger.js";
 import {
@@ -205,6 +210,33 @@ async function register(
 
   let branchLabel = "new-email";
 
+  async function handleExistingEmail(existingId: string): Promise<void> {
+    let cred: AuthCredential | null = null;
+    try {
+      const credPath = `auth/${existingId}.json`;
+      cred = await readJson(
+        getPrivateBlobClient(credPath),
+        AuthCredentialSchema,
+        credPath,
+      );
+    } catch {
+      cred = null;
+    }
+
+    if (cred?.emailVerified) {
+      branchLabel = "existing-verified";
+      return;
+    }
+
+    const state = await loadVerificationState(existingId);
+    const now = Date.now();
+    const freshState = state && now - new Date(state.createdAt).getTime() < VERIFICATION_TOKEN_REISSUE_WINDOW_MS;
+
+    branchLabel = freshState ? "existing-unverified-reuse" : "existing-unverified-reissue";
+    const tokenDoc = freshState && state ? state : await createVerificationToken(existingId, 24);
+    await sendVerificationEmail(emailLower, tokenDoc.token);
+  }
+
   if (!existing) {
     const userId = randomUUID();
     const credential: AuthCredential = {
@@ -219,41 +251,34 @@ async function register(
       undefined,
       { ifNoneMatch: "*" },
     );
-    const user = await getOrCreateUser(userId, emailLower);
-    const acceptedAt = new Date().toISOString();
-    await writePrivateJson(`users/${userId}.json`, UserSchema, {
-      ...user,
-      acceptedTsCsAt: acceptedAt,
-      acceptedTsCsIp: extractIp(req),
-      acceptedTsCsVersion,
-    });
-
-    const tokenDoc = await createVerificationToken(userId, 24);
-    await sendVerificationEmail(emailLower, tokenDoc.token);
-  } else {
-    let cred: AuthCredential | null = null;
     try {
-      const credPath = `auth/${existing}.json`;
-      cred = await readJson(
-        getPrivateBlobClient(credPath),
-        AuthCredentialSchema,
-        credPath,
-      );
-    } catch {
-      cred = null;
-    }
+      const user = await getOrCreateUser(userId, emailLower);
+      const acceptedAt = new Date().toISOString();
+      await writePrivateJson(`users/${userId}.json`, UserSchema, {
+        ...user,
+        acceptedTsCsAt: acceptedAt,
+        acceptedTsCsIp: extractIp(req),
+        acceptedTsCsVersion,
+      });
 
-    if (cred?.emailVerified) {
-      branchLabel = "existing-verified";
-    } else {
-      const state = await loadVerificationState(existing);
-      const now = Date.now();
-      const freshState = state && now - new Date(state.createdAt).getTime() < VERIFICATION_TOKEN_REISSUE_WINDOW_MS;
-
-      branchLabel = freshState ? "existing-unverified-reuse" : "existing-unverified-reissue";
-      const tokenDoc = freshState && state ? state : await createVerificationToken(existing, 24);
+      const tokenDoc = await createVerificationToken(userId, 24);
       await sendVerificationEmail(emailLower, tokenDoc.token);
+    } catch (err: unknown) {
+      if (!(err instanceof EmailIndexConflictError)) throw err;
+
+      const gcResults = await Promise.allSettled([
+        getPrivateBlobClient(`auth/${userId}.json`).deleteIfExists(),
+        getPrivateBlobClient(`users/${userId}.json`).deleteIfExists(),
+      ]);
+      const gcFailures = gcResults.filter((result) => result.status === "rejected").length;
+      if (gcFailures > 0) {
+        console.warn("[auth] register orphan GC failed", { userId, gcFailures });
+      }
+
+      await handleExistingEmail(err.existingId);
     }
+  } else {
+    await handleExistingEmail(existing);
   }
 
   console.log("[auth] register branch:", branchLabel, "for", emailHashPrefix);

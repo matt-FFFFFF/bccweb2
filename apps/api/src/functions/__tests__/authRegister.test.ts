@@ -1,10 +1,21 @@
 import crypto from "crypto";
 import { describe, expect, test, vi, beforeEach } from "vitest";
+import type { User } from "@bccweb/types";
 import { getRegisteredHandler } from "../../__tests__/helpers/setup.js";
 import { makeRequest } from "../../__tests__/helpers/api.js";
-import { makeUser, writePrivateJson } from "../../__tests__/helpers/seed.js";
+import { getPrivateContainer } from "../../__tests__/helpers/azurite.js";
+import { makeUser, privateBlobExists, readPrivateJson, writePrivateJson } from "../../__tests__/helpers/seed.js";
 import { sendEmail } from "../../lib/email.js";
+import { lookupUserByEmail, type AuthCredential } from "../../lib/authHelpers.js";
 import "../authFunctions.js";
+
+vi.mock("../../lib/authHelpers.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/authHelpers.js")>();
+  return {
+    ...actual,
+    lookupUserByEmail: vi.fn(actual.lookupUserByEmail),
+  };
+});
 
 const registerResponse = {
   status: "accepted",
@@ -35,9 +46,18 @@ async function seedFreshVerificationState(userId: string, token = "fresh-verific
   });
 }
 
+async function listPrivateBlobNames(prefix: string): Promise<string[]> {
+  const names: string[] = [];
+  for await (const blob of getPrivateContainer().listBlobsFlat({ prefix })) {
+    names.push(blob.name);
+  }
+  return names.sort();
+}
+
 describe("auth register enumeration neutralization", () => {
   beforeEach(() => {
     vi.mocked(sendEmail).mockClear();
+    vi.mocked(lookupUserByEmail).mockClear();
   });
 
   test("register with new email: 202 + verification email sent", async () => {
@@ -55,6 +75,62 @@ describe("auth register enumeration neutralization", () => {
     expect(res.status).toBe(202);
     expect(res.jsonBody).toEqual(registerResponse);
     expect(vi.mocked(sendEmail)).toHaveBeenCalledTimes(1);
+
+    const userIndex = await readPrivateJson<Record<string, string>>("user-index.json");
+    const userId = userIndex?.[email.toLowerCase()];
+    expect(userId).toBeTruthy();
+    await expect(privateBlobExists(`users/${userId}.json`)).resolves.toBe(true);
+    await expect(privateBlobExists(`auth/${userId}.json`)).resolves.toBe(true);
+  });
+
+  test("register index-claim conflict: 202 same body + loser auth/user blobs GC'd", async () => {
+    const entry = getRegisteredHandler("authRegister");
+    expect(entry).toBeTruthy();
+
+    const ownerId = `owner-${crypto.randomUUID()}`;
+    const email = `claim-conflict-${crypto.randomUUID()}@example.com`;
+    const emailLower = email.toLowerCase();
+    const createdAt = new Date().toISOString();
+    const owner: User = {
+      id: ownerId,
+      email: emailLower,
+      roles: [],
+      pilotId: null,
+      clubId: null,
+      createdAt,
+    };
+    const credential: AuthCredential = {
+      passwordHash: "existing-password-hash-not-used",
+      emailVerified: false,
+      createdAt,
+    };
+    await writePrivateJson("user-index.json", { [emailLower]: ownerId });
+    await writePrivateJson(`users/${ownerId}.json`, owner);
+    await writePrivateJson(`auth/${ownerId}.json`, credential);
+    const usersBeforeRegister = await listPrivateBlobNames("users/");
+    const authCredentialsBeforeRegister = (await listPrivateBlobNames("auth/"))
+      .filter((name) => /^auth\/[^/]+\.json$/.test(name));
+    vi.mocked(lookupUserByEmail).mockResolvedValueOnce(null);
+
+    const res = await entry!.handler(
+      makeRequest({
+        method: "POST",
+        body: { email, password: "TestPass123!", acceptTsCs: true, acceptedTsCsVersion: 1 },
+      }),
+      { log: () => undefined },
+    );
+
+    expect(res.status).toBe(202);
+    expect(res.jsonBody).toEqual(registerResponse);
+    expect(JSON.stringify(res.jsonBody)).not.toContain("EMAIL_TAKEN");
+    expect(vi.mocked(sendEmail)).toHaveBeenCalledTimes(1);
+
+    const userIndex = await readPrivateJson<Record<string, string>>("user-index.json");
+    expect(userIndex?.[emailLower]).toBe(ownerId);
+    await expect(listPrivateBlobNames("users/")).resolves.toEqual(usersBeforeRegister);
+    const authCredentialBlobs = (await listPrivateBlobNames("auth/"))
+      .filter((name) => /^auth\/[^/]+\.json$/.test(name));
+    expect(authCredentialBlobs).toEqual(authCredentialsBeforeRegister);
   });
 
   test("register with existing unverified email: 202 + email re-sent", async () => {
