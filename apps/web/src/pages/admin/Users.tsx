@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
 import * as z from "zod/v4";
-import type { ClubSummary, User, UserRole } from "@bccweb/types";
+import { Link, useNavigate } from "react-router";
+import type { AdminUserView, ClubSummary, Pilot, UserRole } from "@bccweb/types";
 import { ClubSummarySchema } from "@bccweb/schemas";
 import { useAuth } from "../../hooks/useAuth.js";
-import { api } from "../../lib/api.js";
+import { api, ApiError } from "../../lib/api.js";
 import { useBlob } from "../../hooks/useBlob.js";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
 
@@ -17,8 +18,15 @@ const inputStyle: React.CSSProperties = {
   boxSizing: "border-box",
 };
 
+const labelStyle: React.CSSProperties = {
+  fontSize: "0.75rem",
+  color: "#555",
+  display: "block",
+  marginBottom: "0.2rem",
+};
+
 const btnStyle = (color: string, bg: string): React.CSSProperties => ({
-  padding: "0.3rem 0.6rem",
+  padding: "0.35rem 0.75rem",
   background: bg,
   color,
   border: "none",
@@ -37,96 +45,344 @@ function Banner({ msg, ok }: { msg: string; ok?: boolean }) {
       fontSize: "0.8rem",
       background: ok ? "#d1e7dd" : "#f8d7da",
       color: ok ? "#0a3622" : "#58151c",
-      marginTop: "0.25rem",
     }}>
       {msg}
     </div>
   );
 }
 
-interface UserRow extends User {
-  editPilotId: string;
-  editClubId: string;
-  editRoles: Set<UserRole>;
-  busy: boolean;
-  msg: string | null;
-  msgOk: boolean;
+function UserEditRow({
+  user,
+  clubs,
+  onRefresh,
+}: {
+  user: AdminUserView;
+  clubs: ClubSummary[];
+  onRefresh: () => void;
+}) {
+  const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const [email, setEmail] = useState(user.email);
+  const [emailVerified, setEmailVerified] = useState(user.emailVerified);
+  const [roles, setRoles] = useState<Set<UserRole>>(() => new Set(user.roles));
+  const [clubId, setClubId] = useState(user.clubId ?? "");
+  const [showPilotForm, setShowPilotForm] = useState(false);
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [msgOk, setMsgOk] = useState(false);
+
+  // Keep the verified badge / Verify button in sync when the parent re-fetches
+  // after a mutation (e.g. force-verify below flips this to true).
+  useEffect(() => {
+    setEmailVerified(user.emailVerified);
+  }, [user.emailVerified]);
+
+  function toggleRole(role: UserRole) {
+    setRoles((prev) => {
+      const next = new Set(prev);
+      if (next.has(role)) next.delete(role);
+      else next.add(role);
+      return next;
+    });
+  }
+
+  async function saveEmail() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const updated = await api.put<AdminUserView>(`manage/users/${user.id}/email`, { email });
+      // Changing the email resets verification server-side — reflect it locally
+      // so the Verify button appears without a full page refresh.
+      setEmail(updated.email);
+      setEmailVerified(updated.emailVerified);
+      setMsg("Verification reset — re-verify below.");
+      setMsgOk(true);
+    } catch (ex) {
+      if (ex instanceof ApiError && ex.code === "EMAIL_TAKEN") {
+        setMsg("Email already in use.");
+      } else {
+        setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed to update email");
+      }
+      setMsgOk(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verifyEmail() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.post(`manage/users/${user.id}/verify-email`);
+      onRefresh();
+    } catch (ex) {
+      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed to verify email");
+      setMsgOk(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveRoles() {
+    setBusy(true);
+    setMsg(null);
+    try {
+      // Send ONLY roles + clubId; pilotId is managed via the pilot control below
+      // and must stay untouched here.
+      await api.put(`manage/users/${user.id}/roles`, {
+        roles: Array.from(roles),
+        clubId: clubId || null,
+      });
+      setMsg("Saved.");
+      setMsgOk(true);
+      onRefresh();
+    } catch (ex) {
+      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed to save roles");
+      setMsgOk(false);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function createPilot(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    setMsg(null);
+    try {
+      const resp = await api.post<{ pilot: Pilot }>(`manage/users/${user.id}/pilot`, { firstName, lastName });
+      navigate(`/pilots/${resp.pilot.id}`);
+    } catch (ex) {
+      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed to create pilot profile");
+      setMsgOk(false);
+      setBusy(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!window.confirm(`Delete the account for ${user.email}? This removes their login only; the linked pilot record is kept.`)) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      await api.delete(`manage/users/${user.id}`);
+      onRefresh();
+    } catch (ex) {
+      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Delete failed");
+      setMsgOk(false);
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ borderBottom: "1px solid #f0f0f0", padding: "0.6rem 0" }}>
+      <div style={{ display: "flex", gap: "0.75rem", alignItems: "center" }}>
+        <span style={{ flex: 1, fontSize: "0.9rem" }}>
+          <strong>{user.email}</strong>
+          <span style={{
+            marginLeft: "0.5rem",
+            fontSize: "0.7rem",
+            fontWeight: 600,
+            padding: "0.1rem 0.45rem",
+            borderRadius: "0.75rem",
+            background: emailVerified ? "#d1e7dd" : "#fff3cd",
+            color: emailVerified ? "#0a3622" : "#664d03",
+          }}>
+            {emailVerified ? "Verified" : "Unverified"}
+          </span>
+        </span>
+        <button style={btnStyle("#333", "#e9ecef")} onClick={() => setOpen((v) => !v)}>
+          {open ? "Close" : "Edit"}
+        </button>
+      </div>
+
+      {open && (
+        <div style={{ marginTop: "0.75rem", display: "flex", flexDirection: "column", gap: "0.9rem" }}>
+          {/* (a) Editable email + Save email */}
+          <div>
+            <label htmlFor={`email-${user.id}`} style={labelStyle}>Email</label>
+            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap" }}>
+              <input
+                id={`email-${user.id}`}
+                type="email"
+                style={{ ...inputStyle, minWidth: 240, flex: 1 }}
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => { void saveEmail(); }}
+                style={btnStyle("#fff", busy ? "#6c757d" : "#0066cc")}
+              >
+                Save email
+              </button>
+            </div>
+          </div>
+
+          {/* (b) Verify email — rendered only while unverified */}
+          {!emailVerified && (
+            <div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => { void verifyEmail(); }}
+                style={btnStyle("#fff", busy ? "#6c757d" : "#0a6640")}
+              >
+                Verify email
+              </button>
+            </div>
+          )}
+
+          {/* (c) Roles + Admin club + Save */}
+          <div>
+            <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
+              {ALL_ROLES.map((role) => (
+                <label key={role} style={{ display: "flex", gap: "0.3rem", alignItems: "center", fontSize: "0.85rem" }}>
+                  <input
+                    type="checkbox"
+                    checked={roles.has(role)}
+                    onChange={() => toggleRole(role)}
+                  />
+                  {role}
+                </label>
+              ))}
+            </div>
+            <div style={{ display: "flex", gap: "0.75rem", alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div>
+                <label htmlFor={`club-${user.id}`} style={labelStyle}>Admin club</label>
+                <select
+                  id={`club-${user.id}`}
+                  style={{ ...inputStyle, width: 240 }}
+                  value={clubId}
+                  onChange={(e) => setClubId(e.target.value)}
+                >
+                  <option value="">(none)</option>
+                  {clubs.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => { void saveRoles(); }}
+                style={btnStyle("#fff", busy ? "#6c757d" : "#0066cc")}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+
+          {/* (d) Pilot ID — read-only */}
+          <div>
+            <span style={labelStyle}>Pilot ID</span>
+            <div style={{ fontFamily: "monospace", fontSize: "0.85rem", color: "#333" }}>
+              {user.pilotId ?? "(none)"}
+            </div>
+          </div>
+
+          {/* (e) Pilot profile control */}
+          <div>
+            {user.pilotId ? (
+              <Link to={`/pilots/${user.pilotId}`} style={{ color: "#0066cc", fontSize: "0.85rem" }}>
+                Edit pilot profile
+              </Link>
+            ) : showPilotForm ? (
+              <form
+                onSubmit={(e) => { void createPilot(e); }}
+                style={{ display: "flex", gap: "0.5rem", alignItems: "flex-end", flexWrap: "wrap" }}
+              >
+                <div>
+                  <label htmlFor={`fn-${user.id}`} style={labelStyle}>First name</label>
+                  <input
+                    id={`fn-${user.id}`}
+                    required
+                    style={inputStyle}
+                    value={firstName}
+                    onChange={(e) => setFirstName(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label htmlFor={`ln-${user.id}`} style={labelStyle}>Last name</label>
+                  <input
+                    id={`ln-${user.id}`}
+                    required
+                    style={inputStyle}
+                    value={lastName}
+                    onChange={(e) => setLastName(e.target.value)}
+                  />
+                </div>
+                <button type="submit" disabled={busy} style={btnStyle("#fff", busy ? "#6c757d" : "#0a6640")}>
+                  Create
+                </button>
+              </form>
+            ) : (
+              <button type="button" onClick={() => setShowPilotForm(true)} style={btnStyle("#333", "#e9ecef")}>
+                Create pilot profile
+              </button>
+            )}
+          </div>
+
+          {/* (f) Delete */}
+          <div style={{ borderTop: "1px solid #f0f0f0", paddingTop: "0.75rem" }}>
+            <p style={{ fontSize: "0.75rem", color: "#666", margin: "0 0 0.5rem" }}>
+              Deleting removes the login only; the pilot record is kept (unlinked). Full data erasure follows the GDPR runbook (docs/runbooks/gdpr-erasure.md).
+            </p>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => { void handleDelete(); }}
+              style={btnStyle("#fff", busy ? "#6c757d" : "#b02a37")}
+            >
+              Delete
+            </button>
+          </div>
+
+          {msg && <Banner msg={msg} ok={msgOk} />}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function AdminUsers() {
   const { identity, loading: authLoading } = useAuth();
-  const [users, setUsers] = useState<UserRow[]>([]);
+  const [refresh, setRefresh] = useState(0);
+  const [users, setUsers] = useState<AdminUserView[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Load clubs for the dropdown — public blob, no auth needed
+  // Clubs for the "Admin club" dropdown — public blob, no auth needed.
   const { data: clubs } = useBlob<ClubSummary[]>("clubs.json", z.array(ClubSummarySchema));
 
-  const isAdmin = identity?.roles.includes("Admin");
+  const isAdmin = identity?.roles.includes("Admin") ?? false;
 
   useEffect(() => {
-    if (!isAdmin) return;
-    async function load() {
-      try {
-        const data = await api.get<User[]>("manage/users");
-        setUsers(
-          data.map((u) => ({
-            ...u,
-            editPilotId: u.pilotId ?? "",
-            editClubId: u.clubId ?? "",
-            editRoles: new Set(u.roles),
-            busy: false,
-            msg: null,
-            msgOk: false,
-          }))
-        );
-      } catch (ex) {
-        setError(ex instanceof Error ? ex.message : "Failed to load users");
-      } finally {
-        setLoading(false);
-      }
+    if (!isAdmin) {
+      setLoading(false);
+      return;
     }
-    void load();
-  }, [isAdmin]);
-
-  function toggleRole(userId: string, role: UserRole) {
-    setUsers((prev) =>
-      prev.map((u) => {
-        if (u.id !== userId) return u;
-        const next = new Set(u.editRoles);
-        if (next.has(role)) next.delete(role);
-        else next.add(role);
-        return { ...u, editRoles: next };
+    let cancelled = false;
+    // Users are PRIVATE (PII) — fetch through the authenticated API, never useBlob.
+    api
+      .get<AdminUserView[]>("manage/users")
+      .then((data) => {
+        if (!cancelled) {
+          setUsers(data);
+          setError(null);
+        }
       })
-    );
-  }
-
-  async function save(userId: string) {
-    setUsers((prev) => prev.map((u) => u.id === userId ? { ...u, busy: true, msg: null } : u));
-    const row = users.find((u) => u.id === userId)!;
-    try {
-      await api.put(`manage/users/${userId}/roles`, {
-        roles: Array.from(row.editRoles),
-        pilotId: row.editPilotId || null,
-        clubId: row.editClubId || null,
+      .catch((ex: unknown) => {
+        if (!cancelled) setError(ex instanceof Error ? ex.message : "Failed to load users");
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
       });
-      setUsers((prev) =>
-        prev.map((u) =>
-          u.id === userId
-            ? { ...u, busy: false, msg: "Saved.", msgOk: true, roles: Array.from(row.editRoles) as UserRole[] }
-            : u
-        )
-      );
-    } catch (ex) {
-      setUsers((prev) =>
-        prev.map((u) =>
-          u.id === userId
-            ? { ...u, busy: false, msg: ex instanceof Error ? ex.message : "Failed", msgOk: false }
-            : u
-        )
-      );
-    }
-  }
+    return () => {
+      cancelled = true;
+    };
+  }, [isAdmin, refresh]);
 
   if (authLoading || loading) return <LoadingSpinner message="Loading users…" />;
   if (!isAdmin) {
@@ -137,83 +393,23 @@ export default function AdminUsers() {
   }
 
   const clubList = clubs ?? [];
+  const sortedUsers = users.slice().sort((a, b) => a.email.localeCompare(b.email));
 
   return (
-    <div style={{ maxWidth: 1000, margin: "0 auto" }}>
-      <h1 style={{ fontSize: "1.5rem", marginBottom: "1.5rem" }}>User Management</h1>
+    <div style={{ maxWidth: 900, margin: "0 auto" }}>
+      <h1 style={{ fontSize: "1.5rem", marginBottom: "1.5rem" }}>Users & Pilots</h1>
 
-      {users.length === 0 && <p style={{ color: "#888" }}>No users found.</p>}
-
-      <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
-        {users.map((u) => (
-          <div
+      <div style={{ border: "1px solid #dee2e6", borderRadius: "0.5rem", padding: "0.75rem 1rem" }}>
+        {sortedUsers.length === 0 && (
+          <p style={{ color: "#888", fontSize: "0.85rem", margin: "0.25rem 0" }}>No users found.</p>
+        )}
+        {sortedUsers.map((u) => (
+          <UserEditRow
             key={u.id}
-            style={{ border: "1px solid #dee2e6", borderRadius: "0.5rem", padding: "0.75rem 1rem" }}
-          >
-            <div style={{ marginBottom: "0.5rem" }}>
-              <strong style={{ fontSize: "0.9rem" }}>{u.email}</strong>
-              <span style={{ marginLeft: "0.75rem", fontSize: "0.75rem", color: "#888", fontFamily: "monospace" }}>{u.id}</span>
-            </div>
-
-            {/* Roles */}
-            <div style={{ display: "flex", gap: "1rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
-              {ALL_ROLES.map((role) => (
-                <label key={role} style={{ display: "flex", gap: "0.3rem", alignItems: "center", fontSize: "0.85rem" }}>
-                  <input
-                    type="checkbox"
-                    checked={u.editRoles.has(role)}
-                    onChange={() => toggleRole(u.id, role)}
-                  />
-                  {role}
-                </label>
-              ))}
-            </div>
-
-            {/* Pilot ID + Club dropdown */}
-            <div style={{ display: "flex", gap: "0.75rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
-              <div>
-                <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Pilot ID</label>
-                <input
-                  style={{ ...inputStyle, width: 280 }}
-                  placeholder="(none)"
-                  value={u.editPilotId}
-                  onChange={(e) =>
-                    setUsers((prev) =>
-                      prev.map((row) => row.id === u.id ? { ...row, editPilotId: e.target.value } : row)
-                    )
-                  }
-                />
-              </div>
-              <div>
-                <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Club</label>
-                <select
-                  style={{ ...inputStyle, width: 240 }}
-                  value={u.editClubId}
-                  onChange={(e) =>
-                    setUsers((prev) =>
-                      prev.map((row) => row.id === u.id ? { ...row, editClubId: e.target.value } : row)
-                    )
-                  }
-                >
-                  <option value="">(none)</option>
-                  {clubList.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-            </div>
-
-            <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-              <button
-                disabled={u.busy}
-                onClick={() => { void save(u.id); }}
-                style={btnStyle("#fff", u.busy ? "#6c757d" : "#0066cc")}
-              >
-                {u.busy ? "Saving…" : "Save"}
-              </button>
-              {u.msg && <Banner msg={u.msg} ok={u.msgOk} />}
-            </div>
-          </div>
+            user={u}
+            clubs={clubList}
+            onRefresh={() => setRefresh((v) => v + 1)}
+          />
         ))}
       </div>
     </div>
