@@ -9,6 +9,7 @@ import {
   withPrivateLeaseRetry,
 } from "./blob.js";
 import { readJson, writePrivateJson } from "./blobJson.js";
+import { isUserDeleted, UserDeletedError } from "./accountMutation.js";
 
 const StringRecordSchema = z.record(z.string(), z.string());
 
@@ -54,6 +55,10 @@ export async function getOrCreateUser(
   } catch (err: unknown) {
     const status = (err as { statusCode?: number }).statusCode;
     if (status !== 404) throw err;
+
+    if (await isUserDeleted(userId)) {
+      throw new UserDeletedError(userId);
+    }
 
     let pilotId: string | null = null;
     let clubId: string | null = null;
@@ -164,6 +169,8 @@ export async function getCallerIdentity(
   } catch {
     return null;
   }
+
+  if (await isUserDeleted(claims.sub)) return null;
 
   const user = await getOrCreateUser(claims.sub, claims.email);
 

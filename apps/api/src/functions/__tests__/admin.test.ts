@@ -12,16 +12,31 @@
 
 import { describe, expect, test } from "vitest";
 import { randomUUID } from "node:crypto";
+import type { HttpRequest } from "@azure/functions";
 import type { Config, User } from "@bccweb/types";
+import { getCallerIdentity } from "../../lib/auth.js";
+import {
+  assertNotLastAdmin,
+  UserDeletedError,
+  withAccountMutationLock,
+} from "../../lib/accountMutation.js";
 import type { AuthCredential } from "../../lib/authHelpers.js";
+import {
+  generateShortLivedToken,
+  lookupUserByEmail,
+  signRefreshToken,
+} from "../../lib/authHelpers.js";
 import { getRegisteredHandler } from "../../__tests__/helpers/setup.js";
-import { makeAuthRequest } from "../../__tests__/helpers/api.js";
+import { makeAuthRequest, makeRequest } from "../../__tests__/helpers/api.js";
 import {
   bootstrapAdmin,
   makeUser,
+  privateBlobExists,
   readPrivateJson,
+  writePrivateJson,
 } from "../../__tests__/helpers/seed.js";
 import "../admin.js";
+import "../authFunctions.js";
 
 interface HandlerResult {
   status: number;
@@ -42,6 +57,17 @@ async function invoke(
   const entry = getRegisteredHandler(name);
   if (!entry) throw new Error(`${name} not registered`);
   return (await entry.handler(req, ctx)) as HandlerResult;
+}
+
+async function tombstoneIndexedAdminsExcept(keepUserId: string): Promise<void> {
+  const index = await readPrivateJson<Record<string, string>>("user-index.json");
+  for (const userId of new Set(Object.values(index ?? {}))) {
+    if (userId === keepUserId) continue;
+    const user = await readPrivateJson<User>(`users/${userId}.json`);
+    if (user?.roles.includes("Admin")) {
+      await writePrivateJson(`users/deleted/${userId}.json`, {});
+    }
+  }
 }
 
 describe("PUT /api/manage/config — schema validation & lease", () => {
@@ -215,6 +241,199 @@ describe("PUT /api/manage/users/{userId}/roles — schema validation & lease", (
     expect(persisted?.roles).toEqual(["Admin", "Pilot"]);
     expect(persisted?.pilotId).toBe("p-1");
     expect(persisted?.clubId).toBe("c-1");
+  });
+
+  test("returns 409 LAST_ADMIN when removing Admin from the only live admin", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: targetAdmin } = await makeUser({
+      emailVerified: true,
+      roles: ["Admin"],
+    });
+    await tombstoneIndexedAdminsExcept(targetAdmin.id);
+
+    const res = await invoke(
+      "setUserRoles",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "PUT",
+        params: { userId: targetAdmin.id },
+        body: { roles: ["Pilot"] },
+      }),
+    );
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code?: string }).code).toBe("LAST_ADMIN");
+  });
+
+  test("allows removing Admin when another live admin remains", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: secondAdmin } = await makeUser({
+      emailVerified: true,
+      roles: ["Admin"],
+    });
+
+    const res = await invoke(
+      "setUserRoles",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "PUT",
+        params: { userId: secondAdmin.id },
+        body: { roles: ["Pilot"] },
+      }),
+    );
+
+    expect(res.status).toBe(200);
+    expect((res.jsonBody as User).roles).toEqual(["Pilot"]);
+  });
+});
+
+describe("shared account-mutation invariants", () => {
+  test("getCallerIdentity returns null when a still-present user has a delete tombstone", async () => {
+    const { user } = await makeUser({ emailVerified: true });
+    await writePrivateJson(`users/deleted/${user.id}.json`, {});
+
+    const caller = await getCallerIdentity(
+      makeAuthRequest(user.id, user.email) as unknown as HttpRequest,
+    );
+
+    expect(caller).toBeNull();
+  });
+
+  test("refresh returns 401 when a still-present user has a delete tombstone", async () => {
+    const { user, credential } = await makeUser({ emailVerified: true });
+    await writePrivateJson(`users/deleted/${user.id}.json`, {});
+    const refreshToken = signRefreshToken(user.id, credential.tokenVersion ?? 0);
+
+    const res = await invoke(
+      "authRefresh",
+      makeRequest({ method: "POST", body: { refreshToken } }),
+    );
+
+    expect(res.status).toBe(401);
+  });
+
+  test("lookupUserByEmail returns null for a tombstoned resolved userId", async () => {
+    const { user } = await makeUser({ emailVerified: true });
+    await writePrivateJson(`users/deleted/${user.id}.json`, {});
+
+    const resolved = await lookupUserByEmail(user.email);
+
+    expect(resolved).toBeNull();
+  });
+
+  test("verifyEmail returns INVALID_TOKEN when the token resolves to a tombstoned userId", async () => {
+    const { user } = await makeUser({ emailVerified: false });
+    const token = await generateShortLivedToken(user.id, "verify", 24);
+    await writePrivateJson(`users/deleted/${user.id}.json`, {});
+
+    const res = await invoke(
+      "authVerifyEmail",
+      makeRequest({ method: "GET", query: { token } }),
+    );
+
+    expect(res.status).toBe(400);
+    expect((res.jsonBody as { code?: string }).code).toBe("INVALID_TOKEN");
+  });
+
+  test("resetPassword returns INVALID_TOKEN when the token resolves to a tombstoned userId", async () => {
+    const { user } = await makeUser({ emailVerified: true });
+    const token = await generateShortLivedToken(user.id, "reset", 1);
+    await writePrivateJson(`users/deleted/${user.id}.json`, {});
+
+    const res = await invoke(
+      "authResetPassword",
+      makeRequest({
+        method: "POST",
+        body: { token, newPassword: "Replacement123!" },
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect((res.jsonBody as { code?: string }).code).toBe("INVALID_TOKEN");
+  });
+
+  test("getOrCreateUser never recreates the user/index on the 404 path when tombstoned", async () => {
+    const { getOrCreateUser } = await import("../../lib/auth.js");
+    const userId = randomUUID();
+    const email = `deleted-${userId}@example.com`;
+    await writePrivateJson(`users/deleted/${userId}.json`, {});
+
+    await expect(getOrCreateUser(userId, email)).rejects.toBeInstanceOf(UserDeletedError);
+
+    expect(await privateBlobExists(`users/${userId}.json`)).toBe(false);
+    const index = await readPrivateJson<Record<string, string>>("user-index.json");
+    expect(index?.[email]).toBeUndefined();
+  });
+
+  test("assertNotLastAdmin throws LAST_ADMIN at one live admin", async () => {
+    const { user: admin } = await makeUser({
+      emailVerified: true,
+      roles: ["Admin"],
+    });
+    await tombstoneIndexedAdminsExcept(admin.id);
+
+    await expect(assertNotLastAdmin(admin.id, ["Pilot"])).rejects.toMatchObject({
+      status: 409,
+      code: "LAST_ADMIN",
+    });
+  });
+
+  test("assertNotLastAdmin passes at two live admins", async () => {
+    const { user: admin } = await bootstrapAdmin();
+    const { user: secondAdmin } = await makeUser({
+      emailVerified: true,
+      roles: ["Admin"],
+    });
+
+    await expect(assertNotLastAdmin(secondAdmin.id, ["Pilot"])).resolves.toBeUndefined();
+    await expect(assertNotLastAdmin(admin.id, ["Pilot"])).resolves.toBeUndefined();
+  });
+
+  test("assertNotLastAdmin excludes a tombstoned admin from the live count", async () => {
+    const { user: admin } = await makeUser({
+      emailVerified: true,
+      roles: ["Admin"],
+    });
+    const { user: tombstonedAdmin } = await makeUser({
+      emailVerified: true,
+      roles: ["Admin"],
+    });
+    await tombstoneIndexedAdminsExcept(admin.id);
+    await writePrivateJson(`users/deleted/${tombstonedAdmin.id}.json`, {});
+
+    await expect(assertNotLastAdmin(admin.id, ["Pilot"])).rejects.toMatchObject({
+      status: 409,
+      code: "LAST_ADMIN",
+    });
+  });
+
+  test("withAccountMutationLock serializes concurrent holders without 409", async () => {
+    let activeHolders = 0;
+    let maxActiveHolders = 0;
+    const releaseFirstHolder = Promise.withResolvers<void>();
+    const firstHolderEntered = Promise.withResolvers<void>();
+
+    const hold = (waitForRelease: boolean) =>
+      withAccountMutationLock(async () => {
+        activeHolders += 1;
+        maxActiveHolders = Math.max(maxActiveHolders, activeHolders);
+        if (waitForRelease) firstHolderEntered.resolve();
+        try {
+          if (waitForRelease) await releaseFirstHolder.promise;
+          return "ok";
+        } finally {
+          activeHolders -= 1;
+        }
+      });
+
+    const first = hold(true);
+    await firstHolderEntered.promise;
+    const second = hold(false);
+
+    await new Promise((resolve) => setTimeout(resolve, 75));
+    expect(activeHolders).toBe(1);
+    releaseFirstHolder.resolve();
+
+    await expect(Promise.all([first, second])).resolves.toEqual(["ok", "ok"]);
+    expect(maxActiveHolders).toBe(1);
   });
 });
 

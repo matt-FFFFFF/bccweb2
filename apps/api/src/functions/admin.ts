@@ -27,6 +27,7 @@ import {
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
+import { assertNotLastAdmin, withAccountMutationLock } from "../lib/accountMutation.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 import { recomputeSeason, updateRoundsIndex } from "../lib/recompute.js";
@@ -325,34 +326,44 @@ async function setUserRoles(
 
   let updated: User | null = null;
   try {
-    await withPrivateLease(`users/${userId}.json`, async (leaseId) => {
-      let user: User;
-      try {
-        user = await readJson(
-          getPrivateBlobClient(`users/${userId}.json`),
-          UserSchema,
-          `users/${userId}.json`,
-        );
-      } catch (err: unknown) {
-        if (statusCodeOf(err) === 404) {
-          throw new HttpError(404, "NOT_FOUND", "User not found");
+    await withAccountMutationLock(async () => {
+      await withPrivateLease(`users/${userId}.json`, async (leaseId) => {
+        let user: User;
+        try {
+          user = await readJson(
+            getPrivateBlobClient(`users/${userId}.json`),
+            UserSchema,
+            `users/${userId}.json`,
+          );
+        } catch (err: unknown) {
+          if (statusCodeOf(err) === 404) {
+            throw new HttpError(404, "NOT_FOUND", "User not found");
+          }
+          throw err;
         }
-        throw err;
-      }
 
-      updated = {
-        ...user,
-        ...(body.roles !== undefined && { roles: body.roles }),
-        ...(body.pilotId !== undefined && { pilotId: body.pilotId }),
-        ...(body.clubId !== undefined && { clubId: body.clubId }),
-      };
+        if (
+          body.roles !== undefined &&
+          user.roles.includes("Admin") &&
+          !body.roles.includes("Admin")
+        ) {
+          await assertNotLastAdmin(userId, body.roles);
+        }
 
-      await writePrivateJson(
-        `users/${userId}.json`,
-        UserSchema,
-        updated,
-        leaseId,
-      );
+        updated = {
+          ...user,
+          ...(body.roles !== undefined && { roles: body.roles }),
+          ...(body.pilotId !== undefined && { pilotId: body.pilotId }),
+          ...(body.clubId !== undefined && { clubId: body.clubId }),
+        };
+
+        await writePrivateJson(
+          `users/${userId}.json`,
+          UserSchema,
+          updated,
+          leaseId,
+        );
+      });
     });
   } catch (err: unknown) {
     if (err instanceof HttpError) throw err;

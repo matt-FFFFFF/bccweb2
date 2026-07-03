@@ -26,6 +26,7 @@ import {
   withPrivateLease,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
+import { isUserDeleted } from "../lib/accountMutation.js";
 
 const VerificationStateSchema = z.object({
   token: z.string(),
@@ -284,6 +285,10 @@ async function verifyEmail(
     throw new HttpError(500, "INTERNAL");
   }
 
+  if (await isUserDeleted(result.userId)) {
+    throw new HttpError(400, "INVALID_TOKEN", "Invalid or expired token");
+  }
+
   const credPath = `auth/${result.userId}.json`;
   await withPrivateLease(credPath, async (leaseId) => {
     let cred: AuthCredential;
@@ -477,6 +482,8 @@ async function refresh(
     return invalidRefresh;
   }
 
+  if (await isUserDeleted(userId)) return invalidRefresh;
+
   // Reject revoked refresh tokens: tokenVersion is bumped on logout and password
   // reset, so a token issued before the bump no longer matches the stored value.
   let cred: AuthCredential;
@@ -591,6 +598,10 @@ async function resetPassword(
       throw new HttpError(400, "INVALID_TOKEN", "Invalid or expired token");
     }
     throw new HttpError(500, "INTERNAL");
+  }
+
+  if (await isUserDeleted(result.userId)) {
+    throw new HttpError(400, "INVALID_TOKEN", "Invalid or expired token");
   }
 
   const credPath = `auth/${result.userId}.json`;
