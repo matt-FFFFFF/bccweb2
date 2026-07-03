@@ -12,6 +12,7 @@ import * as z from "zod/v4";
 import { AuthCredentialSchema } from "@bccweb/schemas";
 import { getPrivateBlobClient, getPrivateBlockBlobClient, writePrivateBlob } from "./blob.js";
 import { readJson } from "./blobJson.js";
+import { isUserDeleted } from "./accountMutation.js";
 
 const StringRecordSchema = z.record(z.string(), z.string());
 
@@ -215,7 +216,9 @@ export async function lookupUserByEmail(email: string): Promise<string | null> {
       StringRecordSchema,
       "user-index.json",
     );
-    return index[email.toLowerCase()] ?? null;
+    const userId = index[email.toLowerCase()] ?? null;
+    if (!userId) return null;
+    return (await isUserDeleted(userId)) ? null : userId;
   } catch {
     return null;
   }
