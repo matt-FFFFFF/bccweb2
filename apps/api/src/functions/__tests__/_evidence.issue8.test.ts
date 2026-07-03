@@ -272,6 +272,10 @@ const CASES: CallSiteCase[] = [
   { file: "admin.ts", handler: "recomputeRound", endpoint: "recomputeRound", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("POST", { id: randomUUID() }) },
   { file: "admin.ts", handler: "updateConfig", endpoint: "updateConfig", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("PUT", {}, { maxTeamsInClub: 2 }) },
   { file: "admin.ts", handler: "setUserRoles", endpoint: "setUserRoles", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("PUT", { userId: randomUUID() }, { roles: ["Pilot"] }) },
+  { file: "admin.ts", handler: "updateUserEmail", endpoint: "updateUserEmail", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("PUT", { userId: randomUUID() }, { email: "issue8-new@example.test" }) },
+  { file: "admin.ts", handler: "deleteUser", endpoint: "deleteUser", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("DELETE", { userId: randomUUID() }) },
+  { file: "admin.ts", handler: "adminVerifyEmail", endpoint: "adminVerifyEmail", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("POST", { userId: randomUUID() }) },
+  { file: "admin.ts", handler: "adminCreatePilotForUser", endpoint: "adminCreatePilotForUser", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("POST", { userId: randomUUID() }, { firstName: "Issue8", lastName: "Pilot" }) },
   { file: "adminWording.ts", handler: "addSignToFlyWording", endpoint: "addSignToFlyWording", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("POST", {}, { markdown: "x" }) },
 
   { file: "brief.ts", handler: "updateRoundBrief", endpoint: "updateRoundBrief", tier: "heavy", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "PUT", params: { id: (await roundForOtherClub("Confirmed")).id }, body: {} } }) },
@@ -284,6 +288,7 @@ const CASES: CallSiteCase[] = [
 
   { file: "clubs.ts", handler: "createClub", endpoint: "createClub", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("POST", {}, { name: "Forbidden Club" }) },
   { file: "clubs.ts", handler: "updateClub", endpoint: "updateClub", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("PUT", { id: randomUUID() }, { name: "Forbidden Club" }) },
+  { file: "clubs.ts", handler: "deleteClub", endpoint: "deleteClub", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("DELETE", { id: randomUUID() }) },
 
   { file: "flights.ts", handler: "logFlight", endpoint: "logFlight", tier: "flights", forbiddenKind: "self-or-admin", setup: async () => ({ forbidden: await seedUser({ roles: ["Pilot"], pilotId: randomUUID() }), request: { method: "POST", params: { id: randomUUID() }, body: { pilotId: randomUUID(), distance: 1 } } }) },
   { file: "flights.ts", handler: "updateFlight", endpoint: "updateFlight", tier: "flights", forbiddenKind: "self-or-admin", setup: async () => { const flightId = randomUUID(); const ownerPilotId = randomUUID(); const round = await roundWithFlight(flightId, ownerPilotId); return { forbidden: await seedUser({ roles: ["Pilot"], pilotId: randomUUID() }), request: { method: "PUT", params: { id: round.id, flightId }, body: { distance: 11 } } }; } },
