@@ -27,6 +27,19 @@ async function adminDeleteClub(clubId: string) {
   );
 }
 
+async function adminUpdateClub(clubId: string, name: string) {
+  const { user } = await bootstrapAdmin();
+  return invoke(
+    "updateClub",
+    makeAuthRequest(user.id, user.email, {
+      method: "PUT",
+      params: { id: clubId },
+      body: { name },
+      headers: { "x-forwarded-for": `${randomUUID()}.clubs-update` },
+    }),
+  );
+}
+
 describe("DELETE /api/clubs/{id}", () => {
   test("deletes an unreferenced club from the public index and private blob", async () => {
     // Given
@@ -37,6 +50,27 @@ describe("DELETE /api/clubs/{id}", () => {
 
     // Then
     expect(res.status).toBe(204);
+    await expect(privateBlobExists(`clubs/${club.id}.json`)).resolves.toBe(false);
+    const clubs = await readPublicJson<ClubSummary[]>("clubs.json");
+    expect(clubs?.some((item) => item.id === club.id)).toBe(false);
+  });
+
+  test("serializes a concurrent delete and update on the club blob lease", async () => {
+    // Given
+    const club = await makeClub({ name: `Concurrent ${randomUUID()}` });
+
+    // When
+    const [deleteResult, updateResult] = await Promise.allSettled([
+      adminDeleteClub(club.id),
+      adminUpdateClub(club.id, `Concurrent Updated ${randomUUID()}`),
+    ]);
+
+    // Then
+    expect(deleteResult.status).toBe("fulfilled");
+    expect(updateResult.status).toBe("fulfilled");
+    if (deleteResult.status !== "fulfilled" || updateResult.status !== "fulfilled") return;
+    expect(deleteResult.value.status).toBe(204);
+    expect([200, 404]).toContain(updateResult.value.status);
     await expect(privateBlobExists(`clubs/${club.id}.json`)).resolves.toBe(false);
     const clubs = await readPublicJson<ClubSummary[]>("clubs.json");
     expect(clubs?.some((item) => item.id === club.id)).toBe(false);
