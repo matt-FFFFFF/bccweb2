@@ -7,6 +7,7 @@ import {
   makeUser,
   readPrivateJson,
   readPublicJson,
+  writePrivateJson,
   writePublicJson,
 } from "../../__tests__/helpers/seed.js";
 import "../meProfile.js";
@@ -102,6 +103,50 @@ describe("POST /api/me/pilot", () => {
 
     expect(res.status).toBe(403);
     expect((res.jsonBody as { code?: string }).code).toBe("EMAIL_NOT_VERIFIED");
+  });
+
+  test("returns 409 PILOT_EMAIL_TAKEN when caller email is claimed by another pilot", async () => {
+    const { user } = await makeUser({
+      roles: [],
+      pilotId: null,
+      emailVerified: true,
+    });
+    await writePrivateJson<PilotEmailIndex>("pilot-email-index.json", {
+      [user.email.toLowerCase()]: randomUUID(),
+    });
+
+    const res = await invoke(
+      makeAuthRequest(user.id, user.email, {
+        method: "POST",
+        body: { firstName: "Daisy", lastName: "Downwind" },
+      })
+    );
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code?: string }).code).toBe("PILOT_EMAIL_TAKEN");
+  });
+
+  test("creates pilot when caller email is unclaimed", async () => {
+    await writePublicJson("pilots.json", []);
+    const { user } = await makeUser({
+      roles: [],
+      pilotId: null,
+      emailVerified: true,
+    });
+
+    const res = await invoke(
+      makeAuthRequest(user.id, user.email, {
+        method: "POST",
+        body: { firstName: "Erin", lastName: "Elevator" },
+      })
+    );
+
+    expect(res.status).toBe(201);
+    const created = res.jsonBody as Pilot;
+    const emailIndex = await readPrivateJson<PilotEmailIndex>(
+      "pilot-email-index.json"
+    );
+    expect(emailIndex?.[user.email.toLowerCase()]).toBe(created.id);
   });
 
   test("returns 400 when firstName or lastName missing", async () => {

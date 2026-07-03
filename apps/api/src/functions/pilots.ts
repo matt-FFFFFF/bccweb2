@@ -39,6 +39,7 @@ import {
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
+  EmailIndexConflictError,
   getCallerIdentity,
   unauthorizedResponse,
   forbiddenResponse,
@@ -394,7 +395,18 @@ async function upsertPilotInIndex(
   });
 
   if (email) {
-    await updatePilotEmailIndex(email, pilot.id);
+    try {
+      await updatePilotEmailIndex(email, pilot.id);
+    } catch (err: unknown) {
+      if (err instanceof EmailIndexConflictError) {
+        throw new HttpError(
+          409,
+          "PILOT_EMAIL_TAKEN",
+          "Email already belongs to another pilot"
+        );
+      }
+      throw err;
+    }
   }
 }
 

@@ -37,6 +37,7 @@ import {
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
+  EmailIndexConflictError,
   getCallerIdentity,
   unauthorizedResponse,
   updatePilotEmailIndex,
@@ -167,7 +168,18 @@ async function createMyPilot(
 
   await writePrivateJson(`pilots/${id}.json`, PilotSchema, pilot);
   await upsertPilotInIndex(pilot);
-  await updatePilotEmailIndex(caller.email, id);
+  try {
+    await updatePilotEmailIndex(caller.email, id);
+  } catch (err: unknown) {
+    if (err instanceof EmailIndexConflictError) {
+      throw new HttpError(
+        409,
+        "PILOT_EMAIL_TAKEN",
+        "Email already belongs to another pilot"
+      );
+    }
+    throw err;
+  }
   await linkUserToPilot(caller.userId, id, body.currentClub?.id ?? null);
 
   return { status: 201, jsonBody: pilot };
