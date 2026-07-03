@@ -9,14 +9,25 @@ import {
 } from "../lib/authHelpers.js";
 import type { AuthToken } from "../lib/authHelpers.js";
 import { getPrivateContainer } from "./helpers/azurite.js";
+import { writePrivateJson } from "./helpers/seed.js";
+
+async function seedAuthCredential(userId: string, tokenVersion = 0): Promise<void> {
+  await writePrivateJson(`auth/${userId}.json`, {
+    passwordHash: "hash",
+    emailVerified: false,
+    createdAt: new Date().toISOString(),
+    tokenVersion,
+  });
+}
 
 describe("consumeShortLivedToken", () => {
   test("happy: first consume returns userId, second consume throws TokenAlreadyConsumedError", async () => {
     const userId = crypto.randomUUID();
+    await seedAuthCredential(userId, 3);
     const raw = await generateShortLivedToken(userId, "verify", 24);
 
     const result = await consumeShortLivedToken(raw, "verify");
-    expect(result).toEqual({ userId });
+    expect(result).toEqual({ userId, tokenVersion: 3 });
 
     await expect(consumeShortLivedToken(raw, "verify")).rejects.toBeInstanceOf(
       TokenAlreadyConsumedError
@@ -57,6 +68,7 @@ describe("consumeShortLivedToken", () => {
 
   test("concurrent: 10 parallel consumes -> exactly 1 succeeds, 9 throw TokenAlreadyConsumedError", async () => {
     const userId = crypto.randomUUID();
+    await seedAuthCredential(userId);
     const raw = await generateShortLivedToken(userId, "verify", 24);
 
     const results = await Promise.allSettled(
@@ -68,8 +80,8 @@ describe("consumeShortLivedToken", () => {
 
     expect(fulfilled).toHaveLength(1);
     expect(
-      (fulfilled[0] as PromiseFulfilledResult<{ userId: string }>).value
-    ).toEqual({ userId });
+      (fulfilled[0] as PromiseFulfilledResult<{ userId: string; tokenVersion: number }>).value
+    ).toEqual({ userId, tokenVersion: 0 });
 
     expect(rejected).toHaveLength(9);
     for (const r of rejected) {

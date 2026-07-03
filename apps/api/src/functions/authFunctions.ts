@@ -91,6 +91,11 @@ interface VerificationState {
   expiresAt: string;
 }
 
+interface ShortLivedTokenConsumeResult {
+  userId: string;
+  tokenVersion: number;
+}
+
 function hashEmailPrefix(email: string): string {
   return createHash("sha256").update(email.toLowerCase()).digest("hex").slice(0, 8);
 }
@@ -119,6 +124,12 @@ async function storeVerificationToken(
   const expiresAt = new Date(Date.now() + ttlHours * 3_600_000).toISOString();
   const tokenHash = createHash("sha256").update(rawToken).digest("hex");
   const tokenDoc: VerificationState = { token: rawToken, createdAt, expiresAt };
+  const authPath = `auth/${userId}.json`;
+  const credential = await readJson(
+    getPrivateBlobClient(authPath),
+    AuthCredentialSchema,
+    authPath,
+  );
 
   // CREATE-ONCE: token path is sha256-keyed, collision means token already issued
   await writePrivateBlob(`auth/tokens/${tokenHash}.json`, {
@@ -126,6 +137,7 @@ async function storeVerificationToken(
     type: "verify",
     createdAt,
     expiresAt,
+    tokenVersion: credential.tokenVersion ?? 0,
   });
   // CREATE-ONCE: token path is sha256-keyed, collision means token already issued
   await writePrivateBlob(verificationStatePath(userId), tokenDoc);
@@ -258,7 +270,7 @@ async function verifyEmail(
   const token = req.query.get("token");
   if (!token) return badRequest("Missing token");
 
-  let result: { userId: string };
+  let result: ShortLivedTokenConsumeResult;
   try {
     result = await consumeShortLivedToken(token, "verify");
   } catch (err: unknown) {
@@ -283,6 +295,10 @@ async function verifyEmail(
       );
     } catch {
       throw new HttpError(400, "INVALID_TOKEN", "Invalid token");
+    }
+
+    if ((cred.tokenVersion ?? 0) !== result.tokenVersion) {
+      throw new HttpError(400, "INVALID_TOKEN", "Invalid or expired token");
     }
 
     cred.emailVerified = true;
@@ -563,7 +579,7 @@ async function resetPassword(
   }
   const newPassword = body.newPassword;
 
-  let result: { userId: string };
+  let result: ShortLivedTokenConsumeResult;
   try {
     result = await consumeShortLivedToken(body.token, "reset");
   } catch (err: unknown) {
@@ -588,6 +604,10 @@ async function resetPassword(
       );
     } catch {
       throw new HttpError(400, "INVALID_TOKEN", "Invalid token");
+    }
+
+    if ((cred.tokenVersion ?? 0) !== result.tokenVersion) {
+      throw new HttpError(400, "INVALID_TOKEN", "Invalid or expired token");
     }
 
     cred.passwordHash = await hashPassword(newPassword);
