@@ -102,6 +102,19 @@ async function seedExpiredVerifyToken(
   });
 }
 
+async function seedVerifyToken(
+  userId: string,
+  token: string,
+  tokenVersion?: number,
+): Promise<void> {
+  await writePrivateJson(`auth/tokens/${sha256Hex(token)}.json`, {
+    userId,
+    type: "verify",
+    expiresAt: new Date(Date.now() + 24 * 3_600_000).toISOString(),
+    ...(tokenVersion !== undefined && { tokenVersion }),
+  });
+}
+
 const PASSWORD = "TestPass123!";
 
 let ipCounter = 0;
@@ -230,6 +243,75 @@ describe("auth flow integration", () => {
     });
     expect(second.status).toBe(400);
     expect(second.jsonBody?.["code"]).toBe("INVALID_TOKEN");
+  });
+
+  test("(5a) verify token minted at current tokenVersion succeeds", async () => {
+    const { user, credential } = await makeUser({ emailVerified: false });
+    await writePrivateJson(`auth/${user.id}.json`, {
+      ...credential,
+      tokenVersion: 2,
+    });
+    const token = await generateShortLivedToken(user.id, "verify", 24);
+
+    const res = await invoke("authVerifyEmail", {
+      method: "GET",
+      query: { token },
+      headers: { "x-forwarded-for": uniqueIp() },
+    });
+
+    expect(res.status).toBe(200);
+    const cred = await readPrivateJson<AuthCredential>(`auth/${user.id}.json`);
+    expect(cred?.emailVerified).toBe(true);
+    expect(cred?.tokenVersion).toBe(2);
+  });
+
+  test("(5b) verify token consumed after tokenVersion bump -> 400 INVALID_TOKEN; email stays unverified", async () => {
+    const { user, credential } = await makeUser({ emailVerified: false });
+    const state = await readPrivateJson<VerificationState>(
+      verificationStatePath(user.id),
+    );
+    const token = state?.token;
+    expect(token).toBeTruthy();
+    await writePrivateJson(`auth/${user.id}.json`, {
+      ...credential,
+      tokenVersion: 1,
+    });
+
+    const res = await invoke("authVerifyEmail", {
+      method: "GET",
+      query: { token: String(token) },
+      headers: { "x-forwarded-for": uniqueIp() },
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.jsonBody?.["code"]).toBe("INVALID_TOKEN");
+    const cred = await readPrivateJson<AuthCredential>(`auth/${user.id}.json`);
+    expect(cred?.emailVerified).toBe(false);
+    expect(cred?.tokenVersion).toBe(1);
+    const tokenDoc = await readPrivateJson<AuthToken>(
+      `auth/tokens/${sha256Hex(String(token))}.json`,
+    );
+    expect(tokenDoc?.consumed).toBe(true);
+  });
+
+  test("(5c) legacy verify token without tokenVersion works while auth tokenVersion is 0", async () => {
+    const { user, credential } = await makeUser({ emailVerified: false });
+    await writePrivateJson(`auth/${user.id}.json`, {
+      ...credential,
+      tokenVersion: 0,
+    });
+    const token = `legacy-${randomUUID()}`;
+    await seedVerifyToken(user.id, token);
+
+    const res = await invoke("authVerifyEmail", {
+      method: "GET",
+      query: { token },
+      headers: { "x-forwarded-for": uniqueIp() },
+    });
+
+    expect(res.status).toBe(200);
+    const cred = await readPrivateJson<AuthCredential>(`auth/${user.id}.json`);
+    expect(cred?.emailVerified).toBe(true);
   });
 
   test("(6) verify(expired token) -> 400 INVALID_TOKEN; underlying blob untouched", async () => {
@@ -441,6 +523,30 @@ describe("auth flow integration", () => {
     expect(statuses).toEqual([200, 400]);
     const failed = [a, b].find((r) => r.status === 400)!;
     expect(failed.jsonBody?.["code"]).toBe("INVALID_TOKEN");
+  });
+
+  test("(13a) reset token minted before tokenVersion bump -> 400 INVALID_TOKEN; password unchanged", async () => {
+    const { user, credential } = await makeUser({ emailVerified: true });
+    const resetToken = await generateShortLivedToken(user.id, "reset", 1);
+    await writePrivateJson(`auth/${user.id}.json`, {
+      ...credential,
+      tokenVersion: 1,
+    });
+
+    const res = await invoke("authResetPassword", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+      body: { token: resetToken, newPassword: "ShouldNotApply123!" },
+    });
+
+    expect(res.status).toBe(400);
+    expect(res.jsonBody?.["code"]).toBe("INVALID_TOKEN");
+    const oldLogin = await invoke("authLogin", {
+      method: "POST",
+      headers: { "x-forwarded-for": uniqueIp() },
+      body: { email: user.email, password: PASSWORD },
+    });
+    expect(oldLogin.status).toBe(200);
   });
 
   test("(14) register burst: 4th call from same IP -> 429 RATE_LIMITED + Retry-After header", async () => {

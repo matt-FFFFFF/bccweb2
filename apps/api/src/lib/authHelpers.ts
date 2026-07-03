@@ -9,6 +9,7 @@ import crypto from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import * as z from "zod/v4";
+import { AuthCredentialSchema } from "@bccweb/schemas";
 import { getPrivateBlobClient, getPrivateBlockBlobClient, writePrivateBlob } from "./blob.js";
 import { readJson } from "./blobJson.js";
 
@@ -27,6 +28,7 @@ export interface AuthToken {
   userId: string;
   type: "verify" | "reset";
   expiresAt: string;
+  tokenVersion?: number;
   consumed?: true;
 }
 
@@ -134,8 +136,14 @@ export async function generateShortLivedToken(
   const expiresAt = new Date(
     Date.now() + ttlHours * 3_600_000
   ).toISOString();
+  const authPath = `auth/${userId}.json`;
+  const credential = await readJson(
+    getPrivateBlobClient(authPath),
+    AuthCredentialSchema,
+    authPath,
+  );
 
-  const tokenDoc: AuthToken = { userId, type, expiresAt };
+  const tokenDoc: AuthToken = { userId, type, expiresAt, tokenVersion: credential.tokenVersion ?? 0 };
   await writePrivateBlob(`auth/tokens/${hash}.json`, tokenDoc);
   return raw;
 }
@@ -143,7 +151,7 @@ export async function generateShortLivedToken(
 export async function consumeShortLivedToken(
   raw: string,
   expectedType: "verify" | "reset"
-): Promise<{ userId: string }> {
+): Promise<{ userId: string; tokenVersion: number }> {
   const hash = crypto.createHash("sha256").update(raw).digest("hex");
   const blobPath = `auth/tokens/${hash}.json`;
   const blockBlobClient = getPrivateBlockBlobClient(blobPath);
@@ -194,7 +202,7 @@ export async function consumeShortLivedToken(
     throw new Error(`Failed to consume token blob auth/tokens/${hash}.json: ${String(err)}`);
   }
 
-  return { userId: tokenDoc.userId };
+  return { userId: tokenDoc.userId, tokenVersion: tokenDoc.tokenVersion ?? 0 };
 }
 
 // ─── User index ───────────────────────────────────────────────────────────────
