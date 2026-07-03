@@ -4,7 +4,7 @@ import { randomUUID } from "crypto";
 import type { Club, ClubSummary } from "@bccweb/types";
 import { ClubSchema, ClubSummarySchema, ClubTeamSummarySchema, SeasonClubSchema, SeasonSummarySchema, SiteSummarySchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
-import { ensureJsonIndexBlob, getBlobClient, getPrivateBlobClient, withLeaseRetry } from "../lib/blob.js";
+import { ensureJsonIndexBlob, getBlobClient, getPrivateBlobClient, withLeaseRetry, withPrivateLeaseRetry } from "../lib/blob.js";
 import { readJson, writeJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
@@ -119,20 +119,6 @@ async function updateClub(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_CLUB_ID", "Missing club id");
 
-  let existing: Club;
-  try {
-    existing = await readJson(
-      getPrivateBlobClient(`clubs/${id}.json`),
-      ClubSchema,
-      `clubs/${id}.json`,
-    );
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(404, "NOT_FOUND", "Club not found");
-    }
-    throw new HttpError(500, "INTERNAL");
-  }
-
   let body: ClubPatch;
   try {
     body = (await req.json()) as ClubPatch;
@@ -140,15 +126,30 @@ async function updateClub(
     throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
-  const updated: Club = {
-    ...existing,
-    name: body.name?.trim() ?? existing.name,
-    sites: body.sites ?? existing.sites,
-    id: existing.id, // immutable
-  };
-
-  await writePrivateJson(`clubs/${id}.json`, ClubSchema, updated);
-  await upsertClubInIndex({ id, name: updated.name });
+  let updated: Club;
+  try {
+    updated = await withPrivateLeaseRetry(`clubs/${id}.json`, async (leaseId) => {
+      const existing = await readJson(
+        getPrivateBlobClient(`clubs/${id}.json`),
+        ClubSchema,
+        `clubs/${id}.json`,
+      );
+      const next: Club = {
+        ...existing,
+        name: body.name?.trim() ?? existing.name,
+        sites: body.sites ?? existing.sites,
+        id: existing.id, // immutable
+      };
+      await writePrivateJson(`clubs/${id}.json`, ClubSchema, next, leaseId);
+      return next;
+    });
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Club not found");
+    }
+    throw new HttpError(500, "INTERNAL");
+  }
+  await upsertClubInIndex({ id, name: updated.name }, false);
 
   return { status: 200, jsonBody: updated };
 }
@@ -183,7 +184,9 @@ async function deleteClub(
   await assertClubHasNoReferences(id);
 
   await removeClubFromIndex(id);
-  await getPrivateBlobClient(`clubs/${id}.json`).deleteIfExists();
+  await withPrivateLeaseRetry(`clubs/${id}.json`, async (leaseId) => {
+    await getPrivateBlobClient(`clubs/${id}.json`).deleteIfExists({ conditions: { leaseId } });
+  });
 
   return { status: 204 };
 }
@@ -241,7 +244,7 @@ async function seasonClubReferencesClub(season: { year: number }, clubId: string
 
 // ─── Index helper ─────────────────────────────────────────────────────────────
 
-async function upsertClubInIndex(summary: ClubSummary): Promise<void> {
+async function upsertClubInIndex(summary: ClubSummary, insertIfMissing = true): Promise<void> {
   let index: ClubSummary[] = [];
   try {
     index = await readJson(
@@ -249,19 +252,27 @@ async function upsertClubInIndex(summary: ClubSummary): Promise<void> {
       ClubsIndexSchema,
       "clubs.json",
     );
-  } catch {
+  } catch (err: unknown) {
+    if (!insertIfMissing && [409, 412].includes((err as { statusCode?: number }).statusCode ?? 0)) return;
     // index may not exist yet
   }
 
   const idx = index.findIndex((c) => c.id === summary.id);
   if (idx >= 0) {
     index[idx] = summary;
+  } else if (!insertIfMissing) {
+    return;
   } else {
     index.push(summary);
   }
 
   index.sort((a, b) => a.name.localeCompare(b.name));
-  await writeJson("clubs.json", ClubsIndexSchema, index);
+  try {
+    await writeJson("clubs.json", ClubsIndexSchema, index);
+  } catch (err: unknown) {
+    if (!insertIfMissing && [409, 412].includes((err as { statusCode?: number }).statusCode ?? 0)) return;
+    throw err;
+  }
 }
 
 async function removeClubFromIndex(id: string): Promise<void> {
