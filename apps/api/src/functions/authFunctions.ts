@@ -24,8 +24,10 @@ import {
   getPrivateBlobClient,
   writePrivateBlob,
   withPrivateLease,
+  withPrivateLeaseRetry,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
+import { getTelemetryClient } from "../lib/telemetry.js";
 import { isUserDeleted } from "../lib/accountMutation.js";
 
 const VerificationStateSchema = z.object({
@@ -673,6 +675,33 @@ async function resetPassword(
   };
 }
 
+// ─── session invalidation helper ─────────────────────────────────────────────
+
+/**
+ * issue #122: best-effort invalidation of the caller's LIVE access token by bumping
+ * user.sessionVersion. The refresh token is already reliably revoked (cred.tokenVersion) by the
+ * caller; this additionally kills the access token on its next request. Best-effort: a missing
+ * user blob (404) = nothing to invalidate; any other failure is logged + emitted as
+ * `session.invalidate.partial` and swallowed so the primary op (logout / reset) still succeeds.
+ */
+async function bumpSessionVersionBestEffort(userId: string, op: "logout" | "reset"): Promise<void> {
+  const userPath = `users/${userId}.json`;
+  try {
+    await withPrivateLeaseRetry(userPath, async (leaseId) => {
+      const user = await readJson(getPrivateBlobClient(userPath), UserSchema, userPath);
+      user.sessionVersion = (user.sessionVersion ?? 0) + 1;
+      await writePrivateJson(userPath, UserSchema, user, leaseId);
+    });
+  } catch (err) {
+    if ((err as { statusCode?: number }).statusCode === 404) return;
+    console.warn(`[auth] session.invalidate.partial op=${op} userId=${userId}`, err);
+    getTelemetryClient()?.trackEvent({
+      name: "session.invalidate.partial",
+      properties: { op, userId },
+    });
+  }
+}
+
 // ─── POST /api/auth/logout ────────────────────────────────────────────────────
 
 async function logout(
@@ -709,6 +738,9 @@ async function logout(
     }
     throw err;
   }
+
+  // issue #122: additionally invalidate the live access token (best-effort; see helper).
+  await bumpSessionVersionBestEffort(caller.userId, "logout");
 
   return { status: 204 };
 }
