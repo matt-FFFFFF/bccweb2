@@ -47,6 +47,19 @@ describe("pilot auto-link via private pilot-email-index.json", () => {
     expect(user.roles).toEqual([]);
   });
 
+  it("does not adopt pilotId when the email index points at a missing pilot blob", async () => {
+    const ghostPilotId = randomUUID();
+    const userId = randomUUID();
+    const email = `missing-pilot-${userId}@example.com`;
+
+    await writePrivateJson("pilot-email-index.json", { [email]: ghostPilotId });
+
+    const user = await getOrCreateUser(userId, email);
+
+    expect(user.pilotId).toBeNull();
+    expect(user.roles).toEqual([]);
+  });
+
   it("public pilots.json has no email, bhpaNumber, or userId after makePilot", async () => {
     const pilot = await makePilot({});
     const index = await readPublicJson<PilotSummary[]>("pilots.json");

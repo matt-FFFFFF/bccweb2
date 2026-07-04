@@ -112,7 +112,6 @@ export async function getOrCreateUser(
       );
       const foundPilotId = emailIndex[email.toLowerCase()];
       if (foundPilotId) {
-        pilotId = foundPilotId;
         try {
           const pilotPath = `pilots/${foundPilotId}.json`;
           const pilot = await readJson(
@@ -120,9 +119,10 @@ export async function getOrCreateUser(
             PilotSchema,
             pilotPath,
           );
+          pilotId = foundPilotId;
           clubId = pilot.currentClub?.id ?? null;
         } catch {
-          // ignore
+          // issue #126: an email claim can briefly exist before the pilot blob is durable.
         }
       }
     } catch {
@@ -193,6 +193,31 @@ export async function updatePilotEmailIndex(email: string, pilotId: string): Pro
     const owner = index[key];
     if (owner && owner !== pilotId) throw new EmailIndexConflictError(owner);
     index[key] = pilotId;
+    await writePrivateJson(indexPath, StringRecordSchema, index, leaseId);
+  });
+}
+
+export async function releasePilotEmailClaim(email: string, pilotId: string): Promise<void> {
+  const indexPath = "pilot-email-index.json";
+  await ensurePrivateJsonIndexBlob(indexPath, "{}");
+
+  await withPrivateLeaseRetry(indexPath, async (leaseId) => {
+    let index: PilotEmailIndex = {};
+    try {
+      index = await readJson(
+        getPrivateBlobClient(indexPath),
+        StringRecordSchema,
+        indexPath,
+      );
+    } catch (err: unknown) {
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      if (statusCode === 404) return;
+      throw err;
+    }
+
+    const key = email.toLowerCase();
+    if (index[key] !== pilotId) return;
+    delete index[key];
     await writePrivateJson(indexPath, StringRecordSchema, index, leaseId);
   });
 }
