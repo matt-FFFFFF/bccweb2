@@ -39,6 +39,7 @@ import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   EmailIndexConflictError,
   getCallerIdentity,
+  releasePilotEmailClaim,
   unauthorizedResponse,
   updatePilotEmailIndex,
 } from "../lib/auth.js";
@@ -166,8 +167,7 @@ async function createMyPilot(
     profileUpdatedAt: now,
   };
 
-  await writePrivateJson(`pilots/${id}.json`, PilotSchema, pilot);
-  await upsertPilotInIndex(pilot);
+  // Claim the unique email FIRST so a conflict aborts with zero side effects (issue #126).
   try {
     await updatePilotEmailIndex(caller.email, id);
   } catch (err: unknown) {
@@ -180,7 +180,18 @@ async function createMyPilot(
     }
     throw err;
   }
-  await linkUserToPilot(caller.userId, id, body.currentClub?.id ?? null);
+
+  // Durable writes after the claim. On any failure, release the reservation and
+  // drop the private blob so a retry starts clean (issue #126).
+  try {
+    await writePrivateJson(`pilots/${id}.json`, PilotSchema, pilot);
+    await linkUserToPilot(caller.userId, id, body.currentClub?.id ?? null);
+    await upsertPilotInIndex(pilot);
+  } catch (err: unknown) {
+    await releasePilotEmailClaim(caller.email, id).catch(() => {});
+    await getPrivateBlobClient(`pilots/${id}.json`).deleteIfExists().catch(() => {});
+    throw err;
+  }
 
   return { status: 201, jsonBody: pilot };
 }
