@@ -669,6 +669,9 @@ async function resetPassword(
     await writePrivateJson(credPath, AuthCredentialSchema, cred, leaseId);
   });
 
+  // issue #122: additionally invalidate the user's live access token (best-effort; see helper).
+  await bumpSessionVersionBestEffort(result.userId, "reset");
+
   return {
     status: 200,
     jsonBody: { message: "Password reset successfully. You can now sign in." },
