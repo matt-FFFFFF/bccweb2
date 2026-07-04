@@ -133,6 +133,8 @@ describe("AdminUsers (Users & Pilots)", () => {
       expect(api.put).toHaveBeenCalledWith("manage/users/u1/email", { email: "new@example.com" });
     });
 
+    expect(screen.getByText(/signed out and emailed a verification link/i)).toBeInTheDocument();
+
     // emailVerified flipped false locally → Verify button THEN appears.
     expect(await screen.findByRole("button", { name: "Verify email" })).toBeInTheDocument();
   });
