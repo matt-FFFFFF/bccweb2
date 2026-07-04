@@ -292,6 +292,6 @@ export async function sendVerificationEmail(email: string, token: string): Promi
       text: verificationEmailText(verifyUrl),
     });
   } catch (err) {
-    console.error("[auth/register] Failed to send verification email:", err);
+    console.error("[auth] Failed to send verification email:", err);
   }
 }
