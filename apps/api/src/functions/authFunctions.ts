@@ -473,7 +473,19 @@ async function login(
   }
 
   await recordLoginSuccess(userId);
-  const accessToken = signAccessToken(userId, email);
+
+  // issue #122: bind the token to the user's current sessionVersion. This is the ONLY new blob
+  // read added by this change, and it is on the rare login path — NOT the per-request hot path.
+  let sessionVersion = 0;
+  try {
+    const userPath = `users/${userId}.json`;
+    const user = await readJson(getPrivateBlobClient(userPath), UserSchema, userPath);
+    sessionVersion = user.sessionVersion ?? 0;
+  } catch (err) {
+    if ((err as { statusCode?: number }).statusCode !== 404) throw err;
+    // no user blob yet → sessionVersion 0
+  }
+  const accessToken = signAccessToken(userId, email, sessionVersion);
   const refreshToken = signRefreshToken(userId, cred.tokenVersion ?? 0);
 
   return {
@@ -539,7 +551,7 @@ async function refresh(
     throw err;
   }
 
-  const accessToken = signAccessToken(userId, user.email);
+  const accessToken = signAccessToken(userId, user.email, user.sessionVersion ?? 0);
   return { status: 200, jsonBody: { accessToken, expiresIn: 3600 } };
 }
 

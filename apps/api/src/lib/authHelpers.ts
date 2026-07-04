@@ -67,9 +67,9 @@ function getJwtSecret(): string {
   return s;
 }
 
-export function signAccessToken(userId: string, email: string): string {
+export function signAccessToken(userId: string, email: string, sessionVersion: number): string {
   return jwt.sign(
-    { sub: userId, email, type: "access" },
+    { sub: userId, email, type: "access", sessionVersion },
     getJwtSecret(),
     { algorithm: "HS256", expiresIn: "1h" }
   );

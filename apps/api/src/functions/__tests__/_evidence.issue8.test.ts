@@ -135,7 +135,7 @@ function makeReq(user: TestUser, request: HarnessRequest): HttpRequest {
   return {
     method: request.method,
     headers: new Headers({
-      authorization: `Bearer ${signAccessToken(user.id, user.email)}`,
+      authorization: `Bearer ${signAccessToken(user.id, user.email, 0)}`,
       "content-type": "application/json",
       "x-forwarded-for": randomIp(),
     }),
