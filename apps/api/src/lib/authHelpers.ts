@@ -5,7 +5,7 @@
  * short-lived token generation/consumption, and user-index lookups.
  */
 
-import crypto from "crypto";
+import crypto, { createHash, randomBytes } from "crypto";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import * as z from "zod/v4";
@@ -13,6 +13,7 @@ import { AuthCredentialSchema } from "@bccweb/schemas";
 import { getPrivateBlobClient, getPrivateBlockBlobClient, writePrivateBlob } from "./blob.js";
 import { readJson } from "./blobJson.js";
 import { isUserDeleted } from "./accountMutation.js";
+import { sendEmail, verificationEmailHtml, verificationEmailText } from "./email.js";
 
 const StringRecordSchema = z.record(z.string(), z.string());
 
@@ -67,9 +68,9 @@ function getJwtSecret(): string {
   return s;
 }
 
-export function signAccessToken(userId: string, email: string): string {
+export function signAccessToken(userId: string, email: string, sessionVersion: number): string {
   return jwt.sign(
-    { sub: userId, email, type: "access" },
+    { sub: userId, email, type: "access", sessionVersion },
     getJwtSecret(),
     { algorithm: "HS256", expiresIn: "1h" }
   );
@@ -233,4 +234,64 @@ export function getAppUrl(): string {
   const hostname = process.env["WEBSITE_HOSTNAME"];
   if (hostname) return `https://${hostname}`;
   return "http://localhost:5173";
+}
+
+// ─── Email-verification tokens ──────────────────────────────────────────────
+
+export interface VerificationState {
+  token: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
+export function verificationStatePath(userId: string): string {
+  return `auth/verification-state/${userId}.json`;
+}
+
+export async function storeVerificationToken(
+  userId: string,
+  rawToken: string,
+  ttlHours: number
+): Promise<VerificationState> {
+  const createdAt = new Date().toISOString();
+  const expiresAt = new Date(Date.now() + ttlHours * 3_600_000).toISOString();
+  const tokenHash = createHash("sha256").update(rawToken).digest("hex");
+  const tokenDoc: VerificationState = { token: rawToken, createdAt, expiresAt };
+  const authPath = `auth/${userId}.json`;
+  const credential = await readJson(
+    getPrivateBlobClient(authPath),
+    AuthCredentialSchema,
+    authPath,
+  );
+
+  // CREATE-ONCE: token path is sha256-keyed, collision means token already issued
+  await writePrivateBlob(`auth/tokens/${tokenHash}.json`, {
+    userId,
+    type: "verify",
+    createdAt,
+    expiresAt,
+    tokenVersion: credential.tokenVersion ?? 0,
+  });
+  // CREATE-ONCE: token path is sha256-keyed, collision means token already issued
+  await writePrivateBlob(verificationStatePath(userId), tokenDoc);
+  return tokenDoc;
+}
+
+export async function createVerificationToken(userId: string, ttlHours: number): Promise<VerificationState> {
+  const rawToken = randomBytes(32).toString("hex");
+  return storeVerificationToken(userId, rawToken, ttlHours);
+}
+
+export async function sendVerificationEmail(email: string, token: string): Promise<void> {
+  const verifyUrl = `${getAppUrl()}/verify-email?token=${token}`;
+  try {
+    await sendEmail({
+      to: [email],
+      subject: "Verify your BCC account",
+      html: verificationEmailHtml(verifyUrl),
+      text: verificationEmailText(verifyUrl),
+    });
+  } catch (err) {
+    console.error("[auth] Failed to send verification email:", err);
+  }
 }

@@ -60,6 +60,7 @@ export const UserSchema = z
     acceptedTsCsAt: lenientOptional(z.string()),
     acceptedTsCsIp: lenientOptional(NullableStringSchema),
     acceptedTsCsVersion: lenientOptional(z.number()),
+    sessionVersion: lenientOptional(z.number().int().nonnegative()),
   })
   .strip();
 

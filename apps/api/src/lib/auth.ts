@@ -33,6 +33,8 @@ interface AccessTokenClaims {
   sub: string;   // user UUID
   email: string;
   type: "access";
+  // issue #122: optional for back-compat — a pre-deploy token has no claim and is treated as 0.
+  sessionVersion?: number;
   iat: number;
   exp: number;
 }
@@ -222,6 +224,13 @@ export async function getCallerIdentity(
   const user = await getOrCreateUser(claims.sub, claims.email, {
     onIndexConflict: "swallow",
   });
+
+  // issue #122: reject a token whose session was invalidated (email-change / logout / reset
+  // bumps user.sessionVersion). Uses the `user` already read above → 0 extra blob ops on the
+  // per-request auth hot path.
+  if ((claims.sessionVersion ?? 0) !== (user.sessionVersion ?? 0)) {
+    return null;
+  }
 
   return {
     userId: claims.sub,

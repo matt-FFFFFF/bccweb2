@@ -78,13 +78,17 @@ export function makeAuthRequest(
     query?: Record<string, string>;
     body?: unknown;
     headers?: Record<string, string>;
+    // issue #122: token is bound to this sessionVersion (default 0 keeps every existing
+    // makeAuthRequest(userId, email) caller minting a version-0 token — the back-compat case).
+    sessionVersion?: number;
   } = {},
 ): MockHttpRequest {
-  const token = signAccessToken(userId, email);
+  const { sessionVersion = 0, ...requestOptions } = options;
+  const token = signAccessToken(userId, email, sessionVersion);
   return new MockHttpRequest({
-    ...options,
+    ...requestOptions,
     headers: {
-      ...options.headers,
+      ...requestOptions.headers,
       authorization: `Bearer ${token}`,
     },
   });

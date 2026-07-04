@@ -16,16 +16,17 @@ import {
   HttpResponseInit,
   InvocationContext,
 } from "@azure/functions";
-import { createHash, randomBytes, randomUUID } from "crypto";
+import { createHash, randomUUID } from "crypto";
 import * as z from "zod/v4";
 import type { User } from "@bccweb/types";
 import { AuthCredentialSchema, UserSchema } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
-  writePrivateBlob,
   withPrivateLease,
+  withPrivateLeaseRetry,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
+import { getTelemetryClient } from "../lib/telemetry.js";
 import { isUserDeleted } from "../lib/accountMutation.js";
 
 const VerificationStateSchema = z.object({
@@ -55,6 +56,10 @@ import {
   consumeShortLivedToken,
   lookupUserByEmail,
   getAppUrl,
+  createVerificationToken,
+  sendVerificationEmail,
+  verificationStatePath,
+  type VerificationState,
 } from "../lib/authHelpers.js";
 import {
   checkAccountLockout,
@@ -91,12 +96,6 @@ const REGISTER_ACCEPTED_RESPONSE: HttpResponseInit = {
 
 const VERIFICATION_TOKEN_REISSUE_WINDOW_MS = 60_000;
 
-interface VerificationState {
-  token: string;
-  createdAt: string;
-  expiresAt: string;
-}
-
 interface ShortLivedTokenConsumeResult {
   userId: string;
   tokenVersion: number;
@@ -104,10 +103,6 @@ interface ShortLivedTokenConsumeResult {
 
 function hashEmailPrefix(email: string): string {
   return createHash("sha256").update(email.toLowerCase()).digest("hex").slice(0, 8);
-}
-
-function verificationStatePath(userId: string): string {
-  return `auth/verification-state/${userId}.json`;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -121,60 +116,12 @@ async function ensureMinimumDuration(startedAtMs: number, minimumMs: number): Pr
   }
 }
 
-async function storeVerificationToken(
-  userId: string,
-  rawToken: string,
-  ttlHours: number
-): Promise<VerificationState> {
-  const createdAt = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + ttlHours * 3_600_000).toISOString();
-  const tokenHash = createHash("sha256").update(rawToken).digest("hex");
-  const tokenDoc: VerificationState = { token: rawToken, createdAt, expiresAt };
-  const authPath = `auth/${userId}.json`;
-  const credential = await readJson(
-    getPrivateBlobClient(authPath),
-    AuthCredentialSchema,
-    authPath,
-  );
-
-  // CREATE-ONCE: token path is sha256-keyed, collision means token already issued
-  await writePrivateBlob(`auth/tokens/${tokenHash}.json`, {
-    userId,
-    type: "verify",
-    createdAt,
-    expiresAt,
-    tokenVersion: credential.tokenVersion ?? 0,
-  });
-  // CREATE-ONCE: token path is sha256-keyed, collision means token already issued
-  await writePrivateBlob(verificationStatePath(userId), tokenDoc);
-  return tokenDoc;
-}
-
-async function createVerificationToken(userId: string, ttlHours: number): Promise<VerificationState> {
-  const rawToken = randomBytes(32).toString("hex");
-  return storeVerificationToken(userId, rawToken, ttlHours);
-}
-
 async function loadVerificationState(userId: string): Promise<VerificationState | null> {
   const path = verificationStatePath(userId);
   try {
     return await readJson(getPrivateBlobClient(path), VerificationStateSchema, path);
   } catch {
     return null;
-  }
-}
-
-async function sendVerificationEmail(email: string, token: string): Promise<void> {
-  const verifyUrl = `${getAppUrl()}/verify-email?token=${token}`;
-  try {
-    await sendEmail({
-      to: [email],
-      subject: "Verify your BCC account",
-      html: verificationEmailHtml(verifyUrl),
-      text: verificationEmailText(verifyUrl),
-    });
-  } catch (err) {
-    console.error("[auth/register] Failed to send verification email:", err);
   }
 }
 
@@ -259,6 +206,10 @@ async function register(
         acceptedTsCsAt: acceptedAt,
         acceptedTsCsIp: extractIp(req),
         acceptedTsCsVersion,
+        // Explicit (not covered by `...user`): lenientOptional makes sessionVersion a required
+        // `number | undefined` key in UserSchema's inferred type, so this inline writePrivateJson
+        // literal must carry it. Preserves the user's current value (undefined for a new user).
+        sessionVersion: user.sessionVersion,
       });
 
       const tokenDoc = await createVerificationToken(userId, 24);
@@ -469,7 +420,19 @@ async function login(
   }
 
   await recordLoginSuccess(userId);
-  const accessToken = signAccessToken(userId, email);
+
+  // issue #122: bind the token to the user's current sessionVersion. This is the ONLY new blob
+  // read added by this change, and it is on the rare login path — NOT the per-request hot path.
+  let sessionVersion = 0;
+  try {
+    const userPath = `users/${userId}.json`;
+    const user = await readJson(getPrivateBlobClient(userPath), UserSchema, userPath);
+    sessionVersion = user.sessionVersion ?? 0;
+  } catch (err) {
+    if ((err as { statusCode?: number }).statusCode !== 404) throw err;
+    // no user blob yet → sessionVersion 0
+  }
+  const accessToken = signAccessToken(userId, email, sessionVersion);
   const refreshToken = signRefreshToken(userId, cred.tokenVersion ?? 0);
 
   return {
@@ -535,7 +498,7 @@ async function refresh(
     throw err;
   }
 
-  const accessToken = signAccessToken(userId, user.email);
+  const accessToken = signAccessToken(userId, user.email, user.sessionVersion ?? 0);
   return { status: 200, jsonBody: { accessToken, expiresIn: 3600 } };
 }
 
@@ -651,10 +614,40 @@ async function resetPassword(
     await writePrivateJson(credPath, AuthCredentialSchema, cred, leaseId);
   });
 
+  // issue #122: additionally invalidate the user's live access token (best-effort; see helper).
+  await bumpSessionVersionBestEffort(result.userId, "reset");
+
   return {
     status: 200,
     jsonBody: { message: "Password reset successfully. You can now sign in." },
   };
+}
+
+// ─── session invalidation helper ─────────────────────────────────────────────
+
+/**
+ * issue #122: best-effort invalidation of the caller's LIVE access token by bumping
+ * user.sessionVersion. The refresh token is already reliably revoked (cred.tokenVersion) by the
+ * caller; this additionally kills the access token on its next request. Best-effort: a missing
+ * user blob (404) = nothing to invalidate; any other failure is logged + emitted as
+ * `session.invalidate.partial` and swallowed so the primary op (logout / reset) still succeeds.
+ */
+async function bumpSessionVersionBestEffort(userId: string, op: "logout" | "reset"): Promise<void> {
+  const userPath = `users/${userId}.json`;
+  try {
+    await withPrivateLeaseRetry(userPath, async (leaseId) => {
+      const user = await readJson(getPrivateBlobClient(userPath), UserSchema, userPath);
+      user.sessionVersion = (user.sessionVersion ?? 0) + 1;
+      await writePrivateJson(userPath, UserSchema, user, leaseId);
+    });
+  } catch (err) {
+    if ((err as { statusCode?: number }).statusCode === 404) return;
+    console.warn(`[auth] session.invalidate.partial op=${op} userId=${userId}`, err);
+    getTelemetryClient()?.trackEvent({
+      name: "session.invalidate.partial",
+      properties: { op, userId },
+    });
+  }
 }
 
 // ─── POST /api/auth/logout ────────────────────────────────────────────────────
@@ -693,6 +686,9 @@ async function logout(
     }
     throw err;
   }
+
+  // issue #122: additionally invalidate the live access token (best-effort; see helper).
+  await bumpSessionVersionBestEffort(caller.userId, "logout");
 
   return { status: 204 };
 }

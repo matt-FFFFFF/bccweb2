@@ -113,7 +113,7 @@ export async function bootstrapAdmin(): Promise<BootstrapAdmin> {
 
   // EXCEPTION: direct write to data-private/users/<adminId>.json. The auth API requires an existing admin to grant the Admin role; no API path creates the first one. This is the only direct write permitted in seed.ts. F2 oracle allowlists this exact call site.
   await writePrivateJson(`users/${adminId}.json`, user);
-  bootstrapAdminMemo = { user, token: signAccessToken(adminId, adminEmail) };
+  bootstrapAdminMemo = { user, token: signAccessToken(adminId, adminEmail, 0) };
   return bootstrapAdminMemo;
 }
 

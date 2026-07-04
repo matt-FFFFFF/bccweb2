@@ -131,7 +131,7 @@ describe("Task 11 mutationRateLimit evidence harness", () => {
       const adminId = randomUUID();
       const email = `admin-${adminId}@example.test`;
       await seedAdminUser(adminId, email);
-      const token = signAccessToken(adminId, email);
+      const token = signAccessToken(adminId, email, 0);
 
       // Seed a valid config so updateConfig succeeds with 200 on the happy path.
       await writePrivateBlob("config.json", {
@@ -169,7 +169,7 @@ describe("Task 11 mutationRateLimit evidence harness", () => {
     const adminId = randomUUID();
     const email = `admin-${adminId}@example.test`;
     await seedAdminUser(adminId, email);
-    const token = signAccessToken(adminId, email);
+    const token = signAccessToken(adminId, email, 0);
 
     // lockRound scope-checks the round (read + organising-club guard) before
     // the rate limiter, consistent with the other coord handlers. Seed a

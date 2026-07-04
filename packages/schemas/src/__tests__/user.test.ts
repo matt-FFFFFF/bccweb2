@@ -25,6 +25,24 @@ describe("UserSchema", () => {
     expect(UserSchema.parse(validUser)).toEqual(validUser);
   });
 
+  test("preserves sessionVersion when present", () => {
+    const parsed = UserSchema.parse({ ...validUser, sessionVersion: 3 });
+
+    expect(parsed.sessionVersion).toBe(3);
+  });
+
+  test("leaves sessionVersion undefined when missing", () => {
+    const parsed = UserSchema.parse(validUser);
+
+    expect(parsed.sessionVersion).toBeUndefined();
+  });
+
+  test("heals negative sessionVersion to undefined", () => {
+    const parsed = UserSchema.parse({ ...validUser, sessionVersion: -1 });
+
+    expect(parsed.sessionVersion).toBeUndefined();
+  });
+
   test("fails when id identity field is missing", () => {
     const { id: _id, ...withoutId } = validUser;
 

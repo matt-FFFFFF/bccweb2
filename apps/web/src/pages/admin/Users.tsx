@@ -97,7 +97,7 @@ function UserEditRow({
       // so the Verify button appears without a full page refresh.
       setEmail(updated.email);
       setEmailVerified(updated.emailVerified);
-      setMsg("Verification reset — re-verify below.");
+      setMsg("Email updated. The user has been signed out and emailed a verification link at the new address. You can also verify manually below.");
       setMsgOk(true);
     } catch (ex) {
       if (ex instanceof ApiError && ex.code === "EMAIL_TAKEN") {
