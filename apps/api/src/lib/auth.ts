@@ -111,8 +111,12 @@ export async function getOrCreateUser(
           StringRecordSchema,
           "pilot-email-index.json",
         );
-      } catch {
-        return {};
+      } catch (err: unknown) {
+        // 404 = no index yet (no pilots created) → treat as empty. Any other error is
+        // transient/unexpected; rethrow so we never persist a permanently-unlinked user
+        // (issue #126 — matches the pilot-blob read below).
+        if ((err as { statusCode?: number }).statusCode === 404) return {};
+        throw err;
       }
     })();
     const foundPilotId = emailIndex[email.toLowerCase()];

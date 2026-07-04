@@ -2,7 +2,10 @@ import { randomUUID } from "crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PilotSummary, User } from "@bccweb/types";
 
-const blobJsonControl = vi.hoisted(() => ({ failPilotRead: false }));
+const blobJsonControl = vi.hoisted(() => ({
+  failEmailIndexRead: false,
+  failPilotRead: false,
+}));
 
 vi.mock("../lib/blobJson.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/blobJson.js")>();
@@ -10,6 +13,9 @@ vi.mock("../lib/blobJson.js", async (importOriginal) => {
     ...actual,
     readJson: vi.fn(
       (client: Parameters<typeof actual.readJson>[0], schema: Parameters<typeof actual.readJson>[1], path: string) => {
+        if (blobJsonControl.failEmailIndexRead && path === "pilot-email-index.json") {
+          return Promise.reject({ statusCode: 500 });
+        }
         if (blobJsonControl.failPilotRead && path.startsWith("pilots/")) {
           return Promise.reject({ statusCode: 500 });
         }
@@ -29,6 +35,7 @@ import {
 
 describe("pilot auto-link via private pilot-email-index.json", () => {
   afterEach(() => {
+    blobJsonControl.failEmailIndexRead = false;
     blobJsonControl.failPilotRead = false;
   });
 
@@ -90,6 +97,16 @@ describe("pilot auto-link via private pilot-email-index.json", () => {
 
     await writePrivateJson("pilot-email-index.json", { [email]: pilotId });
     blobJsonControl.failPilotRead = true;
+
+    await expect(getOrCreateUser(userId, email)).rejects.toMatchObject({ statusCode: 500 });
+    expect(await readPrivateJson<User>(`users/${userId}.json`)).toBeNull();
+  });
+
+  it("rethrows a transient pilot-email-index read failure and does not persist an unlinked user", async () => {
+    const userId = randomUUID();
+    const email = `transient-index-read-${userId}@example.com`;
+
+    blobJsonControl.failEmailIndexRead = true;
 
     await expect(getOrCreateUser(userId, email)).rejects.toMatchObject({ statusCode: 500 });
     expect(await readPrivateJson<User>(`users/${userId}.json`)).toBeNull();
