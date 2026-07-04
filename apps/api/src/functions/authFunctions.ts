@@ -259,6 +259,10 @@ async function register(
         acceptedTsCsAt: acceptedAt,
         acceptedTsCsIp: extractIp(req),
         acceptedTsCsVersion,
+        // Explicit (not covered by `...user`): lenientOptional makes sessionVersion a required
+        // `number | undefined` key in UserSchema's inferred type, so this inline writePrivateJson
+        // literal must carry it. Preserves the user's current value (undefined for a new user).
+        sessionVersion: user.sessionVersion,
       });
 
       const tokenDoc = await createVerificationToken(userId, 24);

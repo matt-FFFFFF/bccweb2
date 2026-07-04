@@ -77,6 +77,8 @@ export interface User {
   acceptedTsCsAt?: string;
   acceptedTsCsIp?: string | null;
   acceptedTsCsVersion?: number;
+  /** live access-token/session invalidation counter; distinct from auth.tokenVersion */
+  sessionVersion?: number;
 }
 
 export interface AdminUserView extends User {
