@@ -5,7 +5,7 @@ Azure Functions v4 API, rewriting a legacy .NET app. **All data lives in Azure
 Blob Storage — no DB.** Not yet live: no production data or deployments to
 protect, so migration/cutover concerns are forward-looking, not remediation.
 
-> **Keep this file evergreen.** Source of truth for repo conventions. If any
+> **Keep all AGENTS.md files evergreen.** Source of truth for repo conventions. If any
 > statement here no longer matches the code (stale versions, renamed/added/removed
 > modules, changed build steps or paths), VERIFY against the files and UPDATE it in
 > the same change that revealed the drift — don't just flag it. Accuracy is part of "done".
