@@ -39,6 +39,7 @@ import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
   EmailIndexConflictError,
   getCallerIdentity,
+  releasePilotEmailClaim,
   unauthorizedResponse,
   updatePilotEmailIndex,
 } from "../lib/auth.js";
@@ -166,8 +167,7 @@ async function createMyPilot(
     profileUpdatedAt: now,
   };
 
-  await writePrivateJson(`pilots/${id}.json`, PilotSchema, pilot);
-  await upsertPilotInIndex(pilot);
+  // Claim the unique email FIRST so a conflict aborts with zero side effects (issue #126).
   try {
     await updatePilotEmailIndex(caller.email, id);
   } catch (err: unknown) {
@@ -180,7 +180,21 @@ async function createMyPilot(
     }
     throw err;
   }
-  await linkUserToPilot(caller.userId, id, body.currentClub?.id ?? null);
+
+  // Durable writes after the claim, with the user link LAST so any failure leaves
+  // user.pilotId null (never half-linked to a rolled-back pilot). On failure, undo
+  // the public index entry, delete the private blob, and release the reservation so a
+  // retry starts clean (issue #126).
+  try {
+    await writePrivateJson(`pilots/${id}.json`, PilotSchema, pilot);
+    await upsertPilotInIndex(pilot);
+    await linkUserToPilot(caller.userId, id, body.currentClub?.id ?? null);
+  } catch (err: unknown) {
+    await releasePilotEmailClaim(caller.email, id).catch(() => {});
+    await removePilotFromIndex(id).catch(() => {});
+    await getPrivateBlobClient(`pilots/${id}.json`).deleteIfExists().catch(() => {});
+    throw err;
+  }
 
   return { status: 201, jsonBody: pilot };
 }
@@ -241,6 +255,30 @@ async function upsertPilotInIndex(pilot: Pilot): Promise<void> {
     // writeJson/writeBlob do not currently expose ifMatch/leaseId conditions
     // for this index slot. Schema healing applies through the readJson above.
     const content = JSON.stringify(index, null, 2);
+    await getBlockBlobClient("pilots.json").uploadData(Buffer.from(content), {
+      blobHTTPHeaders: { blobContentType: "application/json" },
+      conditions: { leaseId },
+    });
+  });
+}
+
+async function removePilotFromIndex(pilotId: string): Promise<void> {
+  await ensureJsonIndexBlob("pilots.json", "[]");
+  await withLeaseRetry("pilots.json", async (leaseId) => {
+    let index: PilotSummary[] = [];
+    try {
+      index = await readJson(
+        getBlobClient("pilots.json"),
+        PilotsIndexSchema,
+        "pilots.json",
+      );
+    } catch (err: unknown) {
+      if ((err as { statusCode?: number }).statusCode !== 404) throw err;
+      return;
+    }
+    const next = index.filter((p) => p.id !== pilotId);
+    if (next.length === index.length) return;
+    const content = JSON.stringify(next, null, 2);
     await getBlockBlobClient("pilots.json").uploadData(Buffer.from(content), {
       blobHTTPHeaders: { blobContentType: "application/json" },
       conditions: { leaseId },

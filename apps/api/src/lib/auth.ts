@@ -104,29 +104,39 @@ export async function getOrCreateUser(
     let pilotId: string | null = null;
     let clubId: string | null = null;
 
-    try {
-      const emailIndex = await readJson(
-        getPrivateBlobClient("pilot-email-index.json"),
-        StringRecordSchema,
-        "pilot-email-index.json",
-      );
-      const foundPilotId = emailIndex[email.toLowerCase()];
-      if (foundPilotId) {
-        pilotId = foundPilotId;
-        try {
-          const pilotPath = `pilots/${foundPilotId}.json`;
-          const pilot = await readJson(
-            getPrivateBlobClient(pilotPath),
-            PilotSchema,
-            pilotPath,
-          );
-          clubId = pilot.currentClub?.id ?? null;
-        } catch {
-          // ignore
-        }
+    const emailIndex = await (async (): Promise<Record<string, string>> => {
+      try {
+        return await readJson(
+          getPrivateBlobClient("pilot-email-index.json"),
+          StringRecordSchema,
+          "pilot-email-index.json",
+        );
+      } catch (err: unknown) {
+        // 404 = no index yet (no pilots created) → treat as empty. Any other error is
+        // transient/unexpected; rethrow so we never persist a permanently-unlinked user
+        // (issue #126 — matches the pilot-blob read below).
+        if ((err as { statusCode?: number }).statusCode === 404) return {};
+        throw err;
       }
-    } catch {
-      // ignore
+    })();
+    const foundPilotId = emailIndex[email.toLowerCase()];
+    if (foundPilotId) {
+      try {
+        const pilotPath = `pilots/${foundPilotId}.json`;
+        const pilot = await readJson(
+          getPrivateBlobClient(pilotPath),
+          PilotSchema,
+          pilotPath,
+        );
+        pilotId = foundPilotId;
+        clubId = pilot.currentClub?.id ?? null;
+      } catch (err: unknown) {
+        // issue #126: a 404 means the email is claimed but the pilot blob is not yet
+        // durable (claim-first in-flight window) — leave the user unlinked (auto-link is
+        // best-effort at first login). Any OTHER error is unexpected/transient; do NOT
+        // silently persist a permanently-unlinked user — rethrow so the request retries.
+        if ((err as { statusCode?: number }).statusCode !== 404) throw err;
+      }
     }
 
     const newUser: User = {
@@ -172,9 +182,10 @@ async function updateUserIndex(email: string, userId: string): Promise<void> {
   });
 }
 
-export async function updatePilotEmailIndex(email: string, pilotId: string): Promise<void> {
+export async function updatePilotEmailIndex(email: string, pilotId: string): Promise<string | undefined> {
   const indexPath = "pilot-email-index.json";
   await ensurePrivateJsonIndexBlob(indexPath, "{}");
+  let previousOwner: string | undefined;
 
   await withPrivateLeaseRetry(indexPath, async (leaseId) => {
     let index: PilotEmailIndex = {};
@@ -192,7 +203,34 @@ export async function updatePilotEmailIndex(email: string, pilotId: string): Pro
     const key = email.toLowerCase();
     const owner = index[key];
     if (owner && owner !== pilotId) throw new EmailIndexConflictError(owner);
+    previousOwner = owner;
     index[key] = pilotId;
+    await writePrivateJson(indexPath, StringRecordSchema, index, leaseId);
+  });
+  return previousOwner;
+}
+
+export async function releasePilotEmailClaim(email: string, pilotId: string): Promise<void> {
+  const indexPath = "pilot-email-index.json";
+  await ensurePrivateJsonIndexBlob(indexPath, "{}");
+
+  await withPrivateLeaseRetry(indexPath, async (leaseId) => {
+    let index: PilotEmailIndex = {};
+    try {
+      index = await readJson(
+        getPrivateBlobClient(indexPath),
+        StringRecordSchema,
+        indexPath,
+      );
+    } catch (err: unknown) {
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      if (statusCode === 404) return;
+      throw err;
+    }
+
+    const key = email.toLowerCase();
+    if (index[key] !== pilotId) return;
+    delete index[key];
     await writePrivateJson(indexPath, StringRecordSchema, index, leaseId);
   });
 }
