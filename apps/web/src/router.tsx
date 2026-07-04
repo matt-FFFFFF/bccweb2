@@ -32,6 +32,7 @@ import SeasonClubs from "./pages/admin/SeasonClubs.js";
 import PilotSeasonClubs from "./pages/admin/PilotSeasonClubs.js";
 import AdminSites from "./pages/admin/Sites.js";
 import AdminConfig from "./pages/admin/Config.js";
+import AdminManufacturers from "./pages/admin/Manufacturers.js";
 import SignToFlyWording from "./pages/admin/SignToFlyWording.js";
 import MyClub from "./pages/club/MyClub.js";
 import FirstLoginOfSeasonGate from "./components/FirstLoginOfSeasonGate.js";
@@ -96,14 +97,14 @@ function AdminMenu() {
       </button>
       {open && (
         <div className="bcc-nav__menu">
-          <NavLink to="/admin/sites" className={navLinkClass}>
-            Sites
-          </NavLink>
-          <NavLink to="/admin/users" className={navLinkClass}>
-            Users
-          </NavLink>
           <NavLink to="/admin/clubs" className={navLinkClass}>
             Clubs
+          </NavLink>
+          <NavLink to="/admin/config" className={navLinkClass}>
+            Config
+          </NavLink>
+          <NavLink to="/admin/manufacturers" className={navLinkClass}>
+            Manufacturers
           </NavLink>
           <NavLink to="/admin/seasons" className={navLinkClass}>
             Seasons
@@ -111,8 +112,11 @@ function AdminMenu() {
           <NavLink to="/admin/sign-to-fly-wording" className={navLinkClass}>
             Sign-to-fly wording
           </NavLink>
-          <NavLink to="/admin/config" className={navLinkClass}>
-            Config
+          <NavLink to="/admin/sites" className={navLinkClass}>
+            Sites
+          </NavLink>
+          <NavLink to="/admin/users" className={navLinkClass}>
+            Users
           </NavLink>
         </div>
       )}
@@ -295,6 +299,7 @@ function RoutedContent() {
           {/* Admin */}
           <Route path="/admin/users" element={<RequireAuth><Page><AdminUsers /></Page></RequireAuth>} />
           <Route path="/admin/clubs" element={<RequireAuth><Page><AdminClubs /></Page></RequireAuth>} />
+          <Route path="/admin/manufacturers" element={<RequireAuth><Page><AdminManufacturers /></Page></RequireAuth>} />
           <Route path="/admin/seasons" element={<RequireAuth><Page><AdminSeasons /></Page></RequireAuth>} />
           <Route path="/admin/seasons/:year/clubs" element={<RequireAuth><Page><SeasonClubs /></Page></RequireAuth>} />
           <Route path="/admin/pilot-season-clubs" element={<RequireAuth><Page><PilotSeasonClubs /></Page></RequireAuth>} />

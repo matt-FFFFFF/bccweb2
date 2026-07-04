@@ -53,7 +53,7 @@ function menuLinkTexts(): string[] {
   return Array.from(getMenu().querySelectorAll("a")).map((a) => a.textContent?.trim() ?? "");
 }
 
-const EXPECTED_ADMIN_LINKS = ["Sites", "Users", "Clubs", "Seasons", "Sign-to-fly wording", "Config"];
+const EXPECTED_ADMIN_LINKS = ["Clubs", "Config", "Manufacturers", "Seasons", "Sign-to-fly wording", "Sites", "Users"];
 
 const admin = () => identityWithRoles(["Admin"], "admin@bcc.test");
 
@@ -73,7 +73,7 @@ describe("Admin nav dropdown", () => {
     expect(screen.queryByRole("link", { name: "Sites" })).toBeNull();
   });
 
-  it("admin: opening the trigger reveals all six links in order, Sites only inside the menu", () => {
+  it("admin: opening the trigger reveals all seven links in lexicographic order, Sites only inside the menu", () => {
     renderNav(admin());
 
     fireEvent.click(screen.getByRole("button", { name: "Admin" }));
@@ -84,6 +84,16 @@ describe("Admin nav dropdown", () => {
     // Exactly one Sites link in the whole nav, and it lives inside the menu.
     expect(menuLinkTexts()).toContain("Sites");
     expect(screen.getAllByRole("link", { name: "Sites" })).toHaveLength(1);
+  });
+
+  it("admin: the Manufacturers link is present in the menu and points to /admin/manufacturers", () => {
+    renderNav(admin());
+
+    fireEvent.click(screen.getByRole("button", { name: "Admin" }));
+
+    const manufacturers = screen.getByRole("link", { name: "Manufacturers" });
+    expect(manufacturers).toHaveAttribute("href", "/admin/manufacturers");
+    expect(menuLinkTexts()).toContain("Manufacturers");
   });
 
   it("admin: Escape closes the menu", () => {
