@@ -165,6 +165,37 @@ describe("AdminUsers (Users & Pilots)", () => {
     await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
   });
 
+  it("flips the badge back to Verified when Verify is clicked right after an email edit", async () => {
+    const verified = makeUser({ id: "u1", email: "alice@example.com", emailVerified: true });
+    // The parent is never refetched between the edit and the verify, so its
+    // user.emailVerified prop stays `true` throughout (regression #123).
+    vi.mocked(api.get).mockResolvedValue([verified]);
+    vi.mocked(api.put).mockResolvedValue({ ...verified, email: "new@example.com", emailVerified: false });
+    vi.mocked(api.post).mockResolvedValue({});
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+
+    fireEvent.change(screen.getByLabelText("Email"), { target: { value: "new@example.com" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save email" }));
+
+    const verifyBtn = await screen.findByRole("button", { name: "Verify email" });
+    expect(screen.getByText("Unverified")).toBeInTheDocument();
+
+    fireEvent.click(verifyBtn);
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith("manage/users/u1/verify-email");
+    });
+    // Badge must flip to Verified without a page reload; the stale value bug
+    // left it stuck on "Unverified" with the Verify button still showing.
+    expect(await screen.findByText("Verified")).toBeInTheDocument();
+    expect(screen.queryByText("Unverified")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Verify email" })).toBeNull();
+    await waitFor(() => expect(api.get).toHaveBeenCalledTimes(2));
+  });
+
   it("hides the Verify button for already-verified users", async () => {
     vi.mocked(api.get).mockResolvedValue([makeUser({ id: "u1", emailVerified: true })]);
 

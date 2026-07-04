@@ -116,6 +116,9 @@ function UserEditRow({
     setMsg(null);
     try {
       await api.post(`manage/users/${user.id}/verify-email`);
+      // Flip the badge directly: after an email edit the parent prop is still
+      // `true`, so the `[user.emailVerified]` sync effect won't re-fire on refresh.
+      setEmailVerified(true);
       onRefresh();
     } catch (ex) {
       setMsg(ex instanceof ApiError ? (ex.detail ?? ex.message) : ex instanceof Error ? ex.message : "Failed to verify email");
