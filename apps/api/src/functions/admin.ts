@@ -502,7 +502,7 @@ async function updateUserEmail(
         await writePilotEmailIndex(oldEmail, newEmail, pilotId);
       }
 
-      const updatedUser: User = { ...user, email: newEmail };
+      const updatedUser: User = { ...user, email: newEmail, sessionVersion: (user.sessionVersion ?? 0) + 1 };
       await withPrivateLeaseRetry(userPath, async (leaseId) => {
         await writePrivateJson(userPath, UserSchema, updatedUser, leaseId);
       });
