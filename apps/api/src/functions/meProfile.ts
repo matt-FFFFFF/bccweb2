@@ -45,6 +45,7 @@ import {
 } from "../lib/auth.js";
 import type { AuthCredential } from "../lib/authHelpers.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { resolveWingManufacturer } from "../lib/wingManufacturer.js";
 
 const PilotsIndexSchema = z.array(PilotSummarySchema);
 
@@ -133,6 +134,12 @@ async function createMyPilot(
     );
   }
 
+  // Canonicalise the wing manufacturer; an unknown id aborts before any write.
+  const wingManufacturer = await resolveWingManufacturer(
+    undefined,
+    body.wingManufacturer,
+  );
+
   const id = randomUUID();
   const now = new Date().toISOString();
   const pilot: Pilot = {
@@ -148,7 +155,7 @@ async function createMyPilot(
     emergencyPhoneNumber: body.emergencyPhoneNumber,
     medicalInfo: body.medicalInfo,
     wingClass: body.wingClass,
-    wingManufacturer: body.wingManufacturer,
+    wingManufacturer,
     wingModel: body.wingModel,
     wingColours: body.wingColours,
     person: {
