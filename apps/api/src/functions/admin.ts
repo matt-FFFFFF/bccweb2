@@ -516,7 +516,7 @@ async function updateUserEmail(
       // post-bump cred.tokenVersion; minted earlier, authVerifyEmail rejects it
       // (deleted token / version mismatch → 400) and locks the user out.
       const verify = await createVerificationToken(userId, 24);
-      return { view: { ...updatedUser, emailVerified: false } as AdminUserView, token: verify.token };
+      return { view: { ...updatedUser, emailVerified: false }, token: verify.token };
     });
     updated = result.view;
     verifyTokenToSend = result.token;
