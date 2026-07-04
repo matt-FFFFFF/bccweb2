@@ -35,6 +35,7 @@ import {
   unauthorizedResponse,
   forbiddenResponse,
 } from "../lib/auth.js";
+import { createVerificationToken, sendVerificationEmail } from "../lib/authHelpers.js";
 import { assertNotLastAdmin, withAccountMutationLock } from "../lib/accountMutation.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
@@ -474,8 +475,9 @@ async function updateUserEmail(
   const newEmail = parsed.data.email.toLowerCase();
 
   let updated: AdminUserView | null = null;
+  let verifyTokenToSend: string | null = null;
   try {
-    updated = await withAccountMutationLock(async () => {
+    const result = await withAccountMutationLock(async () => {
       const userPath = `users/${userId}.json`;
       const user = await readUserLocked(userPath);
       const oldEmail = user.email.toLowerCase();
@@ -508,14 +510,28 @@ async function updateUserEmail(
       });
 
       await bestEffortDeleteAuthArtifacts(userId, ctx, "updateUserEmail");
-      return { ...updatedUser, emailVerified: false };
+
+      // Mint the re-verification token AFTER the GC sweep and AFTER
+      // markAuthEmailUnverified so it survives the sweep and carries the
+      // post-bump cred.tokenVersion; minted earlier, authVerifyEmail rejects it
+      // (deleted token / version mismatch → 400) and locks the user out.
+      const verify = await createVerificationToken(userId, 24);
+      return { view: { ...updatedUser, emailVerified: false } as AdminUserView, token: verify.token };
     });
+    updated = result.view;
+    verifyTokenToSend = result.token;
   } catch (err: unknown) {
     if (err instanceof HttpError) throw err;
     if (statusCodeOf(err) === 404) {
       throw new HttpError(404, "NOT_FOUND", "User not found");
     }
     rethrowLeaseConflict(err);
+  }
+
+  // Email the link OUTSIDE the mutation lock — the ACS/network call must not hold
+  // the account lease. Best-effort: sendVerificationEmail swallows send errors.
+  if (updated && verifyTokenToSend) {
+    await sendVerificationEmail(newEmail, verifyTokenToSend);
   }
 
   return { status: 200, jsonBody: updated };
