@@ -43,6 +43,7 @@ import {
   getCallerIdentity,
   unauthorizedResponse,
   forbiddenResponse,
+  releasePilotEmailClaim,
   updatePilotEmailIndex,
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
@@ -214,8 +215,27 @@ async function createPilot(
     userId: null,
   };
 
-  await writePrivateJson(`pilots/${id}.json`, PilotSchema, pilot);
-  await upsertPilotInIndex(pilot, body.email);
+  // Claim the unique email FIRST so a conflict aborts with zero side effects (issue #126).
+  if (body.email) {
+    try {
+      await updatePilotEmailIndex(body.email, id);
+    } catch (err: unknown) {
+      if (err instanceof EmailIndexConflictError) {
+        throw new HttpError(409, "PILOT_EMAIL_TAKEN", "Email already belongs to another pilot");
+      }
+      throw err;
+    }
+  }
+
+  // Durable writes after the claim; roll back the reservation + blob on any failure (issue #126).
+  try {
+    await writePrivateJson(`pilots/${id}.json`, PilotSchema, pilot);
+    await upsertPilotInIndex(pilot);
+  } catch (err: unknown) {
+    if (body.email) await releasePilotEmailClaim(body.email, id).catch(() => {});
+    await getPrivateBlobClient(`pilots/${id}.json`).deleteIfExists().catch(() => {});
+    throw err;
+  }
 
   return { status: 201, jsonBody: pilot };
 }
@@ -333,18 +353,28 @@ async function updatePilot(
     profileUpdatedAt: new Date().toISOString(),
   };
 
+  // Claim the (admin-supplied) email FIRST so a conflict aborts before any write (issue #126).
+  // Re-claiming the pilot's own email is a no-op (owner === id).
+  if (isAdmin && body.email) {
+    try {
+      await updatePilotEmailIndex(body.email, id);
+    } catch (err: unknown) {
+      if (err instanceof EmailIndexConflictError) {
+        throw new HttpError(409, "PILOT_EMAIL_TAKEN", "Email already belongs to another pilot");
+      }
+      throw err;
+    }
+  }
+
   await writePrivateJson(`pilots/${id}.json`, PilotSchema, updated);
-  await upsertPilotInIndex(updated, isAdmin ? body.email : undefined);
+  await upsertPilotInIndex(updated);
 
   return { status: 200, jsonBody: updated };
 }
 
 // ─── Index helper ─────────────────────────────────────────────────────────────
 
-async function upsertPilotInIndex(
-  pilot: Pilot,
-  email?: string
-): Promise<void> {
+async function upsertPilotInIndex(pilot: Pilot): Promise<void> {
   // Public index shows only VERIFIED active-season club membership, never the
   // self-declared currentClub (a pilot can set that to any club). Stops a pilot
   // poisoning the anonymously-readable index with an unaffiliated club.
@@ -394,20 +424,6 @@ async function upsertPilotInIndex(
     });
   });
 
-  if (email) {
-    try {
-      await updatePilotEmailIndex(email, pilot.id);
-    } catch (err: unknown) {
-      if (err instanceof EmailIndexConflictError) {
-        throw new HttpError(
-          409,
-          "PILOT_EMAIL_TAKEN",
-          "Email already belongs to another pilot"
-        );
-      }
-      throw err;
-    }
-  }
 }
 
 async function getActiveSeasonYear(): Promise<number> {
