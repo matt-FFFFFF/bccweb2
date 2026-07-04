@@ -1,6 +1,25 @@
 import { randomUUID } from "crypto";
-import { describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import type { Pilot, PilotSummary } from "@bccweb/types";
+
+const blobJsonControl = vi.hoisted(() => ({ failPilotWrite: false }));
+
+vi.mock("../lib/blobJson.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/blobJson.js")>();
+  return {
+    ...actual,
+    writePrivateJson: vi.fn(
+      (...args: Parameters<typeof actual.writePrivateJson>) => {
+        const [path] = args;
+        if (blobJsonControl.failPilotWrite && path.startsWith("pilots/")) {
+          return Promise.reject(new Error("simulated pilot write failure"));
+        }
+        return actual.writePrivateJson(...args);
+      },
+    ),
+  };
+});
+
 import { makeAuthRequest, invoke } from "./helpers/api.js";
 import { getPrivateContainer } from "./helpers/azurite.js";
 import {
@@ -22,6 +41,10 @@ async function listPrivatePilotBlobNames(): Promise<string[]> {
 }
 
 describe("pilot email conflict handling", () => {
+  afterEach(() => {
+    blobJsonControl.failPilotWrite = false;
+  });
+
   test("createPilot conflict leaves no orphan when email is already claimed", async () => {
     // Given: a foreign pilot owns the lower-cased email claim, with no pilot blobs yet.
     const { user: admin } = await bootstrapAdmin();
@@ -106,5 +129,51 @@ describe("pilot email conflict handling", () => {
     expect(await readPrivateJson<Record<string, string>>("pilot-email-index.json")).toMatchObject({
       [email.toLowerCase()]: pilot.id,
     });
+  });
+
+  test("updatePilot releases a newly acquired email claim when the pilot write fails", async () => {
+    // Given: an existing pilot and an admin updating it with a fresh unused email.
+    const { user: admin } = await bootstrapAdmin();
+    const target = await makePilot({ firstName: "New", lastName: "Claim" });
+    const email = `new-claim-${randomUUID()}@example.com`;
+
+    // When: the post-claim private pilot write fails.
+    blobJsonControl.failPilotWrite = true;
+    const res = await invoke(
+      "updatePilot",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "PUT",
+        params: { id: target.id },
+        body: { email, firstName: "Changed" },
+      }),
+    );
+
+    // Then: the request fails and the newly acquired claim is rolled back.
+    expect(res.status).toBe(500);
+    const emailIndex = await readPrivateJson<Record<string, string>>("pilot-email-index.json");
+    expect(emailIndex?.[email.toLowerCase()]).toBeUndefined();
+  });
+
+  test("updatePilot keeps a pilot's existing email claim when a re-claim write fails", async () => {
+    // Given: a pilot already owns its email claim.
+    const { user: admin } = await bootstrapAdmin();
+    const email = `existing-claim-${randomUUID()}@example.com`;
+    const target = await makePilot({ firstName: "Existing", lastName: "Claim", email });
+
+    // When: the admin re-submits that same email and the post-claim pilot write fails.
+    blobJsonControl.failPilotWrite = true;
+    const res = await invoke(
+      "updatePilot",
+      makeAuthRequest(admin.id, admin.email, {
+        method: "PUT",
+        params: { id: target.id },
+        body: { email, firstName: "Changed" },
+      }),
+    );
+
+    // Then: the request fails but the pre-existing legitimate claim remains.
+    expect(res.status).toBe(500);
+    const emailIndex = await readPrivateJson<Record<string, string>>("pilot-email-index.json");
+    expect(emailIndex?.[email.toLowerCase()]).toBe(target.id);
   });
 });

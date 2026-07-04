@@ -355,9 +355,13 @@ async function updatePilot(
 
   // Claim the (admin-supplied) email FIRST so a conflict aborts before any write (issue #126).
   // Re-claiming the pilot's own email is a no-op (owner === id).
+  let releaseEmailOnFailure: string | undefined;
   if (isAdmin && body.email) {
     try {
-      await updatePilotEmailIndex(body.email, id);
+      const previousOwner = await updatePilotEmailIndex(body.email, id);
+      // Only our brand-new claim is safe to roll back; a re-claim of the pilot's own
+      // existing email must NOT be released (issue #126 review).
+      if (previousOwner === undefined) releaseEmailOnFailure = body.email;
     } catch (err: unknown) {
       if (err instanceof EmailIndexConflictError) {
         throw new HttpError(409, "PILOT_EMAIL_TAKEN", "Email already belongs to another pilot");
@@ -366,8 +370,15 @@ async function updatePilot(
     }
   }
 
-  await writePrivateJson(`pilots/${id}.json`, PilotSchema, updated);
-  await upsertPilotInIndex(updated);
+  try {
+    await writePrivateJson(`pilots/${id}.json`, PilotSchema, updated);
+    await upsertPilotInIndex(updated);
+  } catch (err: unknown) {
+    if (releaseEmailOnFailure) {
+      await releasePilotEmailClaim(releaseEmailOnFailure, id).catch(() => {});
+    }
+    throw err;
+  }
 
   return { status: 200, jsonBody: updated };
 }

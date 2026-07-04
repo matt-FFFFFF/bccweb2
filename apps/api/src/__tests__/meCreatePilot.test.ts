@@ -1,15 +1,42 @@
 import { randomUUID } from "crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { Pilot, PilotSummary, User } from "@bccweb/types";
+import type * as z from "zod/v4";
 
 const blobJsonControl = vi.hoisted(() => ({ failUserWrite: false }));
+const blobControl = vi.hoisted(() => ({ failPublicPilotIndexWrite: false }));
+
+vi.mock("../lib/blob.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../lib/blob.js")>();
+  return {
+    ...actual,
+    getBlockBlobClient: vi.fn((path: string) => {
+      const client = actual.getBlockBlobClient(path);
+      const wrappedClient = Object.create(client) as typeof client;
+      wrappedClient.uploadData = vi.fn(
+        (...args: Parameters<typeof client.uploadData>): ReturnType<typeof client.uploadData> => {
+          const options = args[1];
+          if (
+            blobControl.failPublicPilotIndexWrite &&
+            path === "pilots.json" &&
+            options?.conditions?.ifNoneMatch !== "*"
+          ) {
+            return Promise.reject(new Error("simulated public pilots index write failure"));
+          }
+          return client.uploadData(...args);
+        },
+      );
+      return wrappedClient;
+    }),
+  };
+});
 
 vi.mock("../lib/blobJson.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../lib/blobJson.js")>();
   return {
     ...actual,
     writePrivateJson: vi.fn(
-      (path: string, schema: unknown, data: unknown, leaseId?: string, opts?: unknown) => {
+      (path: string, schema: z.ZodType<unknown>, data: unknown, leaseId?: string, opts?: { ifNoneMatch?: "*" }) => {
         if (blobJsonControl.failUserWrite && path.startsWith("users/")) {
           return Promise.reject(new Error("simulated user link write failure"));
         }
@@ -104,7 +131,7 @@ describe("createMyPilot", () => {
     const res = await createPilotForUser(user, email);
     blobJsonControl.failUserWrite = false;
 
-    // Then: the reservation is released and the private pilot blob is removed.
+    // Then: the reservation, private blob, public summary, and user link are all rolled back.
     expect(res.status).toBe(500);
     expect(
       (await readPrivateJson<Record<string, string>>("pilot-email-index.json"))?.[
@@ -112,6 +139,38 @@ describe("createMyPilot", () => {
       ],
     ).toBeUndefined();
     expect(await listPrivatePilotBlobNames()).toEqual([]);
+
+    const publicPilots = await readPublicJson<PilotSummary[]>("pilots.json");
+    expect(publicPilots ?? []).toEqual([]);
+
+    const storedUser = await readPrivateJson<User>(`users/${user.id}.json`);
+    expect(storedUser?.pilotId).toBeNull();
+  });
+
+  it("leaves the user unlinked when publishing the public summary fails", async () => {
+    // Given: a verified user with an unclaimed email.
+    const email = `public-rollback-${randomUUID()}@example.com`;
+    const { user } = await makeUser({ email, emailVerified: true });
+
+    // When: the public pilots.json write fails after the private pilot blob is written.
+    blobControl.failPublicPilotIndexWrite = true;
+    const res = await createPilotForUser(user, email);
+    blobControl.failPublicPilotIndexWrite = false;
+
+    // Then: every durable side effect is rolled back before the user can retry.
+    expect(res.status).toBe(500);
+    expect(
+      (await readPrivateJson<Record<string, string>>("pilot-email-index.json"))?.[
+        email.toLowerCase()
+      ],
+    ).toBeUndefined();
+    expect(await listPrivatePilotBlobNames()).toEqual([]);
+
+    const publicPilots = await readPublicJson<PilotSummary[]>("pilots.json");
+    expect(publicPilots ?? []).toEqual([]);
+
+    const storedUser = await readPrivateJson<User>(`users/${user.id}.json`);
+    expect(storedUser?.pilotId).toBeNull();
   });
 
   it("creates a pilot, links the user, publishes the summary, and claims the email", async () => {
