@@ -75,6 +75,10 @@ jobs:
             "seasons.json": JSON.stringify([
               { id: "season-2024", year: 2024, active: true }
             ], null, 2),
+            "manufacturers.json": JSON.stringify([
+              { id: "m1", legacyId: 1, name: "Ozone", websiteUrl: "https://flyozone.com" },
+              { id: "m2", name: "Gin Gliders" }
+            ], null, 2),
           };
 
           for (const [name, content] of Object.entries(blobs)) {
