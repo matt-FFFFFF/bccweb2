@@ -23,6 +23,7 @@ import { HttpError, BlobShapeError, withErrorHandler } from "../lib/http.js";
 import { rateLimit } from "../lib/rateLimit.js";
 import { trustedClientIp } from "../lib/clientIp.js";
 import { getLatestSignature } from "../lib/signTofly/ledger.js";
+import { pilotClubIdForSeason, ensureSeasonClubRecorded } from "../lib/pilotClub.js";
 
 // RegistrationConfig widens ConfigSchema with autoAllocatePilotsToRoundClub —
 // a runtime-only field that the registration flow reads but Config (and
@@ -255,14 +256,6 @@ function ensureProfileComplete(pilot: Pilot): void {
   }
 }
 
-function pilotClubIdForSeason(pilot: Pilot, seasonYear: number): string | null {
-  return (
-    pilot.seasonClubs.find((club) => club.seasonYear === seasonYear)?.clubId
-    ?? pilot.currentClub?.id
-    ?? null
-  );
-}
-
 function pickTeam(candidates: Team[], teamId: string | undefined): Team {
   if (teamId) {
     const team = candidates.find((c) => c.id === teamId);
@@ -273,20 +266,6 @@ function pickTeam(candidates: Team[], teamId: string | undefined): Team {
   }
   if (candidates.length === 1) return candidates[0];
   throw new HttpError(400, "TEAM_REQUIRED", "Choose which of your club's teams to join.");
-}
-
-async function ensureSeasonClubRecorded(
-  pilotId: string,
-  seasonYear: number,
-  clubId: string,
-  clubName: string,
-): Promise<void> {
-  await withPrivateLease(`pilots/${pilotId}.json`, async (leaseId) => {
-    const pilot = await readPilot(pilotId);
-    if (pilot.seasonClubs.some((club) => club.seasonYear === seasonYear)) return;
-    pilot.seasonClubs.push({ seasonYear, clubId, clubName });
-    await writePrivateJson(`pilots/${pilotId}.json`, PilotSchema, pilot, leaseId);
-  });
 }
 
 async function ensureNotDoubleBooked(pilotId: string, targetRound: Round): Promise<void> {

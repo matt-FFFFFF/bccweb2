@@ -311,11 +311,15 @@ function AddTeamForm({
 function AddPilotForm({
   roundId,
   teamId,
+  teamClubId,
+  teamClubName,
   pilots,
   onAdded,
 }: {
   roundId: string;
   teamId: string;
+  teamClubId: string;
+  teamClubName: string;
   pilots: PilotSummary[];
   onAdded: () => void;
 }) {
@@ -344,7 +348,11 @@ function AddPilotForm({
     }
   }
 
-  const sortedPilots = [...pilots].sort((a, b) =>
+  const filteredPilots = pilots.filter(
+    (p) => p.clubId === teamClubId || p.clubId == null
+  );
+
+  const sortedPilots = [...filteredPilots].sort((a, b) =>
     a.name.localeCompare(b.name)
   );
 
@@ -353,19 +361,29 @@ function AddPilotForm({
       onSubmit={(e) => { void submit(e); }}
       style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", alignItems: "center", marginTop: "0.5rem" }}
     >
-      <select
-        required
-        style={{ ...inputStyle, minWidth: 180, flexShrink: 1 }}
-        value={pilotId}
-        onChange={(e) => setPilotId(e.target.value)}
-      >
-        <option value="">— pilot —</option>
-        {sortedPilots.map((p) => (
-          <option key={p.id} value={p.id}>
-            {p.name}
-          </option>
-        ))}
-      </select>
+      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", flexShrink: 1 }}>
+        <select
+          required
+          style={{ ...inputStyle, minWidth: 180 }}
+          value={pilotId}
+          onChange={(e) => setPilotId(e.target.value)}
+        >
+          <option value="">— pilot —</option>
+          {sortedPilots.map((p) => (
+            <option key={p.id} value={p.id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        {sortedPilots.length === 0 && (
+          <span style={{ fontSize: "0.75rem", color: "#888" }}>
+            No pilots available for {teamClubName}.
+          </span>
+        )}
+        <span style={{ fontSize: "0.75rem", color: "#888" }}>
+          Pilots without a confirmed season club are shown; the server verifies club on save.
+        </span>
+      </div>
       <label style={{ display: "flex", gap: "0.3rem", alignItems: "center", fontSize: "0.85rem" }}>
         <input
           type="checkbox"
@@ -376,8 +394,8 @@ function AddPilotForm({
       </label>
       <button
         type="submit"
-        disabled={busy}
-        style={btnStyle("#fff", busy ? "#6c757d" : "#0a6640")}
+        disabled={busy || sortedPilots.length === 0}
+        style={btnStyle("#fff", busy || sortedPilots.length === 0 ? "#6c757d" : "#0a6640")}
       >
         {busy ? "Adding…" : "Add Pilot"}
       </button>
@@ -1072,6 +1090,8 @@ function TeamCard({
               <AddPilotForm
                 roundId={roundId}
                 teamId={team.id}
+                teamClubId={team.club.id}
+                teamClubName={team.club.name}
                 pilots={pilots ?? []}
                 onAdded={() => { setShowAddPilot(false); onChanged(); }}
               />
