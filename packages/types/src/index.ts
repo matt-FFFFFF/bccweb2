@@ -378,6 +378,8 @@ export interface Team {
   legacyId?: number;
 }
 
+export type BriefPdfStatus = "pending" | "processing" | "ready" | "failed";
+
 export interface Round {
   id: string;
   legacyId?: number;
@@ -396,6 +398,16 @@ export interface Round {
   createdAt?: string;
   updatedAt?: string;
   updatedBy?: string;
+  brief?: {
+    version?: number;
+    jsonPath?: string;
+    pdfPath?: string;
+    generatedAt?: string;
+    pdfStatus?: BriefPdfStatus;
+    pdfError?: string;
+    pdfUpdatedAt?: string;
+    pdfAttemptId?: string;
+  };
 }
 
 // ─── Sign-to-Fly / Audit ─────────────────────────────────────────────────────
