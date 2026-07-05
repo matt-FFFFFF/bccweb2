@@ -31,8 +31,8 @@ import * as z from "zod/v4";
 import {
   ensureJsonIndexBlob,
   getBlobClient,
-  getBlockBlobClient,
   getPrivateBlobClient,
+  writeBlob,
   withLeaseRetry,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
@@ -258,14 +258,7 @@ async function upsertPilotInIndex(pilot: Pilot): Promise<void> {
     index.sort(
       (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
     );
-    // Lease-coupled write retains the raw BlockBlobClient.uploadData path —
-    // writeJson/writeBlob do not currently expose ifMatch/leaseId conditions
-    // for this index slot. Schema healing applies through the readJson above.
-    const content = JSON.stringify(index, null, 2);
-    await getBlockBlobClient("pilots.json").uploadData(Buffer.from(content), {
-      blobHTTPHeaders: { blobContentType: "application/json" },
-      conditions: { leaseId },
-    });
+    await writeBlob("pilots.json", index, leaseId);
   });
 }
 
@@ -285,11 +278,7 @@ async function removePilotFromIndex(pilotId: string): Promise<void> {
     }
     const next = index.filter((p) => p.id !== pilotId);
     if (next.length === index.length) return;
-    const content = JSON.stringify(next, null, 2);
-    await getBlockBlobClient("pilots.json").uploadData(Buffer.from(content), {
-      blobHTTPHeaders: { blobContentType: "application/json" },
-      conditions: { leaseId },
-    });
+    await writeBlob("pilots.json", next, leaseId);
   });
 }
 
