@@ -176,7 +176,7 @@ export default function RoundBrief() {
         </div>
         {pdfStatus === "failed" ? (
           <div style={{ padding: "0.5rem 0", color: "#721c24", fontSize: "0.9rem", fontWeight: 500 }}>
-            generation failed — ask an organiser to regenerate
+            PDF generation failed — ask an organiser to regenerate
           </div>
         ) : (
           <button

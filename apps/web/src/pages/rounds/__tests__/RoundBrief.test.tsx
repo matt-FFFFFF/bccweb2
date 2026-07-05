@@ -123,7 +123,7 @@ describe("RoundBrief", () => {
     renderComponent();
 
     await waitFor(() => {
-      expect(screen.getByText("generation failed — ask an organiser to regenerate")).toBeInTheDocument();
+      expect(screen.getByText("PDF generation failed — ask an organiser to regenerate")).toBeInTheDocument();
       expect(screen.queryByRole("button")).not.toBeInTheDocument();
     });
   });
