@@ -87,6 +87,32 @@ give atomic read-modify-write (30s lease).
   `users/{uuid}.json`, `user-index.json`, `auth/{uuid}.json`, `auth/tokens/{hash}.json`,
   `round-briefs/{uuid}.{json,pdf}`, `frequencies/*`, `pilot-season-clubs/*`, `season-clubs/*`.
 
+### Storage Queues
+
+Two queues (created by `scripts/init-storage.mjs`, same storage account as blobs):
+`round-brief-pdf` (main) and `round-brief-pdf-poison` (dead-letter after
+`maxDequeueCount=5` per `host.json`).
+
+**Async brief-PDF flow**: the lock endpoint (`POST /api/rounds/{id}/lock`) sets
+`brief.pdfStatus = "pending"` and `brief.pdfAttemptId` on the round blob, then enqueues
+a `{roundId, briefVersion, pdfAttemptId}` job. The `briefPdf` queue-trigger consumer
+(`apps/api/src/functions/briefPdf.ts`) renders the PDF, uploads it to
+`round-briefs/{uuid}.pdf`, emails it, and flips `pdfStatus` to `ready`. Correctness is
+guarded by `pdfAttemptId` + an atomic compare-and-set commit (`commitBriefPdfReady`),
+NOT by `briefVersion` or `visibilityTimeout`. Status values: `pending | processing |
+ready | failed`. On unlock the PDF status fields are cleared.
+
+**Connection invariant**: both the producer (`apps/api/src/lib/queue.ts`) and the
+`app.storageQueue` triggers use the `AzureWebJobsStorage` connection setting. That is
+the only setting carrying a `QueueEndpoint` in local/Docker; `BLOB_CONNECTION_STRING` is
+blob-only. Never switch the producer to `BLOB_CONNECTION_STRING` — it would silently
+break queueing.
+
+**Queue privacy**: `privacy-scan.mjs` does NOT cover Storage Queues. The compensating
+control is the strict `BriefPdfJobSchema` (`z.object().strict()`) in
+`apps/api/src/lib/queue.ts`, which rejects any key beyond `{roundId, briefVersion,
+pdfAttemptId}` at serialisation time so PII can never enter a queue message.
+
 A PR-gated [privacy scanner](file:///Volumes/code/bccweb2/scripts/privacy-scan.mjs)
 fails CI if PII leaks into the public container. **Never put PII fields in `data/` blobs.**
 
@@ -112,18 +138,22 @@ artifacts (PDF, image, `.lock`, audit logs).
 ## API (`apps/api`)
 
 Entry: [src/index.ts](file:///Volumes/code/bccweb2/apps/api/src/index.ts) imports every
-function module — each self-registers via `app.http(...)`. **A new function file is dead
-unless added to `src/index.ts`.**
+function module — each self-registers via `app.http(...)` or `app.storageQueue(...)`.
+**A new function file is dead unless added to `src/index.ts`.**
 
 Modules: `health`, `me`, `meProfile`, `rounds`, `roundsMutate`, `seasons`, `pilots`,
-`clubs`, `sites`, `teams`, `flights`, `admin`, `adminWording`, `brief`, `puretrack`,
+`clubs`, `sites`, `teams`, `flights`, `admin`, `adminWording`, `brief`,
+`briefPdf` **(queue-trigger — registers `app.storageQueue(...)` for `round-brief-pdf`
+and `round-brief-pdf-poison`; the first non-HTTP triggers in the codebase)**, `puretrack`,
 `authFunctions`, `signatures`, `roundRegistration`, `clubTeams`, `seasonClubs`,
 `pilotSeasonClubs`, `teamsCaptain`.
 
 Lib helpers: `blob` (storage + lease), `blobJson` (schema read/write), `auth` +
 `authHelpers` (HS256 JWT), `roundAuth`, `accountMutation`, `email` (ACS), `http`,
 `clientIp`, `pdf` (puppeteer-core + @sparticuz/chromium), `rateLimit`, `recompute`,
-`puretrack`, `teamCaptain`, `telemetry` + `telemetryRedactor` (App Insights PII scrubber,
+`puretrack`, `teamCaptain`, `briefPdf` (PDF status CAS helpers: `setBriefPdfStatus`,
+`commitBriefPdfReady`, `sendBriefIfConfigured`), `queue` (enqueue + `BriefPdfJobSchema`
+strict guard), `telemetry` + `telemetryRedactor` (App Insights PII scrubber,
 set up BEFORE function imports), `signTofly/*` (signature ledger). See
 `docs/runbooks/alerts.md#blobhealed-events--blob-heal-storm-alert` for `blob.healed` triage.
 
