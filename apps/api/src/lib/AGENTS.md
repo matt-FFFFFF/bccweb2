@@ -6,7 +6,7 @@ these by name; this file is the **cheat sheet** so you don't re-read the source.
 ## blob.ts — clients + leases
 
 - `getBlobClient/getBlockBlobClient(path)` (public), `getPrivateBlobClient/...` (private).
-- `readBlob(client)` raw JSON parse (missing → Azure 404). `writeBlob(path,data,leaseId?)`.
+- `readBlob(client)` raw JSON parse (missing → Azure 404). `writeBlob(path,data,leaseId?,{ifNoneMatch?})`.
 - `writePrivateBlob(path,data,leaseId?,{ifNoneMatch?})` — `ifNoneMatch:"*"` = create-only.
 - `ensureJsonIndexBlob` / `ensurePrivateJsonIndexBlob(path,seed)` — create-only seed (409/412 = no-op).
 - `withLease` / `withPrivateLease(path, fn)` — 30s lease, passes `leaseId`, best-effort release.
