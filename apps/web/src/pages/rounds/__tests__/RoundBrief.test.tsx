@@ -70,14 +70,21 @@ describe("RoundBrief", () => {
 
   it("renders prose fields as markdown and neutralizes XSS payloads", async () => {
     vi.mocked(api.get).mockResolvedValue({
-      roundId: "r1",
-      version: 1,
-      generatedAt: "2023-01-01T00:00:00.000Z",
-      teams: [],
-      airspaceAndHazards: "**A** " + XSS_CORPUS.join(" "),
-      expectedLandingArea: "**B**",
-      briefersNotes: "**C**",
-      windSpeedDirection: "**x**", // Non-prose should be literal
+      brief: { pdfStatus: "ready" },
+    });
+
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        roundId: "r1",
+        version: 1,
+        generatedAt: "2023-01-01T00:00:00.000Z",
+        teams: [],
+        airspaceAndHazards: "**A** " + XSS_CORPUS.join(" "),
+        expectedLandingArea: "**B**",
+        briefersNotes: "**C**",
+        windSpeedDirection: "**x**", // Non-prose should be literal
+      }),
     });
 
     renderComponent();
@@ -93,5 +100,44 @@ describe("RoundBrief", () => {
     expect(html).not.toContain("onerror");
 
     expect(screen.getByText("**x**")).toBeInTheDocument();
+  });
+
+  it("disables download with processing label when pdfStatus is processing", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      brief: { pdfStatus: "processing" },
+    });
+
+    renderComponent();
+
+    await waitFor(() => {
+      const btn = screen.getByRole("button", { name: "PDF processing…" });
+      expect(btn).toBeDisabled();
+    });
+  });
+
+  it("shows failure note when pdfStatus is failed", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      brief: { pdfStatus: "failed" },
+    });
+
+    renderComponent();
+
+    await waitFor(() => {
+      expect(screen.getByText("PDF generation failed — ask an organiser to regenerate")).toBeInTheDocument();
+      expect(screen.queryByRole("button")).not.toBeInTheDocument();
+    });
+  });
+
+  it("enables download when pdfStatus is ready", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      brief: { pdfStatus: "ready" },
+    });
+
+    renderComponent();
+
+    await waitFor(() => {
+      const btn = screen.getByRole("button", { name: "Download PDF" });
+      expect(btn).not.toBeDisabled();
+    });
   });
 });

@@ -176,6 +176,10 @@ export const RoundSchema = z
           jsonPath: lenientOptional(z.string()),
           pdfPath: lenientOptional(z.string()),
           generatedAt: lenientOptional(z.string()),
+          pdfStatus: lenientOptional(z.enum(["pending", "processing", "ready", "failed"])),
+          pdfError: lenientOptional(z.string()),
+          pdfUpdatedAt: lenientOptional(z.string()),
+          pdfAttemptId: lenientOptional(z.string()),
         })
         .strict(),
     ),

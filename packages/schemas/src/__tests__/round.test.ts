@@ -201,6 +201,32 @@ describe("RoundSchema", () => {
     expect(RoundSchema.parse({ ...validRound, brief }).brief).toEqual(brief);
   });
 
+  test("preserves brief PDF status metadata (pdfStatus + pdfAttemptId)", () => {
+    const parsed = RoundSchema.parse({
+      ...validRound,
+      brief: {
+        version: 2,
+        pdfStatus: "ready",
+        pdfAttemptId: "11111111-1111-1111-1111-111111111111",
+        pdfUpdatedAt: "2026-07-05T00:00:00Z",
+      },
+    });
+
+    expect(parsed.brief?.pdfStatus).toBe("ready");
+    expect(parsed.brief?.pdfAttemptId).toBe("11111111-1111-1111-1111-111111111111");
+    expect(parsed.brief?.pdfUpdatedAt).toBe("2026-07-05T00:00:00Z");
+  });
+
+  test("heals a bogus brief.pdfStatus enum to undefined without throwing", () => {
+    const parsed = RoundSchema.parse({
+      ...validRound,
+      brief: { pdfStatus: "bogus" },
+    });
+
+    expect(parsed.brief?.pdfStatus).toBeUndefined();
+    expect(parsed).toHaveProperty("brief");
+  });
+
   test("fills optional fields with undefined when invalid", () => {
     const parsed = RoundSchema.parse({
       ...validRound,

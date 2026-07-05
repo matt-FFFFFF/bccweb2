@@ -18,6 +18,8 @@ const KEY =
   "Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==";
 const HOST = process.env.BLOB_HOST ?? "127.0.0.1";
 const PORT = parseInt(process.env.BLOB_PORT ?? "10000", 10);
+// Azurite exposes the Queue service on a separate port (10001 by default).
+const QUEUE_PORT = parseInt(process.env.QUEUE_PORT ?? "10001", 10);
 const VERSION = "2020-10-02";
 
 /**
@@ -29,6 +31,14 @@ const CONTAINERS = [
   { name: "data",         publicAccess: "blob" },
   { name: "data-private", publicAccess: undefined },  // private
 ];
+
+/**
+ * Storage queue definitions (Queue service, port 10001).
+ * The async brief-PDF pipeline enqueues jobs onto `round-brief-pdf`; the
+ * Functions host auto-parks poison messages onto `round-brief-pdf-poison`.
+ * Names MUST match the Terraform-provisioned queues + the API producer/consumer.
+ */
+const QUEUES = ["round-brief-pdf", "round-brief-pdf-poison"];
 
 /**
  * Build a Shared Key Authorization header for an Azure Blob Storage PUT
@@ -160,6 +170,67 @@ function createContainer(name, publicAccess) {
 }
 
 /**
+ * Create a Queue in Azurite's Queue service (port 10001) using only Node
+ * built-ins — mirrors createContainer but targets the Queue REST API.
+ *
+ * Key differences from a blob container create:
+ *   - PUT /<account>/<queue> has NO `?restype=container` query param.
+ *   - The Shared-Key CanonicalizedResource is therefore just
+ *     /<account>/<account>/<queue> (the signing-account name PLUS the
+ *     path-style account segment — the account name appears twice — and NO
+ *     trailing `\nrestype:...` line).
+ *   - No x-ms-blob-public-access header (queues have no anonymous-access ACL).
+ *
+ * Idempotent: 201 = created, 204/409 = already exists. Any other status throws.
+ * Spec: https://learn.microsoft.com/en-us/rest/api/storageservices/create-queue4
+ */
+function createQueue(name) {
+  return new Promise((resolve, reject) => {
+    const dateUtc = new Date().toUTCString();
+
+    // CanonicalizedHeaders — x-ms-* headers, lowercase, sorted alphabetically.
+    const canonHeaders = `x-ms-date:${dateUtc}\nx-ms-version:${VERSION}\n`;
+    // CanonicalizedResource — path-style, NO restype for queue create.
+    const canonResource = `/${ACCOUNT}/${ACCOUNT}/${name}`;
+    const toSign = ["PUT","","","","","","","","","","","",canonHeaders + canonResource].join("\n");
+    const sig = createHmac("sha256", Buffer.from(KEY, "base64")).update(toSign, "utf8").digest("base64");
+    const auth = `SharedKey ${ACCOUNT}:${sig}`;
+
+    const opts = {
+      hostname: HOST,
+      port: QUEUE_PORT,
+      path: `/${ACCOUNT}/${name}`,
+      method: "PUT",
+      headers: {
+        Authorization: auth,
+        "x-ms-date": dateUtc,
+        "x-ms-version": VERSION,
+        "Content-Length": "0",
+      },
+    };
+
+    const req = request(opts, (res) => {
+      let body = "";
+      res.on("data", (c) => (body += c));
+      res.on("end", () => {
+        if (res.statusCode === 201) {
+          console.log(`  created: ${name} (queue)`);
+          resolve();
+        } else if (res.statusCode === 204 || res.statusCode === 409) {
+          console.log(`  exists:  ${name} (queue)`);
+          resolve();
+        } else {
+          reject(new Error(`HTTP ${res.statusCode} creating queue '${name}': ${body}`));
+        }
+      });
+    });
+
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+/**
  * Set CORS rules on the Blob service via Set Blob Service Properties.
  * This replaces the removed --blobCors CLI flag.
  * Spec: https://learn.microsoft.com/en-us/rest/api/storageservices/set-blob-service-properties
@@ -246,11 +317,14 @@ function setBlobServiceCors() {
 }
 
 async function main() {
-  console.log(`Azurite init → ${HOST}:${PORT}`);
+  console.log(`Azurite init → blob ${HOST}:${PORT}, queue ${HOST}:${QUEUE_PORT}`);
   for (const { name, publicAccess } of CONTAINERS) {
     await createContainer(name, publicAccess);
   }
   await setBlobServiceCors();
+  for (const name of QUEUES) {
+    await createQueue(name);
+  }
   console.log("Done.");
 }
 

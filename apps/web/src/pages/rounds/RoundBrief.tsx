@@ -9,9 +9,9 @@
 import { useState, useEffect } from "react";
 import { Link, useParams } from "react-router";
 import { BriefDocument } from "../../components/BriefDocument.js";
-import type { RoundBrief as RoundBriefType } from "@bccweb/types";
+import type { RoundBrief as RoundBriefType, Round, BriefPdfStatus } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
-import { ApiError } from "../../lib/api.js";
+import { ApiError, api } from "../../lib/api.js";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
 
 function formatDate(iso: string) {
@@ -29,6 +29,7 @@ export default function RoundBrief() {
   const { identity, loading: authLoading } = useAuth();
 
   const [brief, setBrief] = useState<RoundBriefType | null>(null);
+  const [pdfStatus, setPdfStatus] = useState<BriefPdfStatus | undefined>();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
@@ -44,16 +45,21 @@ export default function RoundBrief() {
     const headers: Record<string, string> = {};
     if (accessToken) headers["Authorization"] = `Bearer ${accessToken}`;
 
-    fetch(`/api/rounds/${id}/brief`, { headers })
-      .then(async (res) => {
-        if (res.status === 404) { setNotFound(true); return; }
+    Promise.all([
+      fetch(`/api/rounds/${id}/brief`, { headers }).then(async (res) => {
+        if (res.status === 404) { setNotFound(true); return null; }
         if (!res.ok) {
           const body = await res.json().catch(() => ({})) as { error?: string };
           setError(body.error ?? `Error ${res.status}`);
-          return;
+          return null;
         }
-        const data = await res.json() as RoundBriefType;
-        setBrief(data);
+        return res.json() as Promise<RoundBriefType>;
+      }),
+      api.get<Round>(`rounds/${id}`).catch(() => null)
+    ])
+      .then(([briefData, roundData]) => {
+        if (briefData) setBrief(briefData);
+        if (roundData) setPdfStatus(roundData.brief?.pdfStatus);
       })
       .catch((err: unknown) => {
         setError(err instanceof Error ? err.message : "Failed to load brief");
@@ -168,22 +174,28 @@ export default function RoundBrief() {
             )}
           </p>
         </div>
-        <button
-          onClick={() => { void downloadPdf(); }}
-          disabled={downloading}
-          style={{
-            padding: "0.5rem 1rem",
-            background: downloading ? "#6c757d" : "#1a4fa0",
-            color: "#fff",
-            border: "none",
-            borderRadius: "0.35rem",
-            cursor: downloading ? "not-allowed" : "pointer",
-            fontWeight: 600,
-            fontSize: "0.9rem",
-          }}
-        >
-          {downloading ? "Downloading…" : "Download PDF"}
-        </button>
+        {pdfStatus === "failed" ? (
+          <div style={{ padding: "0.5rem 0", color: "#721c24", fontSize: "0.9rem", fontWeight: 500 }}>
+            PDF generation failed — ask an organiser to regenerate
+          </div>
+        ) : (
+          <button
+            onClick={() => { void downloadPdf(); }}
+            disabled={downloading || pdfStatus !== "ready"}
+            style={{
+              padding: "0.5rem 1rem",
+              background: downloading || pdfStatus !== "ready" ? "#6c757d" : "#1a4fa0",
+              color: "#fff",
+              border: "none",
+              borderRadius: "0.35rem",
+              cursor: downloading || pdfStatus !== "ready" ? "not-allowed" : "pointer",
+              fontWeight: 600,
+              fontSize: "0.9rem",
+            }}
+          >
+            {downloading ? "Downloading…" : pdfStatus !== "ready" ? "PDF processing…" : "Download PDF"}
+          </button>
+        )}
       </div>
 
       <BriefDocument brief={brief} />

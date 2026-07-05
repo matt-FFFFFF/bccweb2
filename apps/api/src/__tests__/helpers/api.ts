@@ -8,7 +8,7 @@
 
 import type { HttpResponseInit } from "@azure/functions";
 import { signAccessToken } from "../../lib/authHelpers.js";
-import { getRegisteredHandler } from "./setup.js";
+import { getRegisteredHandler, getRegisteredQueueHandler } from "./setup.js";
 
 // ─── MockHttpRequest ──────────────────────────────────────────────────────────
 
@@ -113,4 +113,29 @@ export async function invoke(
   // Pass a minimal InvocationContext stub
   const ctx = { log: console.log, warn: console.warn, error: console.error, functionName: handlerName };
   return entry.handler(req, ctx) as Promise<HttpResponseInit>;
+}
+
+/**
+ * Invoke a registered storage-queue handler by name with a message.
+ *
+ * The real Azure Functions v4 storage-queue trigger base64-decodes then
+ * JSON-parses the queue message before calling the handler, so `invokeQueue`
+ * passes the ALREADY-PARSED object — a consumer handed a string must still
+ * defensively `JSON.parse` it. `dequeueCount` is surfaced via
+ * `ctx.triggerMetadata.dequeueCount` (first-class input for poison/retry logic).
+ */
+export async function invokeQueue(
+  name: string,
+  message: unknown,
+  opts?: { dequeueCount?: number },
+): Promise<unknown> {
+  const entry = getRegisteredQueueHandler(name);
+  const ctx = {
+    log: console.log,
+    warn: console.warn,
+    error: console.error,
+    functionName: name,
+    triggerMetadata: { dequeueCount: opts?.dequeueCount ?? 1 },
+  };
+  return entry.handler(message, ctx);
 }

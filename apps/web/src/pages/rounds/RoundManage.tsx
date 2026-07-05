@@ -1421,6 +1421,9 @@ export default function RoundManage() {
   const [actionBusy, setActionBusy] = useState<string | null>(null);
   const [confirmModal, setConfirmModal] = useState<{ label: string; endpoint: string; count: number } | null>(null);
 
+  const [pollCount, setPollCount] = useState(0);
+  const [pollTimeout, setPollTimeout] = useState<number | null>(null);
+
   const loadRound = useCallback(async () => {
     if (!id) return;
     try {
@@ -1465,6 +1468,34 @@ export default function RoundManage() {
       cancelled = true;
     };
   }, [id]);
+
+  useEffect(() => {
+    const st = round?.brief?.pdfStatus;
+    if (st === "pending" || st === "processing") {
+      if (pollCount >= 15) {
+        setPollTimeout(Date.now());
+        return;
+      }
+      const delay = Math.min(3000 * Math.pow(1.5, pollCount), 15000);
+      const timer = setTimeout(() => {
+        void loadRound();
+        setPollCount((c) => c + 1);
+      }, delay);
+      return () => clearTimeout(timer);
+    } else {
+      if (pollCount > 0) {
+        setPollCount(0);
+        setPollTimeout(null);
+      }
+    }
+  }, [round?.brief?.pdfStatus, pollCount, loadRound]);
+
+  async function regeneratePdf() {
+    if (!round) return;
+    await runAction("Regenerate PDF", () => api.post(`rounds/${round.id}/brief/regenerate`));
+    setPollCount(0);
+    setPollTimeout(null);
+  }
 
   async function runAction(label: string, fn: () => Promise<unknown>) {
     setActionErr(null);
@@ -1544,22 +1575,75 @@ export default function RoundManage() {
         <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "0.5rem" }}>
           <StatusBadge status={r.status} />
           {canManage && (r.status === "Locked" || r.status === "Complete") && (
-            <Link
-              to={`/rounds/${r.id}/brief`}
-              style={{
-                padding: "0.35rem 0.75rem",
-                background: "#e8edf8",
-                color: "#1a4fa0",
-                border: "1px solid #c8cce0",
-                borderRadius: "0.3rem",
-                textDecoration: "none",
-                fontSize: "0.82rem",
-                fontWeight: 600,
-                whiteSpace: "nowrap",
-              }}
-            >
-              View Brief
-            </Link>
+            <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              {r.brief?.pdfStatus === "pending" && pollTimeout === null && (
+                <span style={{ fontSize: "0.82rem", color: "#664d03", display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                  <span style={{ display: "inline-block", width: "0.8rem", height: "0.8rem", border: "2px solid #dee2e6", borderTopColor: "currentColor", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                  Queued…
+                </span>
+              )}
+              {r.brief?.pdfStatus === "processing" && pollTimeout === null && (
+                <span style={{ fontSize: "0.82rem", color: "#084298", display: "flex", alignItems: "center", gap: "0.3rem" }}>
+                  <span style={{ display: "inline-block", width: "0.8rem", height: "0.8rem", border: "2px solid #dee2e6", borderTopColor: "currentColor", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                  Generating PDF…
+                </span>
+              )}
+              {r.brief?.pdfStatus === "failed" && (
+                <span style={{ fontSize: "0.82rem", color: "#842029" }}>
+                  Failed to generate PDF
+                </span>
+              )}
+              {pollTimeout !== null && (r.brief?.pdfStatus === "pending" || r.brief?.pdfStatus === "processing") && (
+                <span style={{ fontSize: "0.82rem", color: "#842029" }}>
+                  Taking longer than expected — Refresh/Regenerate
+                </span>
+              )}
+
+              {r.brief?.pdfStatus === "failed" || (pollTimeout !== null && (r.brief?.pdfStatus === "pending" || r.brief?.pdfStatus === "processing")) ? (
+                <button
+                  onClick={() => { void regeneratePdf(); }}
+                  style={{ ...btnStyle("#58151c", "#f8d7da"), fontSize: "0.82rem" }}
+                >
+                  Regenerate PDF
+                </button>
+              ) : null}
+
+              {r.brief?.pdfStatus === "ready" || !r.brief?.pdfStatus ? (
+                <Link
+                  to={`/rounds/${r.id}/brief`}
+                  style={{
+                    padding: "0.35rem 0.75rem",
+                    background: "#e8edf8",
+                    color: "#1a4fa0",
+                    border: "1px solid #c8cce0",
+                    borderRadius: "0.3rem",
+                    textDecoration: "none",
+                    fontSize: "0.82rem",
+                    fontWeight: 600,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  View Brief
+                </Link>
+              ) : (
+                <span
+                  style={{
+                    padding: "0.35rem 0.75rem",
+                    background: "#e9ecef",
+                    color: "#6c757d",
+                    border: "1px solid #dee2e6",
+                    borderRadius: "0.3rem",
+                    fontSize: "0.82rem",
+                    fontWeight: 600,
+                    whiteSpace: "nowrap",
+                    cursor: "not-allowed",
+                  }}
+                  title={r.brief?.pdfStatus === "pending" || r.brief?.pdfStatus === "processing" ? "PDF is generating" : "PDF generation failed"}
+                >
+                  View Brief
+                </span>
+              )}
+            </div>
           )}
         </div>
       </div>

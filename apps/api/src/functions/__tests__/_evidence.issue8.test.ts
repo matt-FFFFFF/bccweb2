@@ -279,6 +279,7 @@ const CASES: CallSiteCase[] = [
   { file: "adminWording.ts", handler: "addSignToFlyWording", endpoint: "addSignToFlyWording", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("POST", {}, { markdown: "x" }) },
 
   { file: "brief.ts", handler: "updateRoundBrief", endpoint: "updateRoundBrief", tier: "heavy", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "PUT", params: { id: (await roundForOtherClub("Confirmed")).id }, body: {} } }) },
+  { file: "brief.ts", handler: "regenerateRoundBriefPdf", endpoint: "regenerateRoundBriefPdf", tier: "heavy", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "POST", params: { id: (await roundForOtherClub("Locked")).id } } }) },
   { file: "brief.ts", handler: "uploadBriefImage", endpoint: "uploadBriefImage", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "POST", params: { id: (await roundForOtherClub("Confirmed")).id } } }) },
   { file: "brief.ts", handler: "deleteBriefImage", endpoint: "deleteBriefImage", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "DELETE", params: { id: (await roundForOtherClub("Confirmed")).id, index: "1" } } }) },
 

@@ -16,7 +16,7 @@ import {
   HttpResponseInit,
   InvocationContext,
 } from "@azure/functions";
-import { randomUUID } from "crypto";
+import { randomUUID } from "node:crypto";
 import type {
   CallerIdentity,
   Round,
@@ -50,7 +50,6 @@ import {
   withPrivateLease,
   withPrivateLeaseRenewing,
   withRoundAndBriefLease,
-  getPrivateBlockBlobClient,
 } from "../lib/blob.js";
 import { readJson, writeJson, writePrivateJson } from "../lib/blobJson.js";
 import {
@@ -63,13 +62,8 @@ import { assertCanManageRound } from "../lib/roundAuth.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 import { updateRoundsIndex, recomputeSeason } from "../lib/recompute.js";
 import { createPureTrackGroups, type PureTrackRoundResult } from "../lib/puretrack.js";
-import { generateBriefPdf } from "../lib/pdf.js";
-import {
-  sendEmail,
-  getBriefRecipients,
-  briefHtmlBody,
-  briefPlainText,
-} from "../lib/email.js";
+import { setBriefPdfStatus } from "../lib/briefPdf.js";
+import { enqueueBriefPdf } from "../lib/queue.js";
 import { getTelemetryClient } from "../lib/telemetry.js";
 import { listSignaturesForRound } from "../lib/signTofly/ledger.js";
 import { invalidatePriorSignToFlyFlags } from "../lib/signTofly/invalidate.js";
@@ -110,15 +104,6 @@ const PilotSummariesSchema = z.array(PilotSummarySchema);
 const ClubRefSchema = z
   .object({ id: z.string().min(1), name: z.string().min(1) })
   .strip();
-
-type RoundWithBriefMetadata = Round & {
-  brief?: {
-    version?: number;
-    jsonPath?: string;
-    pdfPath?: string;
-    generatedAt?: string;
-  };
-};
 
 async function loadConfig(): Promise<Config> {
   try {
@@ -983,37 +968,11 @@ async function mergeBriefForLock(
   return merged;
 }
 
-async function sendBriefIfConfigured(brief: RoundBrief, pdfBuffer: Buffer | null): Promise<void> {
-  const recipients = getBriefRecipients();
-  if (recipients.length === 0) return;
-
-  const dateDisplay = new Date(brief.date + "T00:00:00Z").toLocaleDateString(
-    "en-GB",
-    { day: "numeric", month: "long", year: "numeric", timeZone: "UTC" }
-  );
-
-  await sendEmail({
-    to: recipients,
-    subject: `BCC Round Brief — ${brief.siteName} — ${dateDisplay}`,
-    html: briefHtmlBody(brief.siteName, dateDisplay),
-    text: briefPlainText(brief.siteName, dateDisplay),
-    attachments: pdfBuffer
-      ? [
-          {
-            name: `BCC-Brief-${brief.siteName.replace(/\s+/g, "-")}-${brief.date}.pdf`,
-            contentType: "application/pdf",
-            data: pdfBuffer,
-          },
-        ]
-      : undefined,
-  });
-}
-
 /**
  * BriefComplete → Locked.
  * Takes a snapshot of each registered pilot's safety/scoring data from
  * their pilot document. Resets accountedFor and signToFly for all slots.
- * After the lock is confirmed, fires async: PureTrack groups → PDF → email.
+ * After the lock is confirmed, fires async: PureTrack groups → PDF queue.
  */
 async function lockRound(
   req: HttpRequest,
@@ -1135,14 +1094,14 @@ async function lockRound(
   };
 
   let updated: Round;
-  let lockedBrief: RoundBrief;
+  const pdfAttemptId = randomUUID();
   try {
     const result = await withRoundAndBriefLease(id, async (roundLeaseId, briefLeaseId) => {
-      const r = (await readJson(
+      const r: Round = await readJson(
         getPrivateBlobClient(path),
         RoundSchema,
         path,
-      )) as RoundWithBriefMetadata;
+      );
 
       if (r.status !== "BriefComplete") {
         const err = new Error("Round status changed concurrently");
@@ -1206,13 +1165,16 @@ async function lockRound(
         jsonPath: briefPaths.jsonPath,
         pdfPath: briefPaths.pdfPath,
         generatedAt: brief.generatedAt,
+        pdfStatus: "pending",
+        pdfError: undefined,
+        pdfUpdatedAt: new Date().toISOString(),
+        pdfAttemptId,
       };
 
       await writePrivateJson(path, RoundSchema, r, roundLeaseId);
       return { round: r, brief };
     });
     updated = result.round;
-    lockedBrief = result.brief;
   } catch (err: unknown) {
     if (err instanceof HttpError) throw err;
     const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
@@ -1224,20 +1186,13 @@ async function lockRound(
     );
   }
 
-  // PDF + email are best-effort AFTER the brief JSON and round are committed: a
-  // failure here leaves the round Locked (the artifacts are regenerable) and
-  // never rolls the lock back.
+  // PDF generation is best-effort AFTER the brief JSON and round are committed: a
+  // queue failure leaves the round Locked and marks only the PDF state failed.
   try {
-    const pdfBuffer = await generateBriefPdf(lockedBrief);
-    const pdfBlobClient = getPrivateBlockBlobClient(briefPaths.pdfPath);
-    await pdfBlobClient.upload(pdfBuffer, pdfBuffer.length, {
-      blobHTTPHeaders: { blobContentType: "application/pdf" },
-      metadata: { sitename: lockedBrief.siteName, date: lockedBrief.date },
-    });
-    await sendBriefIfConfigured(lockedBrief, pdfBuffer);
-    console.log(`[lockRound:${id}] Brief artifacts generated and email processed`);
-  } catch (briefErr) {
-    console.error(`[lockRound:${id}] Brief artifact/email processing failed:`, briefErr);
+    await enqueueBriefPdf({ roundId: id, briefVersion: updated.brief!.version!, pdfAttemptId });
+  } catch {
+    // Recovery is best-effort: a failure here must NOT fail the lock or skip updateRoundsIndex.
+    await setBriefPdfStatus(id, "failed", { error: "enqueue_failed", expectAttemptId: pdfAttemptId, fromStatuses: ["pending", "processing"] }).catch(() => {});
   }
 
   await updateRoundsIndex(updated);
@@ -1261,6 +1216,11 @@ async function unlockRound(
   // eslint-disable-next-line @typescript-eslint/require-await -- transition()'s `extra` slot is typed (round: Round) => Promise<void>; this mutator is synchronous but the Promise-returning shape is required by that signature.
   const result = await transition(req, id, ["Locked"], "Confirmed", async (r) => {
     r.isLocked = false;
+    if (r.brief) {
+      r.brief.pdfStatus = undefined;
+      r.brief.pdfError = undefined;
+      r.brief.pdfAttemptId = undefined;
+    }
     // Clear snapshots so they are re-taken at next lock
     for (const team of r.teams) {
       for (const slot of team.pilots) {

@@ -160,6 +160,89 @@ describe("RoundManage Brief Section", () => {
   });
 });
 
+describe("Brief PDF Status UI", () => {
+  beforeEach(() => {
+    state.round = makeRound({ status: "Locked" });
+    state.identity = makeIdentity({ roles: ["Admin"] });
+    state.apiGet.mockReset().mockImplementation(async () => state.round);
+    state.apiPost.mockReset().mockResolvedValue({});
+  });
+
+  afterEach(() => {
+    cleanup();
+  });
+
+  it("pdfStatus: processing -> View Brief disabled + spinner present", async () => {
+    state.round!.brief = { pdfStatus: "processing" } as unknown as RoundBrief;
+    renderPage();
+    
+    const disabledLink = await screen.findByText("View Brief");
+    expect(disabledLink.tagName).not.toBe("A");
+    expect(disabledLink).toHaveStyle({ cursor: "not-allowed" });
+    
+    expect(screen.getByText("Generating PDF…")).toBeInTheDocument();
+  });
+
+  it("pdfStatus: ready -> View Brief enabled", async () => {
+    state.round!.brief = { pdfStatus: "ready" } as unknown as RoundBrief;
+    renderPage();
+    
+    const link = await screen.findByText("View Brief");
+    expect(link.tagName).toBe("A");
+    expect(link).toHaveAttribute("href", "/rounds/round-1/brief");
+  });
+
+  it("pdfStatus: failed -> error text + Regenerate PDF button calls api.post", async () => {
+    state.round!.brief = { pdfStatus: "failed" } as unknown as RoundBrief;
+    renderPage();
+    
+    const disabledLink = await screen.findByText("View Brief");
+    expect(disabledLink.tagName).not.toBe("A");
+
+    expect(screen.getByText("Failed to generate PDF")).toBeInTheDocument();
+    
+    const regenBtn = screen.getByRole("button", { name: "Regenerate PDF" });
+    fireEvent.click(regenBtn);
+    
+    await waitFor(() => {
+      expect(state.apiPost).toHaveBeenCalledWith("rounds/round-1/brief/regenerate");
+    });
+  });
+
+  it("polls when processing, stops when ready", async () => {
+    state.round!.brief = { pdfStatus: "processing" } as unknown as RoundBrief;
+    
+    vi.useFakeTimers();
+    renderPage();
+    
+    await vi.runAllTicks();
+    await vi.advanceTimersByTimeAsync(1); 
+    
+    expect(screen.getByText("Generating PDF…")).toBeInTheDocument();
+    
+    const callsBefore = state.apiGet.mock.calls.length;
+    
+    await vi.advanceTimersByTimeAsync(3000);
+    const callsAfter = state.apiGet.mock.calls.length;
+    expect(callsAfter).toBeGreaterThan(callsBefore);
+    
+    state.round = {
+      ...state.round!,
+      brief: { ...state.round!.brief!, pdfStatus: "ready" } as unknown as RoundBrief,
+    };
+    
+    await vi.advanceTimersByTimeAsync(4500);
+    const callsAfterReady = state.apiGet.mock.calls.length;
+    expect(callsAfterReady).toBe(callsAfter + 1);
+    
+    await vi.advanceTimersByTimeAsync(10000);
+    expect(state.apiGet.mock.calls.length).toBe(callsAfterReady);
+
+    const link = screen.getByText("View Brief");
+    expect(link.tagName).toBe("A");
+  });
+});
+
 function renderPage() {
   render(
     <MemoryRouter initialEntries={["/rounds/round-1/manage"]}>

@@ -76,7 +76,13 @@ vi.mock("../../lib/email.js", () => ({
   briefPlainText: emailMock.briefPlainText,
 }));
 
+vi.mock("../../lib/queue.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/queue.js")>()),
+  enqueueBriefPdf: vi.fn(),
+}));
+
 import { getBriefRecipients, sendEmail } from "../../lib/email.js";
+import { enqueueBriefPdf } from "../../lib/queue.js";
 import { recomputeSeason } from "../../lib/recompute.js";
 import "../roundsMutate.js";
 import "../teams.js";
@@ -95,6 +101,7 @@ describe("round lifecycle integration", () => {
       teams: [],
     });
     pdfMock.generateBriefPdf.mockResolvedValue(Buffer.from("%PDF-1.4 lifecycle"));
+    vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
     vi.mocked(getBriefRecipients).mockReturnValue([]);
   });
 
@@ -103,7 +110,7 @@ describe("round lifecycle integration", () => {
     vi.restoreAllMocks();
   });
 
-  it("happy path create -> confirm -> brief-complete -> sign -> lock generates artifacts and freezes brief metadata", async () => {
+  it("happy path create -> confirm -> brief-complete -> sign -> lock enqueues PDF job and freezes brief metadata", async () => {
     vi.mocked(getBriefRecipients).mockReturnValue(["ops@example.com"]);
     const ctx = await seedCreatedRoundViaHandlers();
     await seedBrief(ctx, { windSpeedDirection: "W 10kt" });
@@ -120,14 +127,22 @@ describe("round lifecycle integration", () => {
 
     expect(lockRes.status).toBe(200);
     expect(pureTrackMock.createPureTrackGroups).toHaveBeenCalledTimes(1);
-    expect(pdfMock.generateBriefPdf).toHaveBeenCalledTimes(1);
-    expect(sendEmail).toHaveBeenCalledTimes(1);
-    expect(await privateBlobExists(`round-briefs/${ctx.roundId}.pdf`)).toBe(true);
+    expect(pdfMock.generateBriefPdf).toHaveBeenCalledTimes(0);
+    expect(sendEmail).toHaveBeenCalledTimes(0);
+    expect(await privateBlobExists(`round-briefs/${ctx.roundId}.pdf`)).toBe(false);
     expect(await privateBlobExists(`round-briefs/${ctx.roundId}.json`)).toBe(true);
-    const locked = (await readPrivateJson<Round & { brief?: { version?: number; pdfPath?: string } }>(`rounds/${ctx.roundId}.json`))!;
+    const locked = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
     expect(locked.status).toBe("Locked");
     expect(locked.brief?.version).toBe(1);
     expect(locked.brief?.pdfPath).toBe(`round-briefs/${ctx.roundId}.pdf`);
+    expect(locked.brief?.pdfStatus).toBe("pending");
+    expect(locked.brief?.pdfAttemptId).toBeTruthy();
+    expect(enqueueBriefPdf).toHaveBeenCalledTimes(1);
+    expect(enqueueBriefPdf).toHaveBeenCalledWith({
+      roundId: ctx.roundId,
+      briefVersion: 1,
+      pdfAttemptId: locked.brief?.pdfAttemptId,
+    });
     expect(await readPrivateJson<Signature>(signaturePath(ctx.roundId, ctx.teamId, 1, 1))).toMatchObject({
       pilotId: ctx.pilotId,
       source: "pilot-self",
