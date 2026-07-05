@@ -32,10 +32,10 @@ import {
 import * as z from "zod/v4";
 import {
   getBlobClient,
-  getBlockBlobClient,
   getPrivateBlobClient,
   withLeaseRetry,
   ensureJsonIndexBlob,
+  writeBlob,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
@@ -435,15 +435,7 @@ async function upsertPilotInIndex(pilot: Pilot): Promise<void> {
     }
 
     index.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-    // Raw uploadData with lease conditions: writeBlob does not currently accept
-    // ETag/lease guards alongside If-None-Match for the pilots.json index slot,
-    // so the lease-coupled write stays on the BlockBlobClient API. Schema
-    // healing for the array elements still applies through the readJson above.
-    const content = JSON.stringify(index, null, 2);
-    await getBlockBlobClient("pilots.json").uploadData(Buffer.from(content), {
-      blobHTTPHeaders: { blobContentType: "application/json" },
-      conditions: { leaseId },
-    });
+    await writeBlob("pilots.json", index, leaseId);
   });
 
 }
