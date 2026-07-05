@@ -6,6 +6,7 @@ import { invoke, makeAuthRequest } from "../../__tests__/helpers/api.js";
 import {
   makeUser,
   readPrivateJson,
+  readPublicJson,
   writePrivateJson,
   writePublicJson,
 } from "../../__tests__/helpers/seed.js";
@@ -30,7 +31,19 @@ vi.mock("../../lib/queue.js", async (importOriginal) => ({
   enqueueBriefPdf: vi.fn(),
 }));
 
+const briefPdfMock = vi.hoisted(() => ({
+  setBriefPdfStatus: vi.fn(),
+  realSetBriefPdfStatus:
+    undefined as unknown as (typeof import("../../lib/briefPdf.js"))["setBriefPdfStatus"],
+}));
+vi.mock("../../lib/briefPdf.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/briefPdf.js")>();
+  briefPdfMock.realSetBriefPdfStatus = actual.setBriefPdfStatus;
+  return { ...actual, setBriefPdfStatus: briefPdfMock.setBriefPdfStatus };
+});
+
 import { enqueueBriefPdf } from "../../lib/queue.js";
+import { setBriefPdfStatus } from "../../lib/briefPdf.js";
 import "../roundsMutate.js";
 
 interface Ctx {
@@ -175,6 +188,7 @@ describe("lockRound async brief PDF queue", () => {
     vi.clearAllMocks();
     pureTrackMock.createPureTrackGroups.mockResolvedValue(null);
     vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
+    vi.mocked(setBriefPdfStatus).mockImplementation(briefPdfMock.realSetBriefPdfStatus);
   });
 
   it("enqueues a pending PDF job on lock and clears PDF state on unlock", async () => {
@@ -220,5 +234,25 @@ describe("lockRound async brief PDF queue", () => {
     expect(round.brief?.pdfError).toBe("enqueue_failed");
     expect(enqueueBriefPdf).toHaveBeenCalledTimes(1);
     expect(pdfMock.generateBriefPdf).not.toHaveBeenCalled();
+  });
+
+  it("keeps the lock and still updates the rounds index when both enqueue AND the failure recovery throw", async () => {
+    const ctx = await seedBriefCompleteRound();
+    await writePrivateJson(`round-briefs/${ctx.roundId}.json`, frozenBrief(ctx));
+    vi.mocked(enqueueBriefPdf).mockRejectedValueOnce(new Error("queue unavailable"));
+    vi.mocked(setBriefPdfStatus).mockRejectedValueOnce(new Error("lease timeout"));
+
+    const res = await lock(ctx);
+
+    expect(res.status).toBe(200);
+    expect(enqueueBriefPdf).toHaveBeenCalledTimes(1);
+    expect(setBriefPdfStatus).toHaveBeenCalledTimes(1);
+
+    const round = await readRequiredRound(ctx.roundId);
+    expect(round.status).toBe("Locked");
+
+    const index = await readPublicJson<Array<{ id: string; status: string }>>("rounds.json");
+    const entry = index?.find((r) => r.id === ctx.roundId);
+    expect(entry?.status).toBe("Locked");
   });
 });

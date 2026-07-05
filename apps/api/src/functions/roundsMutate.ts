@@ -1191,7 +1191,8 @@ async function lockRound(
   try {
     await enqueueBriefPdf({ roundId: id, briefVersion: updated.brief!.version!, pdfAttemptId });
   } catch {
-    await setBriefPdfStatus(id, "failed", { error: "enqueue_failed", expectAttemptId: pdfAttemptId, fromStatuses: ["pending", "processing"] });
+    // Recovery is best-effort: a failure here must NOT fail the lock or skip updateRoundsIndex.
+    await setBriefPdfStatus(id, "failed", { error: "enqueue_failed", expectAttemptId: pdfAttemptId, fromStatuses: ["pending", "processing"] }).catch(() => {});
   }
 
   await updateRoundsIndex(updated);
