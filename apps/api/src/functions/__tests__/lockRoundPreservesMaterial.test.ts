@@ -64,6 +64,13 @@ vi.mock("../../lib/email.js", () => ({
   briefPlainText: emailMock.briefPlainText,
 }));
 
+vi.mock("../../lib/queue.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/queue.js")>()),
+  enqueueBriefPdf: vi.fn(),
+}));
+
+import { enqueueBriefPdf } from "../../lib/queue.js";
+
 // Telemetry spy. setup.ts does NOT mock telemetry; getTelemetryClient() returns
 // undefined in tests. The stub client is a Proxy so any method (e.g. trackEvent
 // on a blob heal) is a safe no-op while `trackTrace` is the spy we assert on.
@@ -178,9 +185,6 @@ async function seedBriefCompleteRound(): Promise<Ctx> {
     isLocked: false,
     maxTeams: 8,
     minimumScore: 0,
-    briefingTime: "10:00",
-    landByTime: "18:00",
-    checkInByTime: "19:00",
     site: {
       id: site.id,
       name: "Milk Hill",
@@ -289,6 +293,7 @@ describe("lockRound preserves the frozen material hash while refreshing teams (T
     blobJsonControl.failBriefWrite = false;
     pureTrackMock.createPureTrackGroups.mockResolvedValue(null);
     pdfMock.generateBriefPdf.mockResolvedValue(Buffer.from("%PDF-1.4 lock-test"));
+    vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
     emailMock.getBriefRecipients.mockReturnValue([]);
     telemetryMock.trackTrace.mockClear();
   });
@@ -405,16 +410,20 @@ describe("lockRound preserves the frozen material hash while refreshing teams (T
     expect(round.isLocked).toBe(false);
   });
 
-  it("is best-effort on PDF: a generateBriefPdf failure still reaches Locked", async () => {
+  it("is best-effort on PDF queue failure: enqueue failure still reaches Locked", async () => {
     const ctx = await seedBriefCompleteRound();
     await seedBrief(ctx, frozen(buildBrief(ctx, { briefersNotes: "notes" })));
-    pdfMock.generateBriefPdf.mockRejectedValueOnce(new Error("PDF engine exploded"));
+    vi.mocked(enqueueBriefPdf).mockRejectedValueOnce(new Error("queue unavailable"));
 
     const res = await lock(ctx);
 
     expect(res.status).toBe(200);
     const round = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
     expect(round.status).toBe("Locked");
+    expect(round.brief?.pdfStatus).toBe("failed");
+    expect(round.brief?.pdfError).toBe("enqueue_failed");
+    expect(enqueueBriefPdf).toHaveBeenCalledTimes(1);
+    expect(pdfMock.generateBriefPdf).not.toHaveBeenCalled();
     // The brief JSON (frozen material) was still written before the PDF step.
     const after = (await readPrivateJson<RoundBrief>(`round-briefs/${ctx.roundId}.json`))!;
     expect(computeBriefHash(after)).toBe(after.hash);

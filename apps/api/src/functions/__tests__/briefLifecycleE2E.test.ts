@@ -63,6 +63,11 @@ vi.mock("../../lib/email.js", () => ({
   briefPlainText: emailMock.briefPlainText,
 }));
 
+vi.mock("../../lib/queue.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/queue.js")>()),
+  enqueueBriefPdf: vi.fn(),
+}));
+
 // CRITICAL: the default 15s renewIntervalMs trips the leaseDurationSec*500
 // safety guard in apps/api/src/lib/blob.ts. Forcing 1s keeps lockRound alive
 // for the duration of this test. See plan T2 / lockRoundPreservesNarrative.test.ts.
@@ -84,6 +89,7 @@ vi.mock("../../lib/blob.js", async (importOriginal) => {
 });
 
 // Register handlers (side-effectful imports)
+import { enqueueBriefPdf } from "../../lib/queue.js";
 import "../roundsMutate.js";
 import "../teams.js";
 import "../signatures.js";
@@ -186,6 +192,7 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
       teams: [],
     });
     pdfMock.generateBriefPdf.mockResolvedValue(Buffer.from("%PDF-1.4 e2e"));
+    vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
     emailMock.getBriefRecipients.mockReturnValue([]);
   });
 
@@ -320,7 +327,19 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
       }),
     );
     expect(lockRes.status).toBe(200);
-    expect((await readPrivateJson<Round>(`rounds/${roundId}.json`))?.status).toBe("Locked");
+    const lockedRound = (await readPrivateJson<Round>(`rounds/${roundId}.json`))!;
+    expect(lockedRound.status).toBe("Locked");
+    expect(lockedRound.brief?.pdfStatus).toBe("pending");
+    expect(lockedRound.brief?.pdfAttemptId).toBeTruthy();
+    expect(enqueueBriefPdf).toHaveBeenCalledTimes(1);
+    expect(enqueueBriefPdf).toHaveBeenCalledWith({
+      roundId,
+      briefVersion: lockedRound.brief?.version,
+      pdfAttemptId: lockedRound.brief?.pdfAttemptId,
+    });
+    expect(pdfMock.generateBriefPdf).not.toHaveBeenCalled();
+    expect(emailMock.sendEmail).not.toHaveBeenCalled();
+    expect(await privateBlobExists(`round-briefs/${roundId}.pdf`)).toBe(false);
 
     const getRes2 = await invoke(
       "getRoundBrief",
