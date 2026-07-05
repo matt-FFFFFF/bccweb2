@@ -125,6 +125,41 @@ resource "azapi_resource" "storage_container_data_private" {
   }
 }
 
+# ─── Queue Service ───────────────────────────────────────────────────────────
+#
+# Backs the async round-brief PDF pipeline. The API enqueues a job on the
+# `round-brief-pdf` queue; a queue-triggered Function renders the PDF. The
+# queue service is the parent for all named queues (name must be "default").
+
+resource "azapi_resource" "queue_service" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices@2025-06-01"
+  name      = "default"
+  parent_id = azapi_resource.storage.id
+
+  body = {
+    properties = {}
+  }
+}
+
+# ─── Round-Brief PDF Queues ──────────────────────────────────────────────────
+#
+# `round-brief-pdf` carries BriefPdfJob messages (roundId, briefVersion,
+# pdfAttemptId — no PII). `round-brief-pdf-poison` collects messages that
+# exhaust the Functions host retry budget. Names MUST match the producer /
+# consumer AzureWebJobsStorage queue bindings — do not rename.
+
+resource "azapi_resource" "queue_brief_pdf" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "round-brief-pdf"
+  parent_id = azapi_resource.queue_service.id
+}
+
+resource "azapi_resource" "queue_brief_pdf_poison" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "round-brief-pdf-poison"
+  parent_id = azapi_resource.queue_service.id
+}
+
 # ─── Storage Account Keys ────────────────────────────────────────────────────
 #
 # Used to construct the connection string for the Function App.

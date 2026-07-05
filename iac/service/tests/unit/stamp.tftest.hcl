@@ -272,6 +272,33 @@ run "no_diagnostic_settings" {
   }
 }
 
+run "round_brief_pdf_queues_planned" {
+  command = plan
+
+  providers = {
+    azapi  = azapi.mock
+    random = random.mock
+  }
+
+  module {
+    source = "./tests/unit/stamp-fixture"
+  }
+
+  assert {
+    condition = (
+      azapi_resource.queue_service.name == "default" &&
+      azapi_resource.queue_service.type == "Microsoft.Storage/storageAccounts/queueServices@2025-06-01" &&
+      azapi_resource.queue_brief_pdf.name == "round-brief-pdf" &&
+      azapi_resource.queue_brief_pdf.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
+      azapi_resource.queue_brief_pdf_poison.name == "round-brief-pdf-poison" &&
+      azapi_resource.queue_brief_pdf_poison.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
+      azapi_resource.queue_brief_pdf.parent_id == azapi_resource.queue_service.id &&
+      azapi_resource.queue_brief_pdf_poison.parent_id == azapi_resource.queue_service.id
+    )
+    error_message = "The round-brief-pdf queue and its poison queue must plan under the queue service with the exact expected names, types, and parent linkage."
+  }
+}
+
 run "dns_skipped_when_hostname_empty" {
   command = plan
 
