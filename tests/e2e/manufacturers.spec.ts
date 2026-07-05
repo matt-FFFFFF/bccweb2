@@ -23,8 +23,7 @@ import { resetAzuriteAndSeedAdmin } from "./_setup/reset-azurite.js";
  */
 
 const EVIDENCE_DIR = path.join(".omo", "evidence", "e2e-manufacturers");
-// Required deliverable — absolute path, outside the worktree.
-const FINAL_SHOT = "/Volumes/code/bccweb2/.omo/evidence/task-10-manufacturers-e2e.png";
+const FINAL_SHOT = path.join(EVIDENCE_DIR, "task-10-manufacturers-e2e.png");
 
 const MANUFACTURER = "Gin Gliders";
 const WEBSITE_URL = "https://gingliders.com";
@@ -37,7 +36,6 @@ let admin: { email: string; password: string };
 
 test.beforeAll(async () => {
   await fs.mkdir(EVIDENCE_DIR, { recursive: true });
-  await fs.mkdir(path.dirname(FINAL_SHOT), { recursive: true });
   // Clean Azurite + admin-only seed. `data` is left EMPTY: manufacturers.json
   // does NOT pre-exist — this spec creates it via the admin flow.
   admin = await resetAzuriteAndSeedAdmin();
