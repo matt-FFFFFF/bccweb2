@@ -1,11 +1,11 @@
 import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useLocation, type NavLinkRenderProps } from "react-router";
-import { useState, useRef, useEffect } from "react";
 import * as z from "zod/v4";
 import { SeasonSummarySchema } from "@bccweb/schemas";
 import { useAuth, loginUrl } from "./hooks/useAuth.js";
 import { AuthProvider } from "./components/AuthProvider.js";
 import { useBlob } from "./hooks/useBlob.js";
 import type { SeasonSummary } from "@bccweb/types";
+import { NavDropdown } from "./components/NavDropdown.js";
 import Home from "./pages/Home.js";
 import RoundsList from "./pages/rounds/RoundsList.js";
 import RoundDetail from "./pages/rounds/RoundDetail.js";
@@ -44,84 +44,30 @@ const navLinkClass = ({ isActive }: NavLinkRenderProps) => (isActive ? "active" 
 
 // Mounted only for admins, so its document-level listeners never attach for other roles.
 function AdminMenu() {
-  const location = useLocation();
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(event: MouseEvent) {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    setOpen(false);
-  }, [location.pathname]);
-
   return (
-    <div className="bcc-nav__dropdown" ref={ref}>
-      <button
-        type="button"
-        className="bcc-nav__dropdown-trigger"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-      >
-        Admin
-        <svg
-          className="bcc-nav__caret"
-          width="10"
-          height="10"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </button>
-      {open && (
-        <div className="bcc-nav__menu">
-          <NavLink to="/admin/clubs" className={navLinkClass}>
-            Clubs
-          </NavLink>
-          <NavLink to="/admin/config" className={navLinkClass}>
-            Config
-          </NavLink>
-          <NavLink to="/admin/manufacturers" className={navLinkClass}>
-            Manufacturers
-          </NavLink>
-          <NavLink to="/admin/seasons" className={navLinkClass}>
-            Seasons
-          </NavLink>
-          <NavLink to="/admin/sign-to-fly-wording" className={navLinkClass}>
-            Sign-to-fly wording
-          </NavLink>
-          <NavLink to="/admin/sites" className={navLinkClass}>
-            Sites
-          </NavLink>
-          <NavLink to="/admin/users" className={navLinkClass}>
-            Users
-          </NavLink>
-        </div>
-      )}
-    </div>
+    <NavDropdown label="Admin">
+      <NavLink to="/admin/clubs" className={navLinkClass}>
+        Clubs
+      </NavLink>
+      <NavLink to="/admin/config" className={navLinkClass}>
+        Config
+      </NavLink>
+      <NavLink to="/admin/manufacturers" className={navLinkClass}>
+        Manufacturers
+      </NavLink>
+      <NavLink to="/admin/seasons" className={navLinkClass}>
+        Seasons
+      </NavLink>
+      <NavLink to="/admin/sign-to-fly-wording" className={navLinkClass}>
+        Sign-to-fly wording
+      </NavLink>
+      <NavLink to="/admin/sites" className={navLinkClass}>
+        Sites
+      </NavLink>
+      <NavLink to="/admin/users" className={navLinkClass}>
+        Users
+      </NavLink>
+    </NavDropdown>
   );
 }
 
