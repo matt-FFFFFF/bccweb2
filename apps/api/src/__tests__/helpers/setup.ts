@@ -9,7 +9,7 @@
 process.env["NODE_ENV"] ??= "test";
 process.env["TEST_BCRYPT_COST"] ??= "4";
 
-const { beforeEach, vi } = await import("vitest");
+const { beforeAll, beforeEach, vi } = await import("vitest");
 const { resetAllBuckets } = await import("../../lib/rateLimit.js");
 
 // ─── Environment variables ────────────────────────────────────────────────────
@@ -30,6 +30,14 @@ process.env["BLOB_CONNECTION_STRING"] ??= AZURITE_CONNECTION_STRING;
 process.env["AzureWebJobsStorage"] ??= AZURITE_QUEUE_CONNECTION_STRING;
 process.env["JWT_SECRET"] ??= "test-jwt-secret-for-vitest-at-least-32-chars-long";
 process.env["APP_URL"] ??= "http://localhost:5173";
+
+// Per-file reset of lib/queue.ts's QueueClient (mirrors resetBlobSingletons).
+// Import stays lazy INSIDE the hook: a top-level import would load lib/queue.js
+// before queue.test.ts's vi.mock("@azure/storage-queue") registers, poisoning it.
+beforeAll(async () => {
+  const { resetQueueSingletons } = await import("../../lib/queue.js");
+  resetQueueSingletons();
+});
 
 // ─── Mock @azure/functions ────────────────────────────────────────────────────
 
