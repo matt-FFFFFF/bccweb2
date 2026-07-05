@@ -335,7 +335,7 @@ async function updateRound(
       if (r.isLocked) {
         const err = new Error("Round is locked — unlock before editing");
         (err as { isValidation?: boolean }).isValidation = true;
-        throw new HttpError(500, "INTERNAL");
+        throw err;
       }
 
       if (r.status === "Cancelled") {
@@ -355,7 +355,7 @@ async function updateRound(
         } catch {
           const err = new Error("Site not found");
           (err as { isValidation?: boolean }).isValidation = true;
-          throw new HttpError(500, "INTERNAL");
+          throw err;
         }
         r.site = {
           id: site.id,
@@ -1341,7 +1341,7 @@ async function completeRound(
           `Round must be Locked to complete (currently ${r.status})`
         );
         (err as { isValidation?: boolean }).isValidation = true;
-        throw new HttpError(500, "INTERNAL");
+        throw err;
       }
 
       const scored = structuredClone(scoredSnapshot);
