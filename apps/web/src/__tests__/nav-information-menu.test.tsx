@@ -148,6 +148,21 @@ describe("Information nav dropdown", () => {
     expect(infoTrigger).toHaveAttribute("aria-expanded", "false");
   });
 
+  it("closes when a PDF link (new tab, no route change) is selected", () => {
+    renderNav(null);
+    const infoTrigger = screen.getByRole("button", { name: "Information" });
+    const infoDropdown = infoTrigger.closest(".bcc-nav__dropdown") as HTMLElement;
+
+    fireEvent.click(infoTrigger);
+    expect(within(infoDropdown).queryAllByRole("link").length).toBeGreaterThan(0);
+
+    const pdfLink = within(infoDropdown).getByRole("link", { name: "BCC Rules" });
+    fireEvent.click(pdfLink);
+
+    expect(within(infoDropdown).queryByRole("link")).toBeNull();
+    expect(infoTrigger).toHaveAttribute("aria-expanded", "false");
+  });
+
   it("coexists independently with Admin dropdown", () => {
     // Render as Admin so both dropdowns are present
     renderNav(identityWithRoles(["Admin"], "admin@bcc.test"));

@@ -54,7 +54,11 @@ export function NavDropdown({ label, children }: { label: string; children: Reac
           <polyline points="6 9 12 15 18 9" />
         </svg>
       </button>
-      {open && <div className="bcc-nav__menu">{children}</div>}
+      {open && (
+        <div className="bcc-nav__menu" onClick={() => setOpen(false)}>
+          {children}
+        </div>
+      )}
     </div>
   );
 }
