@@ -25,6 +25,8 @@ import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { canViewRoundDetail, assertCanManageRound } from "../lib/roundAuth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
+import { enqueueBriefPdf } from "../lib/queue.js";
+import { setBriefPdfStatus } from "../lib/briefPdf.js";
 import { buildInitialBrief } from "./roundsMutate.js";
 import type { CallerIdentity, Round } from "@bccweb/types";
 
@@ -69,7 +71,7 @@ async function readBrief(id: string): Promise<RoundBrief | null> {
 async function assertCanViewRound(
   caller: CallerIdentity,
   id: string,
-): Promise<void> {
+): Promise<Round> {
   const path = `rounds/${id}.json`;
   let round: Round;
   try {
@@ -83,6 +85,7 @@ async function assertCanViewRound(
   if (!canViewRoundDetail(caller, round)) {
     throw new HttpError(403, "FORBIDDEN", "You do not have access to this round's brief");
   }
+  return round;
 }
 
 // ─── GET /api/rounds/{id}/brief ───────────────────────────────────────────────
@@ -125,7 +128,15 @@ async function getRoundBriefPdf(
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
 
-  await assertCanViewRound(caller, id);
+  const round = await assertCanViewRound(caller, id);
+
+  if (round.brief?.pdfStatus !== "ready") {
+    throw new HttpError(
+      409,
+      "PDF_NOT_READY",
+      "Round brief PDF is not ready for download.",
+    );
+  }
 
   // Non-JSON pdf binary: use BlobClient.download() not readBlob/readJson (see "PREFER readJson" doc in lib/blob.ts).
   const blobClient = getPrivateBlobClient(`round-briefs/${id}.pdf`);
@@ -345,6 +356,68 @@ async function updateRoundBrief(
   return { status: 200, jsonBody: merged };
 }
 
+// ─── POST /api/rounds/{id}/brief/regenerate ───────────────────────────────────
+
+async function regenerateRoundBriefPdf(
+  req: HttpRequest,
+  _ctx: InvocationContext,
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const id = req.params["id"];
+  if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
+
+  const round = await readJson(
+    getPrivateBlobClient(`rounds/${id}.json`),
+    RoundSchema,
+    `rounds/${id}.json`,
+  ).catch((e: unknown) => {
+    if ((e as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "Round not found");
+    }
+    throw e;
+  });
+
+  assertCanManageRound(caller, round);
+
+  await mutationRateLimit(req, caller, "regenerateRoundBriefPdf", "heavy");
+
+  if (round.status !== "Locked" && round.status !== "Complete") {
+    throw new HttpError(409, "PDF_NOT_LOCKED", "Round is not locked");
+  }
+
+  if (!(await readBrief(id))) {
+    throw new HttpError(409, "BRIEF_NOT_FOUND", "Round brief does not exist");
+  }
+
+  const briefVersion = round.brief?.version;
+  if (briefVersion === undefined) {
+    throw new HttpError(409, "BRIEF_NOT_FOUND", "Round brief does not exist");
+  }
+
+  const pdfAttemptId = randomUUID();
+  const started = await setBriefPdfStatus(id, "pending", {
+    newAttemptId: pdfAttemptId,
+    requireRoundStatuses: ["Locked", "Complete"],
+  });
+  if (!started.updated) {
+    throw new HttpError(409, "PDF_NOT_LOCKED", "Round is no longer locked");
+  }
+
+  try {
+    await enqueueBriefPdf({ roundId: id, briefVersion, pdfAttemptId });
+    return { status: 202, jsonBody: { pdfStatus: "pending" } };
+  } catch {
+    await setBriefPdfStatus(id, "failed", {
+      error: "enqueue_failed",
+      expectAttemptId: pdfAttemptId,
+      fromStatuses: ["pending", "processing"],
+    });
+    throw new HttpError(503, "ENQUEUE_FAILED", "Could not queue PDF generation; try again");
+  }
+}
+
 // ─── POST /api/rounds/{id}/brief/images ───────────────────────────────────────
 
 // CAS create-only so withRoundAndBriefLease has a blob to lease; a concurrent
@@ -537,6 +610,13 @@ app.http("updateRoundBrief", {
   authLevel: "anonymous",
   route: "rounds/{id}/brief",
   handler: withErrorHandler(updateRoundBrief),
+});
+
+app.http("regenerateRoundBriefPdf", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "rounds/{id}/brief/regenerate",
+  handler: withErrorHandler(regenerateRoundBriefPdf),
 });
 
 app.http("uploadBriefImage", {
