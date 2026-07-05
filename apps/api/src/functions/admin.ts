@@ -23,11 +23,11 @@ import {
   ensureJsonIndexBlob,
   ensurePrivateJsonIndexBlob,
   getBlobClient,
-  getBlockBlobClient,
   getPrivateBlobClient,
   withLeaseRetry,
   withPrivateLease,
   withPrivateLeaseRetry,
+  writeBlob,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
@@ -1037,11 +1037,7 @@ async function upsertAdminPilotInIndex(pilot: Pilot): Promise<void> {
     }
     index.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
 
-    const content = JSON.stringify(index, null, 2);
-    await getBlockBlobClient("pilots.json").uploadData(Buffer.from(content), {
-      blobHTTPHeaders: { blobContentType: "application/json" },
-      conditions: { leaseId },
-    });
+    await writeBlob("pilots.json", index, leaseId);
   });
 }
 

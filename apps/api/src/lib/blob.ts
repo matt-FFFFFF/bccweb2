@@ -125,20 +125,25 @@ export async function readBlob(blobClient: BlobClient): Promise<unknown> {
  *
  * Write a JSON blob to the public container, overwriting any existing content.
  * Optionally pass a leaseId to write under an active blob lease.
+ *
+ * Pass `options.ifNoneMatch = "*"` to perform an atomic create-only write —
+ * Azure returns HTTP 409 (BlobAlreadyExists) if the blob already exists, which
+ * the caller can catch and treat as a no-op (don't overwrite).
  */
 export async function writeBlob<T>(
   path: string,
   data: T,
-  leaseId?: string
+  leaseId?: string,
+  options?: { ifNoneMatch?: string }
 ): Promise<void> {
   const client = getBlockBlobClient(path);
   const content = JSON.stringify(data, null, 2);
-  const options = leaseId
-    ? { conditions: { leaseId } }
-    : undefined;
+  const conditions: { leaseId?: string; ifNoneMatch?: string } = {};
+  if (leaseId) conditions.leaseId = leaseId;
+  if (options?.ifNoneMatch) conditions.ifNoneMatch = options.ifNoneMatch;
   await client.upload(content, Buffer.byteLength(content), {
     blobHTTPHeaders: { blobContentType: "application/json" },
-    conditions: options?.conditions,
+    conditions: Object.keys(conditions).length > 0 ? conditions : undefined,
   });
 }
 

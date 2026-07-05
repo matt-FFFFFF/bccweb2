@@ -1,33 +1,23 @@
 import { randomUUID } from "crypto";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Pilot, PilotSummary, User } from "@bccweb/types";
 import type * as z from "zod/v4";
 
 const blobJsonControl = vi.hoisted(() => ({ failUserWrite: false }));
 const blobControl = vi.hoisted(() => ({ failPublicPilotIndexWrite: false }));
+const writeBlobSpy = vi.hoisted(() => vi.fn());
 
-vi.mock("../lib/blob.js", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../lib/blob.js")>();
+vi.mock("../lib/blob.js", async () => {
+  const actual = await vi.importActual<typeof import("../lib/blob.js")>("../lib/blob.js");
   return {
     ...actual,
-    getBlockBlobClient: vi.fn((path: string) => {
-      const client = actual.getBlockBlobClient(path);
-      const wrappedClient = Object.create(client) as typeof client;
-      wrappedClient.uploadData = vi.fn(
-        (...args: Parameters<typeof client.uploadData>): ReturnType<typeof client.uploadData> => {
-          const options = args[1];
-          if (
-            blobControl.failPublicPilotIndexWrite &&
-            path === "pilots.json" &&
-            options?.conditions?.ifNoneMatch !== "*"
-          ) {
-            return Promise.reject(new Error("simulated public pilots index write failure"));
-          }
-          return client.uploadData(...args);
-        },
-      );
-      return wrappedClient;
-    }),
+    writeBlob: (path: string, data: unknown, leaseId?: string, options?: { ifNoneMatch?: string }) => {
+      writeBlobSpy(path, data, leaseId, options);
+      if (blobControl.failPublicPilotIndexWrite && path === "pilots.json") {
+        return Promise.reject(new Error("simulated public pilots index write failure"));
+      }
+      return actual.writeBlob(path, data, leaseId, options);
+    },
   };
 });
 
@@ -78,6 +68,10 @@ async function createPilotForUser(user: User, email: string) {
 }
 
 describe("createMyPilot", () => {
+  beforeEach(() => {
+    writeBlobSpy.mockClear();
+  });
+
   it("leaves no orphan when a pilot email conflict happens before writes", async () => {
     // Given: user registration happened before any pilot owned this email.
     const email = `conflict-${randomUUID()}@example.com`;
@@ -171,6 +165,7 @@ describe("createMyPilot", () => {
 
     const storedUser = await readPrivateJson<User>(`users/${user.id}.json`);
     expect(storedUser?.pilotId).toBeNull();
+    expect(writeBlobSpy).toHaveBeenCalledWith("pilots.json", expect.anything(), expect.anything(), undefined);
   });
 
   it("creates a pilot, links the user, publishes the summary, and claims the email", async () => {
