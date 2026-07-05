@@ -16,7 +16,7 @@ export default function About() {
   return (
     <article style={pageStyle}>
       <h1 style={headingStyle}>About the British Club Challenge (BCC)</h1>
-      
+
       <p>
         The Advance BCC is a UK Sport National Governing Body, in our case the British Hang Gliding and Paragliding Association (BHPA), endorsed event, designed to introduce lower airtime paragliding pilots to cross country competition flying and promote the development of the appropriate skill sets. This is achieved through a friendly, coaching environment, with pilots competing in low complexity tasks as members of small teams against other clubs. The primary aim of the BCC is pilot development through safe, supervised, and enjoyable flying.
       </p>

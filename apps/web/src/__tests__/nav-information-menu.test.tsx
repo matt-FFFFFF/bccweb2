@@ -46,11 +46,11 @@ beforeEach(() => {
 describe("Information nav dropdown", () => {
   it("renders for anonymous, Pilot, RoundsCoord, and Admin users", () => {
     const rolesToTest: (UserRole[] | null)[] = [null, ["Pilot"], ["RoundsCoord"], ["Admin"]];
-    
+
     for (const roles of rolesToTest) {
       const identity = roles ? identityWithRoles(roles, "test@bcc.test") : null;
       const { unmount } = renderNav(identity);
-      
+
       const trigger = screen.getByRole("button", { name: "Information" });
       expect(trigger).toBeInTheDocument();
       unmount();
@@ -61,7 +61,7 @@ describe("Information nav dropdown", () => {
     renderNav(null);
     const infoTrigger = screen.getByRole("button", { name: "Information" });
     const infoDropdown = infoTrigger.closest(".bcc-nav__dropdown") as HTMLElement;
-    
+
     expect(infoTrigger).toHaveAttribute("aria-expanded", "false");
     expect(within(infoDropdown).queryByRole("link")).toBeNull();
   });
@@ -70,14 +70,14 @@ describe("Information nav dropdown", () => {
     renderNav(null);
     const infoTrigger = screen.getByRole("button", { name: "Information" });
     const infoDropdown = infoTrigger.closest(".bcc-nav__dropdown") as HTMLElement;
-    
+
     fireEvent.click(infoTrigger);
-    
+
     expect(infoTrigger).toHaveAttribute("aria-expanded", "true");
-    
+
     const links = within(infoDropdown).getAllByRole("link");
     expect(links).toHaveLength(5);
-    
+
     const expectedTexts = [
       "About the BCC",
       "BCC Rules",
@@ -85,12 +85,12 @@ describe("Information nav dropdown", () => {
       "COVID Risk Assessment",
       "Paragliding SOPs"
     ];
-    
+
     expect(links.map(l => l.textContent?.trim())).toEqual(expectedTexts);
-    
+
     // Check specific attributes
     expect(links[0]).toHaveAttribute("href", "/about");
-    
+
     // Check PDF links
     const pdfExpected = [
       { text: "BCC Rules", href: "/static/BCCRulesUpdateApril2025.pdf" },
@@ -98,7 +98,7 @@ describe("Information nav dropdown", () => {
       { text: "COVID Risk Assessment", href: "/static/bcccovidra_04_2022.pdf" },
       { text: "Paragliding SOPs", href: "/static/ParaglidingSOPsv1.7.pdf" }
     ];
-    
+
     for (let i = 0; i < pdfExpected.length; i++) {
       const link = links[i + 1];
       expect(link).toHaveAttribute("href", pdfExpected[i].href);
@@ -111,12 +111,12 @@ describe("Information nav dropdown", () => {
     renderNav(null);
     const infoTrigger = screen.getByRole("button", { name: "Information" });
     const infoDropdown = infoTrigger.closest(".bcc-nav__dropdown") as HTMLElement;
-    
+
     fireEvent.click(infoTrigger);
     expect(within(infoDropdown).queryAllByRole("link").length).toBeGreaterThan(0);
-    
+
     fireEvent.keyDown(document, { key: "Escape" });
-    
+
     expect(within(infoDropdown).queryByRole("link")).toBeNull();
     expect(infoTrigger).toHaveAttribute("aria-expanded", "false");
   });
@@ -125,12 +125,12 @@ describe("Information nav dropdown", () => {
     renderNav(null);
     const infoTrigger = screen.getByRole("button", { name: "Information" });
     const infoDropdown = infoTrigger.closest(".bcc-nav__dropdown") as HTMLElement;
-    
+
     fireEvent.click(infoTrigger);
     expect(within(infoDropdown).queryAllByRole("link").length).toBeGreaterThan(0);
-    
+
     fireEvent.mouseDown(document.body);
-    
+
     expect(within(infoDropdown).queryByRole("link")).toBeNull();
   });
 
@@ -138,12 +138,12 @@ describe("Information nav dropdown", () => {
     renderNav(null);
     const infoTrigger = screen.getByRole("button", { name: "Information" });
     const infoDropdown = infoTrigger.closest(".bcc-nav__dropdown") as HTMLElement;
-    
+
     fireEvent.click(infoTrigger);
-    
+
     const aboutLink = within(infoDropdown).getByRole("link", { name: "About the BCC" });
     fireEvent.click(aboutLink);
-    
+
     expect(within(infoDropdown).queryByRole("link")).toBeNull();
     expect(infoTrigger).toHaveAttribute("aria-expanded", "false");
   });
@@ -151,17 +151,17 @@ describe("Information nav dropdown", () => {
   it("coexists independently with Admin dropdown", () => {
     // Render as Admin so both dropdowns are present
     renderNav(identityWithRoles(["Admin"], "admin@bcc.test"));
-    
+
     const infoTrigger = screen.getByRole("button", { name: "Information" });
-    
+
     // Open ONLY Information
     fireEvent.click(infoTrigger);
     expect(document.querySelectorAll(".bcc-nav__menu").length).toBe(1);
-    
+
     // Open Admin too (using click, not mouseDown, so it doesn't trigger outside click)
     const adminTrigger = screen.getByRole("button", { name: "Admin" });
     fireEvent.click(adminTrigger);
-    
+
     // Both should be open
     expect(document.querySelectorAll(".bcc-nav__menu").length).toBe(2);
   });
