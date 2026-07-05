@@ -35,6 +35,10 @@ body {
   --bcc-navy:    #1a4fa0;    /* used in PDF / links */
 }
 
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
 /* --- Typography ------------------------------------------ */
 h1, h2, h3, h4, h5, h6 {
   font-family: 'Barlow', 'Helvetica Neue', Arial, sans-serif;
