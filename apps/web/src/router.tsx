@@ -42,6 +42,18 @@ import "./bcc-theme.css";
 
 const navLinkClass = ({ isActive }: NavLinkRenderProps) => (isActive ? "active" : "");
 
+function InformationMenu() {
+  return (
+    <NavDropdown label="Information">
+      <NavLink to="/about" className={navLinkClass}>About the BCC</NavLink>
+      <a href="/static/BCCRulesUpdateApril2025.pdf" target="_blank" rel="noopener noreferrer">BCC Rules</a>
+      <a href="/static/AdvanceBCCBriefingAideMemoireApr2025.pdf" target="_blank" rel="noopener noreferrer">Briefing Aide Memoire</a>
+      <a href="/static/bcccovidra_04_2022.pdf" target="_blank" rel="noopener noreferrer">COVID Risk Assessment</a>
+      <a href="/static/ParaglidingSOPsv1.7.pdf" target="_blank" rel="noopener noreferrer">Paragliding SOPs</a>
+    </NavDropdown>
+  );
+}
+
 // Mounted only for admins, so its document-level listeners never attach for other roles.
 function AdminMenu() {
   return (
@@ -93,6 +105,7 @@ export function Nav() {
         <NavLink to="/results" className={navLinkClass}>
           Results
         </NavLink>
+        <InformationMenu />
         {isCoord && (
           <NavLink to="/pilots" className={navLinkClass}>
             Pilots
