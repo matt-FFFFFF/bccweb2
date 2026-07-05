@@ -1602,7 +1602,6 @@ export default function RoundManage() {
               {r.brief?.pdfStatus === "failed" || (pollTimeout !== null && (r.brief?.pdfStatus === "pending" || r.brief?.pdfStatus === "processing")) ? (
                 <button
                   onClick={() => { void regeneratePdf(); }}
-                  disabled={pollCount > 0 && pollTimeout === null && (r.brief?.pdfStatus === "pending" || r.brief?.pdfStatus === "processing")}
                   style={{ ...btnStyle("#58151c", "#f8d7da"), fontSize: "0.82rem" }}
                 >
                   Regenerate PDF
