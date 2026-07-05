@@ -185,11 +185,15 @@ describe("AdminManufacturers", () => {
     expect(screen.queryByRole("button", { name: "Create" })).not.toBeInTheDocument();
   });
 
-  it("does NOT render a live link for an unsafe javascript: websiteUrl", async () => {
+  it.each([
+    "javascript:alert(1)",
+    "data:text/html,<script>alert(1)</script>",
+    "vbscript:msgbox(1)",
+  ])("does NOT render a live link for an unsafe websiteUrl: %s", async (websiteUrl) => {
     vi.mocked(readPublicBlob).mockImplementation(async (path: string) => {
       const base = path.split("?")[0];
       if (base === "manufacturers.json") {
-        return [{ id: "m-evil", name: "EvilCorp", websiteUrl: "javascript:alert(1)" }];
+        return [{ id: "m-evil", name: "EvilCorp", websiteUrl }];
       }
       throw Object.assign(new Error("Not found"), {
         name: "BlobNotFoundError",
@@ -207,10 +211,7 @@ describe("AdminManufacturers", () => {
       expect(screen.getByText("EvilCorp")).toBeInTheDocument();
     });
 
-    expect(screen.getByText("javascript:alert(1)")).toBeInTheDocument();
+    expect(screen.getByText(websiteUrl)).toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
-    for (const a of document.querySelectorAll("a[href]")) {
-      expect(a.getAttribute("href")?.startsWith("javascript:")).toBe(false);
-    }
   });
 });
