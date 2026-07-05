@@ -15,7 +15,7 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import { randomUUID } from "crypto";
-import type { CallerIdentity, ClubTeamSummary, Round, Team, PilotSlot } from "@bccweb/types";
+import type { CallerIdentity, ClubTeamSummary, Pilot, Round, Team, PilotSlot } from "@bccweb/types";
 import { isRosterFrozen, rosterFrozenReason } from "@bccweb/types";
 import { ClubTeamSummarySchema, PilotSchema, RoundSchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
@@ -36,6 +36,7 @@ import {
 } from "../lib/roundAuth.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 import { recomputeTeamCaptain } from "../lib/teamCaptain.js";
+import { ensureSeasonClubRecorded, pilotClubIdForSeason } from "../lib/pilotClub.js";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 
@@ -234,15 +235,35 @@ async function addPilot(
     throw new HttpError(400, "INVALID_BODY", "pilotId is required");
   }
 
-  // Verify pilot exists
+  let pilot: Pilot;
+  const pilotPath = `pilots/${body.pilotId}.json`;
   try {
-    const pilotPath = `pilots/${body.pilotId}.json`;
-    await readJson(getPrivateBlobClient(pilotPath), PilotSchema, pilotPath);
+    pilot = await readJson(getPrivateBlobClient(pilotPath), PilotSchema, pilotPath);
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
       throw new HttpError(400, "INVALID_BODY", "Pilot not found");
     }
     throw new HttpError(500, "INTERNAL");
+  }
+
+  const team = round.teams.find((t) => t.id === teamId);
+  if (!team) throw new HttpError(404, "TEAM_NOT_FOUND", "Team not found");
+
+  if (isRosterFrozen(round.status)) {
+    throw new HttpError(409, "CONFLICT", `Cannot change teams or pilots while ${rosterFrozenReason(round.status)}`);
+  }
+
+  const pilotClubId = pilotClubIdForSeason(pilot, round.season.year);
+  if (!pilotClubId) {
+    throw new HttpError(422, "NO_CLUB_FOR_SEASON", "This pilot has no club for this season.");
+  }
+  if (pilotClubId !== team.club.id) {
+    throw new HttpError(422, "TEAM_CLUB_MISMATCH", "This pilot does not belong to this team's club for this season.");
+  }
+
+  const effectiveClubId = await ensureSeasonClubRecorded(pilot.id, round.season.year, pilotClubId, team.club.name);
+  if (effectiveClubId !== team.club.id) {
+    throw new HttpError(422, "TEAM_CLUB_MISMATCH", "This pilot does not belong to this team's club for this season.");
   }
 
   const result = await mutateLocked(id, caller, (r) => {
