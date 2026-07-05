@@ -48,6 +48,7 @@ import {
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
+import { resolveWingManufacturer } from "../lib/wingManufacturer.js";
 
 const PilotsIndexSchema = z.array(PilotSummarySchema);
 const SeasonsIndexSchema = z.array(SeasonSummarySchema);
@@ -182,6 +183,12 @@ async function createPilot(
     throw new HttpError(400, "INVALID_BODY", "firstName and lastName are required");
   }
 
+  // Canonicalise the wing manufacturer; an unknown id aborts before any write.
+  const wingManufacturer = await resolveWingManufacturer(
+    undefined,
+    body.wingManufacturer,
+  );
+
   const id = randomUUID();
   const fullName = `${body.firstName.trim()} ${body.lastName.trim()}`;
 
@@ -200,7 +207,7 @@ async function createPilot(
     emergencyPhoneNumber: body.emergencyPhoneNumber,
     medicalInfo: body.medicalInfo,
     wingClass: body.wingClass,
-    wingManufacturer: body.wingManufacturer,
+    wingManufacturer,
     wingModel: body.wingModel,
     wingColours: body.wingColours,
     person: {
@@ -319,6 +326,10 @@ async function updatePilot(
   }
 
   // Build updated pilot — common fields (both Admin and self)
+  const wingManufacturer = await resolveWingManufacturer(
+    existing.wingManufacturer,
+    body.wingManufacturer,
+  );
   const firstName = body.firstName?.trim() ?? existing.person.firstName;
   const lastName = body.lastName?.trim() ?? existing.person.lastName;
 
@@ -334,7 +345,7 @@ async function updatePilot(
       body.emergencyPhoneNumber ?? existing.emergencyPhoneNumber,
     medicalInfo: body.medicalInfo ?? existing.medicalInfo,
     wingClass: body.wingClass ?? existing.wingClass,
-    wingManufacturer: body.wingManufacturer ?? existing.wingManufacturer,
+    wingManufacturer,
     wingModel: body.wingModel ?? existing.wingModel,
     wingColours: body.wingColours ?? existing.wingColours,
     bhpaNumber: body.bhpaNumber ?? existing.bhpaNumber,

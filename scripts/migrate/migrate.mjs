@@ -282,7 +282,7 @@ async function main() {
     mfrNameBySqlId.set(r.ID, r.Name);
     return mfr;
   });
-  await uploadPrivateBlob("manufacturers.json", manufacturersList);
+  await uploadBlob("manufacturers.json", manufacturersList);
   saveIdMap();
   console.log(`  wrote ${manufacturersList.length} manufacturers\n`);
 

@@ -1,13 +1,14 @@
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router";
-import type { Pilot, PilotClubMembership, CoachType, PilotRatingValue, WingClass, ManufacturerRef, ClubSummary } from "@bccweb/types";
+import type { Pilot, PilotClubMembership, CoachType, PilotRatingValue, WingClass, ManufacturerRef, ClubSummary, Manufacturer } from "@bccweb/types";
 import { PILOT_RATINGS, WING_CLASSES } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
 import { useBlob } from "../../hooks/useBlob.js";
 import { api, ApiError } from "../../lib/api.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
 import { COACH_TYPES, coachLabel } from "../../lib/coach.js";
+import { safeExternalUrl } from "../../lib/url.js";
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
@@ -44,16 +45,6 @@ function Banner({ msg, ok }: { msg: string; ok?: boolean }) {
       {msg}
     </div>
   );
-}
-
-function safeExternalUrl(value?: string): string | null {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
-  } catch {
-    return null;
-  }
 }
 
 function ManufacturerLink({ manufacturer, model }: { manufacturer: ManufacturerRef; model?: string }) {
@@ -110,6 +101,7 @@ interface EditForm {
   emergencyPhoneNumber: string;
   medicalInfo: string;
   currentClubId: string;
+  wingManufacturerId: string;
 }
 
 function pilotToForm(p: Pilot): EditForm {
@@ -121,6 +113,7 @@ function pilotToForm(p: Pilot): EditForm {
     harnessType: p.harnessType ?? "",
     harnessColour: p.harnessColour ?? "",
     wingClass: p.wingClass ?? "",
+    wingManufacturerId: p.wingManufacturer?.id ?? "",
     wingModel: p.wingModel ?? "",
     wingColours: p.wingColours ?? "",
     pureTrackId: p.pureTrackId != null ? String(p.pureTrackId) : "",
@@ -148,6 +141,7 @@ function EditProfileForm({
   const [msg, setMsg] = useState<string | null>(null);
   const [msgOk, setMsgOk] = useState(false);
   const { data: clubs } = useBlob<ClubSummary[]>("clubs.json");
+  const { data: manufacturers } = useBlob<Manufacturer[]>("manufacturers.json");
 
   const seasonClubEntry = activeSeasonYear
     ? pilot.seasonClubs.find((sc) => sc.seasonYear === activeSeasonYear)
@@ -172,6 +166,13 @@ function EditProfileForm({
             : undefined
           : undefined;
 
+      const m = manufacturers?.find((x) => x.id === form.wingManufacturerId);
+      const wingManufacturerPayload = m
+        ? m.websiteUrl
+          ? { id: m.id, name: m.name, websiteUrl: m.websiteUrl }
+          : { id: m.id, name: m.name }
+        : undefined;
+
       await api.put(`pilots/${pilot.id}`, {
         coachType: form.coachType,
         pilotRating: form.pilotRating,
@@ -180,6 +181,7 @@ function EditProfileForm({
         harnessType: form.harnessType || undefined,
         harnessColour: form.harnessColour || undefined,
         wingClass: form.wingClass || undefined,
+        wingManufacturer: form.wingManufacturerId === "" ? undefined : wingManufacturerPayload,
         wingModel: form.wingModel || undefined,
         wingColours: form.wingColours || undefined,
         pureTrackId: form.pureTrackId ? Number(form.pureTrackId) : undefined,
@@ -234,6 +236,20 @@ function EditProfileForm({
           <select style={inputStyle} value={form.wingClass} onChange={(e) => setF("wingClass", e.target.value as WingClass | "")}>
             <option value="">(none)</option>
             {WING_CLASSES.map((wc) => <option key={wc} value={wc}>{wc}</option>)}
+          </select>
+        </div>
+        <div>
+          <label htmlFor="wingManufacturerId" style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Wing manufacturer</label>
+          <select id="wingManufacturerId" style={inputStyle} value={form.wingManufacturerId} onChange={(e) => setF("wingManufacturerId", e.target.value)}>
+            <option value="">(none)</option>
+            {pilot.wingManufacturer && (!manufacturers || !manufacturers.some(x => x.id === pilot.wingManufacturer!.id)) && (
+              <option value={pilot.wingManufacturer.id}>{pilot.wingManufacturer.name}</option>
+            )}
+            {manufacturers?.map((m) => (
+              <option key={m.id} value={m.id}>
+                {m.name}
+              </option>
+            ))}
           </select>
         </div>
         <div>

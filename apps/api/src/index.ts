@@ -19,6 +19,7 @@ import "./functions/seasons.js";
 import "./functions/pilots.js";
 import "./functions/clubs.js";
 import "./functions/sites.js";
+import "./functions/manufacturers.js";
 
 // Phase 3 — Round management write endpoints
 import "./functions/roundsMutate.js";

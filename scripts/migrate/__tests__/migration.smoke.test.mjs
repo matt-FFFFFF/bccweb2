@@ -464,7 +464,7 @@ test("migration smoke: real run writes expected blobs", { skip: SKIP }, async ()
   assert.equal(pilotHistoryDocs.length, 3, "pilot club-history blob count");
   assert.equal(countPrefix("rounds/"), 3, "private rounds/{uuid}.json count");
   assert.equal(countPrefix("manufacturers/"), 0, "manufacturers/{uuid}.json blobs are no longer written");
-  assert.ok(privateBlobs.includes("manufacturers.json"), "manufacturers.json lookup list is still written");
+  assert.ok(publicBlobs.includes("manufacturers.json"), "manufacturers.json lookup list is written to the public container");
   assert.ok(!privateBlobs.includes("pilot-ratings.json"), "pilot-ratings.json blob is no longer written");
   assert.ok(!privateBlobs.includes("frequencies.json"), "frequencies.json blob is no longer written");
   // season-clubs/{year}/{clubId}.json are private (detail), one per row → 3.

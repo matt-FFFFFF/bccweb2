@@ -244,6 +244,7 @@ function schemaMaps(schemas) {
       { family: "seasons", match: (path) => /^seasons\/[^/]+\.json$/u.test(path), schema: schemas.SeasonSchema, schemaName: "SeasonSchema" },
       { family: "clubs", match: (path) => path === "clubs.json", schema: schemas.ClubSummarySchema.array(), schemaName: "ClubSummarySchema[]" },
       { family: "club-teams", match: (path) => path === "club-teams.json", schema: schemas.ClubTeamSummarySchema.array(), schemaName: "ClubTeamSummarySchema[]" },
+      { family: "manufacturers", match: (path) => path === "manufacturers.json", schema: schemas.ManufacturersIndexSchema, schemaName: "ManufacturersIndexSchema" },
     ],
     private: [
       { family: "rounds", match: (path) => /^rounds\/[^/]+\.json$/u.test(path), schema: schemas.RoundSchema, schemaName: "RoundSchema" },
@@ -260,7 +261,6 @@ function schemaMaps(schemas) {
 }
 
 function unvalidatedReason(path) {
-  if (/^manufacturers(?:\/|\.json$)/u.test(path)) return "manufacturers has no schema";
   if (/^results\//u.test(path)) return "results have no schema";
   if (/(?:^|\/)club-history\.json$/u.test(path)) return "club history has no schema";
   if (/^season-clubs\/index\.json$/u.test(path) || /^season-clubs\/[^/]+\/index\.json$/u.test(path)) return "season-club index has no schema";
@@ -441,7 +441,7 @@ async function main() {
   const seasons = await readBlob(publicClient, "seasons.json");
   const seasonsOk = assertArray("seasons.json", seasons);
 
-  await readBlob(privateClient, "manufacturers.json");
+  await readBlob(publicClient, "manufacturers.json");
 
   console.log("");
 
