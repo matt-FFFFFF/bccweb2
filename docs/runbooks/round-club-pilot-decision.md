@@ -132,6 +132,62 @@ This is acceptable given the absence of a corresponding feature in the new appli
 
 ---
 
+## Club Membership Enforcement (Shipped)
+
+**Date added**: 2026-07-05
+
+Both the coordinator/admin "add pilot" path and the pilot self-register path now hard-block any attempt to place a pilot into a team whose club does not match the pilot's club for the round's season. This is a **hard block for all roles — Admin included**. There is no override.
+
+### Club resolution
+
+Both paths resolve a pilot's season club via `pilotClubIdForSeason` in `apps/api/src/lib/pilotClub.ts`:
+
+```
+seasonClubs[seasonYear].clubId  (authoritative — season-club entry wins)
+  ?? currentClub.id             (fallback — pilot's current club)
+  ?? null                       (no club → blocked)
+```
+
+`ensureSeasonClubRecorded` (same file) records the season-club entry on a successful add, so the season club is locked in on first registration.
+
+### Coordinator / Admin: addPilot
+
+`POST /api/rounds/{id}/teams/{teamId}/pilots` (`apps/api/src/functions/teams.ts`)
+
+| Condition | Status | Code |
+|---|---|---|
+| Round roster is frozen | `409` | `CONFLICT` |
+| Pilot has no club for the season | `422` | `NO_CLUB_FOR_SEASON` |
+| Pilot's season club ≠ team's club | `422` | `TEAM_CLUB_MISMATCH` |
+| Season-club record written, re-check fails | `422` | `TEAM_CLUB_MISMATCH` |
+
+The frozen-round check (`409 CONFLICT`) runs before the club checks. Both `NO_CLUB_FOR_SEASON` and `TEAM_CLUB_MISMATCH` use `422` here because a coordinator acting on behalf of someone else is supplying bad data, not fixing their own profile.
+
+### Pilot self-register
+
+`POST /api/rounds/{roundId}/register-self` (`apps/api/src/functions/roundRegistration.ts`)
+
+| Condition | Status | Code |
+|---|---|---|
+| Round not open for registration | `409` | `REGISTRATION_CLOSED` |
+| Pilot has no club for the season | `409` | `NO_CLUB_FOR_SEASON` |
+| Pilot's club has no team in the round | `409` | `NO_TEAM_FOR_CLUB` |
+| Explicit `teamId` doesn't belong to pilot's club | `422` | `TEAM_CLUB_MISMATCH` |
+
+`NO_CLUB_FOR_SEASON` is `409` (not `422`) on this path because the caller is fixing their own profile state — they should update their club in their profile and try again.
+
+### What coordinators see
+
+The web "Add Pilot" picker already filters the pilot list to the team's club, so coordinators won't normally reach these errors through the UI. The API is the authoritative gate; these codes exist for direct API calls and future integrations.
+
+### Operational notes
+
+- A pilot who appears in `NO_CLUB_FOR_SEASON`: ask the pilot to set their club in their profile, or set it via the admin pilot-edit UI. Once set, the add will succeed.
+- A `TEAM_CLUB_MISMATCH`: the pilot's season club is definitively wrong for this team. Either the pilot belongs to a different club's team, or their profile has the wrong club. Correct the profile first.
+- Season clubs are immutable once recorded for a given year. If a pilot joined the wrong club, that requires an admin correction to their `pilot.seasonClubs` entry.
+
+---
+
 ## Migration Implementation Summary
 
 ### `scripts/migrate/discarded-counts.mjs` (new)
