@@ -10,6 +10,7 @@ const state = vi.hoisted(() => ({
   round: null as Round | null,
   brief: null as Partial<RoundBrief> | null,
   pilot: null as Record<string, unknown> | null,
+  pilotsIndex: [{ id: "pilot-1", name: "Pat Pilot", rating: "Pilot", clubId: "club-1" }] as Array<{ id: string; name: string; rating?: string; clubId?: string }>,
   apiGet: vi.fn(),
   apiPost: vi.fn(),
   apiPut: vi.fn(),
@@ -29,7 +30,7 @@ vi.mock("../../../hooks/useAuth.js", () => ({
 vi.mock("../../../hooks/useBlob.js", () => ({
   useBlob: (path: string | null) => ({
     data: path === "pilots.json"
-      ? [{ id: "pilot-1", name: "Pat Pilot", rating: "Pilot", clubId: "club-1" }]
+      ? state.pilotsIndex
       : [{ id: "club-1", name: "Home Club" }],
     loading: false,
     error: null,
@@ -78,6 +79,7 @@ describe("RoundManage follow-up fixes", () => {
     state.identity = makeIdentity({ roles: ["Admin"] });
     state.brief = { briefingTime: "09:00" };
     state.pilot = null;
+    state.pilotsIndex = [{ id: "pilot-1", name: "Pat Pilot", rating: "Pilot", clubId: "club-1" }];
 
     state.apiGet.mockReset().mockImplementation(async (path: string) => {
       if (path.startsWith("pilots/") && state.pilot) return state.pilot;
@@ -307,3 +309,58 @@ function makeTeam(overrides: Partial<Team> = {}): Team {
     ...overrides,
   };
 }
+
+  // ─── Pilot picker club filtering ──────────────────────────────────────────────
+
+  describe("Pilot picker club filtering", () => {
+    it("offers pilots matching the team club or unknown club, but hides other-club pilots", async () => {
+      // Setup state for pilots
+      state.pilotsIndex = [
+        { id: "m", name: "Match", clubId: "club-1" },
+        { id: "o", name: "Other", clubId: "club-other" },
+        { id: "u", name: "Unknown", clubId: undefined },
+      ];
+
+      state.round = makeRound({ status: "Confirmed", teams: [makeTeam({ club: { id: "club-1", name: "Home Club" } })] });
+      renderPage();
+
+      await screen.findByText("Alpha");
+      
+      const addPilotBtn = screen.getByRole("button", { name: "+ Add Pilot" });
+      addPilotBtn.click();
+
+      // Ensure form renders
+      await screen.findByRole("button", { name: "Add Pilot" });
+      
+      // Placeholder is there
+      expect(screen.getAllByRole("option", { name: "— pilot —" })[0]).toBeInTheDocument();
+      // Eligible pilots
+      expect(screen.getByRole("option", { name: "Match" })).toBeInTheDocument();
+      expect(screen.getByRole("option", { name: "Unknown" })).toBeInTheDocument();
+      // Hidden pilot
+      expect(screen.queryByRole("option", { name: "Other" })).not.toBeInTheDocument();
+    });
+
+    it("shows empty state when no pilots are eligible", async () => {
+      state.pilotsIndex = [{ id: "o", name: "Other", clubId: "club-other" }];
+
+      state.round = makeRound({ status: "Confirmed", teams: [makeTeam({ club: { id: "club-1", name: "Home Club" } })] });
+      renderPage();
+
+      await screen.findByText("Alpha");
+      
+      const addPilotBtn = screen.getByRole("button", { name: "+ Add Pilot" });
+      addPilotBtn.click();
+
+      // Ensure form renders
+      const submitBtn = await screen.findByRole("button", { name: "Add Pilot" });
+      
+      // Placeholder is there
+      expect(screen.getAllByRole("option", { name: "— pilot —" })[0]).toBeInTheDocument();
+      // No actual pilot options
+      expect(screen.queryByRole("option", { name: "Other" })).not.toBeInTheDocument();
+
+      expect(screen.getByText("No pilots available for Home Club.")).toBeInTheDocument();
+      expect(submitBtn).toBeDisabled();
+    });
+  });
