@@ -1492,12 +1492,9 @@ export default function RoundManage() {
 
   async function regeneratePdf() {
     if (!round) return;
-    try {
-      await runAction("Regenerate PDF", () => api.post(`rounds/${round.id}/brief/regenerate`));
-      setPollCount(0);
-      setPollTimeout(null);
-    } catch {
-    }
+    await runAction("Regenerate PDF", () => api.post(`rounds/${round.id}/brief/regenerate`));
+    setPollCount(0);
+    setPollTimeout(null);
   }
 
   async function runAction(label: string, fn: () => Promise<unknown>) {
