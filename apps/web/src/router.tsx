@@ -25,6 +25,7 @@ import VerifyEmail from "./pages/auth/VerifyEmail.js";
 import ForgotPassword from "./pages/auth/ForgotPassword.js";
 import ResetPassword from "./pages/auth/ResetPassword.js";
 import Terms from "./pages/Terms.js";
+import About from "./pages/About.js";
 import AdminUsers from "./pages/admin/Users.js";
 import AdminClubs from "./pages/admin/Clubs.js";
 import AdminSeasons from "./pages/admin/Seasons.js";
@@ -292,6 +293,7 @@ function RoutedContent() {
           <Route path="/login" element={<Page><Login /></Page>} />
           <Route path="/register" element={<Page><Register /></Page>} />
           <Route path="/terms" element={<Page><Terms /></Page>} />
+          <Route path="/about" element={<Page><About /></Page>} />
           <Route path="/verify-email" element={<Page><VerifyEmail /></Page>} />
           <Route path="/forgot-password" element={<Page><ForgotPassword /></Page>} />
           <Route path="/reset-password" element={<Page><ResetPassword /></Page>} />

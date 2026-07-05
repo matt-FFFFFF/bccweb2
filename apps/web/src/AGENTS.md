@@ -31,10 +31,16 @@ sign-to-fly wording), `telemetry.ts` (PII redaction + RUM stub), `terms.ts` (T&C
 **All mutations go through `api.ts`** — except multipart upload (raw `fetch` + `FormData`,
 see `RoundManage.tsx`).
 
+## public/static/ — vendored legacy PDFs
+
+`apps/web/public/static/` holds vendored legacy public PDFs (BCC Rules, Briefing Aide
+Memoire, COVID Risk Assessment, Paragliding SOPs) served at `/static/*.pdf` (Vite copies
+`public/` verbatim into `dist/web/`).
+
 ## pages/ — route-aligned folders
 
 Folder = route domain (`auth`, `rounds`, `results`, `pilots`, `admin`, `club`; plus top-level
-`Home/Profile/Terms`). 1:1 with `router.tsx`. Page conventions:
+`Home/Profile/Terms/About`). 1:1 with `router.tsx`. Page conventions:
 - top-level `useState/useEffect`; helper fns + small nested subcomponents **above** the page
 - early-return loading / error / forbidden states
 - mutation handlers live in the page file (no shared form layer); inline styles OK
