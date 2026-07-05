@@ -233,8 +233,9 @@ Vitest incl. heavy tests with Azurite, `docker compose build`); `deploy-dev.yml`
 release-ancestry check on `main` → same gate + jobs); `terraform.yml` (manual plan/apply
 per stack × env; also drift-reconcile); `privacy-scan.yml` (Azurite + seed + `privacy-scan.mjs`,
 fails on PII leak). Prod SPA: Static Web App + routes in
-[`staticwebapp.config.json`](file:///Volumes/code/bccweb2/apps/web/staticwebapp.config.json)
-(SPA fallback, security headers, `/api/*` → Function App); local Docker uses Caddy with the
+[`staticwebapp.config.json`](file:///Volumes/code/bccweb2/apps/web/public/staticwebapp.config.json)
+(kept in `apps/web/public/` so Vite copies it to the `dist/web` output-location root the SWA
+deploy uploads — SPA fallback, security headers, `/api/*` → Function App); local Docker uses Caddy with the
 same proxy shape ([`Caddyfile`](file:///Volumes/code/bccweb2/apps/web/Caddyfile)).
 
 ## Operations

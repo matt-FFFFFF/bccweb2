@@ -1,11 +1,11 @@
 import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useLocation, type NavLinkRenderProps } from "react-router";
-import { useState, useRef, useEffect } from "react";
 import * as z from "zod/v4";
 import { SeasonSummarySchema } from "@bccweb/schemas";
 import { useAuth, loginUrl } from "./hooks/useAuth.js";
 import { AuthProvider } from "./components/AuthProvider.js";
 import { useBlob } from "./hooks/useBlob.js";
 import type { SeasonSummary } from "@bccweb/types";
+import { NavDropdown } from "./components/NavDropdown.js";
 import Home from "./pages/Home.js";
 import RoundsList from "./pages/rounds/RoundsList.js";
 import RoundDetail from "./pages/rounds/RoundDetail.js";
@@ -25,6 +25,7 @@ import VerifyEmail from "./pages/auth/VerifyEmail.js";
 import ForgotPassword from "./pages/auth/ForgotPassword.js";
 import ResetPassword from "./pages/auth/ResetPassword.js";
 import Terms from "./pages/Terms.js";
+import About from "./pages/About.js";
 import AdminUsers from "./pages/admin/Users.js";
 import AdminClubs from "./pages/admin/Clubs.js";
 import AdminSeasons from "./pages/admin/Seasons.js";
@@ -41,86 +42,44 @@ import "./bcc-theme.css";
 
 const navLinkClass = ({ isActive }: NavLinkRenderProps) => (isActive ? "active" : "");
 
+function InformationMenu() {
+  return (
+    <NavDropdown label="Information">
+      <NavLink to="/about" className={navLinkClass}>About the BCC</NavLink>
+      <a href="/static/BCCRulesUpdateApril2025.pdf" target="_blank" rel="noopener noreferrer">BCC Rules</a>
+      <a href="/static/AdvanceBCCBriefingAideMemoireApr2025.pdf" target="_blank" rel="noopener noreferrer">Briefing Aide Memoire</a>
+      <a href="/static/bcccovidra_04_2022.pdf" target="_blank" rel="noopener noreferrer">COVID Risk Assessment</a>
+      <a href="/static/ParaglidingSOPsv1.7.pdf" target="_blank" rel="noopener noreferrer">Paragliding SOPs</a>
+    </NavDropdown>
+  );
+}
+
 // Mounted only for admins, so its document-level listeners never attach for other roles.
 function AdminMenu() {
-  const location = useLocation();
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    function onPointerDown(event: MouseEvent) {
-      if (ref.current && !ref.current.contains(event.target as Node)) {
-        setOpen(false);
-      }
-    }
-    function onKeyDown(event: KeyboardEvent) {
-      if (event.key === "Escape") setOpen(false);
-    }
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
-
-  useEffect(() => {
-    setOpen(false);
-  }, [location.pathname]);
-
   return (
-    <div className="bcc-nav__dropdown" ref={ref}>
-      <button
-        type="button"
-        className="bcc-nav__dropdown-trigger"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
-      >
-        Admin
-        <svg
-          className="bcc-nav__caret"
-          width="10"
-          height="10"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="3"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-          aria-hidden="true"
-          focusable="false"
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
-      </button>
-      {open && (
-        <div className="bcc-nav__menu">
-          <NavLink to="/admin/clubs" className={navLinkClass}>
-            Clubs
-          </NavLink>
-          <NavLink to="/admin/config" className={navLinkClass}>
-            Config
-          </NavLink>
-          <NavLink to="/admin/manufacturers" className={navLinkClass}>
-            Manufacturers
-          </NavLink>
-          <NavLink to="/admin/seasons" className={navLinkClass}>
-            Seasons
-          </NavLink>
-          <NavLink to="/admin/sign-to-fly-wording" className={navLinkClass}>
-            Sign-to-fly wording
-          </NavLink>
-          <NavLink to="/admin/sites" className={navLinkClass}>
-            Sites
-          </NavLink>
-          <NavLink to="/admin/users" className={navLinkClass}>
-            Users
-          </NavLink>
-        </div>
-      )}
-    </div>
+    <NavDropdown label="Admin">
+      <NavLink to="/admin/clubs" className={navLinkClass}>
+        Clubs
+      </NavLink>
+      <NavLink to="/admin/config" className={navLinkClass}>
+        Config
+      </NavLink>
+      <NavLink to="/admin/manufacturers" className={navLinkClass}>
+        Manufacturers
+      </NavLink>
+      <NavLink to="/admin/seasons" className={navLinkClass}>
+        Seasons
+      </NavLink>
+      <NavLink to="/admin/sign-to-fly-wording" className={navLinkClass}>
+        Sign-to-fly wording
+      </NavLink>
+      <NavLink to="/admin/sites" className={navLinkClass}>
+        Sites
+      </NavLink>
+      <NavLink to="/admin/users" className={navLinkClass}>
+        Users
+      </NavLink>
+    </NavDropdown>
   );
 }
 
@@ -146,6 +105,7 @@ export function Nav() {
         <NavLink to="/results" className={navLinkClass}>
           Results
         </NavLink>
+        <InformationMenu />
         {isCoord && (
           <NavLink to="/pilots" className={navLinkClass}>
             Pilots
@@ -292,6 +252,7 @@ function RoutedContent() {
           <Route path="/login" element={<Page><Login /></Page>} />
           <Route path="/register" element={<Page><Register /></Page>} />
           <Route path="/terms" element={<Page><Terms /></Page>} />
+          <Route path="/about" element={<Page><About /></Page>} />
           <Route path="/verify-email" element={<Page><VerifyEmail /></Page>} />
           <Route path="/forgot-password" element={<Page><ForgotPassword /></Page>} />
           <Route path="/reset-password" element={<Page><ResetPassword /></Page>} />

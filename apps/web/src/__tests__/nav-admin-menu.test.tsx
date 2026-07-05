@@ -131,7 +131,10 @@ describe("Admin nav dropdown", () => {
     renderNav(identityWithRoles(["RoundsCoord"], "coord@bcc.test"));
 
     expect(screen.queryByRole("button", { name: "Admin" })).toBeNull();
-    expect(document.querySelector(".bcc-nav__dropdown")).toBeNull();
+    // The Information dropdown is shown to all users, so a coord now sees exactly one nav
+    // dropdown (Information) and never the Admin dropdown.
+    expect(screen.getByRole("button", { name: "Information" })).toBeInTheDocument();
+    expect(document.querySelectorAll(".bcc-nav__dropdown")).toHaveLength(1);
 
     const sites = screen.getByRole("link", { name: "Sites" });
     expect(sites).toHaveAttribute("href", "/admin/sites");
