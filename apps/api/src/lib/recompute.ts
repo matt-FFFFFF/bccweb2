@@ -185,6 +185,7 @@ function buildSeasonResults(
               a.placeInTeam - b.placeInTeam
           )
           .map((slot) => ({
+            pilotId: slot.pilotId ?? null,
             pilotName: slot.pilotId
               ? (pilotNameMap[slot.pilotId] ?? slot.pilotId)
               : "Unknown",

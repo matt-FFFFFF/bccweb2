@@ -1157,6 +1157,7 @@ function buildSeasonResults(season, allRoundDocs, pilotNameMap) {
           .filter((p) => p.flight != null && p.snapshot != null)
           .sort((a, b) => b.pilotPoints - a.pilotPoints)
           .map((slot) => ({
+            pilotId: slot.pilotId ?? null,
             pilotName: slot.pilotId
               ? (pilotNameMap[slot.pilotId] ?? slot.pilotId)
               : "Unknown",

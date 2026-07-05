@@ -444,6 +444,18 @@ test("migration smoke: real run writes expected blobs", { skip: SKIP }, async ()
   const results2026 = await readJsonBlob(PUBLIC_CONTAINER, "results/2026.json");
   assert.equal(results2026.length, 1, "one Complete round → one entry in results/2026.json");
   assert.equal(results2026[0].teamResults.length, 3, "three teams in the Complete round");
+  const resultPilots = results2026[0].teamResults.flatMap((tr) => tr.pilots);
+  assert.ok(resultPilots.length >= 3, "produced results carry a pilot row per team's flighted place-1 pilot");
+  for (const p of resultPilots) {
+    assert.ok(
+      p.pilotId === null || typeof p.pilotId === "string",
+      `results pilot row pilotId is string|null, never undefined (got ${JSON.stringify(p.pilotId)})`,
+    );
+  }
+  assert.ok(
+    resultPilots.some((p) => typeof p.pilotId === "string"),
+    "migrated results carry a UUID string pilotId (ported buildSeasonResults emits pilotId in lockstep with recompute.ts)",
+  );
 
   // ── Private blob assertions ───────────────────────────────────────────
   const privateBlobs = await listBlobPaths(PRIVATE_CONTAINER);

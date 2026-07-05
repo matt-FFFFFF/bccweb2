@@ -543,6 +543,7 @@ export interface RoundResult {
     clubName: string;
     score: number;
     pilots: Array<{
+      pilotId: string | null;
       pilotName: string;
       distance: number;
       score: number;
