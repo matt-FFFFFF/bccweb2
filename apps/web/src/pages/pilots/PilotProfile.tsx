@@ -8,6 +8,7 @@ import { useBlob } from "../../hooks/useBlob.js";
 import { api, ApiError } from "../../lib/api.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
 import { COACH_TYPES, coachLabel } from "../../lib/coach.js";
+import { safeExternalUrl } from "../../lib/url.js";
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
@@ -44,16 +45,6 @@ function Banner({ msg, ok }: { msg: string; ok?: boolean }) {
       {msg}
     </div>
   );
-}
-
-function safeExternalUrl(value?: string): string | null {
-  if (!value) return null;
-  try {
-    const url = new URL(value);
-    return url.protocol === "http:" || url.protocol === "https:" ? url.toString() : null;
-  } catch {
-    return null;
-  }
 }
 
 function ManufacturerLink({ manufacturer, model }: { manufacturer: ManufacturerRef; model?: string }) {

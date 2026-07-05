@@ -184,4 +184,33 @@ describe("AdminManufacturers", () => {
     });
     expect(screen.queryByRole("button", { name: "Create" })).not.toBeInTheDocument();
   });
+
+  it("does NOT render a live link for an unsafe javascript: websiteUrl", async () => {
+    vi.mocked(readPublicBlob).mockImplementation(async (path: string) => {
+      const base = path.split("?")[0];
+      if (base === "manufacturers.json") {
+        return [{ id: "m-evil", name: "EvilCorp", websiteUrl: "javascript:alert(1)" }];
+      }
+      throw Object.assign(new Error("Not found"), {
+        name: "BlobNotFoundError",
+        status: 404,
+      });
+    });
+
+    render(
+      <MemoryRouter>
+        <AdminManufacturers />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("EvilCorp")).toBeInTheDocument();
+    });
+
+    expect(screen.getByText("javascript:alert(1)")).toBeInTheDocument();
+    expect(screen.queryByRole("link")).not.toBeInTheDocument();
+    for (const a of document.querySelectorAll("a[href]")) {
+      expect(a.getAttribute("href")?.startsWith("javascript:")).toBe(false);
+    }
+  });
 });

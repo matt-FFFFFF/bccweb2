@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from "react";
 import type { Manufacturer } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
 import { api } from "../../lib/api.js";
+import { safeExternalUrl } from "../../lib/url.js";
 import { useBlob } from "../../hooks/useBlob.js";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
 
@@ -56,6 +57,7 @@ function ManufacturerRow({
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [msgOk, setMsgOk] = useState(false);
+  const safeUrl = safeExternalUrl(manufacturer.websiteUrl);
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
@@ -117,11 +119,14 @@ function ManufacturerRow({
         ) : (
           <div style={{ display: "flex", gap: "0.5rem", alignItems: "center", flex: 1 }}>
             <strong style={{ fontSize: "1rem" }}>{manufacturer.name}</strong>
-            {manufacturer.websiteUrl && (
-              <a href={manufacturer.websiteUrl} target="_blank" rel="noreferrer" style={{ fontSize: "0.85rem", color: "#0d6efd", textDecoration: "none" }}>
-                {manufacturer.websiteUrl}
-              </a>
-            )}
+            {manufacturer.websiteUrl &&
+              (safeUrl ? (
+                <a href={safeUrl} target="_blank" rel="noreferrer" style={{ fontSize: "0.85rem", color: "#0d6efd", textDecoration: "none" }}>
+                  {manufacturer.websiteUrl}
+                </a>
+              ) : (
+                <span style={{ fontSize: "0.85rem", color: "#888" }}>{manufacturer.websiteUrl}</span>
+              ))}
             <div style={{ flex: 1 }} />
             <button type="button" onClick={() => setEditing(true)} style={btnStyle("#333", "#e9ecef")}>
               Edit
