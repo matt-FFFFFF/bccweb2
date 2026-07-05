@@ -110,6 +110,8 @@ export function getRegisteredQueueHandler(name: string) {
 // Mock email module — prevent real ACS email calls
 vi.mock("../../lib/email.js", () => ({
   sendEmail: vi.fn().mockResolvedValue(undefined),
+  briefHtmlBody: vi.fn((siteName: string, dateDisplay: string) => `<p>${siteName} ${dateDisplay}</p>`),
+  briefPlainText: vi.fn((siteName: string, dateDisplay: string) => `${siteName} ${dateDisplay}`),
   verificationEmailHtml: vi.fn((url: string) => `<p>verify ${url}</p>`),
   verificationEmailText: vi.fn((url: string) => `verify ${url}`),
   passwordResetEmailHtml: vi.fn().mockReturnValue("<p>reset</p>"),
