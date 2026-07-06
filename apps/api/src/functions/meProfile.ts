@@ -48,6 +48,7 @@ import { HttpError, withErrorHandler } from "../lib/http.js";
 import { resolveWingManufacturer } from "../lib/wingManufacturer.js";
 import { getActiveSeasonYear } from "../lib/season.js";
 import { upsertPilotClubMap } from "../lib/pilotClubMap.js";
+import { upsertPilotInIndex } from "../lib/pilotIndex.js";
 import { getTelemetryClient } from "../lib/telemetry.js";
 
 const PilotsIndexSchema = z.array(PilotSummarySchema);
@@ -256,53 +257,6 @@ async function linkUserToPilot(
     roles: user.roles.includes("Pilot") ? user.roles : [...user.roles, "Pilot"],
   };
   await writePrivateJson(userPath, UserSchema, updated);
-}
-
-async function upsertPilotInIndex(
-  pilot: Pilot,
-  activeYear?: number,
-): Promise<void> {
-  // issue #101 (Decision 6) INTENTIONALLY REVERSES the old "Security: E" rule
-  // that hard-coded clubId: undefined here. A self-selected club now IS the
-  // pilot's active-season club (createMyPilot writes it into pilot.seasonClubs),
-  // so the public index derives clubId from that entry — identical to pilots.ts
-  // — and a newly self-created pilot appears under their chosen club. clubId is
-  // non-PII, and the club only locks once the pilot has flown (see updatePilot).
-  // Callers mid-create pass the resolved year to skip a second seasons.json read.
-  const year = activeYear ?? (await getActiveSeasonYear());
-  const verifiedClubId = pilot.seasonClubs.find(
-    (sc) => sc.seasonYear === year,
-  )?.clubId;
-  await ensureJsonIndexBlob("pilots.json", "[]");
-  await withLeaseRetry("pilots.json", async (leaseId) => {
-    let index: PilotSummary[] = [];
-    try {
-      index = await readJson(
-        getBlobClient("pilots.json"),
-        PilotsIndexSchema,
-        "pilots.json",
-      );
-    } catch (err: unknown) {
-      if ((err as { statusCode?: number }).statusCode !== 404) throw err;
-    }
-    const entry: PilotSummary = {
-      id: pilot.id,
-      legacyId: pilot.legacyId,
-      name: pilot.person.fullName,
-      clubId: verifiedClubId,
-      rating: pilot.pilotRating,
-    };
-    const idx = index.findIndex((p) => p.id === pilot.id);
-    if (idx >= 0) {
-      index[idx] = entry;
-    } else {
-      index.push(entry);
-    }
-    index.sort(
-      (a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id)
-    );
-    await writeBlob("pilots.json", index, leaseId);
-  });
 }
 
 async function removePilotFromIndex(pilotId: string): Promise<void> {

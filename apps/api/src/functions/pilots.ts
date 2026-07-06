@@ -16,7 +16,6 @@ import {
 import { randomUUID } from "crypto";
 import type {
   Pilot,
-  PilotSummary,
   PilotClubMembership,
   WingClass,
   CoachType,
@@ -32,10 +31,7 @@ import * as z from "zod/v4";
 import {
   getBlobClient,
   getPrivateBlobClient,
-  withLeaseRetry,
   withPrivateLease,
-  ensureJsonIndexBlob,
-  writeBlob,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
@@ -52,6 +48,7 @@ import { resolveWingManufacturer } from "../lib/wingManufacturer.js";
 import { getActiveSeasonYear } from "../lib/season.js";
 import { hasFlownInSeason } from "../lib/pilotFlown.js";
 import { upsertPilotClubMap } from "../lib/pilotClubMap.js";
+import { upsertPilotInIndex } from "../lib/pilotIndex.js";
 import { withSeasonClub } from "../lib/pilotClub.js";
 import { getTelemetryClient } from "../lib/telemetry.js";
 
@@ -452,54 +449,6 @@ async function updatePilot(
   }
 
   return { status: 200, jsonBody: updated };
-}
-
-// ─── Index helper ─────────────────────────────────────────────────────────────
-
-async function upsertPilotInIndex(pilot: Pilot, activeYear?: number): Promise<void> {
-  // Public index shows only VERIFIED active-season club membership, never the
-  // self-declared currentClub (a pilot can set that to any club). Stops a pilot
-  // poisoning the anonymously-readable index with an unaffiliated club.
-  // Callers mid-mutation pass the already-resolved year to skip a second
-  // seasons.json read and close a season-flip window between the two reads.
-  const year = activeYear ?? (await getActiveSeasonYear());
-  const verifiedClubId = pilot.seasonClubs.find(
-    (sc) => sc.seasonYear === year,
-  )?.clubId;
-
-  await ensureJsonIndexBlob("pilots.json", "[]");
-
-  await withLeaseRetry("pilots.json", async (leaseId) => {
-    let index: PilotSummary[] = [];
-    try {
-      index = await readJson(
-        getBlobClient("pilots.json"),
-        PilotsIndexSchema,
-        "pilots.json",
-      );
-    } catch (err: unknown) {
-      if ((err as { statusCode?: number }).statusCode !== 404) throw err;
-    }
-
-    const entry: PilotSummary = {
-      id: pilot.id,
-      legacyId: pilot.legacyId,
-      name: pilot.person.fullName,
-      clubId: verifiedClubId,
-      rating: pilot.pilotRating,
-    };
-
-    const idx = index.findIndex((p) => p.id === pilot.id);
-    if (idx >= 0) {
-      index[idx] = entry;
-    } else {
-      index.push(entry);
-    }
-
-    index.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-    await writeBlob("pilots.json", index, leaseId);
-  });
-
 }
 
 // ─── GET /api/pilots/{id}/club-history ───────────────────────────────────────
