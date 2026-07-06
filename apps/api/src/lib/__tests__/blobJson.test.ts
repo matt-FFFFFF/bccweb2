@@ -30,24 +30,11 @@ vi.mock("../telemetry.js", () => ({
   getTelemetryClient: vi.fn(() => telemetry.client),
 }));
 
-const defaultWingFactors = {
-  "EN A": 1.0,
-  "EN B": 0.9,
-  "EN C": 0.8,
-  "EN C 2-liner": 0.7,
-  "EN D": 0.6,
-  "EN D 2-liner": 0.5,
-} satisfies Config["wingFactors"];
-
+// Derived from the schema (not a literal) so it can never drift: a COMPLETE
+// new-shape Config that heals to nothing on read — assertions below then
+// exercise only the junk-key drop, not incidental default-filling.
 function validConfig(overrides: Partial<Config> = {}): Config {
-  return {
-    maxTeamsInClub: 2,
-    maxPilotsInTeam: 12,
-    maxScoringPilotsInTeam: 6,
-    flightDateValidationEnabled: true,
-    wingFactors: defaultWingFactors,
-    ...overrides,
-  };
+  return { ...ConfigSchema.parse({}), ...overrides };
 }
 
 function withExtraKey<T extends object>(value: T, key: string, extra: unknown): T {
