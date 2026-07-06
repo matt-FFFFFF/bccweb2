@@ -14,6 +14,7 @@ import { describe, expect, test } from "vitest";
 import { createHash, randomUUID } from "node:crypto";
 import type { HttpRequest } from "@azure/functions";
 import type { AdminUserView, Config, Pilot, PilotEmailIndex, PilotSummary, User } from "@bccweb/types";
+import { ConfigSchema } from "@bccweb/schemas";
 import { getCallerIdentity } from "../../lib/auth.js";
 import {
   assertNotLastAdmin,
@@ -150,13 +151,80 @@ describe("PUT /api/manage/config — schema validation & lease", () => {
     const cfg = res.jsonBody as Config;
     expect(cfg.maxTeamsInClub).toBe(7);
     expect(cfg.wingFactors["EN A"]).toBe(1.5);
-    // Untouched defaults preserved.
+    // Untouched defaults preserved (schema default is the legacy-correct 9).
     expect(cfg.wingFactors["EN B"]).toBeTypeOf("number");
-    expect(cfg.maxPilotsInTeam).toBe(12);
+    expect(cfg.maxPilotsInTeam).toBe(9);
 
     const persisted = await readPrivateJson<Config>("config.json");
     expect(persisted?.maxTeamsInClub).toBe(7);
     expect(persisted?.wingFactors["EN A"]).toBe(1.5);
+  });
+
+  test("partial factor edit preserves untouched sibling keys and every other table", async () => {
+    // Given: a full config carrying CUSTOM factor values in each nested map,
+    // seeded directly so the PATCH below is the only operation under test.
+    const { user } = await bootstrapAdmin();
+    const seeded: Config = {
+      ...ConfigSchema.parse({}),
+      pilotFactors: { "Club Pilot": 1, Pilot: 1, "Advanced Pilot": 0.85 },
+      wingFactors: {
+        "EN A": 1.0,
+        "EN B": 0.9,
+        "EN C": 0.77,
+        "EN C 2-liner": 0.7,
+        "EN D": 0.6,
+        "EN D 2-liner": 0.5,
+      },
+      clubsAttendingFactors: {
+        fewerThanThreeClubs: 0.5,
+        exactlyThreeClubs: 0.7,
+        moreThanThreeClubs: 1,
+      },
+      minDistanceFactors: {
+        oneFlight: 0.2,
+        twoFlights: 0.4,
+        threeFlights: 0.55,
+        fourFlights: 0.8,
+        fiveOrMoreFlights: 1,
+      },
+    };
+    await writePrivateJson("config.json", seeded);
+
+    // When: an admin PATCHes only pilotFactors.Pilot.
+    const put = await invoke(
+      "updateConfig",
+      makeAuthRequest(user.id, user.email, {
+        method: "PUT",
+        body: { pilotFactors: { Pilot: 1.1 } },
+      }),
+    );
+    expect(put.status).toBe(200);
+
+    const res = await invoke(
+      "getConfig",
+      makeAuthRequest(user.id, user.email, { method: "GET" }),
+    );
+    expect(res.status).toBe(200);
+    const cfg = res.jsonBody as Config;
+
+    // Then: only pilotFactors.Pilot changed; its siblings survive. The old
+    // ConfigSchema.partial() merge hydrated them from defaults (Advanced Pilot
+    // 0.85 → 0.9), so this assertion fails against that merge.
+    expect(cfg.pilotFactors.Pilot).toBe(1.1);
+    expect(cfg.pilotFactors["Advanced Pilot"]).toBe(0.85);
+    expect(cfg.pilotFactors["Club Pilot"]).toBe(seeded.pilotFactors["Club Pilot"]);
+
+    // And: every OTHER factor table is byte-identical to what was seeded.
+    expect(cfg.wingFactors).toEqual(seeded.wingFactors);
+    expect(cfg.clubsAttendingFactors).toEqual(seeded.clubsAttendingFactors);
+    expect(cfg.minDistanceFactors).toEqual(seeded.minDistanceFactors);
+
+    // And: the persisted blob is a valid full Config carrying the merge result.
+    const persistedCfg = await readPrivateJson<Config>("config.json");
+    expect(ConfigSchema.safeParse(persistedCfg).success).toBe(true);
+    expect(persistedCfg?.pilotFactors["Advanced Pilot"]).toBe(0.85);
+    expect(persistedCfg?.pilotFactors.Pilot).toBe(1.1);
+    expect(persistedCfg?.wingFactors).toEqual(seeded.wingFactors);
   });
 
   test("concurrent updates: exactly one 200, others 503 LEASE_HELD", async () => {
