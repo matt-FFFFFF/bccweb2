@@ -136,12 +136,18 @@ async function seedOneRound(token, statusIdx) {
         statusIdx * TEAMS_PER_ROUND * PILOTS_PER_TEAM +
         clubIdx * PILOTS_PER_TEAM +
         (place - 1);
+      // Slot eligibility is derived server-side and positionally at slot
+      // creation (teams.ts addPilot: isScoring = place <=
+      // config.maxScoringPilotsInTeam, =6). The addPilot handler IGNORES any
+      // request-body `isScoring`, so we omit it and let the API be the single
+      // source of truth — replacing the old, now-dead `isScoring: place === 1`.
+      // With 3 pilots per team every slot lands in a scoring place (1..3 <= 6).
       await apiFetch(
         "POST",
         `/api/rounds/${roundId}/teams/${teamId}/pilots`,
         {
           token,
-          body: { pilotId: pilotIds[pilotIdx], isScoring: place === 1 },
+          body: { pilotId: pilotIds[pilotIdx] },
         }
       );
     }
