@@ -24,6 +24,7 @@ import { pathToFileURL } from "node:url";
 
 import { BlobServiceClient } from "@azure/storage-blob";
 import { findPiiInObject, PII_FIELDS } from "../lib/pii.mjs";
+import { legacyScoreManifestPath, readLegacyScoreManifest } from "./legacy-score-manifest.mjs";
 
 const PUBLIC_CONTAINER = process.env.BLOB_CONTAINER_NAME ?? process.env.BLOB_CONTAINER ?? "data";
 const PRIVATE_CONTAINER = process.env.BLOB_PRIVATE_CONTAINER_NAME ?? process.env.BLOB_PRIVATE_CONTAINER ?? "data-private";
@@ -232,6 +233,67 @@ function assertObject(path, value, requiredKeys = []) {
   return true;
 }
 
+// Scoring config keys added by the W1 normalized-scoring reshape. The migrated
+// config.json MUST carry all of these (taskMaxPoints, the counts, and the
+// factor tables) or the new engine cannot score — assert them present + valid.
+const REQUIRED_CONFIG_NUMBER_KEYS = [
+  "maxTeamsInClub",
+  "maxPilotsInTeam",
+  "maxScoringPilotsInTeam",
+  "maxPilotScoresCountedPerTeam",
+  "leagueRoundScoresCounted",
+  "taskMaxPoints",
+];
+
+const REQUIRED_CONFIG_FACTOR_TABLES = {
+  wingFactors: ["EN A", "EN B", "EN C", "EN C 2-liner", "EN D", "EN D 2-liner"],
+  pilotFactors: ["Club Pilot", "Pilot", "Advanced Pilot"],
+  clubsAttendingFactors: ["fewerThanThreeClubs", "exactlyThreeClubs", "moreThanThreeClubs"],
+  minDistanceFactors: ["oneFlight", "twoFlights", "threeFlights", "fourFlights", "fiveOrMoreFlights"],
+};
+
+function isFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+/**
+ * Assert the migrated config.json carries every scoring key the new engine needs
+ * (counts, taskMaxPoints, and the four factor tables) with valid numeric values.
+ *
+ * @param {string} path
+ * @param {unknown} config
+ */
+function assertScoringConfig(path, config) {
+  if (!isRecord(config)) {
+    fail(`${path} — config is not an object; cannot check scoring keys`);
+    return;
+  }
+  let allOk = true;
+  for (const key of REQUIRED_CONFIG_NUMBER_KEYS) {
+    if (!hasOwn(config, key) || !isFiniteNumber(config[key])) {
+      fail(`${path} — scoring config key ${key} missing or not a finite number`);
+      allOk = false;
+    }
+  }
+  for (const [table, keys] of Object.entries(REQUIRED_CONFIG_FACTOR_TABLES)) {
+    const value = config[table];
+    if (!isRecord(value)) {
+      fail(`${path} — scoring factor table ${table} missing or not an object`);
+      allOk = false;
+      continue;
+    }
+    for (const factorKey of keys) {
+      if (!isFiniteNumber(value[factorKey])) {
+        fail(`${path} — scoring factor ${table}.${factorKey} missing or not a finite number`);
+        allOk = false;
+      }
+    }
+  }
+  if (allOk) {
+    ok(`${path} — scoring config keys present + valid (counts, taskMaxPoints, factor tables)`);
+  }
+}
+
 // ─── Schema gate ──────────────────────────────────────────────────────────────
 
 function schemaMaps(schemas) {
@@ -392,6 +454,96 @@ function printSchemaSummary(stats) {
   }
 }
 
+// ─── Legacy-score manifest cross-check ─────────────────────────────────────────
+
+/**
+ * Prove that migrated Complete rounds kept their EXACT legacy scores. Reads the
+ * migration's legacy-score manifest (keyed by legacy ids) and asserts, for every
+ * migrated Complete round, that each team's `team.score` AND each filled slot's
+ * `pilotPoints` equal the manifest — matched by
+ * `(round.legacyId, team.legacyId, slot.placeInTeam)`.
+ *
+ * A missing match key (round.legacyId, team.legacyId, or a slot placeInTeam not
+ * present in the manifest) is a HARD FAILURE, never a silent skip — otherwise a
+ * dropped legacyId would let a re-scored (mismatched) round slip through.
+ *
+ * @param {import("@azure/storage-blob").ContainerClient} privateClient
+ * @param {Array<{id:string,status:string}>} roundsSummary  rounds.json entries
+ */
+async function crossCheckLegacyScores(privateClient, roundsSummary) {
+  const manifest = readLegacyScoreManifest();
+  const completeRounds = roundsSummary.filter((r) => isRecord(r) && r.status === "Complete");
+
+  if (manifest === null) {
+    if (completeRounds.length > 0) {
+      fail(
+        `legacy-score manifest missing at ${legacyScoreManifestPath()} but ${completeRounds.length} Complete round(s) exist — cannot prove legacy scores were preserved`,
+      );
+    } else {
+      ok("legacy-score manifest — no Complete rounds to cross-check");
+    }
+    return;
+  }
+
+  if (completeRounds.length === 0) {
+    ok("legacy-score manifest — no Complete rounds to cross-check");
+    return;
+  }
+
+  for (const summary of completeRounds) {
+    const doc = await readBlob(privateClient, `rounds/${summary.id}.json`);
+    if (!isRecord(doc)) continue; // readBlob already recorded the failure
+
+    const roundLegacyId = doc.legacyId;
+    if (roundLegacyId == null) {
+      fail(`data-private/rounds/${summary.id}.json — round.legacyId absent; cannot match legacy-score manifest`);
+      continue;
+    }
+    const roundManifest = manifest[roundLegacyId];
+    if (!isRecord(roundManifest)) {
+      fail(`data-private/rounds/${summary.id}.json — no legacy-score manifest entry for round legacyId ${roundLegacyId}`);
+      continue;
+    }
+
+    const teams = Array.isArray(doc.teams) ? doc.teams : [];
+    for (const team of teams) {
+      const teamLegacyId = isRecord(team) ? team.legacyId : undefined;
+      if (teamLegacyId == null) {
+        fail(`data-private/rounds/${summary.id}.json — team "${isRecord(team) ? team.teamName ?? "?" : "?"}" has no legacyId; cannot match legacy-score manifest`);
+        continue;
+      }
+      const teamManifest = roundManifest[teamLegacyId];
+      if (!isRecord(teamManifest)) {
+        fail(`data-private/rounds/${summary.id}.json — no legacy-score manifest entry for round ${roundLegacyId} team ${teamLegacyId}`);
+        continue;
+      }
+
+      if (Object.is(team.score, teamManifest.teamScore)) {
+        ok(`round ${roundLegacyId} team ${teamLegacyId} — team.score preserved (${team.score})`);
+      } else {
+        fail(`data-private/rounds/${summary.id}.json — team ${teamLegacyId} score ${team.score} ≠ legacy manifest teamScore ${teamManifest.teamScore} (legacy score not preserved)`);
+      }
+
+      const pilotsManifest = isRecord(teamManifest.pilots) ? teamManifest.pilots : {};
+      const filledSlots = (Array.isArray(team.pilots) ? team.pilots : []).filter(
+        (slot) => isRecord(slot) && slot.status === "Filled",
+      );
+      for (const slot of filledSlots) {
+        const place = slot.placeInTeam;
+        if (place == null || !hasOwn(pilotsManifest, String(place))) {
+          fail(`data-private/rounds/${summary.id}.json — team ${teamLegacyId} filled place ${place} absent from legacy-score manifest match keys`);
+          continue;
+        }
+        if (Object.is(slot.pilotPoints, pilotsManifest[place])) {
+          ok(`round ${roundLegacyId} team ${teamLegacyId} place ${place} — pilotPoints preserved (${slot.pilotPoints})`);
+        } else {
+          fail(`data-private/rounds/${summary.id}.json — team ${teamLegacyId} place ${place} pilotPoints ${slot.pilotPoints} ≠ legacy manifest ${pilotsManifest[place]} (legacy score not preserved)`);
+        }
+      }
+    }
+  }
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 async function main() {
@@ -418,6 +570,7 @@ async function main() {
 
   const config = await readBlob(privateClient, "config.json");
   assertObject("data-private/config.json", config, ["wingFactors", "maxScoringPilotsInTeam"]);
+  assertScoringConfig("data-private/config.json", config);
 
   const userIndex = await readBlob(privateClient, "user-index.json", /* required= */ false);
   if (userIndex !== null) {
@@ -521,6 +674,10 @@ async function main() {
       }
     }
   }
+
+  console.log("");
+  console.log("── Legacy score preservation (manifest cross-check) ──");
+  await crossCheckLegacyScores(privateClient, roundsOk ? rounds : []);
 
   console.log("");
   console.log("── Schema parse gate ──");
