@@ -212,9 +212,7 @@ export function computeLeague(rounds: Round[], config: Config): LeagueEntry[] {
         });
       }
 
-      if (team.score > 0) {
-        scoresByTeam.get(key)?.scores.push({ roundId: round.id, score: team.score });
-      }
+      scoresByTeam.get(key)?.scores.push({ roundId: round.id, score: team.score });
     }
   }
 
