@@ -15,9 +15,9 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import { randomUUID } from "crypto";
-import type { CallerIdentity, ClubTeamSummary, Pilot, Round, Team, PilotSlot } from "@bccweb/types";
+import type { CallerIdentity, ClubTeamSummary, Config, Pilot, Round, Team, PilotSlot } from "@bccweb/types";
 import { isRosterFrozen, rosterFrozenReason } from "@bccweb/types";
-import { ClubTeamSummarySchema, PilotSchema, RoundSchema } from "@bccweb/schemas";
+import { ClubTeamSummarySchema, ConfigSchema, PilotSchema, RoundSchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
 import { getBlobClient, getPrivateBlobClient, withPrivateLease } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
@@ -37,6 +37,7 @@ import {
 import { mutationRateLimit } from "../lib/rateLimit.js";
 import { recomputeTeamCaptain } from "../lib/teamCaptain.js";
 import { ensureSeasonClubRecorded, pilotClubIdForSeason } from "../lib/pilotClub.js";
+import { choosePlace } from "./roundRegistration.js";
 
 // ─── Auth helper ──────────────────────────────────────────────────────────────
 
@@ -53,6 +54,14 @@ async function loadRound(id: string): Promise<Round> {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
     throw new HttpError(500, "INTERNAL");
+  }
+}
+
+async function loadConfig(): Promise<Config> {
+  try {
+    return await readJson(getPrivateBlobClient("config.json"), ConfigSchema, "config.json");
+  } catch {
+    return ConfigSchema.parse({});
   }
 }
 
@@ -229,7 +238,6 @@ async function addPilot(
 
   const body = (await req.json()) as {
     pilotId?: string;
-    isScoring?: boolean;
   };
   if (!body.pilotId) {
     throw new HttpError(400, "INVALID_BODY", "pilotId is required");
@@ -266,6 +274,8 @@ async function addPilot(
     throw new HttpError(422, "TEAM_CLUB_MISMATCH", "This pilot does not belong to this team's club for this season.");
   }
 
+  const config = await loadConfig();
+
   const result = await mutateLocked(id, caller, (r) => {
     if (isRosterFrozen(r.status)) return `Cannot change teams or pilots while ${rosterFrozenReason(r.status)}`;
 
@@ -281,14 +291,15 @@ async function addPilot(
       return "Pilot is already registered in this round";
     }
 
-    const nextPlace =
-      team.pilots.length > 0
-        ? Math.max(...team.pilots.map((s) => s.placeInTeam)) + 1
-        : 1;
+    // D11 — positional slot eligibility fixed at creation: `choosePlace` (shared
+    // with self-registration) gives the first free place, so re-adding after a
+    // removePilot splice reuses the freed place rather than growing past the cap.
+    // No reorder/override path in this plan (legacy RoundTeam.cs:41-55).
+    const place = choosePlace(team, undefined, config.maxPilotsInTeam);
 
     const slot: PilotSlot = {
-      placeInTeam: nextPlace,
-      isScoring: body.isScoring ?? true,
+      placeInTeam: place,
+      isScoring: place <= config.maxScoringPilotsInTeam,
       status: "Filled",
       accountedFor: false,
       signToFly: false,
