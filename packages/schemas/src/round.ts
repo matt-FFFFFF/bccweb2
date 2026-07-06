@@ -5,6 +5,7 @@ import type {
   PilotSlotStatus,
   PilotSnapshot,
   Round,
+  RoundScoringSnapshot,
   RoundStatus,
   RoundSummary,
   ScoringType,
@@ -153,6 +154,57 @@ export const TeamSchema = z
 
 TeamSchema satisfies z.ZodType<Team>;
 
+const RoundScoringPilotFactorsSchema = z
+  .object({
+    "Club Pilot": z.number(),
+    Pilot: z.number(),
+    "Advanced Pilot": z.number(),
+  })
+  .strict();
+
+const RoundScoringWingFactorsSchema = z
+  .object({
+    "EN A": z.number(),
+    "EN B": z.number(),
+    "EN C": z.number(),
+    "EN C 2-liner": z.number(),
+    "EN D": z.number(),
+    "EN D 2-liner": z.number(),
+  })
+  .strict();
+
+// Audit snapshot: validated STRICTLY with no per-field healing/defaults so a
+// stored snapshot is preserved verbatim or (via the outer `lenientOptional` on
+// `RoundSchema.scoring`) healed to ABSENT as a whole — never silently
+// half-fabricated, which would corrupt the re-derivation audit trail.
+export const RoundScoringSnapshotSchema = z
+  .object({
+    taskMaxPoints: z.number(),
+    clubsAttendingCount: z.number(),
+    clubsAttendingFactor: z.number(),
+    minDistanceFlightCount: z.number(),
+    minDistanceFactor: z.number(),
+    maxPointsForRound: z.number(),
+    maxPilotScoreInRound: z.number(),
+    maxTeamScore: z.number(),
+    maxPilotScoresCountedPerTeam: z.number(),
+    leagueRoundScoresCounted: z.number(),
+    pilotFactors: RoundScoringPilotFactorsSchema,
+    wingFactors: RoundScoringWingFactorsSchema,
+    teams: z.array(
+      z
+        .object({
+          teamId: z.string(),
+          workingTeamScore: z.number(),
+        })
+        .strip(),
+    ),
+    scoredAt: z.string(),
+  })
+  .strip();
+
+RoundScoringSnapshotSchema satisfies z.ZodType<RoundScoringSnapshot>;
+
 export const RoundSchema = z
   .object({
     id: z.string().min(1),
@@ -183,6 +235,7 @@ export const RoundSchema = z
         })
         .strict(),
     ),
+    scoring: lenientOptional(RoundScoringSnapshotSchema),
     createdAt: lenientOptional(z.string()),
     updatedAt: lenientOptional(z.string()),
     updatedBy: lenientOptional(z.string()),

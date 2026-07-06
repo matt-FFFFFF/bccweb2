@@ -435,6 +435,60 @@ export interface Team {
 
 export type BriefPdfStatus = "pending" | "processing" | "ready" | "failed";
 
+/**
+ * Everything `scoreRound` derives while scoring a round — enough to re-derive
+ * EVERY `Team.score` AND every `PilotSlot.pilotPoints` after the fact, even once
+ * an admin has since edited the factor `Config`. W2.2's `scoreRound(round, config)`
+ * returns this; W3.1 stamps it onto `Round.scoring` inside the completion lease.
+ *
+ * The three normalization DENOMINATORS are the audit-critical values (a stored
+ * score is unexplainable without the divisor it was produced with):
+ *   - `maxPilotScoreInRound` — highest raw pilot score in the round; the per-pilot
+ *     divisor (`pilotPoints = maxPointsForRound × pilotScore / maxPilotScoreInRound`).
+ *     Legacy: `BaseController.cs:2330` (applied at `:2336`).
+ *   - `maxTeamScore` — highest working team score; the per-team divisor
+ *     (`team.score = round(maxPointsForRound × workingTeamScore / maxTeamScore)`).
+ *     Legacy: `BaseController.cs:2384` (`GetMaxTeamScore`, applied at `:2424`).
+ *   - `maxPointsForRound` — `taskMaxPoints × clubsAttendingFactor × minDistanceFactor`.
+ *     Legacy: `BaseController.cs:2465` (inside `ScoreRound`, `:2458`).
+ */
+export interface RoundScoringDerivation {
+  /** Base points before any factor. Legacy: `BaseController.cs:2461` (`taskMaxPoints = 1000`). */
+  taskMaxPoints: number;
+  /** Clubs attending the round — bucket input to `clubsAttendingFactor`. */
+  clubsAttendingCount: number;
+  /** Clubs-attending multiplier. Legacy: `BaseController.cs:2254-2275` (`GetClubsAttendingFactor`). */
+  clubsAttendingFactor: number;
+  /** Flights at/over the round minimum distance — bucket input to `minDistanceFactor`. */
+  minDistanceFlightCount: number;
+  /** Scoring-flight-count multiplier. Legacy: `BaseController.cs:2277-2309` (`GetMinDistanceFactor`). */
+  minDistanceFactor: number;
+  /** `taskMaxPoints × clubsAttendingFactor × minDistanceFactor`. Legacy: `BaseController.cs:2465`. */
+  maxPointsForRound: number;
+  /** Per-pilot normalization denominator (highest raw pilot score). Legacy: `BaseController.cs:2330`. */
+  maxPilotScoreInRound: number;
+  /** Per-team normalization denominator (highest working team score). Legacy: `BaseController.cs:2384`. */
+  maxTeamScore: number;
+  /** Pilot scores summed into a team's working score (top-N). Legacy: `BaseController.cs:2359` (4). */
+  maxPilotScoresCountedPerTeam: number;
+  /** Rounds counted in the season league. Legacy: `LeagueTeamSeasonViewModel.cs:27` (6). */
+  leagueRoundScoresCounted: number;
+  /** Per-pilot-rating multiplier applied. Legacy: `BaseController.cs:1661-1678` (`GetPilotFactor`). */
+  pilotFactors: Record<PilotRatingValue, number>;
+  /** Per-wing-class multiplier applied. */
+  wingFactors: Record<WingClass, number>;
+  /** Per-team pre-normalization working score (sum of top-N pilot points). Legacy: `BaseController.cs:2357-2380`. */
+  teams: { teamId: string; workingTeamScore: number }[];
+}
+
+/**
+ * Private round-blob audit snapshot: the full scoring derivation plus the instant
+ * it was taken. Persisted to the PRIVATE `rounds/{uuid}.json` blob ONLY — it
+ * encodes per-team internals, so it MUST NEVER reach a public `data/` blob
+ * (privacy-scan gate). Absent on rounds that have never been scored.
+ */
+export type RoundScoringSnapshot = RoundScoringDerivation & { scoredAt: string };
+
 export interface Round {
   id: string;
   legacyId?: number;
@@ -463,6 +517,10 @@ export interface Round {
     pdfUpdatedAt?: string;
     pdfAttemptId?: string;
   };
+  /** Private round-blob audit snapshot of the scoring derivation (denominators
+   * `maxPilotScoreInRound`, `maxTeamScore`, `maxPointsForRound` — legacy
+   * `BaseController.cs:2330,2384,2465`). Private-only; absent until scored. */
+  scoring?: RoundScoringSnapshot;
 }
 
 // ─── Sign-to-Fly / Audit ─────────────────────────────────────────────────────
