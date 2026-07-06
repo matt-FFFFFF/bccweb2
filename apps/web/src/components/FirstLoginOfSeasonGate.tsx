@@ -3,9 +3,9 @@ import { useLocation } from "react-router";
 import * as z from "zod/v4";
 import { ClubSummarySchema } from "@bccweb/schemas";
 import { useAuth } from "../hooks/useAuth.js";
-import { api } from "../lib/api.js";
+import { api, ApiError } from "../lib/api.js";
 import { useBlob } from "../hooks/useBlob.js";
-import type { Pilot, WingClass } from "@bccweb/types";
+import type { Pilot, WingClass, SeasonResults } from "@bccweb/types";
 
 interface ClubSummary {
   id: string;
@@ -26,6 +26,9 @@ export default function FirstLoginOfSeasonGate({ children }: { children: React.R
   const firstLoginOfSeason = identity?.firstLoginOfSeason ?? false;
   const activeYear = identity?.activeSeasonYear;
   
+  const { data: seasonResults } = useBlob<SeasonResults>(activeYear ? `results/${activeYear}.json` : null);
+  const flown = !!seasonResults?.some((rr) => rr.teamResults.some((tr) => tr.pilots.some((p) => p.pilotId === identity?.pilotId)));
+
   const dismissedUntilStr = localStorage.getItem("bcc_first_login_dismissed_until");
   const isDismissed = dismissedUntilStr && Date.now() < Number(dismissedUntilStr);
   const acknowledged = localStorage.getItem("bcc_first_login_acknowledged_at");
@@ -108,7 +111,11 @@ export default function FirstLoginOfSeasonGate({ children }: { children: React.R
       
       // Optionally trigger re-fetch of /me to update identity, but local state + acknowledged key is enough to hide
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "Failed to update profile");
+      if (err instanceof ApiError && err.code === "CLUB_LOCKED") {
+        setError("You cannot change your club because you have already flown for another club this season. Please contact an admin.");
+      } else {
+        setError(err instanceof Error ? err.message : "Failed to update profile");
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -193,13 +200,14 @@ export default function FirstLoginOfSeasonGate({ children }: { children: React.R
               </div>
 
               <div>
-                <label style={labelStyle}>Current Club</label>
-                <select style={inputStyle} value={formData.currentClubId} onChange={e => setFormData({ ...formData, currentClubId: e.target.value })}>
+                <label style={labelStyle} htmlFor="currentClub">Current Club</label>
+                <select id="currentClub" style={inputStyle} value={formData.currentClubId} onChange={e => setFormData({ ...formData, currentClubId: e.target.value })} disabled={flown}>
                   <option value="">-- None --</option>
                   {clubs?.map(c => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
+                {flown && <p style={{ fontSize: "0.8rem", color: "#666", marginTop: "0.25rem" }}>(locked — you've flown; contact an admin)</p>}
               </div>
 
               <div style={{ display: "flex", gap: "1rem", marginTop: "1rem" }}>
