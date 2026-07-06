@@ -1318,8 +1318,6 @@ async function completeRound(
   assertCanManageRound(caller, current);
   await mutationRateLimit(req, caller, "completeRound", "heavy");
 
-  const config = await loadConfig();
-
   if (current.status !== "Locked") {
     return {
       status: 409,
@@ -1329,22 +1327,26 @@ async function completeRound(
     };
   }
 
-  const scoredSnapshot = scoreRound(current, config);
   let updated: Round;
 
   try {
     updated = await withPrivateLeaseRenewing(path, async (leaseId) => {
+      // Score the LEASED read — NOT a pre-lease snapshot — so a mutation
+      // committed between the pre-lease read and lease acquisition can never be
+      // stale-overwritten by an outdated score (legacy RoundsController.cs:305-310).
       const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
 
       if (r.status !== "Locked") {
-        const err = new Error(
+        throw new HttpError(
+          409,
+          "CONFLICT",
           `Round must be Locked to complete (currently ${r.status})`
         );
-        (err as { isValidation?: boolean }).isValidation = true;
-        throw new HttpError(500, "INTERNAL");
       }
 
-      const scored = structuredClone(scoredSnapshot);
+      const config = await loadConfig();
+      const { round: scored, derivation } = scoreRound(r, config);
+      scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
       scored.status = "Complete";
       scored.isLocked = false;
 
@@ -1352,8 +1354,8 @@ async function completeRound(
       return scored;
     });
   } catch (err: unknown) {
-    const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
+    if (err instanceof HttpError) throw err;
+    const e = err as { statusCode?: number };
     if (e.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
     throw new HttpError(500, "INTERNAL");
   }
