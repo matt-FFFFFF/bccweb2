@@ -1,25 +1,38 @@
 import type {
-  Round,
   Config,
   LeagueEntry,
-  PilotSlot,
+  PilotRatingValue,
+  Round,
+  RoundScoringDerivation,
   WingClass,
 } from "@bccweb/types";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const DEFAULT_WING_FACTOR = 1.0;
-const SCORE_PRECISION = 10; // round to 1 decimal place (multiply/divide by 10)
+const f32 = Math.fround;
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function round1dp(value: number): number {
-  return Math.round(value * SCORE_PRECISION) / SCORE_PRECISION;
+function roundHalfToEven0dp(value: number): number {
+  const floor = Math.floor(value);
+  const fraction = value - floor;
+
+  if (fraction < 0.5) return floor;
+  if (fraction > 0.5) return floor + 1;
+
+  return floor % 2 === 0 ? floor : floor + 1;
 }
 
-function getWingFactor(wingClass: WingClass | undefined, config: Config): number {
-  if (!wingClass) return DEFAULT_WING_FACTOR;
-  return config.wingFactors[wingClass] ?? DEFAULT_WING_FACTOR;
+const truncInt = Math.trunc;
+
+function pilotFactorFor(rating: PilotRatingValue, config: Config): number {
+  return f32(config.pilotFactors[rating] ?? 0);
+}
+
+function wingFactorFor(wingClass: WingClass, config: Config): number {
+  // D8 heal-divergence: schema healing maps malformed stored wing classes to EN A;
+  // if an unknown key still reaches scoring, legacy's factor fallback is zero.
+  return f32(config.wingFactors[wingClass] ?? 0);
 }
 
 // ─── scoreRound ───────────────────────────────────────────────────────────────
