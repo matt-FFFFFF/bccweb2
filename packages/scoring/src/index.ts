@@ -186,54 +186,61 @@ export function scoreRound(
 
 // ─── computeLeague ────────────────────────────────────────────────────────────
 
-/**
- * Aggregate team scores across all Complete rounds in a season and produce a
- * ranked league table. Each team's contribution is the sum of their scores
- * across all counted rounds (no "drop worst" rule is currently specified).
- */
-export function computeLeague(rounds: Round[]): LeagueEntry[] {
+/** D12: season-roster zero-round teams are not added here; legacy only ranks round teams. */
+export function computeLeague(rounds: Round[], config: Config): LeagueEntry[] {
   const completeRounds = rounds.filter((r) => r.status === "Complete");
-
-  // Map: "clubId|teamName" → entry
-  const entryMap = new Map<string, LeagueEntry>();
+  const scoresByTeam = new Map<
+    string,
+    {
+      readonly clubId: string;
+      readonly clubName: string;
+      readonly teamName: string;
+      readonly scores: { readonly roundId: string; readonly score: number }[];
+    }
+  >();
 
   for (const round of completeRounds) {
     for (const team of round.teams) {
       const key = `${team.club.id}|${team.teamName}`;
 
-      if (!entryMap.has(key)) {
-        entryMap.set(key, {
-          rank: 0,
+      if (!scoresByTeam.has(key)) {
+        scoresByTeam.set(key, {
           clubId: team.club.id,
           clubName: team.club.name,
           teamName: team.teamName,
-          totalScore: 0,
-          roundScores: {},
-          countedRounds: 0,
+          scores: [],
         });
       }
 
-      const entry = entryMap.get(key)!;
       if (team.score > 0) {
-        entry.roundScores[round.id] = team.score;
-        entry.totalScore = round1dp(entry.totalScore + team.score);
-        entry.countedRounds += 1;
+        scoresByTeam.get(key)?.scores.push({ roundId: round.id, score: team.score });
       }
     }
   }
 
-  // Sort descending by totalScore, then assign ranks
-  const sorted = Array.from(entryMap.values()).sort(
-    (a, b) => b.totalScore - a.totalScore
-  );
+  const sorted = Array.from(scoresByTeam.values())
+    .map((team): LeagueEntry => {
+      const countedScores = team.scores
+        .sort((left, right) => right.score - left.score)
+        .slice(0, config.leagueRoundScoresCounted);
 
-  let rank = 1;
-  for (let i = 0; i < sorted.length; i++) {
-    if (i > 0 && sorted[i].totalScore < sorted[i - 1].totalScore) {
-      rank = i + 1;
-    }
-    sorted[i].rank = rank;
-  }
+      return {
+        rank: 0,
+        clubId: team.clubId,
+        clubName: team.clubName,
+        teamName: team.teamName,
+        totalScore: truncInt(countedScores.reduce((sum, score) => sum + score.score, 0)),
+        roundScores: Object.fromEntries(
+          countedScores.map((score) => [score.roundId, score.score])
+        ),
+        countedRounds: countedScores.length,
+      };
+    })
+    .sort((a, b) => b.totalScore - a.totalScore);
+
+  sorted.forEach((entry, index) => {
+    entry.rank = index + 1;
+  });
 
   return sorted;
 }
