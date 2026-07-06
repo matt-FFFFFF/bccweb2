@@ -1,4 +1,5 @@
 import type {
+  Config,
   Round,
   RoundSummary,
   Season,
@@ -8,6 +9,7 @@ import type {
 import { normalizeStatus } from "@bccweb/types";
 import { computeLeague } from "@bccweb/scoring";
 import {
+  ConfigSchema,
   PilotSummarySchema,
   RoundSchema,
   RoundSummarySchema,
@@ -99,6 +101,18 @@ export async function recomputeSeason(seasonYear: number): Promise<void> {
   return promise;
 }
 
+async function loadConfig(): Promise<Config> {
+  try {
+    return await readJson(
+      getPrivateBlobClient("config.json"),
+      ConfigSchema,
+      "config.json",
+    );
+  } catch {
+    return ConfigSchema.parse({});
+  }
+}
+
 async function recomputeSeasonUncached(seasonYear: number): Promise<void> {
   const seasonPath = `seasons/${seasonYear}.json`;
   const season = await readJson(getBlobClient(seasonPath), SeasonSchema, seasonPath);
@@ -116,8 +130,13 @@ async function recomputeSeasonUncached(seasonYear: number): Promise<void> {
   }
   normalizedRounds.sort(compareRounds);
 
-  // Compute league table
-  const leagueTable = stableLeagueTable(computeLeague(normalizedRounds));
+  // Compute league table. D13: the league RE-derives from persisted per-round
+  // team.score aggregates under the CURRENT config, so editing
+  // leagueRoundScoresCounted intentionally re-windows the league. The
+  // "immutable to config edits" guarantee scopes to per-round scores + the
+  // Round.scoring snapshot, NOT to the league table.
+  const config = await loadConfig();
+  const leagueTable = stableLeagueTable(computeLeague(normalizedRounds, config));
   const seasonPayload: Season = stableSeason({ ...season, leagueTable });
 
   // Load pilot index for name resolution in results
@@ -175,6 +194,8 @@ function buildSeasonResults(
         rank: i + 1,
         teamName: team.teamName,
         clubName: team.club.name,
+        // `score` fields carry NORMALIZED points (team.score / slot.pilotPoints);
+        // `distance` carries RAW km (flight.distance). Different units — do not conflate.
         score: team.score,
         pilots: [...team.pilots]
           .filter((p) => p.flight != null && p.snapshot != null)
