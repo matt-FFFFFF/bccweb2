@@ -1,5 +1,5 @@
 import { PilotSchema } from "@bccweb/schemas";
-import type { Pilot } from "@bccweb/types";
+import type { Pilot, PilotSeasonClub } from "@bccweb/types";
 
 import { getPrivateBlobClient, withPrivateLease } from "./blob.js";
 import { readJson, writePrivateJson } from "./blobJson.js";
@@ -10,6 +10,13 @@ export function pilotClubIdForSeason(pilot: Pilot, seasonYear: number): string |
     ?? pilot.currentClub?.id
     ?? null
   );
+}
+
+export function withSeasonClub(
+  seasonClubs: PilotSeasonClub[],
+  entry: PilotSeasonClub,
+): PilotSeasonClub[] {
+  return [...seasonClubs.filter((club) => club.seasonYear !== entry.seasonYear), entry];
 }
 
 export async function ensureSeasonClubRecorded(
