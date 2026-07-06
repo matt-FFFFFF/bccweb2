@@ -37,48 +37,151 @@ function wingFactorFor(wingClass: WingClass, config: Config): number {
 
 // ─── scoreRound ───────────────────────────────────────────────────────────────
 
-/**
- * Compute pilot scores and team scores for a round, mutating the round in-place
- * and returning it. Intended to be called just before a round transitions to
- * Complete status.
- *
- * Rules:
- * - A pilot slot contributes iff it has a flight, noScore is false, and the
- *   round snapshot contains a wingClass.
- * - pilotPoints = distance × wingFactor (1 d.p.)
- * - Top `maxScoringPilotsInTeam` scoring pilots' points sum to team score.
- */
-export function scoreRound(round: Round, config: Config): Round {
-  for (const team of round.teams) {
-    const scoringSlots: PilotSlot[] = [];
+export function scoreRound(
+  round: Round,
+  config: Config
+): { round: Round; derivation: RoundScoringDerivation } {
+  // BaseController.cs:2254-2275 — GetClubsAttendingFactor.
+  const clubsAttendingCount = new Set(round.teams.map((team) => team.club.id)).size;
+  const clubsAttendingFactor = f32(
+    clubsAttendingCount < 3
+      ? config.clubsAttendingFactors.fewerThanThreeClubs
+      : clubsAttendingCount === 3
+        ? config.clubsAttendingFactors.exactlyThreeClubs
+        : config.clubsAttendingFactors.moreThanThreeClubs
+  );
 
+  // BaseController.cs:2277-2309 — GetMinDistanceFactor.
+  const minDistanceFlightCount = round.teams.reduce(
+    (count, team) =>
+      count +
+      team.pilots.filter((slot) => slot.flight && slot.flight.distance >= round.minimumScore)
+        .length,
+    0
+  );
+  const minDistanceFactor = f32(
+    minDistanceFlightCount === 1
+      ? config.minDistanceFactors.oneFlight
+      : minDistanceFlightCount === 2
+        ? config.minDistanceFactors.twoFlights
+        : minDistanceFlightCount === 3
+          ? config.minDistanceFactors.threeFlights
+          : minDistanceFlightCount === 4
+            ? config.minDistanceFactors.fourFlights
+            : minDistanceFlightCount > 4
+              ? config.minDistanceFactors.fiveOrMoreFlights
+              : 0
+  );
+
+  // BaseController.cs:2461-2465 — ScoreRound taskMaxPoints and maxPointsForRound.
+  const maxPointsForRound = f32(
+    f32(config.taskMaxPoints * clubsAttendingFactor) * minDistanceFactor
+  );
+
+  const rawScores: number[] = [];
+
+  // BaseController.cs:1619-1680 and :2311-2350 — GetPilotScore/GetPilotPoints.
+  for (const team of round.teams) {
     for (const slot of team.pilots) {
-      if (!slot.flight || slot.noScore || !slot.snapshot?.wingClass) {
+      if (!slot.flight || !slot.snapshot?.wingClass || slot.noScore) {
         slot.pilotPoints = 0;
         continue;
       }
 
-      const factor = getWingFactor(slot.snapshot.wingClass, config);
-      const score = round1dp(slot.flight.distance * factor);
+      const wingFactor = wingFactorFor(slot.snapshot.wingClass, config);
+      const rawScore = f32(
+        f32(f32(slot.flight.distance) * pilotFactorFor(slot.snapshot.pilotRating, config)) *
+          wingFactor
+      );
 
-      slot.flight.wingFactor = factor;
-      slot.flight.score = score;
-      slot.pilotPoints = score;
-
-      if (slot.isScoring) {
-        scoringSlots.push(slot);
-      }
+      slot.flight.wingFactor = wingFactor;
+      slot.flight.score = rawScore;
+      rawScores.push(rawScore);
     }
-
-    // Best N scoring pilots count toward team score
-    const counted = scoringSlots
-      .sort((a, b) => b.pilotPoints - a.pilotPoints)
-      .slice(0, config.maxScoringPilotsInTeam);
-
-    team.score = round1dp(counted.reduce((sum, s) => sum + s.pilotPoints, 0));
   }
 
-  return round;
+  const maxPilotScoreInRound = rawScores.reduce(
+    (highest, rawScore) => Math.max(highest, rawScore),
+    0
+  );
+
+  if (maxPilotScoreInRound > 0) {
+    for (const team of round.teams) {
+      for (const slot of team.pilots) {
+        if (!slot.flight || !slot.snapshot?.wingClass || slot.noScore) {
+          slot.pilotPoints = 0;
+          continue;
+        }
+
+        slot.pilotPoints = f32(
+          f32(maxPointsForRound * slot.flight.score) / maxPilotScoreInRound
+        );
+      }
+    }
+  } else {
+    // D9 divergence: legacy divides by zero when all raw scores are zero; we keep zeros.
+    for (const team of round.teams) {
+      for (const slot of team.pilots) {
+        slot.pilotPoints = 0;
+      }
+    }
+  }
+
+  const teamDerivations: RoundScoringDerivation["teams"] = [];
+
+  // BaseController.cs:2357-2385 — GetWorkingTeamScore and GetMaxTeamScore.
+  for (const team of round.teams) {
+    const workingTeamScore = truncInt(
+      team.pilots
+        .filter(
+          (slot) =>
+            slot.isScoring && slot.status === "Filled" && slot.pilotPoints > 0
+        )
+        .sort((left, right) => right.pilotPoints - left.pilotPoints)
+        .slice(0, config.maxPilotScoresCountedPerTeam)
+        .reduce((sum, slot) => f32(sum + f32(slot.pilotPoints)), 0)
+    );
+
+    teamDerivations.push({ teamId: team.id, workingTeamScore });
+  }
+
+  const maxTeamScore = teamDerivations.reduce(
+    (highest, team) => Math.max(highest, team.workingTeamScore),
+    0
+  );
+
+  // BaseController.cs:2390-2433 — GetTeamScores.
+  for (const team of round.teams) {
+    const workingTeamScore =
+      teamDerivations.find((teamDerivation) => teamDerivation.teamId === team.id)
+        ?.workingTeamScore ?? 0;
+
+    team.score =
+      maxTeamScore > 0
+        ? roundHalfToEven0dp(
+            f32(f32(maxPointsForRound * workingTeamScore) / maxTeamScore)
+          )
+        : 0;
+  }
+
+  return {
+    round,
+    derivation: {
+      taskMaxPoints: config.taskMaxPoints,
+      clubsAttendingCount,
+      clubsAttendingFactor,
+      minDistanceFlightCount,
+      minDistanceFactor,
+      maxPointsForRound,
+      maxPilotScoreInRound,
+      maxTeamScore,
+      maxPilotScoresCountedPerTeam: config.maxPilotScoresCountedPerTeam,
+      leagueRoundScoresCounted: config.leagueRoundScoresCounted,
+      pilotFactors: config.pilotFactors,
+      wingFactors: config.wingFactors,
+      teams: teamDerivations,
+    },
+  };
 }
 
 // ─── computeLeague ────────────────────────────────────────────────────────────
