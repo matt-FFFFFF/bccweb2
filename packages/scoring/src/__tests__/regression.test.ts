@@ -3,7 +3,40 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import type { Config, Round } from "@bccweb/types";
 import { describe, expect, it } from "vitest";
+
+import { computeLeague, scoreRound } from "../index.js";
+
+interface LegacyRoundExpected {
+  maxPointsForRound: number;
+  maxPilotScoreInRound: number;
+  maxTeamScore: number;
+  clubsAttendingCount: number;
+  clubsAttendingFactor: number;
+  minDistanceFlightCount: number;
+  minDistanceFactor: number;
+}
+
+interface LegacyPilotExpected {
+  teamId: string;
+  placeInTeam: number;
+  pilotPoints: number;
+}
+
+interface LegacyTeamExpected {
+  teamId: string;
+  score: number;
+}
+
+interface LegacyLeagueExpected {
+  clubId: string;
+  teamName: string;
+  totalScore: number;
+  rank: number;
+  countedRounds: number;
+  roundScores: Record<string, number>;
+}
 
 interface LegacyOracleFixture {
   name: string;
@@ -13,15 +46,15 @@ interface LegacyOracleFixture {
   legacyIdNote: string;
   capturedAt: string;
   input: {
-    round: { id: string };
-    config: unknown;
-    seasonRounds?: readonly unknown[];
+    round: Round;
+    config: Config;
+    seasonRounds?: readonly Round[];
   };
   expected: {
-    round: unknown;
-    pilots: readonly unknown[];
-    teams: readonly unknown[];
-    league: readonly unknown[];
+    round: LegacyRoundExpected;
+    pilots: readonly LegacyPilotExpected[];
+    teams: readonly LegacyTeamExpected[];
+    league: readonly LegacyLeagueExpected[];
   };
 }
 
@@ -59,6 +92,98 @@ function readManifest(): LegacyScoreManifest {
   return JSON.parse(readFileSync(manifestPath, "utf8")) as LegacyScoreManifest;
 }
 
+const fixtureFiles = readFixtureFiles();
+const fixtureCases = fixtureFiles.map(({ fileName, text }) => [fileName, text] as const);
+
+function readFixture(text: string): LegacyOracleFixture {
+  return JSON.parse(text) as LegacyOracleFixture;
+}
+
+function assertRoundMatchesOracle(fixture: LegacyOracleFixture): void {
+  const round = structuredClone(fixture.input.round);
+  const { derivation } = scoreRound(round, fixture.input.config);
+
+  for (const expectedPilot of fixture.expected.pilots) {
+    const actualPilot = round.teams
+      .find((team) => team.id === expectedPilot.teamId)
+      ?.pilots.find((pilot) => pilot.placeInTeam === expectedPilot.placeInTeam);
+
+    expect(
+      actualPilot?.pilotPoints,
+      `${fixture.name} pilot ${expectedPilot.teamId}/${expectedPilot.placeInTeam}`
+    ).toBeCloseTo(expectedPilot.pilotPoints, 1);
+  }
+
+  for (const expectedTeam of fixture.expected.teams) {
+    const actualTeam = round.teams.find((team) => team.id === expectedTeam.teamId);
+    expect(actualTeam?.score, `${fixture.name} team ${expectedTeam.teamId}`).toBe(
+      expectedTeam.score
+    );
+  }
+
+  expect(derivation.maxPointsForRound).toBeCloseTo(
+    fixture.expected.round.maxPointsForRound,
+    4
+  );
+  expect(derivation.maxPilotScoreInRound).toBeCloseTo(
+    fixture.expected.round.maxPilotScoreInRound,
+    4
+  );
+  expect(derivation.clubsAttendingFactor).toBeCloseTo(
+    fixture.expected.round.clubsAttendingFactor,
+    4
+  );
+  expect(derivation.minDistanceFactor).toBeCloseTo(
+    fixture.expected.round.minDistanceFactor,
+    4
+  );
+  expect(derivation.maxTeamScore).toBe(fixture.expected.round.maxTeamScore);
+  expect(derivation.clubsAttendingCount).toBe(
+    fixture.expected.round.clubsAttendingCount
+  );
+  expect(derivation.minDistanceFlightCount).toBe(
+    fixture.expected.round.minDistanceFlightCount
+  );
+}
+
+function assertLeagueMatchesOracle(fixture: LegacyOracleFixture): void {
+  const seasonRounds = fixture.input.seasonRounds ?? [fixture.input.round];
+  const scoredSeason = seasonRounds.map((inputRound) => {
+    const round = structuredClone(inputRound);
+    scoreRound(round, fixture.input.config);
+    return round;
+  });
+
+  const league = computeLeague(scoredSeason, fixture.input.config);
+  expect(league).toHaveLength(fixture.expected.league.length);
+
+  for (const expectedTeam of fixture.expected.league) {
+    const actualTeam = league.find(
+      (team) =>
+        team.teamName === expectedTeam.teamName && team.clubId === expectedTeam.clubId
+    );
+
+    expect(
+      actualTeam,
+      `${fixture.name} league ${expectedTeam.clubId}/${expectedTeam.teamName}`
+    ).toBeDefined();
+    expect(actualTeam?.totalScore).toBe(expectedTeam.totalScore);
+    expect(actualTeam?.rank).toBe(expectedTeam.rank);
+    expect(actualTeam?.countedRounds).toBe(expectedTeam.countedRounds);
+
+    const actualRoundScores = actualTeam?.roundScores ?? {};
+    const actualRoundIds = Object.keys(actualRoundScores).sort();
+    const expectedRoundIds = Object.keys(expectedTeam.roundScores).sort();
+    expect(actualRoundIds).toEqual(expectedRoundIds);
+
+    for (const roundId of expectedRoundIds) {
+      expect(actualRoundScores[roundId], `${fixture.name} ${expectedTeam.teamName} ${roundId}`).toBe(
+        expectedTeam.roundScores[roundId]
+      );
+    }
+  }
+}
+
 describe("legacy scoring oracle fixtures", () => {
   it("fixtures load with provenance", () => {
     const fixtures = readFixtures();
@@ -88,7 +213,7 @@ describe("legacy scoring oracle fixtures", () => {
       "score = round1(distance * wingFactor)",
     ] as const;
 
-    for (const { fileName, text } of readFixtureFiles()) {
+    for (const { fileName, text } of fixtureFiles) {
       const fixture = JSON.parse(text) as Partial<LegacyOracleFixture>;
       expect(fixture.legacySource, `${fileName} must carry legacySource`).toBeDefined();
       for (const marker of forbiddenMarkers) {
@@ -97,5 +222,17 @@ describe("legacy scoring oracle fixtures", () => {
         );
       }
     }
+  });
+
+  describe.each(fixtureCases)("%s", (fileName, text) => {
+    const fixture = readFixture(text);
+
+    it(`${fileName} matches legacy round scoring`, () => {
+      assertRoundMatchesOracle(fixture);
+    });
+
+    it(`${fileName} matches legacy league scoring`, () => {
+      assertLeagueMatchesOracle(fixture);
+    });
   });
 });
