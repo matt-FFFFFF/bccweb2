@@ -28,6 +28,8 @@ export default function FirstLoginOfSeasonGate({ children }: { children: React.R
   
   const { data: seasonResults } = useBlob<SeasonResults>(activeYear ? `results/${activeYear}.json` : null);
   const flown = !!seasonResults?.some((rr) => rr.teamResults.some((tr) => tr.pilots.some((p) => p.pilotId === identity?.pilotId)));
+  const isAdmin = identity?.roles.includes("Admin") ?? false;
+  const clubLocked = !isAdmin && flown;
 
   const dismissedUntilStr = localStorage.getItem("bcc_first_login_dismissed_until");
   const isDismissed = dismissedUntilStr && Date.now() < Number(dismissedUntilStr);
@@ -201,13 +203,13 @@ export default function FirstLoginOfSeasonGate({ children }: { children: React.R
 
               <div>
                 <label style={labelStyle} htmlFor="currentClub">Current Club</label>
-                <select id="currentClub" style={inputStyle} value={formData.currentClubId} onChange={e => setFormData({ ...formData, currentClubId: e.target.value })} disabled={flown}>
+                <select id="currentClub" style={inputStyle} value={formData.currentClubId} onChange={e => setFormData({ ...formData, currentClubId: e.target.value })} disabled={clubLocked}>
                   <option value="">-- None --</option>
                   {clubs?.map(c => (
                     <option key={c.id} value={c.id}>{c.name}</option>
                   ))}
                 </select>
-                {flown && <p style={{ fontSize: "0.8rem", color: "#666", marginTop: "0.25rem" }}>(locked — you've flown; contact an admin)</p>}
+                {clubLocked && <p style={{ fontSize: "0.8rem", color: "#666", marginTop: "0.25rem" }}>(locked — you've flown; contact an admin)</p>}
               </div>
 
               <div style={{ display: "flex", gap: "1rem", marginTop: "1rem" }}>

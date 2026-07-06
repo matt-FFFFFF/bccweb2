@@ -208,6 +208,41 @@ describe("FirstLoginOfSeasonGate", () => {
     expect(screen.getByText("(locked — you've flown; contact an admin)")).toBeInTheDocument();
   });
 
+  it("does not disable club select for an admin who has flown (admin override)", async () => {
+    mockUseAuth.mockReturnValue({
+      identity: { roles: ["Admin"], pilotId: "p1", firstLoginOfSeason: true, activeSeasonYear: 2026 },
+      loading: false,
+    });
+    mockUseBlob.mockImplementation((p: string | null) =>
+      p?.startsWith("results/")
+        ? { data: [{ teamResults: [{ pilots: [{ pilotId: "p1", pilotName: "N", distance: 1, score: 1, wingClass: "EN-B" }] }] }] }
+        : { data: [{ id: "c1", name: "Club 1" }] }
+    );
+    vi.mocked(api.get).mockResolvedValueOnce({
+      person: { phoneNumber: "123" },
+      emergencyContactName: "Mom",
+      emergencyPhoneNumber: "911",
+      wingClass: "EN-A",
+      currentClub: { id: "c1" }
+    });
+
+    render(
+      <BrowserRouter useTransitions={true}>
+        <FirstLoginOfSeasonGate>
+          <div data-testid="child">Child Content</div>
+        </FirstLoginOfSeasonGate>
+      </BrowserRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText(/Welcome back to the 2026 season/)).toBeInTheDocument();
+    });
+
+    const select = screen.getByLabelText("Current Club") as HTMLSelectElement;
+    expect(select).not.toBeDisabled();
+    expect(screen.queryByText("(locked — you've flown; contact an admin)")).toBeNull();
+  });
+
   it("does not disable club select if pilot has not flown", async () => {
     mockUseAuth.mockReturnValue({
       identity: { roles: ["Pilot"], pilotId: "p1", firstLoginOfSeason: true, activeSeasonYear: 2026 },
