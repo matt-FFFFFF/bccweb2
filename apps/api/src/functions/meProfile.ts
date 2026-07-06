@@ -46,6 +46,9 @@ import {
 import type { AuthCredential } from "../lib/authHelpers.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { resolveWingManufacturer } from "../lib/wingManufacturer.js";
+import { getActiveSeasonYear } from "../lib/season.js";
+import { upsertPilotClubMap } from "../lib/pilotClubMap.js";
+import { getTelemetryClient } from "../lib/telemetry.js";
 
 const PilotsIndexSchema = z.array(PilotSummarySchema);
 
@@ -142,6 +145,13 @@ async function createMyPilot(
 
   const id = randomUUID();
   const now = new Date().toISOString();
+
+  // issue #101 (Decision 6): a self-selected club IS the pilot's active-season
+  // club, so seed a provisional seasonClubs entry that upsertPilotInIndex and the
+  // pilot-club-map derive from. Resolve the year once (skipped when no club),
+  // reused by both, so the create path does a single seasons.json read.
+  const currentClub = body.currentClub;
+  const activeYear = currentClub ? await getActiveSeasonYear() : undefined;
   const pilot: Pilot = {
     id,
     legacyId: null,
@@ -165,8 +175,17 @@ async function createMyPilot(
       fullName: `${firstName} ${lastName}`,
       phoneNumber: body.phoneNumber,
     },
-    currentClub: body.currentClub,
-    seasonClubs: [],
+    currentClub,
+    seasonClubs:
+      currentClub && activeYear !== undefined
+        ? [
+            {
+              seasonYear: activeYear,
+              clubId: currentClub.id,
+              clubName: currentClub.name,
+            },
+          ]
+        : [],
     userId: caller.userId,
     createdAt: now,
     updatedAt: now,
@@ -194,13 +213,26 @@ async function createMyPilot(
   // retry starts clean (issue #126).
   try {
     await writePrivateJson(`pilots/${id}.json`, PilotSchema, pilot);
-    await upsertPilotInIndex(pilot);
-    await linkUserToPilot(caller.userId, id, body.currentClub?.id ?? null);
+    await upsertPilotInIndex(pilot, activeYear);
+    await linkUserToPilot(caller.userId, id, currentClub?.id ?? null);
   } catch (err: unknown) {
     await releasePilotEmailClaim(caller.email, id).catch(() => {});
     await removePilotFromIndex(id).catch(() => {});
     await getPrivateBlobClient(`pilots/${id}.json`).deleteIfExists().catch(() => {});
     throw err;
+  }
+
+  // issue #101: sync seasons/{year}/pilot-club-map.json AFTER the durable writes
+  // succeed, as a SEPARATE best-effort step (never inside the rollback try above)
+  // — a map failure must NOT roll back the created + linked pilot. The pilot blob
+  // and pilots.json are authoritative; the map reconciles on the next write.
+  if (currentClub && activeYear !== undefined) {
+    await upsertPilotClubMap(activeYear, id, currentClub.id).catch(() => {
+      getTelemetryClient()?.trackTrace({
+        message: "pilot.clubMapSyncFailed",
+        properties: { pilotId: id },
+      });
+    });
   }
 
   return { status: 201, jsonBody: pilot };
@@ -226,7 +258,21 @@ async function linkUserToPilot(
   await writePrivateJson(userPath, UserSchema, updated);
 }
 
-async function upsertPilotInIndex(pilot: Pilot): Promise<void> {
+async function upsertPilotInIndex(
+  pilot: Pilot,
+  activeYear?: number,
+): Promise<void> {
+  // issue #101 (Decision 6) INTENTIONALLY REVERSES the old "Security: E" rule
+  // that hard-coded clubId: undefined here. A self-selected club now IS the
+  // pilot's active-season club (createMyPilot writes it into pilot.seasonClubs),
+  // so the public index derives clubId from that entry — identical to pilots.ts
+  // — and a newly self-created pilot appears under their chosen club. clubId is
+  // non-PII, and the club only locks once the pilot has flown (see updatePilot).
+  // Callers mid-create pass the resolved year to skip a second seasons.json read.
+  const year = activeYear ?? (await getActiveSeasonYear());
+  const verifiedClubId = pilot.seasonClubs.find(
+    (sc) => sc.seasonYear === year,
+  )?.clubId;
   await ensureJsonIndexBlob("pilots.json", "[]");
   await withLeaseRetry("pilots.json", async (leaseId) => {
     let index: PilotSummary[] = [];
@@ -243,10 +289,7 @@ async function upsertPilotInIndex(pilot: Pilot): Promise<void> {
       id: pilot.id,
       legacyId: pilot.legacyId,
       name: pilot.person.fullName,
-      // Verified-membership only (Security: E). A self-created pilot has no
-      // season-club yet, so no public club affiliation until one is assigned;
-      // never expose the self-declared currentClub in the anonymous index.
-      clubId: undefined,
+      clubId: verifiedClubId,
       rating: pilot.pilotRating,
     };
     const idx = index.findIndex((p) => p.id === pilot.id);
