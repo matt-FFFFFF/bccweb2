@@ -186,6 +186,22 @@ describe("scoreRound", () => {
     expect(scoredRound.teams[0]?.pilots[0]?.pilotPoints).toBe(0);
     expect(scoredRound.teams[0]?.score).toBe(0);
   });
+
+  it("scores a noScore slot that still has a flight (legacy removes the flight, not the score)", () => {
+    const round = makeRound([
+      makeTeam([
+        makeSlot(1, 100, { noScore: true }),
+        makeSlot(2, 50),
+      ]),
+    ]);
+
+    const { round: scoredRound, derivation } = scoreRound(round, baseConfig);
+
+    // Legacy has NO noScore check (BaseController.cs:2311-2368); no-score is enforced by flight removal, so a dirty noScore+flight slot is still scored. Locks against re-adding a slot.noScore skip.
+    expect(derivation.maxPilotScoreInRound).toBeCloseTo(100, 5);
+    expect(scoredRound.teams[0]?.pilots[0]?.pilotPoints).toBeCloseTo(200, 5);
+    expect(scoredRound.teams[0]?.pilots[1]?.pilotPoints).toBeCloseTo(100, 5);
+  });
 });
 
 describe("computeLeague", () => {
