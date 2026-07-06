@@ -26,9 +26,9 @@ describe("FirstLoginOfSeasonGate", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
-    mockUseBlob.mockImplementation((p: string | null) => 
-      p?.startsWith("results/") 
-        ? { data: [] } 
+    mockUseBlob.mockImplementation((p: string | null) =>
+      p?.startsWith("results/")
+        ? { data: [] }
         : { data: [{ id: "c1", name: "Club 1" }] }
     );
   });
@@ -178,9 +178,9 @@ describe("FirstLoginOfSeasonGate", () => {
       identity: { roles: ["Pilot"], pilotId: "p1", firstLoginOfSeason: true, activeSeasonYear: 2026 },
       loading: false,
     });
-    mockUseBlob.mockImplementation((p: string | null) => 
-      p?.startsWith("results/") 
-        ? { data: [{ teamResults: [{ pilots: [{ pilotId: "p1", pilotName: "N", distance: 1, score: 1, wingClass: "EN-B" }] }] }] } 
+    mockUseBlob.mockImplementation((p: string | null) =>
+      p?.startsWith("results/")
+        ? { data: [{ teamResults: [{ pilots: [{ pilotId: "p1", pilotName: "N", distance: 1, score: 1, wingClass: "EN-B" }] }] }] }
         : { data: [{ id: "c1", name: "Club 1" }] }
     );
     vi.mocked(api.get).mockResolvedValueOnce({
@@ -244,9 +244,9 @@ describe("FirstLoginOfSeasonGate", () => {
       identity: { roles: ["Pilot"], pilotId: "p1", firstLoginOfSeason: true, activeSeasonYear: 2026 },
       loading: false,
     });
-    mockUseBlob.mockImplementation((p: string | null) => 
-      p?.startsWith("results/") 
-        ? { data: [{ teamResults: [{ pilots: [{ pilotId: null, pilotName: "Foreign Pilot", distance: 1, score: 1, wingClass: "EN-B" }] }] }] } 
+    mockUseBlob.mockImplementation((p: string | null) =>
+      p?.startsWith("results/")
+        ? { data: [{ teamResults: [{ pilots: [{ pilotId: null, pilotName: "Foreign Pilot", distance: 1, score: 1, wingClass: "EN-B" }] }] }] }
         : { data: [{ id: "c1", name: "Club 1" }] }
     );
     vi.mocked(api.get).mockResolvedValueOnce({
@@ -289,7 +289,7 @@ describe("FirstLoginOfSeasonGate", () => {
     // The vi.mock is using importActual.
     const { ApiError } = await import("../../lib/api.js");
     vi.mocked(api.put).mockRejectedValueOnce(new ApiError(409, "CLUB_LOCKED", "Pilot is locked to club X."));
-    
+
     render(
       <BrowserRouter useTransitions={true}>
         <FirstLoginOfSeasonGate>

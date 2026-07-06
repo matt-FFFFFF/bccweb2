@@ -56,13 +56,13 @@ describe("PilotsList clubName rendering", () => {
 
     // 1. Matched club renders the NAME
     expect(screen.getByText("Glider Club Matched")).toBeInTheDocument();
-    
+
     // 2. Unmatched club renders the raw UUID
     expect(screen.getByText("club-nomatch-uuid")).toBeInTheDocument();
 
     const rows = screen.getAllByRole("row");
     // rows[0] is header
-    
+
     // rows[1] is Pilot 1
     expect(rows[1]).toHaveTextContent("Pilot 1");
     expect(rows[1]).toHaveTextContent("Glider Club Matched");
