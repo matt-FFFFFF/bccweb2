@@ -62,7 +62,7 @@ interface FormState {
   };
 }
 
-const DEFAULT_WING_FACTORS: Record<WingClass, number> = {
+const WING_FACTOR_DEFAULTS: Record<WingClass, number> = {
   "EN A": 1.0,
   "EN B": 0.9,
   "EN C": 0.8,
@@ -93,7 +93,7 @@ function configToForm(c: Partial<Config> | null | undefined): FormState {
     taskMaxPoints: String(safe.taskMaxPoints ?? 1000),
     flightDateValidationEnabled: safe.flightDateValidationEnabled ?? true,
     wingFactors: Object.fromEntries(
-      WING_CLASSES.map((wc) => [wc, String(wf[wc] ?? DEFAULT_WING_FACTORS[wc])])
+      WING_CLASSES.map((wc) => [wc, String(wf[wc] ?? WING_FACTOR_DEFAULTS[wc])])
     ) as Record<WingClass, string>,
     pilotFactors: Object.fromEntries(
       PILOT_RATINGS.map((pr) => [pr, String(pf[pr] ?? DEFAULT_PILOT_FACTORS[pr])])
