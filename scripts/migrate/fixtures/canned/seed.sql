@@ -147,18 +147,24 @@ INSERT INTO Rounds (ID, Date, SiteID, StatusID, isLocked, OrganisingClub_ID, Sea
    'Not set yet...', 'Not set yet...', NULL);
 
 -- ── RoundTeams (only round 402) ──────────────────────────────────────────────
+-- TeamScore carries the LEGACY-persisted normalized league score (0dp int, the
+-- 0..1000 range the .NET GetTeamScores emitted). Migration preserves these
+-- VERBATIM — it does NOT recompute. The values are deliberately DISTINCT from
+-- what the old raw-sum re-score would produce for these flights (Alpha 38.3,
+-- Bravo 35.6, Charlie 18.0), so the smoke test can prove pass-through, not
+-- regeneration.
 INSERT INTO RoundTeams (ID, RoundID, TeamID, TeamScore, PureTrackGroupName, PureTrackGroupSlug, PureTrackGroup_ID) VALUES
-  (501, 402, 301, 0.0, 'BCC 2026 R1 Alpha A',   'bcc-2026-r1-alpha-a',   9101),
-  (502, 402, 302, 0.0, 'BCC 2026 R1 Bravo A',   'bcc-2026-r1-bravo-a',   9102),
-  (503, 402, 303, 0.0, NULL,                    NULL,                    NULL);
+  (501, 402, 301, 842.0, 'BCC 2026 R1 Alpha A',   'bcc-2026-r1-alpha-a',   9101),
+  (502, 402, 302, 1000.0, 'BCC 2026 R1 Bravo A',   'bcc-2026-r1-bravo-a',   9102),
+  (503, 402, 303, 205.0, NULL,                    NULL,                    NULL);
 
 -- ── RoundTeamPilots ──────────────────────────────────────────────────────────
 INSERT INTO RoundTeamPilots (ID, Pilot_ID, noScore, PilotPoints, PhoneNumber, Pilot_Rating_ID, WingClass, Manufacturer_ID,
                              WingModel, WingColours, HelmetColour, HarnessType, HarnessColour,
                              EmergencyContactName, EmergencyPhoneNumber, MedicalInfo, AccountedFor, SignToFly) VALUES
-  (601, 201, 0, 0.0, '+44-1632-960001', 2, 'EN_B',         1, 'Mentor 7', 'Red/Blue',     'Red',   'Pod',        'Black', 'Synthetic ICE Alpha',   '+44-1632-960101', NULL,   1, 1),
-  (602, 202, 0, 0.0, '+44-1632-960002', 1, 'EN D 2-liner', 2, 'Zeno 2',   'Yellow/Green', 'White', 'Reversible', 'Blue',  'Synthetic ICE Bravo',   '+44-1632-960102', 'None', 1, 1),
-  (603, 203, 0, 0.0, NULL,              3, 'EN A',         3, NULL,       NULL,           NULL,    NULL,         NULL,    NULL,                    NULL,              NULL,   1, 0);
+  (601, 201, 0, 842.5, '+44-1632-960001', 2, 'EN_B',         1, 'Mentor 7', 'Red/Blue',     'Red',   'Pod',        'Black', 'Synthetic ICE Alpha',   '+44-1632-960101', NULL,   1, 1),
+  (602, 202, 0, 1000.0, '+44-1632-960002', 1, 'EN D 2-liner', 2, 'Zeno 2',   'Yellow/Green', 'White', 'Reversible', 'Blue',  'Synthetic ICE Bravo',   '+44-1632-960102', 'None', 1, 1),
+  (603, 203, 0, 205.0, NULL,              3, 'EN A',         3, NULL,       NULL,           NULL,    NULL,         NULL,    NULL,                    NULL,              NULL,   1, 0);
 
 -- ── RoundTeamPlaces (3 places per team — place 1 filled in each) ─────────────
 INSERT INTO RoundTeamPlaces (ID, PlaceInTeam, IsScoring, Status, RoundTeam_ID, RoundTeamPilot_ID) VALUES

@@ -42,12 +42,20 @@ import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 import sql from "mssql";
 import { BlobServiceClient } from "@azure/storage-blob";
+// computeLeague is IMPORTED from @bccweb/scoring (not copied). Even though
+// scripts/migrate is a standalone package (own lockfile) it is run from the repo
+// checkout, so @bccweb/scoring resolves via the workspace root node_modules
+// (its `main` → packages/scoring/dist) — the same mechanism validate.mjs uses for
+// @bccweb/schemas (run `make build` first). Using the real engine keeps the
+// migrated league snapshot in lockstep with what the API re-derives post-cutover.
+import { computeLeague } from "@bccweb/scoring";
 import { getOrCreateUuid, saveIdMap } from "./id-map.mjs";
 import { buildPilotClubHistory, queryPilotClubRows } from "./pilot-club-history-logic.mjs";
 import { writeDiscardedCounts } from "./discarded-counts.mjs";
 import { writeNormalizationCounts } from "./normalization-counts.mjs";
 import { createTally, normalizeCoachType, normalizePilotRating, normalizeRoundStatus, normalizeScoringType, normalizeWingClass } from "./enum-normalize.mjs";
 import { assertSeasonYear, briefImageBlobFromLegacy, briefImagePath, ensureNonEmpty, normalizeWebsiteUrl, parseFrequencyMhz, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
+import { legacyScoreManifestPath, writeLegacyScoreManifest } from "./legacy-score-manifest.mjs";
 
 // ─── CLI flags ────────────────────────────────────────────────────────────────
 
@@ -255,11 +263,23 @@ async function main() {
   // ── 1. config.json ──────────────────────────────────────────────────────────
   console.log("Step 1: config.json");
   // Config is stored in web.config AppSettings in the original app.
-  // We write sensible defaults; the admin can update via admin UI post-migration.
+  // We write the LEGACY-CORRECT normalized-scoring defaults (verbatim from the
+  // .NET source — Web.config:97-109 + BaseController.cs); the admin can update
+  // via the admin UI post-migration. The full factor tables + counts +
+  // taskMaxPoints MUST be present so validate.mjs can assert the new scoring
+  // config keys are populated and so ConfigSchema reads it without healing.
+  //   - maxPilotsInTeam = 9 (Web.config:99; the prior 12 was drift — restored)
+  //   - taskMaxPoints = 1000 (BaseController.cs:2461)
+  //   - pilotFactors (BaseController.cs:1661-1678 GetPilotFactor)
+  //   - clubsAttendingFactors (BaseController.cs:2254-2275 GetClubsAttendingFactor)
+  //   - minDistanceFactors (BaseController.cs:2277-2309 GetMinDistanceFactor)
   const config = {
     maxTeamsInClub: 2,
-    maxPilotsInTeam: 12,
+    maxPilotsInTeam: 9,
     maxScoringPilotsInTeam: 6,
+    maxPilotScoresCountedPerTeam: 4,
+    leagueRoundScoresCounted: 6,
+    taskMaxPoints: 1000,
     flightDateValidationEnabled: true,
     wingFactors: {
       "EN A": 1.0,
@@ -268,6 +288,23 @@ async function main() {
       "EN C 2-liner": 0.7,
       "EN D": 0.6,
       "EN D 2-liner": 0.5,
+    },
+    pilotFactors: {
+      "Club Pilot": 1,
+      Pilot: 1,
+      "Advanced Pilot": 0.9,
+    },
+    clubsAttendingFactors: {
+      fewerThanThreeClubs: 0.5,
+      exactlyThreeClubs: 0.75,
+      moreThanThreeClubs: 1,
+    },
+    minDistanceFactors: {
+      oneFlight: 0.2,
+      twoFlights: 0.4,
+      threeFlights: 0.6,
+      fourFlights: 0.8,
+      fiveOrMoreFlights: 1,
     },
   };
   await uploadPrivateBlob("config.json", config);
@@ -688,8 +725,13 @@ async function main() {
   }
 
   const roundsSummary = [];
-  /** @type {Map<string, object>} uuid → full scored round doc (for step 10) */
+  /** @type {Map<string, object>} uuid → full round doc (for step 10) */
   const roundDocs = new Map();
+  // Legacy-score manifest (keyed by LEGACY ids) — captures the preserved-verbatim
+  // legacy PilotPoints/TeamScore for every Complete round so validate.mjs can
+  // prove migrated == legacy. See legacy-score-manifest.mjs for the shape.
+  /** @type {Record<string, Record<string, {teamScore:number, pilots:Record<string, number>}>>} */
+  const legacyScoreManifest = {};
 
   for (const r of roundsResult.recordset) {
     const id = getOrCreateUuid("round", r.ID);
@@ -747,7 +789,12 @@ async function main() {
               url: flight.url ?? null,
               dateTime: flight.DateTime ? new Date(flight.DateTime).toISOString() : null,
               scoringType: normalizeScoringType(flight.ScoringType, tally) ?? "XC",
-              score: 0, // recomputed below if round is Complete
+              // Legacy Flights persist no per-flight handicap score or wing
+              // factor (only Distance). The new engine derives them, but
+              // migration PRESERVES legacy scores at the slot (pilotPoints) and
+              // team (score) level and NEVER recomputes, so these stay at their
+              // neutral defaults for migrated rounds.
+              score: 0,
               wingFactor: 1.0,
               isManualLog: !!flight.isManualLog,
               ...(flight.ManualLogJustification ? { manualLogJustification: flight.ManualLogJustification } : {}),
@@ -792,6 +839,10 @@ async function main() {
 
       return {
         id: rtId,
+        // Legacy RoundTeam.ID — lets validate.mjs match this migrated team blob
+        // back to the legacy-score manifest by (round.legacyId, team.legacyId,
+        // slot.placeInTeam). Team.legacyId is optional in the schema/types.
+        legacyId: rt.ID,
         teamName: ensureNonEmpty(rt.TeamName, "Unknown team"),
         club: clubDoc ? { id: clubDoc.id, name: clubDoc.name } : { id: "legacy-no-club", name: "Unknown club" },
         score: Number(rt.TeamScore) || 0,
@@ -847,11 +898,29 @@ async function main() {
       );
     }
 
-    // Apply scoring for completed rounds
+    // Preserve legacy scores VERBATIM for completed rounds (plan D5 / Oracle O9).
+    // The imported legacy PilotPoints (slot.pilotPoints, read above from
+    // RoundTeamPilot.PilotPoints) and TeamScore (team.score, from
+    // RoundTeam.TeamScore) are written to the blob EXACTLY as legacy persisted
+    // them — we do NOT re-score with the new engine, because re-migrating with
+    // the new engine could shift historical scores. Instead we record the legacy
+    // scores (keyed by legacy ids) into the manifest so validate.mjs can assert
+    // migrated == legacy.
     if (status === "Complete") {
-      scoreRound(roundDoc, config);
-      // Re-write with scored data
-      await uploadPrivateBlob(`rounds/${id}.json`, roundDoc);
+      const teamManifest = {};
+      for (const team of teams) {
+        const pilotPointsByPlace = {};
+        for (const slot of team.pilots) {
+          if (slot.status === "Filled") {
+            pilotPointsByPlace[slot.placeInTeam] = slot.pilotPoints;
+          }
+        }
+        teamManifest[team.legacyId] = {
+          teamScore: team.score,
+          pilots: pilotPointsByPlace,
+        };
+      }
+      legacyScoreManifest[roundDoc.legacyId] = teamManifest;
     }
 
     // Retain in memory for step 10 league/results computation
@@ -877,6 +946,14 @@ async function main() {
   await uploadBlob("rounds.json", roundsSummary);
   saveIdMap();
   console.log(`  wrote ${roundsSummary.length} rounds\n`);
+
+  // Persist the legacy-score manifest (migration's own artifact, keyed by legacy
+  // ids). validate.mjs reads it to prove every migrated Complete round kept its
+  // exact legacy PilotPoints/TeamScore. Written for both real and --dry-run runs
+  // (like id-map / normalization-counts) since it is migration state, not a blob.
+  writeLegacyScoreManifest(legacyScoreManifest);
+  const manifestRoundCount = Object.keys(legacyScoreManifest).length;
+  console.log(`  wrote legacy-score manifest for ${manifestRoundCount} Complete round(s) → ${legacyScoreManifestPath()}\n`);
 
   const pilotNameMap = Object.fromEntries(pilotsSummary.map((p) => [p.id, p.name]));
 
@@ -991,7 +1068,9 @@ async function main() {
       .map((id) => roundDocs.get(id))
       .filter(Boolean);
 
-    const leagueTable = computeLeague(seasonRoundDocs);
+    // computeLeague is the imported @bccweb/scoring engine (windows the top
+    // leagueRoundScoresCounted rounds under config); pass the migrated config.
+    const leagueTable = computeLeague(seasonRoundDocs, config);
     season.leagueTable = leagueTable;
 
     await uploadBlob(`seasons/${season.year}.json`, {
@@ -1045,91 +1124,36 @@ async function main() {
   console.log("\nMigration complete.");
 }
 
-// ─── scoreRound — ported from packages/scoring/src/index.ts ──────────────────
+// ─── Season aggregation (computeLeague imported; buildSeasonResults copied) ──
+//
+// There is deliberately NO scoreRound copy here: migration PRESERVES legacy
+// per-round scores verbatim (see the round loop above) and never recomputes
+// them, so the former scoreRound port was dead and has been removed.
+//
+// computeLeague is IMPORTED from @bccweb/scoring (see the import at the top of
+// this file) rather than copied — it resolves cleanly from this standalone
+// package via the workspace root node_modules, so the migrated league snapshot
+// stays in lockstep with the engine the API runs (no divergent duplicate). It
+// aggregates the already-final PRESERVED legacy team.score values; it does NOT
+// re-derive per-round scores. The API re-derives the league on its next
+// recompute, so this snapshot is provisional.
+//
+// buildSeasonResults (below) has NO @bccweb export to import — it lives in
+// apps/api/src/lib/recompute.ts (an app module, not a published package) — so it
+// necessarily remains a migration-local copy. Keep its field names/shape in
+// lockstep with recompute.ts (it likewise reads the PRESERVED legacy team.score /
+// slot.pilotPoints and never recomputes them).
 
-/**
- * Compute pilot and team scores for a round, mutating in-place.
- * Called during migration for all Complete rounds.
- *
- * @param {object} roundDoc
- * @param {object} config
- */
-function scoreRound(roundDoc, config) {
-  for (const team of roundDoc.teams) {
-    const scoringSlots = [];
-    for (const slot of team.pilots) {
-      if (!slot.flight || slot.noScore || !slot.snapshot?.wingClass) {
-        slot.pilotPoints = 0;
-        continue;
-      }
-      const factor = config.wingFactors[slot.snapshot.wingClass] ?? 1.0;
-      const score = Math.round(slot.flight.distance * factor * 10) / 10;
-      slot.flight.wingFactor = factor;
-      slot.flight.score = score;
-      slot.pilotPoints = score;
-      if (slot.isScoring) scoringSlots.push(slot);
-    }
-    const counted = scoringSlots
-      .sort((a, b) => b.pilotPoints - a.pilotPoints)
-      .slice(0, config.maxScoringPilotsInTeam);
-    team.score = Math.round(
-      counted.reduce((sum, s) => sum + s.pilotPoints, 0) * 10
-    ) / 10;
-  }
-}
-
-// ─── computeLeague — ported from packages/scoring/src/index.ts ───────────────
-
-/**
- * Aggregate team scores across all Complete rounds and return a ranked league
- * table. Exact port of the TypeScript implementation in packages/scoring.
- *
- * @param {object[]} rounds  In-memory round docs (may include non-Complete).
- * @returns {object[]}
- */
-function computeLeague(rounds) {
-  const completeRounds = rounds.filter((r) => r.status === "Complete");
-  /** @type {Map<string, object>} "clubId|teamName" → entry */
-  const entryMap = new Map();
-
-  for (const round of completeRounds) {
-    for (const team of round.teams) {
-      const key = `${team.club.id}|${team.teamName}`;
-      if (!entryMap.has(key)) {
-        entryMap.set(key, {
-          rank: 0,
-          clubId: team.club.id,
-          clubName: team.club.name,
-          teamName: team.teamName,
-          totalScore: 0,
-          roundScores: {},
-          countedRounds: 0,
-        });
-      }
-      const entry = entryMap.get(key);
-      if (team.score > 0) {
-        entry.roundScores[round.id] = team.score;
-        entry.totalScore = Math.round((entry.totalScore + team.score) * 10) / 10;
-        entry.countedRounds += 1;
-      }
-    }
-  }
-
-  const sorted = Array.from(entryMap.values()).sort(
-    (a, b) => b.totalScore - a.totalScore
-  );
-  let rank = 1;
-  for (let i = 0; i < sorted.length; i++) {
-    if (i > 0 && sorted[i].totalScore < sorted[i - 1].totalScore) rank = i + 1;
-    sorted[i].rank = rank;
-  }
-  return sorted;
-}
-
-// ─── buildSeasonResults — ported from apps/api/src/lib/recompute.ts ──────────
+// ─── buildSeasonResults — copy of apps/api/src/lib/recompute.ts ──────────────
 
 /**
  * Build results/{year}.json content from in-memory round docs.
+ *
+ * Migration-local copy of apps/api/src/lib/recompute.ts buildSeasonResults —
+ * see the season-aggregation note above (buildSeasonResults has no package export
+ * to import, unlike computeLeague). It reads the PRESERVED legacy team.score /
+ * slot.pilotPoints (never recomputed) and emits pilotId in lockstep with
+ * recompute.ts. Keep field names/shape aligned with recompute.ts.
  *
  * @param {object}            season       Season record (has .rounds array of UUIDs)
  * @param {Map<string,object>} allRoundDocs uuid → round doc
