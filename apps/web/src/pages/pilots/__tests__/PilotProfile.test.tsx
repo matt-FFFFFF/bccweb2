@@ -2,10 +2,10 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
 import PilotProfile from "../PilotProfile.js";
-import { api } from "../../../lib/api.js";
+import { api, ApiError } from "../../../lib/api.js";
 import { useBlob } from "../../../hooks/useBlob.js";
 import { useAuth } from "../../../hooks/useAuth.js";
-import type { Pilot, Manufacturer } from "@bccweb/types";
+import type { Pilot, Manufacturer, ClubSummary } from "@bccweb/types";
 
 vi.mock("../../../lib/api.js", async () => {
   const actual = await vi.importActual("../../../lib/api.js");
@@ -52,6 +52,36 @@ const mockManufacturers: Manufacturer[] = [
   { id: "mfr-noweb", name: "NoWebMfr" }, // no websiteUrl
 ];
 
+const mockClubs: ClubSummary[] = [
+  { id: "club-abc", name: "Test Club" },
+  { id: "club-xyz", name: "Other Club" },
+];
+
+const flownResults = [
+  {
+    teamResults: [
+      {
+        pilots: [
+          { pilotId: "pilot-123", pilotName: "Test Flyer", distance: 1, score: 1, wingClass: "EN B" },
+        ],
+      },
+    ],
+  },
+];
+
+const nullPilotResults = [
+  {
+    teamResults: [
+      {
+        pilots: [
+          { pilotId: null, pilotName: "Ghost", distance: 1, score: 1, wingClass: "EN B" },
+          { pilotId: "other-999", pilotName: "Someone Else", distance: 2, score: 2, wingClass: "EN C" },
+        ],
+      },
+    ],
+  },
+];
+
 const renderProfile = (pilotId = "pilot-123") =>
   render(
     <MemoryRouter initialEntries={[`/pilots/${pilotId}`]}>
@@ -60,6 +90,18 @@ const renderProfile = (pilotId = "pilot-123") =>
       </Routes>
     </MemoryRouter>
   );
+
+function getClubSelect(): HTMLSelectElement {
+  const select = screen
+    .getAllByRole("combobox")
+    .find(
+      (el): el is HTMLSelectElement =>
+        el instanceof HTMLSelectElement &&
+        Array.from(el.options).some((o) => o.text === "Test Club"),
+    );
+  if (!select) throw new Error("club select not found");
+  return select;
+}
 
 describe("PilotProfile wing manufacturer dropdown", () => {
   beforeEach(() => {
@@ -79,6 +121,7 @@ describe("PilotProfile wing manufacturer dropdown", () => {
         roles: ["Pilot"],
         pilotId: "pilot-123",
         clubId: null,
+        activeSeasonYear: 2025,
       },
       loading: false,
       logout: vi.fn(),
@@ -86,8 +129,9 @@ describe("PilotProfile wing manufacturer dropdown", () => {
 
     // Default useBlob mock: clubs and manufacturers present
     vi.mocked(useBlob).mockImplementation((path: string | null) => {
-      if (path === "clubs.json") return { data: [], loading: false, notFound: false, error: null };
+      if (path === "clubs.json") return { data: mockClubs, loading: false, notFound: false, error: null };
       if (path === "manufacturers.json") return { data: mockManufacturers, loading: false, notFound: false, error: null };
+      if (path === "results/2025.json") return { data: [], loading: false, notFound: false, error: null };
       return { data: null, loading: false, notFound: false, error: null };
     });
   });
@@ -227,5 +271,127 @@ describe("PilotProfile wing manufacturer dropdown", () => {
     const callArgs = vi.mocked(api.put).mock.calls[0][1] as Record<string, unknown>;
     expect("wingManufacturer" in callArgs).toBe(true);
     expect(callArgs.wingManufacturer).toBeUndefined();
+  });
+
+  it("not flown (self): club select enabled; changing club + save sends currentClub", async () => {
+    renderProfile();
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Edit Profile" })).toBeInTheDocument();
+    });
+
+    const clubSelect = getClubSelect();
+    expect(clubSelect).not.toBeDisabled();
+
+    fireEvent.change(clubSelect, { target: { value: "club-abc" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    expect(api.put).toHaveBeenCalledWith(
+      "pilots/pilot-123",
+      expect.objectContaining({ currentClub: { id: "club-abc", name: "Test Club" } }),
+    );
+  });
+
+  it("flown (self): club select disabled, locked note shown, save omits currentClub", async () => {
+    vi.mocked(useBlob).mockImplementation((path: string | null) => {
+      if (path === "clubs.json") return { data: mockClubs, loading: false, notFound: false, error: null };
+      if (path === "manufacturers.json") return { data: mockManufacturers, loading: false, notFound: false, error: null };
+      if (path === "results/2025.json") return { data: flownResults, loading: false, notFound: false, error: null };
+      return { data: null, loading: false, notFound: false, error: null };
+    });
+
+    renderProfile();
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Edit Profile" })).toBeInTheDocument();
+    });
+
+    const clubSelect = getClubSelect();
+    expect(clubSelect).toBeDisabled();
+    expect(screen.getByText(/flown a scored round/i)).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText("Wing manufacturer"), { target: { value: "mfr-gin" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    const callArgs = vi.mocked(api.put).mock.calls[0][1] as Record<string, unknown>;
+    expect(callArgs.currentClub).toBeUndefined();
+    expect(callArgs.wingManufacturer).toEqual({
+      id: "mfr-gin",
+      name: "Gin Gliders",
+      websiteUrl: "https://gingliders.com",
+    });
+  });
+
+  it("null pilotId result row does not lock the club and does not throw", async () => {
+    vi.mocked(useBlob).mockImplementation((path: string | null) => {
+      if (path === "clubs.json") return { data: mockClubs, loading: false, notFound: false, error: null };
+      if (path === "manufacturers.json") return { data: mockManufacturers, loading: false, notFound: false, error: null };
+      if (path === "results/2025.json") return { data: nullPilotResults, loading: false, notFound: false, error: null };
+      return { data: null, loading: false, notFound: false, error: null };
+    });
+
+    renderProfile();
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Edit Profile" })).toBeInTheDocument();
+    });
+
+    expect(getClubSelect()).not.toBeDisabled();
+    expect(screen.queryByText(/flown a scored round/i)).toBeNull();
+  });
+
+  it("admin: club select enabled even when the pilot has flown", async () => {
+    vi.mocked(useAuth).mockReturnValue({
+      identity: {
+        userId: "uAdmin",
+        email: "admin@example.com",
+        roles: ["Admin"],
+        pilotId: null,
+        clubId: null,
+        activeSeasonYear: 2025,
+      },
+      loading: false,
+      logout: vi.fn(),
+    } as unknown as ReturnType<typeof useAuth>);
+
+    vi.mocked(useBlob).mockImplementation((path: string | null) => {
+      if (path === "clubs.json") return { data: mockClubs, loading: false, notFound: false, error: null };
+      if (path === "manufacturers.json") return { data: mockManufacturers, loading: false, notFound: false, error: null };
+      if (path === "results/2025.json") return { data: flownResults, loading: false, notFound: false, error: null };
+      return { data: null, loading: false, notFound: false, error: null };
+    });
+
+    renderProfile();
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Edit Profile" })).toBeInTheDocument();
+    });
+
+    expect(getClubSelect()).not.toBeDisabled();
+    expect(screen.queryByText(/flown a scored round/i)).toBeNull();
+  });
+
+  it("409 CLUB_LOCKED on save shows a clear banner and re-fetches the pilot", async () => {
+    vi.mocked(api.put).mockRejectedValue(new ApiError(409, "CLUB_LOCKED", "locked"));
+
+    renderProfile();
+
+    await waitFor(() => {
+      expect(screen.getByRole("heading", { name: "Edit Profile" })).toBeInTheDocument();
+    });
+
+    const getsBefore = vi.mocked(api.get).mock.calls.filter((c) => c[0] === "pilots/pilot-123").length;
+
+    fireEvent.change(getClubSelect(), { target: { value: "club-abc" } });
+    fireEvent.click(screen.getByRole("button", { name: "Save changes" }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/locked for this season/i)).toBeInTheDocument();
+    });
+
+    await waitFor(() => {
+      const getsAfter = vi.mocked(api.get).mock.calls.filter((c) => c[0] === "pilots/pilot-123").length;
+      expect(getsAfter).toBeGreaterThan(getsBefore);
+    });
   });
 });

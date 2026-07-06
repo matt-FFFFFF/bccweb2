@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import type { ReactNode } from "react";
 import { Link, useParams } from "react-router";
-import type { Pilot, PilotClubMembership, CoachType, PilotRatingValue, WingClass, ManufacturerRef, ClubSummary, Manufacturer } from "@bccweb/types";
+import type { Pilot, PilotClubMembership, CoachType, PilotRatingValue, WingClass, ManufacturerRef, ClubSummary, Manufacturer, SeasonResults } from "@bccweb/types";
 import { PILOT_RATINGS, WING_CLASSES } from "@bccweb/types";
 import { useAuth } from "../../hooks/useAuth.js";
 import { useBlob } from "../../hooks/useBlob.js";
@@ -142,11 +142,19 @@ function EditProfileForm({
   const [msgOk, setMsgOk] = useState(false);
   const { data: clubs } = useBlob<ClubSummary[]>("clubs.json");
   const { data: manufacturers } = useBlob<Manufacturer[]>("manufacturers.json");
+  const { data: seasonResults } = useBlob<SeasonResults>(
+    activeSeasonYear ? `results/${activeSeasonYear}.json` : null,
+  );
 
   const seasonClubEntry = activeSeasonYear
     ? pilot.seasonClubs.find((sc) => sc.seasonYear === activeSeasonYear)
     : undefined;
-  const clubLocked = !isAdmin && seasonClubEntry !== undefined;
+  // While results load, `seasonResults` is undefined ⇒ flown false ⇒ dropdown
+  // briefly enabled; the API 409 (CLUB_LOCKED) is the backstop.
+  const flown = !!seasonResults?.some((rr) =>
+    rr.teamResults.some((tr) => tr.pilots.some((p) => p.pilotId === pilot.id)),
+  );
+  const clubLocked = !isAdmin && flown;
 
   function setF<K extends keyof EditForm>(k: K, v: EditForm[K]) {
     setForm((p) => ({ ...p, [k]: v }));
@@ -195,8 +203,14 @@ function EditProfileForm({
       setMsgOk(true);
       onSaved();
     } catch (ex) {
-      setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed to save");
-      setMsgOk(false);
+      if (ex instanceof ApiError && ex.code === "CLUB_LOCKED") {
+        setMsg("Your club is locked for this season because you've flown a scored round. Contact an admin to change it.");
+        setMsgOk(false);
+        onSaved();
+      } else {
+        setMsg(ex instanceof ApiError ? ex.message : ex instanceof Error ? ex.message : "Failed to save");
+        setMsgOk(false);
+      }
     } finally {
       setBusy(false);
     }
@@ -299,10 +313,14 @@ function EditProfileForm({
             </option>
           ))}
         </select>
-        {clubLocked && seasonClubEntry && (
+        {seasonClubEntry && (
           <p style={{ margin: "0.3rem 0 0", fontSize: "0.75rem", color: "#666" }}>
-            Assigned to <strong>{seasonClubEntry.clubName}</strong> for the {seasonClubEntry.seasonYear} season.
-            Contact an admin to change.
+            Your {activeSeasonYear} club: <strong>{seasonClubEntry.clubName}</strong>
+          </p>
+        )}
+        {clubLocked && (
+          <p style={{ margin: "0.3rem 0 0", fontSize: "0.75rem", color: "#666" }}>
+            Locked for the {activeSeasonYear} season because you&apos;ve flown a scored round — contact an admin.
           </p>
         )}
       </div>

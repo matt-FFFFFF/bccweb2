@@ -1,6 +1,6 @@
 import { randomUUID } from "crypto";
 import { BlobClient } from "@azure/storage-blob";
-import type { Round, Season } from "@bccweb/types";
+import type { Round, Season, SeasonResults } from "@bccweb/types";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { getPublicContainer } from "../../__tests__/helpers/azurite.js";
 import {
@@ -77,6 +77,58 @@ describe("recomputeSeason", () => {
 
     expect(Buffer.compare(snapshots[0], snapshots[1])).toBe(0);
     expect(Buffer.compare(snapshots[1], snapshots[2])).toBe(0);
+  });
+
+  test("results/{year}.json carries non-PII pilotId and excludes flightless slots", async () => {
+    const year = 2600 + Math.floor(Math.random() * 7_000);
+    const round = makeCompleteRound(year);
+    const flightedSlot = round.teams[0].pilots[0];
+    // Second slot has no flight/snapshot → must be filtered out (no stray pilot row).
+    round.teams[0].pilots = [
+      flightedSlot,
+      {
+        ...flightedSlot,
+        placeInTeam: 2,
+        isScoring: false,
+        status: "Empty",
+        noScore: true,
+        pilotPoints: 0,
+        pilotId: "pilot-b",
+        snapshot: null,
+        flight: null,
+      },
+    ];
+
+    const season: Season = {
+      id: `season-${year}`,
+      year,
+      active: true,
+      rounds: [round.id],
+      leagueTable: [],
+    };
+    await writePublicJson(`seasons/${year}.json`, season);
+    await writePublicJson("rounds.json", [
+      {
+        id: round.id,
+        date: round.date,
+        siteId: round.site.id,
+        siteName: round.site.name,
+        status: round.status,
+        seasonYear: year,
+      },
+    ]);
+    await writePublicJson("pilots.json", [
+      { id: "pilot-a", name: "Pilot A" },
+      { id: "pilot-b", name: "Pilot B" },
+    ]);
+    await writePrivateJson(`rounds/${round.id}.json`, round);
+
+    await recomputeSeason(year);
+
+    const results = await readPublicJson<SeasonResults>(`results/${year}.json`);
+    const pilots = results[0].teamResults[0].pilots;
+    expect(pilots).toHaveLength(1);
+    expect(pilots[0].pilotId).toBe("pilot-a");
   });
 });
 
