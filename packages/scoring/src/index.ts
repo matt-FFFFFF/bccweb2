@@ -81,9 +81,12 @@ export function scoreRound(
   const rawScores: number[] = [];
 
   // BaseController.cs:1619-1680 and :2311-2350 — GetPilotScore/GetPilotPoints.
+  // No-score is handled by the flight-removal invariant (noScore ⇒ flight === null,
+  // matching legacy FlightsController.SetNoScore), NOT an explicit skip — so exclusion is
+  // exactly a missing flight or wing class, matching the C# oracle (which has no noScore check).
   for (const team of round.teams) {
     for (const slot of team.pilots) {
-      if (!slot.flight || !slot.snapshot?.wingClass || slot.noScore) {
+      if (!slot.flight || !slot.snapshot?.wingClass) {
         slot.pilotPoints = 0;
         continue;
       }
@@ -108,7 +111,7 @@ export function scoreRound(
   if (maxPilotScoreInRound > 0) {
     for (const team of round.teams) {
       for (const slot of team.pilots) {
-        if (!slot.flight || !slot.snapshot?.wingClass || slot.noScore) {
+        if (!slot.flight || !slot.snapshot?.wingClass) {
           slot.pilotPoints = 0;
           continue;
         }
@@ -186,7 +189,11 @@ export function scoreRound(
 
 // ─── computeLeague ────────────────────────────────────────────────────────────
 
-/** D12: season-roster zero-round teams are not added here; legacy only ranks round teams. */
+/**
+ * D12 DIVERGENCE: legacy (`ResultsController.cs:198-204`) also lists season-roster teams
+ * with zero completed rounds; `computeLeague` intentionally lists only teams appearing in
+ * ≥1 completed round. Score fidelity — not zero-round membership — is the parity claim.
+ */
 export function computeLeague(rounds: Round[], config: Config): LeagueEntry[] {
   const completeRounds = rounds.filter((r) => r.status === "Complete");
   const scoresByTeam = new Map<
