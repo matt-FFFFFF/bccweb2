@@ -114,7 +114,7 @@ export default function FirstLoginOfSeasonGate({ children }: { children: React.R
       // Optionally trigger re-fetch of /me to update identity, but local state + acknowledged key is enough to hide
     } catch (err: unknown) {
       if (err instanceof ApiError && err.code === "CLUB_LOCKED") {
-        setError("You cannot change your club because you have already flown for another club this season. Please contact an admin.");
+        setError("Your club is locked for this season because you've flown a scored round. Contact an admin to change it.");
       } else {
         setError(err instanceof Error ? err.message : "Failed to update profile");
       }

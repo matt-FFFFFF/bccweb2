@@ -341,7 +341,7 @@ describe("FirstLoginOfSeasonGate", () => {
     fireEvent.click(submitBtn);
 
     await waitFor(() => {
-      expect(screen.getByText("You cannot change your club because you have already flown for another club this season. Please contact an admin.")).toBeInTheDocument();
+      expect(screen.getByText("Your club is locked for this season because you've flown a scored round. Contact an admin to change it.")).toBeInTheDocument();
     });
   });
 
