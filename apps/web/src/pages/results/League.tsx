@@ -133,7 +133,7 @@ export default function League() {
                     fontSize: "1.05em",
                   }}
                 >
-                  {entry.totalScore.toFixed(1)}
+                  {entry.totalScore}
                 </td>
               </tr>
             ))}

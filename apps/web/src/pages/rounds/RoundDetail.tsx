@@ -368,7 +368,7 @@ export default function RoundDetail() {
                     </div>
                     {team.score > 0 && (
                       <span style={{ fontWeight: 700, color: "#0a3622" }}>
-                        {team.score.toFixed(1)}
+                        {team.score}
                       </span>
                     )}
                   </div>
@@ -493,7 +493,10 @@ export default function RoundDetail() {
                                 <span>
                                   {slot.flight.distance} km
                                   {slot.flight.score > 0 && (
-                                    <span style={{ marginLeft: "0.4rem", fontWeight: 600, color: "#0a3622" }}>
+                                    <span
+                                      title="Handicap score (distance × pilot factor × wing factor), before round normalisation"
+                                      style={{ marginLeft: "0.4rem", fontWeight: 600, color: "#0a3622" }}
+                                    >
                                       ({slot.flight.score.toFixed(1)})
                                     </span>
                                   )}

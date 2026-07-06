@@ -127,7 +127,7 @@ export default function RoundResults() {
                       {team.clubName}
                     </span>
                   </span>
-                  <strong>{team.score.toFixed(1)} pts</strong>
+                  <strong>{team.score} pts</strong>
                 </summary>
                 {team.pilots.length > 0 && (
                   <table

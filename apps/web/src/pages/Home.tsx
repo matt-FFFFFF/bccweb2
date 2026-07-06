@@ -109,7 +109,7 @@ function HomeLeagueTable({ year }: { year: number }) {
               </td>
               <td style={{ color: "#666" }}>{entry.clubName}</td>
               <td style={{ textAlign: "right", fontWeight: 600 }}>
-                {entry.totalScore.toFixed(1)}
+                {entry.totalScore}
               </td>
             </tr>
           ))}

@@ -749,7 +749,10 @@ function PilotRow({
           <span style={{ fontSize: "0.85em", color: "#555" }}>
             {slot.flight.distance} km
             {slot.flight.score > 0 && (
-              <span style={{ marginLeft: "0.3rem", fontWeight: 700, color: "#0a3622" }}>
+              <span
+                title="Handicap score (distance × pilot factor × wing factor), before round normalisation"
+                style={{ marginLeft: "0.3rem", fontWeight: 700, color: "#0a3622" }}
+              >
                 ({slot.flight.score.toFixed(1)})
               </span>
             )}
@@ -1050,7 +1053,7 @@ function TeamCard({
         <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
           {team.score > 0 && (
             <span style={{ fontWeight: 700, color: "#0a3622" }}>
-              {team.score.toFixed(1)}
+              {team.score}
             </span>
           )}
           {canEdit && (
