@@ -60,9 +60,60 @@ export type ScoringType = (typeof SCORING_TYPES)[number];
 export interface Config {
   maxTeamsInClub: number;
   maxPilotsInTeam: number;
+  /**
+   * Number of ISSCORING-ELIGIBLE SLOTS in a team — how many team places may
+   * carry `isScoring: true` (intended default 6). This is the eligible-slot
+   * count, NOT the number of pilot scores summed into the working score.
+   * Legacy: `Config.cs:15` / `Web.config:98` (`MaxScoringPilotsInTeam = 6`).
+   * ⚠️ Collision guard — do NOT conflate with:
+   *   • `maxPilotScoresCountedPerTeam` (4 — pilot scores summed per round), or
+   *   • `leagueRoundScoresCounted` (6 — rounds counted in the season league).
+   */
   maxScoringPilotsInTeam: number;
+  /**
+   * Number of PILOT SCORES COUNTED toward a team's working score — the team's
+   * top-N pilot points are summed each round (intended default 4).
+   * Legacy: `BaseController.cs:2359` (`GetWorkingTeamScore` sums the 4 highest
+   * `PilotPoints`, `int topNScoresInTeam = 4`).
+   * ⚠️ Collision guard — this counts PILOTS (4), distinct from:
+   *   • `maxScoringPilotsInTeam` (6 — eligible scoring slots), and
+   *   • `leagueRoundScoresCounted` (6 — rounds counted in the season league).
+   */
+  maxPilotScoresCountedPerTeam: number;
+  /**
+   * Number of ROUNDS COUNTED in the season league — a team's season total is
+   * the sum of its best N round scores (intended default 6).
+   * Legacy: `LeagueTeamSeasonViewModel.cs:27` (`numRoundsInTotal = 6`).
+   * ⚠️ Collision guard — this counts ROUNDS (6), distinct from:
+   *   • `maxScoringPilotsInTeam` (6 — eligible scoring slots, same number but
+   *     different meaning), and
+   *   • `maxPilotScoresCountedPerTeam` (4 — pilot scores summed per round).
+   */
+  leagueRoundScoresCounted: number;
   flightDateValidationEnabled: boolean;
   wingFactors: Record<WingClass, number>;
+  /** Max points a round awards before pilot/club/distance factors (intended default 1000). */
+  taskMaxPoints: number;
+  /**
+   * Per-pilot-rating scoring multiplier, keyed by exactly the `PilotRatingValue`
+   * union. Legacy: `BaseController.cs:1661-1678` (`GetPilotFactor` — Club Pilot
+   * = 1, Pilot = 1, Advanced Pilot = 0.9).
+   */
+  pilotFactors: Record<PilotRatingValue, number>;
+  /** Round-score multiplier bucketed by the number of clubs attending the round. */
+  clubsAttendingFactors: {
+    fewerThanThreeClubs: number;
+    exactlyThreeClubs: number;
+    moreThanThreeClubs: number;
+  };
+  /** Round-score multiplier bucketed by the number of scoring flights in the round. */
+  minDistanceFactors: {
+    oneFlight: number;
+    twoFlights: number;
+    threeFlights: number;
+    fourFlights: number;
+    fiveOrMoreFlights: number;
+  };
 }
 
 // ─── Users / Auth ─────────────────────────────────────────────────────────────
@@ -336,7 +387,9 @@ export interface Flight {
   url?: string;
   dateTime?: string; // ISO datetime
   scoringType: ScoringType;
+  /** Raw float32 pilot score (distance × pilotFactor × wingFactor), PRE-normalization. */
   score: number;
+  /** The wing factor applied to this flight. */
   wingFactor: number;
   isManualLog: boolean;
   manualLogJustification?: string;
@@ -357,6 +410,7 @@ export interface PilotSlot {
   accountedFor: boolean;
   signToFly: boolean;
   noScore: boolean;
+  /** Normalized round points (unrounded float32). */
   pilotPoints: number;
   pilotId: string | null;
   snapshot: PilotSnapshot | null; // null until locked
@@ -367,6 +421,7 @@ export interface Team {
   id: string;
   teamName: string;
   club: ClubRef;
+  /** Normalized league points (0dp integer). */
   score: number;
   pureTrackGroupId?: number;
   pureTrackGroupSlug?: string;
