@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { Pilot, Round, Signature, Team } from "@bccweb/types";
 import { makeAuthRequest, invoke } from "../../__tests__/helpers/api.js";
 import { makeConfig, makePilot, makeRound, makeUser, readPrivateJson, writePrivateJson } from "../../__tests__/helpers/seed.js";
+import { getPrivateContainer } from "../../__tests__/helpers/azurite.js";
 import { signaturePath, writeSignature } from "../../lib/signTofly/ledger.js";
 import { resetAllBuckets } from "../../lib/rateLimit.js";
 import "../roundRegistration.js";
@@ -236,6 +237,63 @@ describe("round self-registration endpoints", () => {
 
     expect(res.status).toBe(409);
     expect((res.jsonBody as { code: string }).code).toBe("NO_TEAM_FOR_CLUB");
+  });
+
+  it("self-registration into a place within the scoring band -> isScoring true", async () => {
+    const ctx = await seedRegistrationRound({
+      maxPilotsInTeam: 9,
+      teamSlots: [1, 2, 3, 4, 5].map((placeInTeam) => ({ placeInTeam, pilotId: randomUUID() })),
+    });
+
+    const res = await register(ctx);
+
+    expect(res.status).toBe(200);
+    expect((res.jsonBody as { place: number }).place).toBe(6);
+    const round = await readPrivateJson<Round>(`rounds/${ctx.round.id}.json`);
+    expect(round?.teams[0].pilots.find((s) => s.placeInTeam === 6)?.isScoring).toBe(true);
+  });
+
+  it("self-registration into a place beyond the scoring band -> isScoring false", async () => {
+    const ctx = await seedRegistrationRound({
+      maxPilotsInTeam: 9,
+      teamSlots: [1, 2, 3, 4, 5, 6].map((placeInTeam) => ({ placeInTeam, pilotId: randomUUID() })),
+    });
+
+    const res = await register(ctx);
+
+    expect(res.status).toBe(200);
+    expect((res.jsonBody as { place: number }).place).toBe(7);
+    const round = await readPrivateJson<Round>(`rounds/${ctx.round.id}.json`);
+    expect(round?.teams[0].pilots.find((s) => s.placeInTeam === 7)?.isScoring).toBe(false);
+  });
+
+  it("missing config falls back to legacy schema defaults so place 7 is free and non-scoring", async () => {
+    // Given a 3-slot config that is then DELETED, readConfig must fall back to
+    // ConfigSchema.parse({}) (maxPilotsInTeam 9, maxScoringPilotsInTeam 6). Were
+    // the seeded 3-slot config still in effect, place 7 would be TEAM_FULL.
+    const ctx = await seedRegistrationRound({
+      teamSlots: [1, 2, 3, 4, 5, 6].map((placeInTeam) => ({ placeInTeam, pilotId: randomUUID() })),
+    });
+    await getPrivateContainer().getBlockBlobClient("config.json").deleteIfExists();
+
+    const res = await register(ctx);
+
+    expect(res.status).toBe(200);
+    expect((res.jsonBody as { place: number }).place).toBe(7);
+    const round = await readPrivateJson<Round>(`rounds/${ctx.round.id}.json`);
+    expect(round?.teams[0].pilots.find((s) => s.placeInTeam === 7)?.isScoring).toBe(false);
+  });
+
+  it("a tenth self-registration into a full 9-place team -> 409 TEAM_FULL", async () => {
+    const ctx = await seedRegistrationRound({
+      maxPilotsInTeam: 9,
+      teamSlots: [1, 2, 3, 4, 5, 6, 7, 8, 9].map((placeInTeam) => ({ placeInTeam, pilotId: randomUUID() })),
+    });
+
+    const res = await register(ctx);
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("TEAM_FULL");
   });
 });
 

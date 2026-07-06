@@ -100,7 +100,7 @@ async function registerSelf(
     const lockedTeam = lockedRound.teams.find((t) => t.id === chosenTeam.id);
     if (!lockedTeam) throw new HttpError(404, "TEAM_NOT_FOUND", "Team not found");
     const place = choosePlace(lockedTeam, undefined, config.maxPilotsInTeam);
-    const slot = getOrCreateSlot(lockedTeam, place);
+    const slot = getOrCreateSlot(lockedTeam, place, config.maxScoringPilotsInTeam);
     fillSlot(slot, pilot.id, pilotSnapshot);
     await writePrivateJson(`rounds/${roundId}.json`, RoundSchema, lockedRound, leaseId);
     return { teamId: lockedTeam.id, place };
@@ -225,20 +225,12 @@ async function readConfig(): Promise<RegistrationConfig> {
     );
   } catch (err: unknown) {
     if ((err as { statusCode?: number }).statusCode === 404) {
-      return {
-        maxTeamsInClub: 3,
-        maxPilotsInTeam: 5,
-        maxScoringPilotsInTeam: 3,
-        flightDateValidationEnabled: true,
-        wingFactors: {
-          "EN A": 1.2,
-          "EN B": 1.1,
-          "EN C": 1,
-          "EN C 2-liner": 0.95,
-          "EN D": 0.9,
-          "EN D 2-liner": 0.85,
-        },
-      };
+      // Virgin store: ConfigSchema.parse({}) yields the canonical legacy
+      // defaults (maxPilotsInTeam 9, maxScoringPilotsInTeam 6, the factor
+      // tables, …) from the single schema source of truth, so this fallback can
+      // never drift from the real Config shape — the same DRY virgin fallback
+      // roundsMutate.ts and recompute.ts use.
+      return ConfigSchema.parse({});
     }
     throw err;
   }
@@ -311,7 +303,9 @@ function isPilotInRound(round: Round, pilotId: string): boolean {
   );
 }
 
-function choosePlace(team: Team, preferredPlace: number | undefined, maxPilotsInTeam: number): number {
+// Exported so teams.ts addPilot reuses this exact first-free-place algorithm —
+// coordinator and self-registration paths must agree (D11 positional slots).
+export function choosePlace(team: Team, preferredPlace: number | undefined, maxPilotsInTeam: number): number {
   if (preferredPlace !== undefined) {
     if (preferredPlace > maxPilotsInTeam) throw new HttpError(409, "TEAM_FULL", `Team is full (max ${maxPilotsInTeam})`);
     if (!isSlotAvailable(team, preferredPlace)) throw new HttpError(409, "SLOT_TAKEN", `Place ${preferredPlace} is already taken`);
@@ -329,12 +323,12 @@ function isSlotAvailable(team: Team, place: number): boolean {
   return !slot || slot.status === "Empty" || !slot.pilotId;
 }
 
-function getOrCreateSlot(team: Team, place: number): PilotSlot {
+function getOrCreateSlot(team: Team, place: number, maxScoringPilotsInTeam: number): PilotSlot {
   let slot = team.pilots.find((candidate) => candidate.placeInTeam === place);
   if (!slot) {
     slot = {
       placeInTeam: place,
-      isScoring: true,
+      isScoring: place <= maxScoringPilotsInTeam,
       status: "Empty",
       accountedFor: false,
       signToFly: false,
