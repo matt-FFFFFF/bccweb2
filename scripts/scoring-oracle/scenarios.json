@@ -385,6 +385,66 @@
           ]
         }
       ]
+    },
+    {
+      "id": "legacy-09-f32-raw-score-boundary",
+      "label": "float32 raw-score boundary",
+      "notes": "Covers D6 per-operation float32 rounding: the Oracle Beta raw score is 33.399997f, so the outer GetPilotScore float cast keeps pilotPoints just below 334 and team.score at 333; dropping that f32 makes it count as 334.",
+      "rounds": [
+        {
+          "id": "legacy-09-f32-raw-score-boundary",
+          "date": "2026-10-03",
+          "minimumScore": 5,
+          "siteName": "Oracle F32 Boundary",
+          "teams": [
+            { "id": "t1", "teamName": "Oracle Alpha", "clubId": "c1", "clubName": "Oracle Club One", "pilots": [{ "placeInTeam": 1, "wingClass": "EN A", "pilotRating": "Pilot", "distance": 100.0 }] },
+            { "id": "t2", "teamName": "Oracle Beta", "clubId": "c2", "clubName": "Oracle Club Two", "pilots": [{ "placeInTeam": 1, "wingClass": "EN B", "pilotRating": "Advanced Pilot", "distance": 41.2345682681098 }] },
+            { "id": "t3", "teamName": "Oracle Gamma", "clubId": "c3", "clubName": "Oracle Club Three", "pilots": [{ "placeInTeam": 1, "wingClass": "EN A", "pilotRating": "Pilot", "distance": 10.0 }] },
+            { "id": "t4", "teamName": "Oracle Delta", "clubId": "c4", "clubName": "Oracle Club Four", "pilots": [{ "placeInTeam": 1, "wingClass": "EN A", "pilotRating": "Pilot", "distance": 10.0 }] },
+            { "id": "t5", "teamName": "Oracle Epsilon", "clubId": "c5", "clubName": "Oracle Club Five", "pilots": [{ "placeInTeam": 1, "wingClass": "EN A", "pilotRating": "Pilot", "distance": 10.0 }] }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "legacy-10-season-counted-zero-rounds",
+      "label": "season league includes counted zero-score rounds",
+      "notes": "Covers LegacyLeague OrderByDescending().Take(6) including completed zero-score round teams in countedRounds and roundScores.",
+      "rounds": [
+        {
+          "id": "legacy-10-season-zero-r1",
+          "date": "2026-10-03",
+          "minimumScore": 5,
+          "siteName": "Oracle Zero 1",
+          "teams": [
+            { "id": "t1", "teamName": "Oracle Alpha", "clubId": "c1", "clubName": "Oracle Club One", "pilots": [{ "placeInTeam": 1, "wingClass": "EN A", "pilotRating": "Pilot", "distance": 100.0 }] },
+            { "id": "t2", "teamName": "Oracle Beta", "clubId": "c2", "clubName": "Oracle Club Two", "pilots": [{ "placeInTeam": 1, "wingClass": "EN A", "pilotRating": "Pilot", "distance": 50.0 }] },
+            { "id": "t3", "teamName": "Oracle Gamma", "clubId": "c3", "clubName": "Oracle Club Three", "pilots": [{ "placeInTeam": 1, "wingClass": "EN A", "pilotRating": "Pilot", "distance": 30.0 }] }
+          ]
+        },
+        {
+          "id": "legacy-10-season-zero-r2",
+          "date": "2026-10-10",
+          "minimumScore": 5,
+          "siteName": "Oracle Zero 2",
+          "teams": [
+            { "id": "t1", "teamName": "Oracle Alpha", "clubId": "c1", "clubName": "Oracle Club One", "pilots": [{ "placeInTeam": 1, "wingClass": "EN A", "pilotRating": "Pilot", "distance": null }] },
+            { "id": "t2", "teamName": "Oracle Beta", "clubId": "c2", "clubName": "Oracle Club Two", "pilots": [{ "placeInTeam": 1, "wingClass": "EN A", "pilotRating": "Pilot", "distance": 55.0 }] },
+            { "id": "t3", "teamName": "Oracle Gamma", "clubId": "c3", "clubName": "Oracle Club Three", "pilots": [{ "placeInTeam": 1, "wingClass": "EN A", "pilotRating": "Pilot", "distance": 35.0 }] }
+          ]
+        },
+        {
+          "id": "legacy-10-season-zero-r3",
+          "date": "2026-10-17",
+          "minimumScore": 5,
+          "siteName": "Oracle Zero 3",
+          "teams": [
+            { "id": "t1", "teamName": "Oracle Alpha", "clubId": "c1", "clubName": "Oracle Club One", "pilots": [{ "placeInTeam": 1, "wingClass": "EN A", "pilotRating": "Pilot", "distance": null }] },
+            { "id": "t2", "teamName": "Oracle Beta", "clubId": "c2", "clubName": "Oracle Club Two", "pilots": [{ "placeInTeam": 1, "wingClass": "EN A", "pilotRating": "Pilot", "distance": 60.0 }] },
+            { "id": "t3", "teamName": "Oracle Gamma", "clubId": "c3", "clubName": "Oracle Club Three", "pilots": [{ "placeInTeam": 1, "wingClass": "EN A", "pilotRating": "Pilot", "distance": 40.0 }] }
+          ]
+        }
+      ]
     }
   ]
 }

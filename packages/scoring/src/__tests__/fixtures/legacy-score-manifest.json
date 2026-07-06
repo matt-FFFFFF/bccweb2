@@ -328,5 +328,111 @@
         "1": 393.75003
       }
     }
+  },
+  "legacy-09-f32-raw-score-boundary": {
+    "06f0b8ba-0313-e04a-a28a-27e62837d686": {
+      "teamScore": 1000,
+      "workingTeamScore": 1000,
+      "pilots": {
+        "1": 1000
+      }
+    },
+    "7da275f1-b8db-ce4a-b1d6-f77610c5697c": {
+      "teamScore": 333,
+      "workingTeamScore": 333,
+      "pilots": {
+        "1": 333.99997
+      }
+    },
+    "e63c5816-6906-fd4a-9739-30a8a2b1beda": {
+      "teamScore": 100,
+      "workingTeamScore": 100,
+      "pilots": {
+        "1": 100
+      }
+    },
+    "eebfbd6e-471d-284f-b8ab-cbcddc115542": {
+      "teamScore": 100,
+      "workingTeamScore": 100,
+      "pilots": {
+        "1": 100
+      }
+    },
+    "3286d08c-ab35-3d43-a8f5-61e9a3816619": {
+      "teamScore": 100,
+      "workingTeamScore": 100,
+      "pilots": {
+        "1": 100
+      }
+    }
+  },
+  "legacy-10-season-zero-r1": {
+    "06f0b8ba-0313-e04a-a28a-27e62837d686": {
+      "teamScore": 450,
+      "workingTeamScore": 450,
+      "pilots": {
+        "1": 450.00003
+      }
+    },
+    "7da275f1-b8db-ce4a-b1d6-f77610c5697c": {
+      "teamScore": 225,
+      "workingTeamScore": 225,
+      "pilots": {
+        "1": 225.00002
+      }
+    },
+    "e63c5816-6906-fd4a-9739-30a8a2b1beda": {
+      "teamScore": 135,
+      "workingTeamScore": 135,
+      "pilots": {
+        "1": 135.00002
+      }
+    }
+  },
+  "legacy-10-season-zero-r2": {
+    "06f0b8ba-0313-e04a-a28a-27e62837d686": {
+      "teamScore": 0,
+      "workingTeamScore": 0,
+      "pilots": {
+        "1": 0
+      }
+    },
+    "7da275f1-b8db-ce4a-b1d6-f77610c5697c": {
+      "teamScore": 300,
+      "workingTeamScore": 300,
+      "pilots": {
+        "1": 300
+      }
+    },
+    "e63c5816-6906-fd4a-9739-30a8a2b1beda": {
+      "teamScore": 190,
+      "workingTeamScore": 190,
+      "pilots": {
+        "1": 190.90909
+      }
+    }
+  },
+  "legacy-10-season-zero-r3": {
+    "06f0b8ba-0313-e04a-a28a-27e62837d686": {
+      "teamScore": 0,
+      "workingTeamScore": 0,
+      "pilots": {
+        "1": 0
+      }
+    },
+    "7da275f1-b8db-ce4a-b1d6-f77610c5697c": {
+      "teamScore": 300,
+      "workingTeamScore": 300,
+      "pilots": {
+        "1": 300
+      }
+    },
+    "e63c5816-6906-fd4a-9739-30a8a2b1beda": {
+      "teamScore": 200,
+      "workingTeamScore": 200,
+      "pilots": {
+        "1": 200
+      }
+    }
   }
 }
