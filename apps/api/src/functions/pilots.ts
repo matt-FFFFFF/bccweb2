@@ -27,7 +27,6 @@ import type {
 import {
   PilotSchema,
   PilotSummarySchema,
-  SeasonSummarySchema,
 } from "@bccweb/schemas";
 import * as z from "zod/v4";
 import {
@@ -49,9 +48,9 @@ import {
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 import { resolveWingManufacturer } from "../lib/wingManufacturer.js";
+import { getActiveSeasonYear } from "../lib/season.js";
 
 const PilotsIndexSchema = z.array(PilotSummarySchema);
-const SeasonsIndexSchema = z.array(SeasonSummarySchema);
 
 // PilotClubMembership has no dedicated schema in @bccweb/schemas; the API
 // only reads (never writes) this blob here. Permissive array passthrough so
@@ -438,23 +437,6 @@ async function upsertPilotInIndex(pilot: Pilot): Promise<void> {
     await writeBlob("pilots.json", index, leaseId);
   });
 
-}
-
-async function getActiveSeasonYear(): Promise<number> {
-  try {
-    const seasons = await readJson(
-      getBlobClient("seasons.json"),
-      SeasonsIndexSchema,
-      "seasons.json",
-    );
-    const active = seasons.find((s) => s.active) ?? seasons[seasons.length - 1];
-    return active?.year ?? new Date().getFullYear();
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      return new Date().getFullYear();
-    }
-    throw err;
-  }
 }
 
 // ─── GET /api/pilots/{id}/club-history ───────────────────────────────────────
