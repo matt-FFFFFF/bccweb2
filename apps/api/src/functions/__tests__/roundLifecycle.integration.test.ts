@@ -198,12 +198,14 @@ describe("round lifecycle integration", () => {
 
   it("completeRound scores the LEASED read so a racing no-score edit is not stale-overwritten", async () => {
     const ctx = await seedLockedScorableRound();
-    // Given: a coordinator marks the pilot no-score in an edit that commits AFTER
+    // Given: a coordinator models a real no-score withdrawal by removing the pilot's flight in an edit that commits AFTER
     // completeRound's pre-lease read but BEFORE it acquires the completion lease.
     leaseHook.beforePrivateRenewing = async (path) => {
       if (path !== `rounds/${ctx.roundId}.json`) return;
       const racing = (await readPrivateJson<Round>(path))!;
       racing.teams[0].pilots[0].noScore = true;
+      racing.teams[0].pilots[0].flight = null;
+      racing.teams[0].pilots[0].pilotPoints = 0;
       await writePrivateJson(path, racing);
     };
 
@@ -212,7 +214,7 @@ describe("round lifecycle integration", () => {
     expect(res.status).toBe(200);
     const completed = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
     expect(completed.status).toBe("Complete");
-    // Then: the racing no-score edit wins — scoring ran on the leased read, so the
+    // Then: the racing no-score withdrawal wins — scoring ran on the leased read, so the
     // stale scorable snapshot (which would have yielded 100) did not overwrite it.
     expect(completed.teams[0].pilots[0].noScore).toBe(true);
     expect(completed.teams[0].pilots[0].pilotPoints).toBe(0);
