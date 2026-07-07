@@ -200,6 +200,24 @@ export default function RoundBrief() {
 
       <BriefDocument brief={brief} />
 
+      <section
+        data-testid="brief-scoring"
+        style={{
+          marginBottom: "1.5rem",
+          padding: "1rem",
+          border: "1px solid #dee2e6",
+          borderRadius: "0.5rem",
+          background: "#fbfcff",
+        }}
+      >
+        <h2 style={{ fontSize: "1rem", margin: "0 0 0.75rem", color: "#1a4fa0" }}>
+          Scoring
+        </h2>
+        <p style={{ margin: 0, color: "#222", fontSize: "0.92rem", whiteSpace: "pre-wrap" }}>
+          Open Distance — 3-turnpoint free distance, ×1 multiplier, 5km minimum. Computed from pilot's uploaded IGC file using igc-xc-score.
+        </p>
+      </section>
+
       <p style={{ fontSize: "0.75rem", color: "#aaa", marginTop: "1.5rem" }}>
         Generated: {new Date(brief.generatedAt).toLocaleString("en-GB")}
       </p>
