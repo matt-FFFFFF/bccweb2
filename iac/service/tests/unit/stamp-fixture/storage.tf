@@ -127,9 +127,10 @@ resource "azapi_resource" "storage_container_data_private" {
 
 # ─── Queue Service ───────────────────────────────────────────────────────────
 #
-# Backs the async round-brief PDF pipeline. The API enqueues a job on the
-# `round-brief-pdf` queue; a queue-triggered Function renders the PDF. The
-# queue service is the parent for all named queues (name must be "default").
+# Backs the async round-brief PDF and sign-to-fly reflect pipelines. The API
+# enqueues jobs on the `round-brief-pdf` / `signtofly-reflect` queues; queue-
+# triggered Functions process them. The queue service is the parent for all
+# named queues (name must be "default").
 
 resource "azapi_resource" "queue_service" {
   type      = "Microsoft.Storage/storageAccounts/queueServices@2025-06-01"
@@ -157,6 +158,25 @@ resource "azapi_resource" "queue_brief_pdf" {
 resource "azapi_resource" "queue_brief_pdf_poison" {
   type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
   name      = "round-brief-pdf-poison"
+  parent_id = azapi_resource.queue_service.id
+}
+
+# ─── Sign-to-Fly Reflect Queues ──────────────────────────────────────────────
+#
+# `signtofly-reflect` carries reflect-job messages ({ roundId } — no PII).
+# `signtofly-reflect-poison` collects messages that exhaust the Functions host
+# retry budget. Names MUST match the producer / consumer AzureWebJobsStorage
+# queue bindings — do not rename.
+
+resource "azapi_resource" "queue_signtofly_reflect" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "signtofly-reflect"
+  parent_id = azapi_resource.queue_service.id
+}
+
+resource "azapi_resource" "queue_signtofly_reflect_poison" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "signtofly-reflect-poison"
   parent_id = azapi_resource.queue_service.id
 }
 

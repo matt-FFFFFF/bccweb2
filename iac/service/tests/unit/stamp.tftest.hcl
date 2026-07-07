@@ -272,7 +272,7 @@ run "no_diagnostic_settings" {
   }
 }
 
-run "round_brief_pdf_queues_planned" {
+run "storage_queues_planned" {
   command = plan
 
   providers = {
@@ -293,9 +293,15 @@ run "round_brief_pdf_queues_planned" {
       azapi_resource.queue_brief_pdf_poison.name == "round-brief-pdf-poison" &&
       azapi_resource.queue_brief_pdf_poison.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
       azapi_resource.queue_brief_pdf.parent_id == azapi_resource.queue_service.id &&
-      azapi_resource.queue_brief_pdf_poison.parent_id == azapi_resource.queue_service.id
+      azapi_resource.queue_brief_pdf_poison.parent_id == azapi_resource.queue_service.id &&
+      azapi_resource.queue_signtofly_reflect.name == "signtofly-reflect" &&
+      azapi_resource.queue_signtofly_reflect.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
+      azapi_resource.queue_signtofly_reflect_poison.name == "signtofly-reflect-poison" &&
+      azapi_resource.queue_signtofly_reflect_poison.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
+      azapi_resource.queue_signtofly_reflect.parent_id == azapi_resource.queue_service.id &&
+      azapi_resource.queue_signtofly_reflect_poison.parent_id == azapi_resource.queue_service.id
     )
-    error_message = "The round-brief-pdf queue and its poison queue must plan under the queue service with the exact expected names, types, and parent linkage."
+    error_message = "The round-brief-pdf and sign-to-fly reflect queues plus their poison queues must plan under the queue service with the exact expected names, types, and parent linkage."
   }
 }
 
