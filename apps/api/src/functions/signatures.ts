@@ -27,8 +27,22 @@ import {
   writeSignatureToPath,
 } from "../lib/signTofly/ledger.js";
 import { appendAuditLine } from "../lib/signTofly/auditLog.js";
+import { enqueueSignToFlyReflect } from "../lib/queue.js";
+import { getTelemetryClient } from "../lib/telemetry.js";
+import { redactObject } from "../lib/telemetryRedactor.js";
 
 type RoundBriefWithVersion = RoundBrief & { version?: number };
+
+async function queueReflect(roundId: string): Promise<void> {
+  try {
+    await enqueueSignToFlyReflect({ roundId });
+  } catch (err: unknown) {
+    getTelemetryClient()?.trackEvent({
+      name: "signToFly.enqueueFailed",
+      properties: redactObject({ roundId, error: String(err) }) as Record<string, unknown>,
+    });
+  }
+}
 
 async function signOwnSlot(
   req: HttpRequest,
@@ -77,7 +91,7 @@ async function signOwnSlot(
   const briefVersion = brief.version ?? 1;
   const existing = await readSignature(roundId, teamId, placeNum, briefVersion);
   if (existing) {
-    await reflectCurrentSignature(roundId, teamId, placeNum);
+    await queueReflect(roundId);
     return { status: 200, jsonBody: existing };
   }
 
@@ -96,7 +110,7 @@ async function signOwnSlot(
   });
 
   await writeSignature(sig);
-  await reflectCurrentSignature(roundId, teamId, placeNum);
+  await queueReflect(roundId);
   return { status: 201, jsonBody: sig };
 }
 
