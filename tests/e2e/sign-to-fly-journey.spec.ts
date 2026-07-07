@@ -173,13 +173,10 @@ test.describe("sign-to-fly journey", () => {
     await page.getByRole("button", { name: /confirm & invalidate/i }).click();
     await expect(page).toHaveURL(new RegExp(`/rounds/${ROUND_ID}/brief`), { timeout: 5000 });
 
-    const invalidatedRound = await page.evaluate(async (roundId) => {
-      const res = await fetch(`/api/rounds/${roundId}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("bcc_access_token")}` },
-      });
-      return res.json();
-    }, ROUND_ID) as { teams: Array<{ pilots: Array<{ signToFly: boolean }> }> };
-    expect(invalidatedRound.teams[0].pilots.every((slot) => slot.signToFly === false)).toBe(true);
+    await expect.poll(
+      async () => (await fetchRoundSignToFlyFlags(page)).every((signToFly) => signToFly === false),
+      { timeout: 15_000 },
+    ).toBe(true);
     await page.goto(`/rounds/${ROUND_ID}/manage`);
     await expect(page.getByRole("heading", { name: /milk hill/i })).toBeVisible({ timeout: 5000 });
     await shot(page, "15-material-signatures-reset");
@@ -196,13 +193,10 @@ test.describe("sign-to-fly journey", () => {
     await expect(page.getByText(/material change detected/i)).toHaveCount(0);
     await expect(page).toHaveURL(new RegExp(`/rounds/${ROUND_ID}/brief`), { timeout: 5000 });
 
-    const preservedRound = await page.evaluate(async (roundId) => {
-      const res = await fetch(`/api/rounds/${roundId}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem("bcc_access_token")}` },
-      });
-      return res.json();
-    }, ROUND_ID) as { teams: Array<{ pilots: Array<{ signToFly: boolean }> }> };
-    expect(preservedRound.teams[0].pilots.every((slot) => slot.signToFly === true)).toBe(true);
+    await expect.poll(
+      async () => (await fetchRoundSignToFlyFlags(page)).every((signToFly) => signToFly === true),
+      { timeout: 15_000 },
+    ).toBe(true);
     await page.goto(`/rounds/${ROUND_ID}/manage`);
     await expect(page.getByRole("heading", { name: /milk hill/i })).toBeVisible({ timeout: 5000 });
     await shot(page, "17-cosmetic-signatures-preserved");
@@ -275,6 +269,16 @@ async function login(
 
 async function shot(page: Page, name: string) {
   await page.screenshot({ path: path.join(EVIDENCE_DIR, `${name}.png`), fullPage: true });
+}
+
+async function fetchRoundSignToFlyFlags(page: Page): Promise<boolean[]> {
+  return page.evaluate(async (roundId) => {
+    const res = await fetch(`/api/rounds/${roundId}`, {
+      headers: { Authorization: `Bearer ${localStorage.getItem("bcc_access_token")}` },
+    });
+    const round = await res.json() as { teams: Array<{ pilots: Array<{ signToFly: boolean }> }> };
+    return round.teams.flatMap((team) => team.pilots.map((slot) => slot.signToFly));
+  }, ROUND_ID);
 }
 
 async function mockBackend(page: Page, state: E2EState) {

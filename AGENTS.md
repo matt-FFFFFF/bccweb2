@@ -89,9 +89,10 @@ give atomic read-modify-write (30s lease).
 
 ### Storage Queues
 
-Two queues (created by `scripts/init-storage.mjs`, same storage account as blobs):
+Four queues (created by `scripts/init-storage.mjs`, same storage account as blobs):
 `round-brief-pdf` (main) and `round-brief-pdf-poison` (dead-letter after
-`maxDequeueCount=5` per `host.json`).
+`maxDequeueCount=5` per `host.json`), plus `signtofly-reflect` (main) and
+`signtofly-reflect-poison` (dead-letter, same `maxDequeueCount=5` policy).
 
 **Async brief-PDF flow**: the lock endpoint (`POST /api/rounds/{id}/lock`) sets
 `brief.pdfStatus = "pending"` and `brief.pdfAttemptId` on the round blob, then enqueues
@@ -102,16 +103,26 @@ guarded by `pdfAttemptId` + an atomic compare-and-set commit (`commitBriefPdfRea
 NOT by `briefVersion` or `visibilityTimeout`. Status values: `pending | processing |
 ready | failed`. On unlock the PDF status fields are cleared.
 
-**Connection invariant**: both the producer (`apps/api/src/lib/queue.ts`) and the
+**Async sign-to-fly reflect flow**: the sign endpoints enqueue a `{ roundId }` job onto
+`signtofly-reflect`. The `signaturesReflect` queue-trigger consumer
+(`apps/api/src/functions/signaturesReflect.ts`) re-materializes `slot.signToFly` for
+the entire round by replaying the signature ledger (`signTofly/*`), then writes the
+updated round blob. This decouples the HTTP response from the potentially expensive
+full-round recompute.
+Operator recovery: `POST /api/rounds/{id}/reflect-sign-to-fly` (Admin/scoped-coord)
+synchronously re-runs the reflect and returns the corrected round.
+
+**Connection invariant**: both producers (`apps/api/src/lib/queue.ts`) and all
 `app.storageQueue` triggers use the `AzureWebJobsStorage` connection setting. That is
 the only setting carrying a `QueueEndpoint` in local/Docker; `BLOB_CONNECTION_STRING` is
-blob-only. Never switch the producer to `BLOB_CONNECTION_STRING` — it would silently
+blob-only. Never switch any producer to `BLOB_CONNECTION_STRING` — it would silently
 break queueing.
 
 **Queue privacy**: `privacy-scan.mjs` does NOT cover Storage Queues. The compensating
-control is the strict `BriefPdfJobSchema` (`z.object().strict()`) in
-`apps/api/src/lib/queue.ts`, which rejects any key beyond `{roundId, briefVersion,
-pdfAttemptId}` at serialisation time so PII can never enter a queue message.
+control is strict job schemas in `apps/api/src/lib/queue.ts`: `BriefPdfJobSchema`
+(`z.object().strict()`) rejects any key beyond `{roundId, briefVersion, pdfAttemptId}`,
+and `SignToFlyReflectJobSchema` (`z.object({roundId}).strict()`) rejects any key beyond
+`{roundId}` — so PII can never enter either queue message at serialisation time.
 
 A PR-gated [privacy scanner](file:///Volumes/code/bccweb2/scripts/privacy-scan.mjs)
 fails CI if PII leaks into the public container. **Never put PII fields in `data/` blobs.**
@@ -144,9 +155,11 @@ function module — each self-registers via `app.http(...)` or `app.storageQueue
 Modules: `health`, `me`, `meProfile`, `rounds`, `roundsMutate`, `seasons`, `pilots`,
 `clubs`, `sites`, `teams`, `flights`, `admin`, `adminWording`, `brief`,
 `briefPdf` **(queue-trigger — registers `app.storageQueue(...)` for `round-brief-pdf`
-and `round-brief-pdf-poison`; the first non-HTTP triggers in the codebase)**, `puretrack`,
-`authFunctions`, `signatures`, `roundRegistration`, `clubTeams`, `seasonClubs`,
-`pilotSeasonClubs`, `teamsCaptain`.
+and `round-brief-pdf-poison`; the first non-HTTP triggers in the codebase)**,
+`signaturesReflect` **(queue-trigger — registers `app.storageQueue(...)` for
+`signtofly-reflect` and `signtofly-reflect-poison`; the second non-HTTP trigger pair)**,
+`puretrack`, `authFunctions`, `signatures`, `roundRegistration`, `clubTeams`,
+`seasonClubs`, `pilotSeasonClubs`, `teamsCaptain`.
 
 Lib helpers: `blob` (storage + lease), `blobJson` (schema read/write), `auth` +
 `authHelpers` (HS256 JWT), `roundAuth`, `accountMutation`, `email` (ACS), `http`,

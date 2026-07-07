@@ -7,18 +7,14 @@ import {
 } from "@azure/functions";
 import type { Round, RoundBrief } from "@bccweb/types";
 import { BriefSchema, RoundSchema } from "@bccweb/schemas";
-import {
-  getPrivateBlobClient,
-  withPrivateLease,
-} from "../lib/blob.js";
-import { readJson, writePrivateJson } from "../lib/blobJson.js";
+import { getPrivateBlobClient } from "../lib/blob.js";
+import { readJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { getActiveWording } from "../lib/signTofly/wording.js";
 import { computeBriefHash } from "../lib/signTofly/briefVersion.js";
 import {
   buildSignaturePayload,
-  getLatestSignature,
   listSignaturesForRound,
   overrideSignaturePath,
   readSignature,
@@ -27,8 +23,23 @@ import {
   writeSignatureToPath,
 } from "../lib/signTofly/ledger.js";
 import { appendAuditLine } from "../lib/signTofly/auditLog.js";
+import { reflectRoundSignToFly } from "../lib/signTofly/reflect.js";
+import { enqueueSignToFlyReflect } from "../lib/queue.js";
+import { getTelemetryClient } from "../lib/telemetry.js";
+import { redactObject } from "../lib/telemetryRedactor.js";
 
 type RoundBriefWithVersion = RoundBrief & { version?: number };
+
+async function queueReflect(roundId: string): Promise<void> {
+  try {
+    await enqueueSignToFlyReflect({ roundId });
+  } catch (err: unknown) {
+    getTelemetryClient()?.trackEvent({
+      name: "signToFly.enqueueFailed",
+      properties: redactObject({ roundId, error: String(err) }) as Record<string, unknown>,
+    });
+  }
+}
 
 async function signOwnSlot(
   req: HttpRequest,
@@ -77,7 +88,7 @@ async function signOwnSlot(
   const briefVersion = brief.version ?? 1;
   const existing = await readSignature(roundId, teamId, placeNum, briefVersion);
   if (existing) {
-    await reflectCurrentSignature(roundId, teamId, placeNum);
+    await queueReflect(roundId);
     return { status: 200, jsonBody: existing };
   }
 
@@ -96,7 +107,7 @@ async function signOwnSlot(
   });
 
   await writeSignature(sig);
-  await reflectCurrentSignature(roundId, teamId, placeNum);
+  await queueReflect(roundId);
   return { status: 201, jsonBody: sig };
 }
 
@@ -186,7 +197,7 @@ async function overrideSlotSignature(
       pilotAndCoordSigned: Boolean(existing && existing.source !== "coord-override"),
     },
   });
-  await reflectCurrentSignature(roundId, teamId, placeNum);
+  await queueReflect(roundId);
 
   return { status: 201, jsonBody: sig };
 }
@@ -217,6 +228,34 @@ async function getRoundSignatures(
     ((a.briefVersion ?? 0) - (b.briefVersion ?? 0)),
   );
   return { status: 200, jsonBody: signatures };
+}
+
+async function reflectSignToFly(
+  req: HttpRequest,
+  _ctx: InvocationContext,
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const roundId = req.params["roundId"];
+  if (!roundId) throw new HttpError(400, "MISSING_ROUND_ID");
+
+  const round = await readRound(roundId);
+  const isAdmin = caller.roles.includes("Admin");
+  const isScopedCoord = caller.roles.includes("RoundsCoord") &&
+    caller.clubId !== null &&
+    round.organisingClub?.id === caller.clubId;
+  if (!isAdmin && !isScopedCoord) {
+    throw new HttpError(403, "FORBIDDEN");
+  }
+
+  if (round.status !== "BriefComplete") {
+    throw new HttpError(409, "INVALID_STATE", `Round status is ${round.status}`);
+  }
+
+  await reflectRoundSignToFly(roundId);
+  const updated = await readRound(roundId);
+  return { status: 200, jsonBody: updated };
 }
 
 async function readRound(roundId: string): Promise<Round> {
@@ -260,36 +299,6 @@ function findSlot(round: Round, teamId: string, place: number) {
   return team?.pilots.find((slot) => slot.placeInTeam === place) ?? null;
 }
 
-// R6: re-read status + the frozen brief version INSIDE the round lease; never
-// trust a version captured unleased. Skip unless the round is still
-// BriefComplete (a concurrent lock / re-complete must not be reflected) AND the
-// latest signature pins the now-current brief version.
-export async function reflectCurrentSignature(
-  roundId: string,
-  teamId: string,
-  place: number,
-): Promise<void> {
-  const path = `rounds/${roundId}.json`;
-  await withPrivateLease(path, async (leaseId) => {
-    const round = await readJson(getPrivateBlobClient(path), RoundSchema, path);
-    if (round.status !== "BriefComplete") return;
-
-    const brief = await readBriefOrNull(roundId);
-    if (!brief) return;
-    const currentBriefVersion = brief.version ?? 1;
-
-    const latest = await getLatestSignature(roundId, teamId, place);
-    if (latest?.briefVersion !== currentBriefVersion) return;
-
-    const slot = findSlot(round, teamId, place);
-    if (!slot) throw new HttpError(404, "NOT_FOUND", "Pilot slot not found");
-    if (!slot.signToFly) {
-      slot.signToFly = true;
-      await writePrivateJson(path, RoundSchema, round, leaseId);
-    }
-  });
-}
-
 app.http("signOwnSlot", {
   methods: ["POST"],
   authLevel: "anonymous",
@@ -309,4 +318,11 @@ app.http("overrideSlotSignature", {
   authLevel: "anonymous",
   route: "rounds/{roundId}/teams/{teamId}/pilots/{place}/sign-override",
   handler: withErrorHandler(overrideSlotSignature),
+});
+
+app.http("reflectSignToFly", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "rounds/{roundId}/reflect-sign-to-fly",
+  handler: withErrorHandler(reflectSignToFly),
 });

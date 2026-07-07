@@ -36,9 +36,17 @@ const CONTAINERS = [
  * Storage queue definitions (Queue service, port 10001).
  * The async brief-PDF pipeline enqueues jobs onto `round-brief-pdf`; the
  * Functions host auto-parks poison messages onto `round-brief-pdf-poison`.
+ * The sign-to-fly reflect pipeline enqueues reflection jobs onto
+ * `signtofly-reflect`; dead-letter messages are parked onto
+ * `signtofly-reflect-poison` (after maxDequeueCount=5 per host.json).
  * Names MUST match the Terraform-provisioned queues + the API producer/consumer.
  */
-const QUEUES = ["round-brief-pdf", "round-brief-pdf-poison"];
+const QUEUES = [
+  "round-brief-pdf",
+  "round-brief-pdf-poison",
+  "signtofly-reflect",
+  "signtofly-reflect-poison",
+];
 
 /**
  * Build a Shared Key Authorization header for an Azure Blob Storage PUT

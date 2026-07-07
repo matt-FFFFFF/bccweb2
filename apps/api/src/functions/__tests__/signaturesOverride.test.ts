@@ -1,21 +1,32 @@
 import { createHash, randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Round, RoundBrief, Signature, SignToFlyWording } from "@bccweb/types";
 import { makeAuthRequest, invoke } from "../../__tests__/helpers/api.js";
 import { makeUser, readPrivateJson, writePrivateJson } from "../../__tests__/helpers/seed.js";
 import { getPrivateContainer } from "../../__tests__/helpers/azurite.js";
 import { signaturePath, writeSignature } from "../../lib/signTofly/ledger.js";
 import { computeBriefHash } from "../../lib/signTofly/briefVersion.js";
+import { reflectRoundSignToFly } from "../../lib/signTofly/reflect.js";
+import { enqueueSignToFlyReflect } from "../../lib/queue.js";
+
+vi.mock("../../lib/queue.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/queue.js")>()),
+  enqueueSignToFlyReflect: vi.fn(),
+}));
+
 import "../signatures.js";
 
 describe("signature override endpoint", () => {
   it("admin can override -> 201 with source:'coord-override', overrideReason, overrideBy", async () => {
     const ctx = await seedSignableRound();
     const { user: admin } = await makeUser({ roles: ["Admin"] });
+    const enqueueMock = vi.mocked(enqueueSignToFlyReflect);
 
     const res = await overrideSign(ctx, admin.id, admin.email);
 
     expect(res.status).toBe(201);
+    expect(enqueueMock).toHaveBeenCalledTimes(1);
+    expect(enqueueMock).toHaveBeenCalledWith({ roundId: ctx.roundId });
     expect(res.jsonBody).toMatchObject({
       source: "coord-override",
       overrideReason: VALID_REASON,
@@ -23,6 +34,9 @@ describe("signature override endpoint", () => {
       userId: admin.id,
       pilotId: ctx.pilotId,
     });
+    await reflectRoundSignToFly(ctx.roundId);
+    const round = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
+    expect(round?.teams[0].pilots[0].signToFly).toBe(true);
   });
 
   it("RoundsCoord scoped to round's club can override -> 201", async () => {

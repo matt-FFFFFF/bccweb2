@@ -1,23 +1,35 @@
 import { createHash, randomUUID } from "node:crypto";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { Round, RoundBrief, Signature, SignToFlyWording } from "@bccweb/types";
 import { makeAuthRequest, invoke } from "../../__tests__/helpers/api.js";
 import { makeUser, readPrivateJson, writePrivateJson } from "../../__tests__/helpers/seed.js";
 import { signaturePath } from "../../lib/signTofly/ledger.js";
 import { computeBriefHash } from "../../lib/signTofly/briefVersion.js";
+import { reflectRoundSignToFly } from "../../lib/signTofly/reflect.js";
+import { enqueueSignToFlyReflect } from "../../lib/queue.js";
+
+vi.mock("../../lib/queue.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/queue.js")>()),
+  enqueueSignToFlyReflect: vi.fn(),
+}));
+
 import "../signatures.js";
 
 describe("signature endpoints", () => {
   it("pilot signs own slot -> 201 + signature blob exists at correct path; slot.signToFly = true", async () => {
     const ctx = await seedSignableRound();
+    const enqueueMock = vi.mocked(enqueueSignToFlyReflect);
 
     const res = await sign(ctx);
 
     expect(res.status).toBe(201);
+    expect(enqueueMock).toHaveBeenCalledTimes(1);
+    expect(enqueueMock).toHaveBeenCalledWith({ roundId: ctx.roundId });
     const sig = res.jsonBody as Signature;
     expect(sig.pilotId).toBe(ctx.pilotId);
     expect(sig.ip).toBe("203.0.113.10");
     expect(await readPrivateJson<Signature>(signaturePath(ctx.roundId, ctx.teamId, 1, 1))).toEqual(sig);
+    await reflectRoundSignToFly(ctx.roundId);
     const round = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
     expect(round?.teams[0].pilots[0].signToFly).toBe(true);
   });

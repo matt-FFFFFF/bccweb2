@@ -5,7 +5,7 @@ import { invoke, makeAuthRequest } from "../../__tests__/helpers/api.js";
 import { makeUser, privateBlobExists, readPrivateJson, writePrivateJson } from "../../__tests__/helpers/seed.js";
 import { computeBriefHash } from "../../lib/signTofly/briefVersion.js";
 import { writeSignature } from "../../lib/signTofly/ledger.js";
-import { reflectCurrentSignature } from "../signatures.js";
+import { reflectRoundSignToFly } from "../../lib/signTofly/reflect.js";
 import "../signatures.js";
 
 interface SignContext {
@@ -79,13 +79,13 @@ describe("G2 — signing requires a frozen, untampered brief", () => {
   });
 });
 
-describe("R6 — reflectCurrentSignature re-checks status + frozen version under the round lease", () => {
+describe("R6 — reflectRoundSignToFly re-checks status + frozen version under the round lease", () => {
   it("sets signToFly when status is BriefComplete AND latest signature matches the current frozen brief version", async () => {
     const ctx = await seedSignableRound({ status: "BriefComplete" });
     await seedBrief(ctx.roundId, 1, { frozen: true });
     await writeSignature(makeSig(ctx, 1));
 
-    await reflectCurrentSignature(ctx.roundId, ctx.teamId, 1);
+    await reflectRoundSignToFly(ctx.roundId);
 
     const round = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
     expect(round?.teams[0].pilots[0].signToFly).toBe(true);
@@ -96,7 +96,7 @@ describe("R6 — reflectCurrentSignature re-checks status + frozen version under
     await seedBrief(ctx.roundId, 1, { frozen: true });
     await writeSignature(makeSig(ctx, 1));
 
-    await reflectCurrentSignature(ctx.roundId, ctx.teamId, 1);
+    await reflectRoundSignToFly(ctx.roundId);
 
     const round = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
     expect(round?.teams[0].pilots[0].signToFly).toBe(false);
@@ -107,7 +107,7 @@ describe("R6 — reflectCurrentSignature re-checks status + frozen version under
     await seedBrief(ctx.roundId, 2, { frozen: true }); // current frozen brief is v2
     await writeSignature(makeSig(ctx, 1)); // latest signature is pinned to v1
 
-    await reflectCurrentSignature(ctx.roundId, ctx.teamId, 1);
+    await reflectRoundSignToFly(ctx.roundId);
 
     const round = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
     expect(round?.teams[0].pilots[0].signToFly).toBe(false);

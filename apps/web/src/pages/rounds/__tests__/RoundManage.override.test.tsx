@@ -122,6 +122,43 @@ describe("RoundManage override sign", () => {
       );
     });
   });
+
+  it("admin sees Re-sync Sign-to-Fly button and clicking it calls the endpoint and reloads", async () => {
+    renderPage();
+
+    const btn = await screen.findByRole("button", { name: "Re-sync Sign-to-Fly" });
+    expect(btn).toBeVisible();
+
+    const initialGets = state.apiGet.mock.calls.length;
+
+    fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(state.apiPost).toHaveBeenCalledWith("rounds/round-1/reflect-sign-to-fly");
+    });
+    
+    await waitFor(() => {
+      expect(state.apiGet.mock.calls.length).toBeGreaterThan(initialGets);
+    });
+  });
+
+  it("non-admin / non-coord does NOT see Re-sync Sign-to-Fly button", async () => {
+    state.identity = makeIdentity({ roles: ["Pilot"], clubId: "club-1" });
+
+    renderPage();
+
+    expect(screen.queryByRole("button", { name: "Re-sync Sign-to-Fly" })).not.toBeInTheDocument();
+  });
+
+  it("locked round does NOT show Re-sync Sign-to-Fly button", async () => {
+    state.round = makeRound({ status: "Locked" });
+    state.apiGet.mockImplementation(async () => state.round);
+
+    renderPage();
+
+    await screen.findByText("Pat Pilot");
+    expect(screen.queryByRole("button", { name: "Re-sync Sign-to-Fly" })).not.toBeInTheDocument();
+  });
 });
 
 function renderPage() {

@@ -30,6 +30,8 @@ import "./functions/admin.js";
 // Phase 4 — Brief + PureTrack endpoints
 import "./functions/brief.js";
 import "./functions/briefPdf.js";
+// Sign-to-fly async reflect (queue trigger)
+import "./functions/signaturesReflect.js";
 import "./functions/puretrack.js";
 
 // Phase 5 — Auth + User Management
