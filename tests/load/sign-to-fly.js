@@ -185,7 +185,8 @@ export default function (data) {
       sign5xx.add(1);
     }
     check(res, {
-      "sign 200": (r) => r.status === 200,
+      // First-time sign returns 201; idempotent re-sign returns 200. Both are OK.
+      "sign ok": (r) => r.status === 200 || r.status === 201,
     });
   }
 }

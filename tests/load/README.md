@@ -19,7 +19,7 @@ The load test is split into phases because k6 (based on Goja) cannot easily shar
 1.  **Prepare** (`make loadtest-prepare`): Creates a dedicated load-test round with 50 teams and 500 slots. It generates `tests/load/.prepared-round.json` which contains the metadata needed by k6.
 2.  **Register** (`make loadtest-register`): 500 virtual users (VUs) log in and call `/register-self` concurrently. This is the primary contention point for the round blob lease.
 3.  **Transition** (`make loadtest-transition`): A single administrative call to move the round to the "Brief Complete" status, enabling the signing phase.
-4.  **Sign** (`make loadtest-sign`): 500 VUs call the `/sign` endpoint concurrently to complete their Sign-to-Fly declaration.
+4.  **Sign** (`make loadtest-sign`): a `ramping-vus` executor drives 10 → 25 → 50 → 100 concurrent VUs calling the `/sign` endpoint on the same round to find the contention knee. A hard `sign_5xx: count==0` threshold fails the run on any sign-phase 5xx.
 5.  **Verify** (`make loadtest-verify`): Logs in as admin, checks that all expected signatures persisted, waits up to 30 seconds for `slot.signToFly` to be materialized by the async `signtofly-reflect` queue consumer, and re-signs one slot to prove idempotency returns the same signature id.
 6.  **Cleanup** (`make loadtest-cleanup`): Deletes the load-test round and its associated signatures to return the storage to a clean state.
 
@@ -93,7 +93,7 @@ k6 produces a summary at the end of each phase. Look for these key metrics:
 
 - `http_req_duration`: End-to-end request time (p90, p95).
 - `http_req_failed`: The percentage of failed requests.
-- `checks`: The success rate of the "login 200", "register ok", and "sign 200" assertions.
+- `checks`: The success rate of the "login 200", "register ok", and "sign ok" assertions.
 
 The register phase remains the primary lease-contention measurement and retries transient lease conflicts. The sign phase is a hard gate: server-side 5xx responses fail the k6 run. After k6 exits, `make loadtest-verify` is the correctness gate for persisted state: it fails non-zero if the signature ledger count is not the expected 500, if `signToFly` remains false after the bounded async drain window, or if re-signing an already signed slot creates a different signature id.
 
@@ -101,11 +101,11 @@ The register phase remains the primary lease-contention measurement and retries 
 
 ### Baseline Metrics (Local)
 
-> **These are illustrative observations, not SLO gates.** k6 runs in advisory mode (no thresholds configured — see [§Interpreting output](#interpreting-output)). Numbers vary by hardware, contention, Azurite version. Don't compare local to Azure.
+> **These are illustrative observations, not SLO gates.** The register phase runs in advisory mode (no thresholds); the sign phase is hard-gated on 5xx (see [§Interpreting output](#interpreting-output)). Numbers vary by hardware, contention, Azurite version. Don't compare local to Azure.
 
 As a reference, these metrics were observed on a standard local dev stack:
 - **Register phase**: 500 VUs finished in ~7m 40s.
-- **Sign phase**: 500 VUs finished in ~8m 00s.
+- **Sign phase**: staged ramp 10 → 25 → 50 → 100 concurrent VUs on one round (~2m20s of staged load; the `sign_5xx` gate must stay at 0).
 
 ## Local vs Azure Differences
 
