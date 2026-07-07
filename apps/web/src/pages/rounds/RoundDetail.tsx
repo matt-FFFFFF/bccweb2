@@ -7,6 +7,7 @@ import { api, ApiError } from "../../lib/api.js";
 import { StatusBadge } from "../../components/StatusBadge.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
 import { IgcUploadButton } from "./components/IgcUploadButton.js";
+import { CoordIgcTable } from "./components/CoordIgcTable.js";
 
 type BriefWithVersion = RoundBrief & { version?: number };
 
@@ -528,6 +529,8 @@ export default function RoundDetail() {
           </div>
         </section>
       )}
+
+      {canManage && <CoordIgcTable round={round} onChanged={loadRound} />}
     </div>
   );
 }
