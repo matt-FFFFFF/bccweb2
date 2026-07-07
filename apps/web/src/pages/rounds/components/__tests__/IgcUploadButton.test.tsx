@@ -1,5 +1,6 @@
+import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
-import { expect, test, vi, beforeEach } from "vitest";
+import { expect, test, vi, beforeEach, afterEach } from "vitest";
 import { IgcUploadButton } from "../IgcUploadButton.js";
 
 // Mock fetch globally
@@ -7,6 +8,10 @@ const originalFetch = globalThis.fetch;
 
 beforeEach(() => {
   globalThis.fetch = vi.fn();
+});
+
+afterEach(() => {
+  globalThis.fetch = originalFetch;
 });
 
 test("shows spinner, calls api, and displays success distance", async () => {

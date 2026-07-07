@@ -136,9 +136,9 @@ async function recordManualFlight(
   if (body.dateTime !== undefined && typeof body.dateTime !== "string") {
     throw new HttpError(400, "BAD_REQUEST", "dateTime must be a string");
   }
-  const url = body.url as string | undefined;
-  const duration = body.duration as number | undefined;
-  const dateTime = body.dateTime as string | undefined;
+  const url = body.url;
+  const duration = body.duration;
+  const dateTime = body.dateTime;
 
   let oldIgcPath: string | undefined;
   let savedFlight: Flight | undefined;

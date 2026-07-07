@@ -6,8 +6,10 @@ import type { IGCFile } from "igc-parser";
 import { runSanityChecks, type SanityFlag } from "./igcSanity.js";
 
 const require = createRequire(import.meta.url);
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 const igcXcScoreModule: IgcXcScoreModule = require("igc-xc-score");
 const { solver, scoringRules } = igcXcScoreModule;
+// eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
 const igcXcScorePackage: IgcXcScorePackage = require("igc-xc-score/package.json");
 const pkgVersion: string = igcXcScorePackage.version;
 
@@ -101,6 +103,9 @@ function scoringResult(
   };
 }
 
+// scoreIgc is intentionally async (stable Promise-returning API contract for a scoring
+// operation); the current igc-xc-score solver is synchronous CPU work.
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function scoreIgc(input: ScoreIgcInput): Promise<ScoreIgcResult> {
   let flight: IGCFile;
   try {
