@@ -21,7 +21,7 @@ import type {
   SignToFlyWording,
 } from "@bccweb/types";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { invoke, makeAuthRequest } from "../../__tests__/helpers/api.js";
+import { invoke, invokeQueue, makeAuthRequest } from "../../__tests__/helpers/api.js";
 import {
   makeClub,
   makeClubTeam,
@@ -93,6 +93,7 @@ import { enqueueBriefPdf } from "../../lib/queue.js";
 import "../roundsMutate.js";
 import "../teams.js";
 import "../signatures.js";
+import "../signaturesReflect.js";
 import "../brief.js";
 
 interface E2ECtx {
@@ -316,6 +317,7 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
       }),
     );
     expect(signRes.status).toBe(201);
+    await invokeQueue("signToFlyReflect", { roundId }, {});
     const roundAfterSign = await readPrivateJson<Round>(`rounds/${roundId}.json`);
     expect(roundAfterSign?.teams[0]?.pilots[0]?.signToFly).toBe(true);
 

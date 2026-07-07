@@ -10,7 +10,7 @@ import type {
   SignToFlyWording,
 } from "@bccweb/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { makeAuthRequest, invoke } from "../../__tests__/helpers/api.js";
+import { invoke, invokeQueue, makeAuthRequest } from "../../__tests__/helpers/api.js";
 import { getPrivateContainer, getPublicContainer } from "../../__tests__/helpers/azurite.js";
 import {
   makeClub,
@@ -101,6 +101,7 @@ import { recomputeSeason } from "../../lib/recompute.js";
 import "../roundsMutate.js";
 import "../teams.js";
 import "../signatures.js";
+import "../signaturesReflect.js";
 import "../brief.js";
 
 describe("round lifecycle integration", () => {
@@ -135,6 +136,7 @@ describe("round lifecycle integration", () => {
 
     const signRes = await signOwnSlot(ctx);
     expect(signRes.status).toBe(201);
+    await invokeQueue("signToFlyReflect", { roundId: ctx.roundId }, {});
     const signedBeforeLock = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
     expect(signedBeforeLock?.teams[0].pilots[0].signToFly).toBe(true);
 
