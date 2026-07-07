@@ -532,6 +532,42 @@ export interface Round {
   scoring?: RoundScoringSnapshot;
 }
 
+export type RescoreJobStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "partial"
+  | "failed";
+
+export interface RescoreJobCounts {
+  rescoredCount: number;
+  skippedManualCount: number;
+  skippedNoIgcCount: number;
+  skippedBudgetCount: number;
+  errorCount: number;
+}
+
+export interface RescoreJob {
+  jobId: string;
+  roundId: string;
+  status: RescoreJobStatus;
+  requestedByEmail: string;
+  requestedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  counts?: RescoreJobCounts;
+  errors?: Array<{ teamId: string; place: number; error: string }>;
+  scoredByVersion?: string;
+}
+
+export interface RescoreJobMessage {
+  jobId: string;
+  roundId: string;
+  requestedByEmail: string;
+  requestedByIp: string;
+  requestedAt: string;
+}
+
 // ─── Sign-to-Fly / Audit ─────────────────────────────────────────────────────
 
 export interface Signature {
