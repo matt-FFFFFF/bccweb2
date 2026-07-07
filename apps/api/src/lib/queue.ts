@@ -9,6 +9,10 @@ export interface BriefPdfJob {
   pdfAttemptId: string;
 }
 
+export interface SignToFlyReflectJob {
+  roundId: string;
+}
+
 // STRICT on purpose. The storage queue is NOT covered by the public-container
 // privacy scanner (scripts/privacy-scan.mjs), so `.strict()` is the compensating
 // control: it rejects ANY extra key (e.g. a PII field) at parse time, before the
@@ -27,21 +31,29 @@ export const BriefPdfJobSchema = z
   })
   .strict();
 
+// STRICT on purpose. The storage queue is NOT covered by the public-container
+// privacy scanner (scripts/privacy-scan.mjs), so `.strict()` is the compensating
+// control: it rejects ANY extra key (e.g. a PII field) at parse time, before the
+// job can be serialised into a queue message. Never add a field here beyond
+// { roundId }, and never drop `.strict()`.
+export const SignToFlyReflectJobSchema = z
+  .object({ roundId: z.string().min(1) })
+  .strict();
+
 // ─── Client singleton ─────────────────────────────────────────────────────────
 
-const QUEUE_NAME = "round-brief-pdf";
-
-let _queueClient: QueueClient | null = null;
+const _clients = new Map<string, QueueClient>();
 
 // TEST-ONLY: clears the cached QueueClient so the next enqueue re-reads
 // AzureWebJobsStorage from env. Mirrors resetBlobSingletons in lib/blob.ts;
 // wired into __tests__/helpers/setup.ts so each test file starts clean.
 export function resetQueueSingletons(): void {
-  _queueClient = null;
+  _clients.clear();
 }
 
-function getQueueClient(): QueueClient {
-  if (_queueClient) return _queueClient;
+function getQueueClient(queueName: string): QueueClient {
+  const cached = _clients.get(queueName);
+  if (cached) return cached;
   // AzureWebJobsStorage is the ONLY setting carrying a QueueEndpoint in
   // local/docker, and it equals the queue trigger's `connection`, so producer
   // and trigger can never diverge. Do NOT fall back to BLOB_CONNECTION_STRING
@@ -52,8 +64,9 @@ function getQueueClient(): QueueClient {
       "AzureWebJobsStorage environment variable is not set (required to enqueue brief-PDF jobs)",
     );
   }
-  _queueClient = new QueueClient(connectionString, QUEUE_NAME);
-  return _queueClient;
+  const queueClient = new QueueClient(connectionString, queueName);
+  _clients.set(queueName, queueClient);
+  return queueClient;
 }
 
 // ─── Producer ─────────────────────────────────────────────────────────────────
@@ -69,5 +82,21 @@ function getQueueClient(): QueueClient {
 export async function enqueueBriefPdf(job: BriefPdfJob): Promise<void> {
   const parsed = BriefPdfJobSchema.parse(job);
   const message = Buffer.from(JSON.stringify(parsed)).toString("base64");
-  await getQueueClient().sendMessage(message);
+  await getQueueClient("round-brief-pdf").sendMessage(message);
+}
+
+/**
+ * Enqueue a SignToFly reflection job onto the `signtofly-reflect` queue.
+ *
+ * Parses the job FIRST (strict schema) so a bad/extra field is rejected before
+ * anything is serialised — no PII can leak into a queue message. The validated
+ * JSON is base64-encoded to match the v4 storage-queue trigger, which
+ * base64-decodes then JSON-parses the message body.
+ */
+export async function enqueueSignToFlyReflect(
+  job: SignToFlyReflectJob,
+): Promise<void> {
+  const parsed = SignToFlyReflectJobSchema.parse(job);
+  const message = Buffer.from(JSON.stringify(parsed)).toString("base64");
+  await getQueueClient("signtofly-reflect").sendMessage(message);
 }
