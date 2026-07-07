@@ -298,6 +298,27 @@ describe("round lifecycle integration", () => {
     expect((await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))?.maxTeams).toBe(8);
   });
 
+  it("updateRound on a Locked round returns 409 CONFLICT and leaves fields unchanged", async () => {
+    const ctx = await seedLifecycleRound({ status: "Locked", isLocked: true });
+
+    const res = await updateRoundMeta(ctx, { maxTeams: 4 });
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code?: string; error?: string }).code).toBe("CONFLICT");
+    expect((res.jsonBody as { error?: string }).error).toBe("Conflict");
+    expect((await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))?.maxTeams).toBe(8);
+  });
+
+  it("updateRound with an unknown siteId returns 409 CONFLICT and leaves the site unchanged", async () => {
+    const ctx = await seedLifecycleRound({ status: "Proposed" });
+
+    const res = await updateRoundMeta(ctx, { siteId: randomUUID() });
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code?: string }).code).toBe("CONFLICT");
+    expect((await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))?.site.id).toBe(ctx.siteId);
+  });
+
   it("brief edit when round is Locked returns 409 BRIEF_LOCKED", async () => {
     const ctx = await seedLifecycleRound({ status: "Locked", isLocked: true });
     await seedBrief(ctx);

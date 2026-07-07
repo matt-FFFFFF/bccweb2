@@ -95,17 +95,14 @@ async function mutateLocked(
       authorize(r);
       const err = mutateFn(r);
       if (err) {
-        const e = new Error(err);
-        (e as { isValidation?: boolean }).isValidation = true;
-        throw e;
+        throw new HttpError(409, "CONFLICT", err);
       }
       await writePrivateJson(path, RoundSchema, r, leaseId);
       return r;
     });
   } catch (e: unknown) {
     if (e instanceof HttpError) throw e;
-    const err = e as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (err.isValidation) throw new HttpError(409, "CONFLICT", err.message);
+    const err = e as { statusCode?: number };
     if (err.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
     throw new HttpError(500, "INTERNAL");
   }
