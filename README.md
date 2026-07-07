@@ -145,4 +145,4 @@ round/club/pilot decision matrix.
 
 ## License
 
-Private / unlicensed. Internal BCC project.
+Mozilla Public License 2.0 (MPL-2.0) — see LICENSE.
