@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { randomUUID } from "node:crypto";
+import { BlockBlobClient } from "@azure/storage-blob";
+import { BriefSchema, RoundSchema } from "@bccweb/schemas";
+import { describe, expect, it, vi } from "vitest";
 import type { PilotSlot, Round, RoundBrief, Signature } from "@bccweb/types";
-import { materializeSignToFly } from "../reflect.js";
+import { getPrivateBlobClient } from "../../blob.js";
+import { readJson, writePrivateJson } from "../../blobJson.js";
+import { materializeSignToFly, reflectRoundSignToFly } from "../reflect.js";
+import { writeSignature } from "../ledger.js";
 
 describe("materializeSignToFly", () => {
   it("sets slots from current, stale, absent, and override signatures", () => {
@@ -105,7 +111,101 @@ describe("materializeSignToFly", () => {
   });
 });
 
-function makeRound(pilots: PilotSlot[]): Round {
+describe("reflectRoundSignToFly", () => {
+  it("persists signToFly true for a current signature", async () => {
+    // Given: a BriefComplete round, current brief, and matching signature blob.
+    const roundId = randomUUID();
+    const round = makeRound([makeSlot({ signToFly: false })], { id: roundId });
+    await seedRound(round);
+    await seedBrief(makeBrief({ roundId, version: 1 }));
+    await writeSignature(makeSignature({ roundId, briefVersion: 1 }));
+
+    // When: the round-level reflector replays the ledger.
+    await reflectRoundSignToFly(roundId);
+
+    // Then: the persisted round blob carries the materialized flag.
+    expect(slotFlags(await readRound(roundId))).toEqual([true]);
+  });
+
+  it("persists signToFly false when only stale signatures exist", async () => {
+    // Given: a v2 brief and only a stale v1 signature for a true slot.
+    const roundId = randomUUID();
+    const round = makeRound([makeSlot({ signToFly: true })], { id: roundId });
+    await seedRound(round);
+    await seedBrief(makeBrief({ roundId, version: 2 }));
+    await writeSignature(makeSignature({ roundId, briefVersion: 1 }));
+
+    // When: the ledger is materialized against the current brief inside the lease.
+    await reflectRoundSignToFly(roundId);
+
+    // Then: stale signatures do not keep persisted sign-to-fly flags alive.
+    expect(slotFlags(await readRound(roundId))).toEqual([false]);
+  });
+
+  it("silently no-ops without a write when the round is not BriefComplete", async () => {
+    // Given: a Locked round with an existing current signature.
+    const roundId = randomUUID();
+    const round = makeRound([makeSlot({ signToFly: false })], {
+      id: roundId,
+      status: "Locked",
+    });
+    await seedRound(round);
+    await seedBrief(makeBrief({ roundId, version: 1 }));
+    await writeSignature(makeSignature({ roundId, briefVersion: 1 }));
+    const uploadSpy = vi.spyOn(BlockBlobClient.prototype, "upload");
+
+    // When: reflection runs for a non-BriefComplete round.
+    try {
+      await reflectRoundSignToFly(roundId);
+
+      // Then: it does not throw, mutate flags, or upload a new round blob.
+      expect(uploadSpy).not.toHaveBeenCalled();
+      expect(slotFlags(await readRound(roundId))).toEqual([false]);
+    } finally {
+      uploadSpy.mockRestore();
+    }
+  });
+
+  it("silently no-ops when the brief blob is missing", async () => {
+    // Given: a BriefComplete round has no round-briefs/{id}.json blob.
+    const roundId = randomUUID();
+    const round = makeRound([makeSlot({ signToFly: false })], { id: roundId });
+    await seedRound(round);
+    await writeSignature(makeSignature({ roundId, briefVersion: 1 }));
+
+    // When/Then: the missing brief is not swallowed as success for mutation.
+    await expect(reflectRoundSignToFly(roundId)).resolves.toBeUndefined();
+    expect(slotFlags(await readRound(roundId))).toEqual([false]);
+  });
+
+  it("retries lease contention when concurrent reflect jobs race", async () => {
+    // Given: one current signature and many jobs for the same round blob.
+    const roundId = randomUUID();
+    const round = makeRound([makeSlot({ signToFly: false })], { id: roundId });
+    await seedRound(round);
+    await seedBrief(makeBrief({ roundId, version: 1 }));
+    await writeSignature(makeSignature({ roundId, briefVersion: 1 }));
+
+    // When: twenty-five reflections run concurrently.
+    const results = await Promise.allSettled(
+      Array.from({ length: 25 }, () => reflectRoundSignToFly(roundId)),
+    );
+
+    // Then: no lease conflict escapes and persisted state is correct.
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(0);
+    expect(slotFlags(await readRound(roundId))).toEqual([true]);
+  });
+
+  it("propagates a missing round so the queue consumer can retry", async () => {
+    // Given: no rounds/{id}.json blob exists.
+    const roundId = randomUUID();
+
+    // When/Then: missing round acquisition/read errors are not swallowed.
+    await expect(reflectRoundSignToFly(roundId)).rejects.toMatchObject({ statusCode: 404 });
+  });
+});
+
+function makeRound(pilots: PilotSlot[], overrides: Partial<Round> = {}): Round {
   return {
     id: "round-1",
     date: "2026-07-07",
@@ -124,6 +224,7 @@ function makeRound(pilots: PilotSlot[]): Round {
         pilots,
       },
     ],
+    ...overrides,
   };
 }
 
@@ -176,4 +277,17 @@ function makeSignature(overrides: Partial<Signature>): Signature {
 
 function slotFlags(round: Round): boolean[] {
   return round.teams.flatMap((team) => team.pilots.map((slot) => slot.signToFly));
+}
+
+async function seedRound(round: Round): Promise<void> {
+  await writePrivateJson(`rounds/${round.id}.json`, RoundSchema, round);
+}
+
+async function seedBrief(brief: RoundBrief & { version?: number }): Promise<void> {
+  await writePrivateJson(`round-briefs/${brief.roundId}.json`, BriefSchema, brief);
+}
+
+async function readRound(roundId: string): Promise<Round> {
+  const path = `rounds/${roundId}.json`;
+  return readJson(getPrivateBlobClient(path), RoundSchema, path);
 }
