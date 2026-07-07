@@ -127,6 +127,17 @@ function igcHeaders(filename: string) {
   };
 }
 
+async function uploadFixtureIgc(r: SeededRound): Promise<void> {
+  const { user } = await bootstrapAdmin();
+  const req = withFile(
+    makeAuthRequest(user.id, user.email, { method: "POST", params: paramsFor(r) }),
+    igcFile(D3P),
+  );
+
+  const res = await invoke("uploadIgc", req);
+  expect(res.status).toBe(200);
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────────
 
 describe("uploadIgc — POST /rounds/{id}/teams/{teamId}/pilots/{place}/igc", () => {
@@ -395,5 +406,70 @@ describe("getIgc — GET /rounds/{id}/teams/{teamId}/pilots/{place}/igc", () => 
     const res = await invoke("getIgc", req);
 
     expect(res.status).toBe(404);
+  });
+});
+
+describe("deleteIgc — DELETE /rounds/{id}/teams/{teamId}/pilots/{place}/igc", () => {
+  it("401 when unauthenticated", async () => {
+    const r = await seedRound();
+    const req = makeRequest({ method: "DELETE", params: paramsFor(r) });
+
+    const res = await invoke("deleteIgc", req);
+
+    expect(res.status).toBe(401);
+  });
+
+  it("403 when a Pilot requests deletion", async () => {
+    const r = await seedRound({ pilotId: randomUUID() });
+    await uploadFixtureIgc(r);
+    const { user } = await makeUser({ roles: ["Pilot"], pilotId: r.pilotId ?? randomUUID() });
+    const req = makeAuthRequest(user.id, user.email, { method: "DELETE", params: paramsFor(r) });
+
+    const res = await invoke("deleteIgc", req);
+
+    expect(res.status).toBe(403);
+  });
+
+  it("409 ROUND_NOT_LOCKED when the round is not Locked", async () => {
+    const r = await seedRound();
+    await uploadFixtureIgc(r);
+    const round = await readPrivateJson<Round>(`rounds/${r.roundId}.json`);
+    if (!round) throw new Error("round fixture missing");
+    round.status = "BriefComplete";
+    round.isLocked = false;
+    await writePrivateJson(`rounds/${r.roundId}.json`, round);
+    const { user } = await bootstrapAdmin();
+    const req = makeAuthRequest(user.id, user.email, { method: "DELETE", params: paramsFor(r) });
+
+    const res = await invoke("deleteIgc", req);
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("ROUND_NOT_LOCKED");
+  });
+
+  it("404 when the slot has no IGC yet", async () => {
+    const r = await seedRound();
+    const { user } = await bootstrapAdmin();
+    const req = makeAuthRequest(user.id, user.email, { method: "DELETE", params: paramsFor(r) });
+
+    const res = await invoke("deleteIgc", req);
+
+    expect(res.status).toBe(404);
+  });
+
+  it("204 removes the slot flight, zeroes pilot points, and deletes the blob", async () => {
+    const r = await seedRound();
+    await uploadFixtureIgc(r);
+    const { user } = await bootstrapAdmin();
+    const req = makeAuthRequest(user.id, user.email, { method: "DELETE", params: paramsFor(r) });
+
+    const res = await invoke("deleteIgc", req);
+
+    expect(res.status).toBe(204);
+    const stored = await readPrivateJson<Round>(`rounds/${r.roundId}.json`);
+    const slot = stored?.teams[0]?.pilots[0];
+    expect(slot?.flight).toBeNull();
+    expect(slot?.pilotPoints).toBe(0);
+    expect(await privateBlobExists(`flight-igcs/${r.roundId}/${r.pilotId}.igc`)).toBe(false);
   });
 });

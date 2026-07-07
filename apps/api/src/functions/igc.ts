@@ -73,6 +73,15 @@ function canWriteSlotIgc(
   );
 }
 
+function canDeleteSlotIgc(caller: CallerIdentity, round: Round): boolean {
+  if (caller.roles.includes("Admin")) return true;
+  return (
+    caller.roles.includes("RoundsCoord") &&
+    caller.clubId !== null &&
+    round.organisingClub?.id === caller.clubId
+  );
+}
+
 /**
  * Best-effort expected pilot name for the IGC_PILOT_MISMATCH sanity check. The
  * round slot's `snapshot` does NOT carry a name, so resolve it from the pilot
@@ -253,6 +262,54 @@ async function getIgc(
   };
 }
 
+async function deleteIgc(
+  req: HttpRequest,
+  _ctx: InvocationContext,
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const id = req.params["id"];
+  const teamId = req.params["teamId"];
+  const place = parseInt(req.params["place"] ?? "", 10);
+  if (!id || !teamId || !Number.isInteger(place)) {
+    throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
+  }
+
+  const roundPath = `rounds/${id}.json`;
+  const round = await readRoundOr404(roundPath);
+
+  const slot = findSlot(round, teamId, place);
+  if (!slot) throw new HttpError(404, "NOT_FOUND", "Pilot slot not found");
+
+  if (!canDeleteSlotIgc(caller, round)) return forbiddenResponse();
+
+  if (round.status !== "Locked") {
+    throw new HttpError(409, "ROUND_NOT_LOCKED", `Round status is ${round.status}`);
+  }
+
+  if (!slot.flight?.igcPath) {
+    throw new HttpError(404, "NOT_FOUND", "IGC not found");
+  }
+
+  let oldPath = "";
+  await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
+    const current = (await readBlob(getPrivateBlobClient(roundPath))) as Round;
+    const currentSlot = findSlot(current, teamId, place);
+    if (!currentSlot) throw new HttpError(404, "NOT_FOUND", "Pilot slot not found");
+    if (!currentSlot.flight?.igcPath) {
+      throw new HttpError(404, "NOT_FOUND", "IGC not found");
+    }
+    oldPath = currentSlot.flight.igcPath;
+    currentSlot.flight = null;
+    currentSlot.pilotPoints = 0;
+    await writePrivateJson(roundPath, RoundSchema, current, leaseId);
+  });
+
+  await getPrivateBlockBlobClient(oldPath).deleteIfExists();
+  return { status: 204 };
+}
+
 // ─── Registration ───────────────────────────────────────────────────────────────
 
 app.http("uploadIgc", {
@@ -267,4 +324,11 @@ app.http("getIgc", {
   authLevel: "anonymous",
   route: "rounds/{id}/teams/{teamId}/pilots/{place}/igc",
   handler: withErrorHandler(getIgc),
+});
+
+app.http("deleteIgc", {
+  methods: ["DELETE"],
+  authLevel: "anonymous",
+  route: "rounds/{id}/teams/{teamId}/pilots/{place}/igc",
+  handler: withErrorHandler(deleteIgc),
 });
