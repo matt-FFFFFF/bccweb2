@@ -61,7 +61,7 @@ function getQueueClient(queueName: string): QueueClient {
   const connectionString = process.env["AzureWebJobsStorage"];
   if (!connectionString) {
     throw new Error(
-      "AzureWebJobsStorage environment variable is not set (required to enqueue brief-PDF jobs)",
+      "AzureWebJobsStorage environment variable is not set (required to enqueue storage-queue jobs)",
     );
   }
   const queueClient = new QueueClient(connectionString, queueName);
