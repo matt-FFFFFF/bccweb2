@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import "@testing-library/jest-dom/vitest";
 import { render, screen, waitFor, fireEvent } from "@testing-library/react";
 import { expect, test, vi, beforeEach, afterEach } from "vitest";

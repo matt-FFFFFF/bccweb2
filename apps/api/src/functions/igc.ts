@@ -198,9 +198,11 @@ async function uploadIgc(
   };
 
   const saved = await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
-    // Raw read (NOT readJson): FlightSchema.strip() drops igcPath/sanityFlags on a
-    // schema read, so re-reading via RoundSchema here would wipe OTHER slots' IGC
-    // results on write-back. Read raw, mutate, write (observe-mode preserves keys).
+    // Raw read (NOT readJson): `FlightSchema` now includes `igcPath`/`sanityFlags`,
+    // so a schema read via `RoundSchema` preserves OTHER slots' IGC results. The raw
+    // read is retained as a deliberate defensive choice for this lease-guarded
+    // read-modify-write (belt-and-suspenders, avoids any schema-healing side effects
+    // mid-transaction), then mutate and write.
     const current = (await readBlob(getPrivateBlobClient(roundPath))) as Round;
     const currentSlot = findSlot(current, teamId, place);
     if (!currentSlot) throw new HttpError(404, "NOT_FOUND", "Pilot slot not found");

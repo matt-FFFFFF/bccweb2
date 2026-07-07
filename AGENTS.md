@@ -115,13 +115,14 @@ full-round recompute.
 Operator recovery: `POST /api/rounds/{id}/reflect-sign-to-fly` (Admin/scoped-coord)
 synchronously re-runs the reflect and returns the corrected round.
 
-**Async rescore flow**: a trigger (e.g. IGC file upload or admin action) enqueues a
-`{ roundId, jobId }` job onto `rescore-jobs`. The `rescoreWorker` queue-trigger consumer
-(`apps/api/src/functions/rescoreWorker.ts`) re-scores the round using the IGC-based
-scoring path, writes the result, and updates the job status blob
-`rescore-jobs/{jobId}.json` (status values: `pending | processing | done | failed`).
-The Admin UI polls `GET /api/rounds/{id}/rescore/{jobId}` to surface progress and the
-final result. Dead-letter messages land on `rescore-jobs-poison` after
+**Async rescore flow**: the Admin rescore path only (`POST /api/rounds/{id}/rescore`)
+enqueues a `{ roundId, jobId }` job onto `rescore-jobs` — single-pilot IGC file upload
+stays SYNCHRONOUS and does NOT trigger this flow. The `rescoreWorker` queue-trigger
+consumer (`apps/api/src/functions/rescoreWorker.ts`) re-scores the round using the
+IGC-based scoring path, writes the result, and updates the job status blob
+`rescore-jobs/{jobId}.json` (status values: `queued | running | completed | partial |
+failed`). The Admin UI polls `GET /api/rounds/{id}/rescore/{jobId}` to surface progress
+and the final result. Dead-letter messages land on `rescore-jobs-poison` after
 `maxDequeueCount=5`; inspect the status blob + App Insights for the failure cause.
 
 **Connection invariant**: both producers (`apps/api/src/lib/queue.ts`) and all

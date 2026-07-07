@@ -11,11 +11,12 @@
  * that previously held an IGC flight, the stored `igcPath` is cleared AND the
  * backing `.igc` blob is deleted so the superseded track can never be re-scored.
  *
- * NOTE: `FlightSchema` (packages/schemas/src/round.ts) does not yet carry the IGC
- * fields (`igcPath` etc.) and is `.strip()`, so `readJson(RoundSchema)` drops
- * `igcPath` on read. To capture the old path for deletion we read the round blob
- * raw (`readBlob`) inside the lease and write it back via `writePrivateJson`
- * (observe-mode preserves unknown keys, so other slots' `igcPath` survive).
+ * NOTE: `FlightSchema` (packages/schemas/src/round.ts) now carries the IGC fields
+ * (`igcPath`, `sanityFlags`, `scoredAt`, `scoredByVersion`), so `readJson(RoundSchema)`
+ * PRESERVES `igcPath` on read. We nonetheless read the round blob raw (`readBlob`)
+ * inside the lease as a deliberate defensive choice for this lease-guarded
+ * read-modify-write — belt-and-suspenders that avoids any schema-healing side
+ * effects mid-transaction — then write it back via `writePrivateJson`.
  */
 
 import {
@@ -144,8 +145,10 @@ async function recordManualFlight(
   let savedFlight: Flight | undefined;
 
   await withPrivateLeaseRenewing(path, async (leaseId) => {
-    // Raw read (NOT readJson): FlightSchema.strip() drops `igcPath` on a schema
-    // read, so we must read the blob raw to observe the superseded IGC path.
+    // Raw read (NOT readJson): `FlightSchema` now includes `igcPath`, so a schema
+    // read would preserve it — the raw read is retained as a deliberate defensive
+    // choice for this lease-guarded read-modify-write (belt-and-suspenders, avoids
+    // any schema-healing side effects mid-transaction).
     const current = (await readBlob(getPrivateBlobClient(path))) as Round;
     const target = findSlot(current, teamId, place);
     if (!target) throw new HttpError(404, "NOT_FOUND", "Pilot slot not found");

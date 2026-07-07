@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: MPL-2.0
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Flight } from "@bccweb/types";
