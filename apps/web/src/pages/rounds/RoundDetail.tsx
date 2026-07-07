@@ -6,6 +6,7 @@ import { useAuth } from "../../hooks/useAuth.js";
 import { api, ApiError } from "../../lib/api.js";
 import { StatusBadge } from "../../components/StatusBadge.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
+import { IgcUploadButton } from "./components/IgcUploadButton.js";
 
 type BriefWithVersion = RoundBrief & { version?: number };
 
@@ -442,6 +443,21 @@ export default function RoundDetail() {
                                   ) : null}
                                 </div>
                               )}
+                              {round.status === "Locked" &&
+                                slot.status === "Filled" &&
+                                slot.pilotId === identity?.pilotId && (
+                                  <div data-testid="my-slot">
+                                    <IgcUploadButton
+                                      roundId={round.id}
+                                      teamId={team.id}
+                                      place={slot.placeInTeam}
+                                      currentFlight={slot.flight ?? null}
+                                      onUploaded={() => {
+                                        loadRound();
+                                      }}
+                                    />
+                                  </div>
+                                )}
                               {round.status === "Locked" &&
                                 slot.status === "Filled" &&
                                 (canManage ||
