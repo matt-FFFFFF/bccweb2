@@ -1,5 +1,7 @@
 import http from "k6/http";
 import { check, fail, sleep } from "k6";
+import { Counter } from "k6/metrics";
+import exec from "k6/execution";
 
 // init context — only place where open() can be used.
 const PREPARED = JSON.parse(open("./.prepared-round.json"));
@@ -8,7 +10,14 @@ if (PHASE !== "register" && PHASE !== "sign") {
   throw new Error("PHASE must be register or sign");
 }
 
-export const options = {
+// Counts sign responses with status >= 500. The sign path deliberately does NOT
+// mask 5xx (no lease-retry), so any unexpected server error lands here and —
+// via the `sign_5xx: count==0` threshold below — fails the whole run.
+const sign5xx = new Counter("sign_5xx");
+
+// REGISTER: unchanged 500-VU flood. Advisory only — NO thresholds (k6
+// thresholds gate the exit code; the stdout summary stays informational).
+const REGISTER_OPTIONS = {
   scenarios: {
     loadtest: {
       executor: "per-vu-iterations",
@@ -17,8 +26,38 @@ export const options = {
       maxDuration: "15m",
     },
   },
-  // NO thresholds — k6 thresholds gate exit code; stdout summary is advisory.
 };
+
+// SIGN: ramp concurrency 10 → 25 → 50 → 100 on the SAME prepared round and gate
+// HARD on server errors. A single sign 5xx (or >1% sign-phase HTTP failure)
+// fails the run — this is the gate that catches the sign-path concurrency bug.
+const SIGN_OPTIONS = {
+  scenarios: {
+    sign: {
+      executor: "ramping-vus",
+      startVUs: 0,
+      stages: [
+        { duration: "5s", target: 10 },
+        { duration: "30s", target: 10 },
+        { duration: "5s", target: 25 },
+        { duration: "30s", target: 25 },
+        { duration: "5s", target: 50 },
+        { duration: "30s", target: 50 },
+        { duration: "5s", target: 100 },
+        { duration: "30s", target: 100 },
+      ],
+      gracefulStop: "30s",
+    },
+  },
+  thresholds: {
+    // Any sign response with status >= 500 fails the run.
+    sign_5xx: ["count==0"],
+    // Sign-phase HTTP failures (status >= 400) must stay below 1%.
+    "http_req_failed{phase:sign}": ["rate<0.01"],
+  },
+};
+
+export const options = PHASE === "sign" ? SIGN_OPTIONS : REGISTER_OPTIONS;
 
 export function setup() {
   return PREPARED;
@@ -91,7 +130,13 @@ function vuSourceIp() {
 }
 
 export default function (data) {
-  const idx = (__VU - 1) % data.teams.length;
+  // REGISTER keeps its per-VU slot mapping unchanged. SIGN ramps VUs (each VU
+  // loops), so key the slot off the global iteration counter to give every sign
+  // a fresh, not-yet-signed slot — maximising genuine write contention.
+  const idx =
+    PHASE === "sign"
+      ? exec.scenario.iterationInTest % data.teams.length
+      : (__VU - 1) % data.teams.length;
   const slot = data.teams[idx];
   const sourceIp = vuSourceIp();
 
@@ -128,15 +173,18 @@ export default function (data) {
       "register ok": (r) => r.status === 200 || r.status === 201,
     });
   } else {
-    const result = postWithLeaseRetry(
+    // SIGN: no lease-retry — a 500 is a real failure, not something to mask.
+    // Tagged phase:sign so the http_req_failed{phase:sign} threshold scopes to
+    // exactly this request (login stays tagged name:login, excluded from it).
+    const res = http.post(
       `${data.baseUrl}/api/rounds/${data.roundId}/teams/${slot.teamId}/pilots/${slot.place}/sign`,
       null,
       { ...auth, tags: { name: "phase", phase: "sign" } },
     );
-    if (result.retries > 0) {
-      console.log(`retry phase=sign vu=${__VU} retries=${result.retries} status=${result.res.status}`);
+    if (res.status >= 500) {
+      sign5xx.add(1);
     }
-    check(result.res, {
+    check(res, {
       "sign 200": (r) => r.status === 200,
     });
   }
