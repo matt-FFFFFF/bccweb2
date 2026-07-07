@@ -5,6 +5,7 @@ import type { Round, PilotSlot, PilotSummary, Team } from "@bccweb/types";
 import { useAuth } from "../../../hooks/useAuth.js";
 import { useBlob } from "../../../hooks/useBlob.js";
 import { api } from "../../../lib/api.js";
+import { ManualFlightModal } from "./ManualFlightModal.js";
 
 interface CoordIgcTableProps {
   round: Round;
@@ -36,6 +37,9 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
   const { data: pilotsIndex } = useBlob<PilotSummary[]>("pilots.json");
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [manualSlot, setManualSlot] = useState<{ team: Team; slot: PilotSlot } | null>(
+    null,
+  );
 
   const isAdmin = identity?.roles.includes("Admin") ?? false;
   const isScopedCoord =
@@ -207,6 +211,15 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
                     <span
                       style={{ display: "inline-flex", gap: "0.4rem", flexWrap: "wrap" }}
                     >
+                      <button
+                        type="button"
+                        className="bcc-btn bcc-btn--outline"
+                        data-testid="manual-entry-btn"
+                        onClick={() => setManualSlot({ team, slot })}
+                        style={{ padding: "0.2rem 0.5rem", fontSize: "0.75rem" }}
+                      >
+                        Manual Entry
+                      </button>
                       {flight?.igcPath && (
                         <>
                           <button
@@ -254,6 +267,18 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
             })}
           </tbody>
         </table>
+      )}
+
+      {manualSlot && (
+        <ManualFlightModal
+          roundId={round.id}
+          teamId={manualSlot.team.id}
+          place={manualSlot.slot.placeInTeam}
+          pilotName={pilotName(manualSlot.slot)}
+          isOpen={manualSlot !== null}
+          onClose={() => setManualSlot(null)}
+          onSaved={() => onChanged()}
+        />
       )}
     </section>
   );
