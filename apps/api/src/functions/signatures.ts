@@ -7,18 +7,14 @@ import {
 } from "@azure/functions";
 import type { Round, RoundBrief } from "@bccweb/types";
 import { BriefSchema, RoundSchema } from "@bccweb/schemas";
-import {
-  getPrivateBlobClient,
-  withPrivateLease,
-} from "../lib/blob.js";
-import { readJson, writePrivateJson } from "../lib/blobJson.js";
+import { getPrivateBlobClient } from "../lib/blob.js";
+import { readJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { getActiveWording } from "../lib/signTofly/wording.js";
 import { computeBriefHash } from "../lib/signTofly/briefVersion.js";
 import {
   buildSignaturePayload,
-  getLatestSignature,
   listSignaturesForRound,
   overrideSignaturePath,
   readSignature,
@@ -200,7 +196,7 @@ async function overrideSlotSignature(
       pilotAndCoordSigned: Boolean(existing && existing.source !== "coord-override"),
     },
   });
-  await reflectCurrentSignature(roundId, teamId, placeNum);
+  await queueReflect(roundId);
 
   return { status: 201, jsonBody: sig };
 }
@@ -272,36 +268,6 @@ async function requireFrozenBrief(roundId: string): Promise<RoundBriefWithVersio
 function findSlot(round: Round, teamId: string, place: number) {
   const team = round.teams.find((candidate) => candidate.id === teamId);
   return team?.pilots.find((slot) => slot.placeInTeam === place) ?? null;
-}
-
-// R6: re-read status + the frozen brief version INSIDE the round lease; never
-// trust a version captured unleased. Skip unless the round is still
-// BriefComplete (a concurrent lock / re-complete must not be reflected) AND the
-// latest signature pins the now-current brief version.
-export async function reflectCurrentSignature(
-  roundId: string,
-  teamId: string,
-  place: number,
-): Promise<void> {
-  const path = `rounds/${roundId}.json`;
-  await withPrivateLease(path, async (leaseId) => {
-    const round = await readJson(getPrivateBlobClient(path), RoundSchema, path);
-    if (round.status !== "BriefComplete") return;
-
-    const brief = await readBriefOrNull(roundId);
-    if (!brief) return;
-    const currentBriefVersion = brief.version ?? 1;
-
-    const latest = await getLatestSignature(roundId, teamId, place);
-    if (latest?.briefVersion !== currentBriefVersion) return;
-
-    const slot = findSlot(round, teamId, place);
-    if (!slot) throw new HttpError(404, "NOT_FOUND", "Pilot slot not found");
-    if (!slot.signToFly) {
-      slot.signToFly = true;
-      await writePrivateJson(path, RoundSchema, round, leaseId);
-    }
-  });
 }
 
 app.http("signOwnSlot", {
