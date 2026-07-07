@@ -1682,6 +1682,15 @@ export default function RoundManage() {
               {actionBusy === a.label ? "Working…" : a.label}
             </button>
           ))}
+          {canOverrideSign && (
+            <button
+              disabled={actionBusy !== null}
+              style={btnStyle("#58151c", "#f8d7da")}
+              onClick={() => void runAction("Re-sync Sign-to-Fly", () => api.post(`rounds/${r.id}/reflect-sign-to-fly`))}
+            >
+              {actionBusy === "Re-sync Sign-to-Fly" ? "Working…" : "Re-sync Sign-to-Fly"}
+            </button>
+          )}
           {actionErr && <Banner msg={actionErr} />}
           {confirmModal && (
             <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
