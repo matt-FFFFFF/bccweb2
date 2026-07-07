@@ -8,9 +8,6 @@ import { listSignaturesForRound } from "./ledger.js";
 type RoundBriefWithVersion = RoundBrief & { version?: number };
 
 export async function reflectRoundSignToFly(roundId: string): Promise<void> {
-  // OUTSIDE the lease: the expensive prefix scan. A signature that lands AFTER
-  // this list is self-healed by its OWN reflect job (its enqueue re-triggers).
-  const signatures = await listSignaturesForRound(roundId);
   const roundPath = `rounds/${roundId}.json`;
 
   await withPrivateLeaseRetry(roundPath, async (leaseId) => {
@@ -19,6 +16,12 @@ export async function reflectRoundSignToFly(roundId: string): Promise<void> {
 
     const brief = await readBriefOrNull(roundId);
     if (!brief) return;
+
+    // List INSIDE the lease so an older reflect job cannot commit a stale
+    // signature snapshot after a newer reflect already materialized the round
+    // (cross-instance last-writer-wins would otherwise regress signToFly
+    // true -> false). The round lease serialises the snapshot with the write.
+    const signatures = await listSignaturesForRound(roundId);
 
     const changed = materializeSignToFly(round, brief, signatures);
     if (changed) await writePrivateJson(roundPath, RoundSchema, round, leaseId);
