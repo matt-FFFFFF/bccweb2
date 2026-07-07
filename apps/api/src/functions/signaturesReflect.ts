@@ -32,9 +32,9 @@ export async function handleSignToFlyReflectJob(
   }
 }
 
-export async function handleSignToFlyReflectPoison(
+export function handleSignToFlyReflectPoison(
   message: QueueMessage,
-): Promise<void> {
+): void {
   try {
     const { roundId } = parseReflectMessage(message);
     getTelemetryClient()?.trackEvent({
