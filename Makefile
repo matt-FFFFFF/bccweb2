@@ -106,12 +106,16 @@ loadtest-sign: ## k6 sign phase
 	@mkdir -p $(CURDIR)/logs/load-test
 	cd tests/load && k6 run --env PHASE=sign sign-to-fly.js | tee $(CURDIR)/logs/load-test/sign-$$(date +%s).log
 
+.PHONY: loadtest-verify
+loadtest-verify: ## Verify signatures persisted and signToFly reflected
+	node scripts/verify-loadtest-signtofly.mjs
+
 .PHONY: loadtest-cleanup
 loadtest-cleanup: ## Delete load-test round + signatures, keep fixtures
 	node scripts/cleanup-loadtest.mjs
 
 .PHONY: loadtest
-loadtest: loadtest-prepare loadtest-register loadtest-transition loadtest-sign loadtest-cleanup ## Full loadtest pipeline (prepare to cleanup)
+loadtest: loadtest-prepare loadtest-register loadtest-transition loadtest-sign loadtest-verify loadtest-cleanup ## Full loadtest pipeline (prepare to cleanup)
 	@echo "[loadtest] full pipeline complete"
 
 .PHONY: clean
