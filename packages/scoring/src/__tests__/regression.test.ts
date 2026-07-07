@@ -1,119 +1,238 @@
+/// <reference types="node" />
+
 import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
 import type { Config, Round } from "@bccweb/types";
+import { describe, expect, it } from "vitest";
+
 import { computeLeague, scoreRound } from "../index.js";
 
-const PILOT_SCORE_TOLERANCE = 0.05;
-const TEAM_SCORE_TOLERANCE = 0.1;
+interface LegacyRoundExpected {
+  maxPointsForRound: number;
+  maxPilotScoreInRound: number;
+  maxTeamScore: number;
+  clubsAttendingCount: number;
+  clubsAttendingFactor: number;
+  minDistanceFlightCount: number;
+  minDistanceFactor: number;
+}
 
-interface LegacyRoundFixture {
+interface LegacyPilotExpected {
+  teamId: string;
+  placeInTeam: number;
+  pilotPoints: number;
+}
+
+interface LegacyTeamExpected {
+  teamId: string;
+  score: number;
+}
+
+interface LegacyLeagueExpected {
+  clubId: string;
+  teamName: string;
+  totalScore: number;
+  rank: number;
+  countedRounds: number;
+  roundScores: Record<string, number>;
+}
+
+interface LegacyOracleFixture {
   name: string;
-  notes: string;
+  scenario: string;
+  legacySource: string;
+  legacyId: null;
+  legacyIdNote: string;
+  capturedAt: string;
   input: {
     round: Round;
     config: Config;
+    seasonRounds?: readonly Round[];
   };
   expected: {
-    teamScores: Array<{ teamId: string; score: number }>;
-    pilotScores: Array<{ pilotId: string; totalScore: number }>;
-    leagueAfter: Array<{ teamId: string; position: number; score: number }>;
+    round: LegacyRoundExpected;
+    pilots: readonly LegacyPilotExpected[];
+    teams: readonly LegacyTeamExpected[];
+    league: readonly LegacyLeagueExpected[];
   };
 }
 
-const fixturesDir = join(
-  dirname(fileURLToPath(import.meta.url)),
-  "fixtures",
-  "legacy-rounds"
-);
+type LegacyScoreManifest = Record<
+  string,
+  Record<
+    string,
+    {
+      teamScore: number;
+      workingTeamScore: number;
+      pilots: Record<string, number>;
+    }
+  >
+>;
 
-function readFixtures(): LegacyRoundFixture[] {
+const fixturesRoot = join(dirname(fileURLToPath(import.meta.url)), "fixtures");
+const fixturesDir = join(fixturesRoot, "legacy-rounds");
+const manifestPath = join(fixturesRoot, "legacy-score-manifest.json");
+
+function readFixtureFiles(): readonly { fileName: string; text: string }[] {
   return readdirSync(fixturesDir)
     .filter((fileName) => fileName.endsWith(".json"))
     .sort()
-    .map((fileName) => {
-      const json = readFileSync(join(fixturesDir, fileName), "utf8");
-      return JSON.parse(json) as LegacyRoundFixture;
-    });
+    .map((fileName) => ({
+      fileName,
+      text: readFileSync(join(fixturesDir, fileName), "utf8"),
+    }));
 }
 
-function scoredPilots(round: Round): Map<string, number> {
-  const scores = new Map<string, number>();
+function readFixtures(): readonly LegacyOracleFixture[] {
+  return readFixtureFiles().map(({ text }) => JSON.parse(text) as LegacyOracleFixture);
+}
 
-  for (const team of round.teams) {
-    for (const slot of team.pilots) {
-      if (slot.pilotId) {
-        scores.set(slot.pilotId, slot.pilotPoints);
-      }
-    }
+function readManifest(): LegacyScoreManifest {
+  return JSON.parse(readFileSync(manifestPath, "utf8")) as LegacyScoreManifest;
+}
+
+const fixtureFiles = readFixtureFiles();
+const fixtureCases = fixtureFiles.map(({ fileName, text }) => [fileName, text] as const);
+
+function readFixture(text: string): LegacyOracleFixture {
+  return JSON.parse(text) as LegacyOracleFixture;
+}
+
+function assertRoundMatchesOracle(fixture: LegacyOracleFixture): void {
+  const round = structuredClone(fixture.input.round);
+  const { derivation } = scoreRound(round, fixture.input.config);
+
+  for (const expectedPilot of fixture.expected.pilots) {
+    const actualPilot = round.teams
+      .find((team) => team.id === expectedPilot.teamId)
+      ?.pilots.find((pilot) => pilot.placeInTeam === expectedPilot.placeInTeam);
+
+    expect(
+      actualPilot?.pilotPoints,
+      `${fixture.name} pilot ${expectedPilot.teamId}/${expectedPilot.placeInTeam}`
+    ).toBeCloseTo(expectedPilot.pilotPoints, 1);
   }
 
-  return scores;
-}
+  for (const expectedTeam of fixture.expected.teams) {
+    const actualTeam = round.teams.find((team) => team.id === expectedTeam.teamId);
+    expect(actualTeam?.score, `${fixture.name} team ${expectedTeam.teamId}`).toBe(
+      expectedTeam.score
+    );
+  }
 
-function leagueByTeamId(round: Round): Map<string, { position: number; score: number }> {
-  const teamKeyToId = new Map(
-    round.teams.map((team) => [`${team.club.id}|${team.teamName}`, team.id])
+  expect(derivation.maxPointsForRound).toBeCloseTo(
+    fixture.expected.round.maxPointsForRound,
+    4
   );
-  const league = computeLeague([round]);
-  const byTeamId = new Map<string, { position: number; score: number }>();
-
-  for (const entry of league) {
-    const teamId = teamKeyToId.get(`${entry.clubId}|${entry.teamName}`);
-    if (teamId) {
-      byTeamId.set(teamId, {
-        position: entry.rank,
-        score: entry.totalScore,
-      });
-    }
-  }
-
-  return byTeamId;
+  expect(derivation.maxPilotScoreInRound).toBeCloseTo(
+    fixture.expected.round.maxPilotScoreInRound,
+    4
+  );
+  expect(derivation.clubsAttendingFactor).toBeCloseTo(
+    fixture.expected.round.clubsAttendingFactor,
+    4
+  );
+  expect(derivation.minDistanceFactor).toBeCloseTo(
+    fixture.expected.round.minDistanceFactor,
+    4
+  );
+  expect(derivation.maxTeamScore).toBe(fixture.expected.round.maxTeamScore);
+  expect(derivation.clubsAttendingCount).toBe(
+    fixture.expected.round.clubsAttendingCount
+  );
+  expect(derivation.minDistanceFlightCount).toBe(
+    fixture.expected.round.minDistanceFlightCount
+  );
 }
 
-describe("legacy scoring regression fixtures", () => {
-  const fixtures = readFixtures();
+function assertLeagueMatchesOracle(fixture: LegacyOracleFixture): void {
+  const seasonRounds = fixture.input.seasonRounds ?? [fixture.input.round];
+  const scoredSeason = seasonRounds.map((inputRound) => {
+    const round = structuredClone(inputRound);
+    scoreRound(round, fixture.input.config);
+    return round;
+  });
 
-  expect(fixtures.length).toBeGreaterThanOrEqual(5);
-  expect(fixtures.length).toBeLessThanOrEqual(10);
+  const league = computeLeague(scoredSeason, fixture.input.config);
+  expect(league).toHaveLength(fixture.expected.league.length);
 
-  for (const fixture of fixtures) {
-    it(`matches legacy fixture ${fixture.name}`, () => {
-      const round = structuredClone(fixture.input.round);
-      const scoredRound = scoreRound(round, fixture.input.config);
-      const pilotScores = scoredPilots(scoredRound);
+  for (const expectedTeam of fixture.expected.league) {
+    const actualTeam = league.find(
+      (team) =>
+        team.teamName === expectedTeam.teamName && team.clubId === expectedTeam.clubId
+    );
 
-      // Pilot tolerance is ±0.05 to match legacy 1-decimal output rounding.
-      for (const expected of fixture.expected.pilotScores) {
-        const actual = pilotScores.get(expected.pilotId);
-        expect(actual, `missing pilot ${expected.pilotId}`).toBeDefined();
-        expect(
-          Math.abs((actual ?? 0) - expected.totalScore) < PILOT_SCORE_TOLERANCE,
-          `pilot ${expected.pilotId}: expected ${expected.totalScore}, got ${actual}`
-        ).toBe(true);
-      }
+    expect(
+      actualTeam,
+      `${fixture.name} league ${expectedTeam.clubId}/${expectedTeam.teamName}`
+    ).toBeDefined();
+    expect(actualTeam?.totalScore).toBe(expectedTeam.totalScore);
+    expect(actualTeam?.rank).toBe(expectedTeam.rank);
+    expect(actualTeam?.countedRounds).toBe(expectedTeam.countedRounds);
 
-      for (const expected of fixture.expected.teamScores) {
-        const actual = scoredRound.teams.find((team) => team.id === expected.teamId)?.score;
-        expect(actual, `missing team ${expected.teamId}`).toBeDefined();
-        // Team tolerance is ±0.1 to allow sum-of-1-decimal drift from legacy exports.
-        expect(
-          Math.abs((actual ?? 0) - expected.score) < TEAM_SCORE_TOLERANCE,
-          `team ${expected.teamId}: expected ${expected.score}, got ${actual}`
-        ).toBe(true);
-      }
+    const actualRoundScores = actualTeam?.roundScores ?? {};
+    const actualRoundIds = Object.keys(actualRoundScores).sort();
+    const expectedRoundIds = Object.keys(expectedTeam.roundScores).sort();
+    expect(actualRoundIds).toEqual(expectedRoundIds);
 
-      const league = leagueByTeamId(scoredRound);
-      for (const expected of fixture.expected.leagueAfter) {
-        const actual = league.get(expected.teamId);
-        expect(actual, `missing league entry for team ${expected.teamId}`).toBeDefined();
-        expect(
-          Math.abs((actual?.score ?? 0) - expected.score) < TEAM_SCORE_TOLERANCE,
-          `league team ${expected.teamId}: expected score ${expected.score}, got ${actual?.score}`
-        ).toBe(true);
-        expect(actual?.position).toBe(expected.position);
-      }
-    });
+    for (const roundId of expectedRoundIds) {
+      expect(actualRoundScores[roundId], `${fixture.name} ${expectedTeam.teamName} ${roundId}`).toBe(
+        expectedTeam.roundScores[roundId]
+      );
+    }
   }
+}
+
+describe("legacy scoring oracle fixtures", () => {
+  it("fixtures load with provenance", () => {
+    const fixtures = readFixtures();
+    const manifest = readManifest();
+
+    expect(fixtures.length).toBeGreaterThanOrEqual(8);
+    for (const fixture of fixtures) {
+      expect(fixture.legacySource).toMatch(
+        /^net10-verbatim-copy-of-BaseController\.cs@[0-9a-f]{40}$/
+      );
+      expect(Date.parse(fixture.capturedAt)).not.toBeNaN();
+      expect(fixture.legacyId).toBeNull();
+      expect(fixture.legacyIdNote).toContain("Algorithm-derived oracle fixture");
+      expect(fixture.expected.round).toBeDefined();
+      expect(fixture.expected.pilots.length).toBeGreaterThan(0);
+      expect(fixture.expected.teams.length).toBeGreaterThan(0);
+      expect(fixture.expected.league.length).toBeGreaterThan(0);
+      expect(manifest[fixture.input.round.id]).toBeDefined();
+    }
+  });
+
+  it("no synthetic or old-model fixture remains", () => {
+    const forbiddenMarkers = [
+      "synthetic-handcrafted",
+      "round1dp",
+      "round1(",
+      "score = round1(distance * wingFactor)",
+    ] as const;
+
+    for (const { fileName, text } of fixtureFiles) {
+      const fixture = JSON.parse(text) as Partial<LegacyOracleFixture>;
+      expect(fixture.legacySource, `${fileName} must carry legacySource`).toBeDefined();
+      for (const marker of forbiddenMarkers) {
+        expect(text.includes(marker), `${fileName} contains old-model marker ${marker}`).toBe(
+          false
+        );
+      }
+    }
+  });
+
+  describe.each(fixtureCases)("%s", (fileName, text) => {
+    const fixture = readFixture(text);
+
+    it(`${fileName} matches legacy round scoring`, () => {
+      assertRoundMatchesOracle(fixture);
+    });
+
+    it(`${fileName} matches legacy league scoring`, () => {
+      assertLeagueMatchesOracle(fixture);
+    });
+  });
 });

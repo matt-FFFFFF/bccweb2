@@ -7,10 +7,12 @@ import {
   makeUser,
   makeRound,
   makePilot,
+  makeConfig,
   readPrivateJson,
   writePrivateJson,
 } from "../../__tests__/helpers/seed.js";
 import "../teamsCaptain.js";
+import "../teams.js";
 
 // ─── Seed helper ──────────────────────────────────────────────────────────────
 
@@ -304,5 +306,91 @@ describe("PUT /api/rounds/{id}/teams/{teamId}/captain", () => {
 
     const after = await readPrivateJson<Round>(`rounds/${round.id}.json`);
     expect(after?.teams[0].captainPilotId ?? null).toBeNull();
+  });
+});
+
+// ─── addPilot — first-free-place positional slot eligibility (W4.1) ─────────────
+
+describe("POST /api/rounds/{id}/teams/{teamId}/pilots — positional eligibility", () => {
+  async function seedEmptyTeamRound(clubId: string): Promise<{ round: Round; team: Team }> {
+    const team: Team = {
+      id: randomUUID(),
+      teamName: "Alpha",
+      club: { id: clubId, name: "Test Club" },
+      score: 0,
+      pilots: [],
+    };
+    const round = await makeRound({
+      organisingClubId: clubId,
+      organisingClubName: "Test Club",
+      teams: [team],
+    });
+    return { round, team };
+  }
+
+  function addPilotReq(
+    user: { id: string; email: string },
+    round: Round,
+    team: Team,
+    pilotId: string,
+  ) {
+    return invoke(
+      "addPilot",
+      makeAuthRequest(user.id, user.email, {
+        method: "POST",
+        params: { id: round.id, teamId: team.id },
+        headers: { "x-forwarded-for": randomForwardedFor() },
+        body: { pilotId },
+      }),
+    );
+  }
+
+  function slotFor(res: { jsonBody?: unknown }, pilotId: string) {
+    return (res.jsonBody as Round).teams[0].pilots.find((s) => s.pilotId === pilotId);
+  }
+
+  it("fills first-free places with a positional scoring band; a removed place is reused (not max+1) and the cap rejects overflow", async () => {
+    resetAllBuckets();
+    const clubId = randomUUID();
+    await makeConfig({ maxPilotsInTeam: 9, maxScoringPilotsInTeam: 6 });
+    const { round, team } = await seedEmptyTeamRound(clubId);
+    const { user } = await makeUser({ roles: ["Admin"] });
+
+    // Given nine distinct pilots added one by one, each lands in the next free
+    // place 1..9, scoring iff place <= maxScoringPilotsInTeam (6).
+    for (let place = 1; place <= 9; place += 1) {
+      const pilot = await makePilot({ firstName: `Fill${place}`, clubId });
+      const res = await addPilotReq(user, round, team, pilot.id);
+      expect(res.status).toBe(200);
+      const slot = slotFor(res, pilot.id);
+      expect(slot?.placeInTeam).toBe(place);
+      expect(slot?.isScoring).toBe(place <= 6);
+    }
+
+    // When place 2 (a scoring slot) is removed and a new pilot is added, first-free
+    // must REUSE place 2 — the old max(place)+1 logic would have assigned place 10.
+    const removeRes = await invoke(
+      "removePilot",
+      makeAuthRequest(user.id, user.email, {
+        method: "DELETE",
+        params: { id: round.id, teamId: team.id, place: "2" },
+        headers: { "x-forwarded-for": randomForwardedFor() },
+      }),
+    );
+    expect(removeRes.status).toBe(200);
+
+    const rejoin = await makePilot({ firstName: "Rejoin", clubId });
+    const rejoinRes = await addPilotReq(user, round, team, rejoin.id);
+    expect(rejoinRes.status).toBe(200);
+    const rejoinSlot = slotFor(rejoinRes, rejoin.id);
+    expect(rejoinSlot?.placeInTeam).toBe(2);
+    expect(rejoinSlot?.isScoring).toBe(true);
+
+    // Then the team is full again (places 1..9) and a further add is TEAM_FULL —
+    // the old logic had no cap and would have grown to place 10.
+    const overflow = await makePilot({ firstName: "Overflow", clubId });
+    const overflowRes = await addPilotReq(user, round, team, overflow.id);
+    expect(overflowRes.status).toBe(409);
+    expect((overflowRes.jsonBody as { code: string }).code).toBe("TEAM_FULL");
   });
 });

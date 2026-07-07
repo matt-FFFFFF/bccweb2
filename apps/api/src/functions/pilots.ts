@@ -16,7 +16,6 @@ import {
 import { randomUUID } from "crypto";
 import type {
   Pilot,
-  PilotSummary,
   PilotClubMembership,
   WingClass,
   CoachType,
@@ -27,15 +26,12 @@ import type {
 import {
   PilotSchema,
   PilotSummarySchema,
-  SeasonSummarySchema,
 } from "@bccweb/schemas";
 import * as z from "zod/v4";
 import {
   getBlobClient,
   getPrivateBlobClient,
-  withLeaseRetry,
-  ensureJsonIndexBlob,
-  writeBlob,
+  withPrivateLease,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
@@ -49,9 +45,14 @@ import {
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 import { resolveWingManufacturer } from "../lib/wingManufacturer.js";
+import { getActiveSeasonYear } from "../lib/season.js";
+import { hasFlownInSeason } from "../lib/pilotFlown.js";
+import { upsertPilotClubMap } from "../lib/pilotClubMap.js";
+import { upsertPilotInIndex } from "../lib/pilotIndex.js";
+import { withSeasonClub } from "../lib/pilotClub.js";
+import { getTelemetryClient } from "../lib/telemetry.js";
 
 const PilotsIndexSchema = z.array(PilotSummarySchema);
-const SeasonsIndexSchema = z.array(SeasonSummarySchema);
 
 // PilotClubMembership has no dedicated schema in @bccweb/schemas; the API
 // only reads (never writes) this blob here. Permissive array passthrough so
@@ -310,62 +311,50 @@ async function updatePilot(
     throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
 
-  // Non-admin pilots cannot change currentClub once committed to a club for the active season.
-  if (!isAdmin && body.currentClub && body.currentClub.id !== existing.currentClub?.id) {
-    const activeYear = await getActiveSeasonYear();
-    const hasActiveSeasonClub = existing.seasonClubs.some(
-      (sc) => sc.seasonYear === activeYear
+  // Shared field-merge for both the leased (club-change) and unleased paths, so
+  // the merge lives once. `base` is whichever pilot snapshot the caller read.
+  const buildUpdatedPilot = async (base: Pilot): Promise<Pilot> => {
+    const wingManufacturer = await resolveWingManufacturer(
+      base.wingManufacturer,
+      body.wingManufacturer,
     );
-    if (hasActiveSeasonClub) {
-      throw new HttpError(
-        409,
-        "CLUB_LOCKED",
-        `Club is locked for the ${activeYear} season. Contact an admin to change it.`
-      );
-    }
-  }
-
-  // Build updated pilot — common fields (both Admin and self)
-  const wingManufacturer = await resolveWingManufacturer(
-    existing.wingManufacturer,
-    body.wingManufacturer,
-  );
-  const firstName = body.firstName?.trim() ?? existing.person.firstName;
-  const lastName = body.lastName?.trim() ?? existing.person.lastName;
-
-  const updated: Pilot = {
-    ...existing,
-    // Self-service fields
-    helmetColour: body.helmetColour ?? existing.helmetColour,
-    harnessType: body.harnessType ?? existing.harnessType,
-    harnessColour: body.harnessColour ?? existing.harnessColour,
-    emergencyContactName:
-      body.emergencyContactName ?? existing.emergencyContactName,
-    emergencyPhoneNumber:
-      body.emergencyPhoneNumber ?? existing.emergencyPhoneNumber,
-    medicalInfo: body.medicalInfo ?? existing.medicalInfo,
-    wingClass: body.wingClass ?? existing.wingClass,
-    wingManufacturer,
-    wingModel: body.wingModel ?? existing.wingModel,
-    wingColours: body.wingColours ?? existing.wingColours,
-    bhpaNumber: body.bhpaNumber ?? existing.bhpaNumber,
-    coachType: body.coachType ?? existing.coachType,
-    pilotRating: body.pilotRating ?? existing.pilotRating,
-    pureTrackId: body.pureTrackId ?? existing.pureTrackId,
-    pureTrackLink: body.pureTrackLink ?? existing.pureTrackLink,
-    currentClub: body.currentClub ?? existing.currentClub,
-    person: {
-      ...existing.person,
-      firstName,
-      lastName,
-      fullName: `${firstName} ${lastName}`,
-      phoneNumber: body.phoneNumber ?? existing.person.phoneNumber,
-    },
-    profileUpdatedAt: new Date().toISOString(),
+    const firstName = body.firstName?.trim() ?? base.person.firstName;
+    const lastName = body.lastName?.trim() ?? base.person.lastName;
+    return {
+      ...base,
+      // Self-service fields
+      helmetColour: body.helmetColour ?? base.helmetColour,
+      harnessType: body.harnessType ?? base.harnessType,
+      harnessColour: body.harnessColour ?? base.harnessColour,
+      emergencyContactName:
+        body.emergencyContactName ?? base.emergencyContactName,
+      emergencyPhoneNumber:
+        body.emergencyPhoneNumber ?? base.emergencyPhoneNumber,
+      medicalInfo: body.medicalInfo ?? base.medicalInfo,
+      wingClass: body.wingClass ?? base.wingClass,
+      wingManufacturer,
+      wingModel: body.wingModel ?? base.wingModel,
+      wingColours: body.wingColours ?? base.wingColours,
+      bhpaNumber: body.bhpaNumber ?? base.bhpaNumber,
+      coachType: body.coachType ?? base.coachType,
+      pilotRating: body.pilotRating ?? base.pilotRating,
+      pureTrackId: body.pureTrackId ?? base.pureTrackId,
+      pureTrackLink: body.pureTrackLink ?? base.pureTrackLink,
+      currentClub: body.currentClub ?? base.currentClub,
+      person: {
+        ...base.person,
+        firstName,
+        lastName,
+        fullName: `${firstName} ${lastName}`,
+        phoneNumber: body.phoneNumber ?? base.person.phoneNumber,
+      },
+      profileUpdatedAt: new Date().toISOString(),
+    };
   };
 
-  // Claim the (admin-supplied) email FIRST so a conflict aborts before any write (issue #126).
-  // Re-claiming the pilot's own email is a no-op (owner === id).
+  // Claim the (admin-supplied) email FIRST so a conflict aborts before any write
+  // (issue #126). This mutates the email-index blob, NOT the pilot blob, so it
+  // stays OUTSIDE the pilot lease. Re-claiming the pilot's own email is a no-op.
   let releaseEmailOnFailure: string | undefined;
   if (isAdmin && body.email) {
     try {
@@ -381,9 +370,64 @@ async function updatePilot(
     }
   }
 
+  let updated: Pilot;
+  // Set only when the club actually changed; carries the post-lease map sync args.
+  let clubChange: { year: number; clubId: string } | undefined;
   try {
-    await writePrivateJson(`pilots/${id}.json`, PilotSchema, updated);
-    await upsertPilotInIndex(updated);
+    if (body.currentClub) {
+      const targetClub = body.currentClub;
+      // issue #101: the flown-lock is a cheap PUBLIC read taken BEFORE the lease;
+      // admins are never locked. The actual club-change decision is re-made against
+      // a FRESH read INSIDE the lease so we never act on stale pre-lease state.
+      const activeYear = await getActiveSeasonYear();
+      const flownLock = !isAdmin && (await hasFlownInSeason(id, activeYear));
+
+      // Serialise the read-modify-write under the pilot lease so the seasonClubs
+      // mutation cannot lose a concurrent update (mirrors assignPilotSeasonClub /
+      // ensureSeasonClubRecorded, which also mutate seasonClubs under this lease).
+      const result = await withPrivateLease(
+        `pilots/${id}.json`,
+        async (leaseId) => {
+          const base = await readJson(
+            getPrivateBlobClient(`pilots/${id}.json`),
+            PilotSchema,
+            `pilots/${id}.json`,
+          );
+          const clubChanging = base.currentClub?.id !== targetClub.id;
+          if (clubChanging && flownLock) {
+            throw new HttpError(
+              409,
+              "CLUB_LOCKED",
+              `Your club is locked for the ${activeYear} season because you have flown a scored round. Contact an admin to change it.`,
+            );
+          }
+          // issue #101: self-selected club is intentionally UNGATED — no
+          // CLUB_NOT_REGISTERED_FOR_SEASON check, unlike assignPilotSeasonClub.
+          const next = await buildUpdatedPilot(base);
+          if (clubChanging) {
+            next.currentClub = targetClub;
+            next.seasonClubs = withSeasonClub(base.seasonClubs, {
+              seasonYear: activeYear,
+              clubId: targetClub.id,
+              clubName: targetClub.name,
+            });
+          }
+          await writePrivateJson(`pilots/${id}.json`, PilotSchema, next, leaseId);
+          await upsertPilotInIndex(next, activeYear);
+          return { next, clubChanging };
+        },
+      );
+      updated = result.next;
+      if (result.clubChanging) {
+        clubChange = { year: activeYear, clubId: targetClub.id };
+      }
+    } else {
+      // No club change → no seasonClubs mutation → no shared-array race, so keep
+      // the original unleased read/build/write path (byte-identical to before).
+      updated = await buildUpdatedPilot(existing);
+      await writePrivateJson(`pilots/${id}.json`, PilotSchema, updated);
+      await upsertPilotInIndex(updated);
+    }
   } catch (err: unknown) {
     if (releaseEmailOnFailure) {
       await releasePilotEmailClaim(releaseEmailOnFailure, id).catch(() => {});
@@ -391,70 +435,20 @@ async function updatePilot(
     throw err;
   }
 
-  return { status: 200, jsonBody: updated };
-}
-
-// ─── Index helper ─────────────────────────────────────────────────────────────
-
-async function upsertPilotInIndex(pilot: Pilot): Promise<void> {
-  // Public index shows only VERIFIED active-season club membership, never the
-  // self-declared currentClub (a pilot can set that to any club). Stops a pilot
-  // poisoning the anonymously-readable index with an unaffiliated club.
-  const activeYear = await getActiveSeasonYear();
-  const verifiedClubId = pilot.seasonClubs.find(
-    (sc) => sc.seasonYear === activeYear,
-  )?.clubId;
-
-  await ensureJsonIndexBlob("pilots.json", "[]");
-
-  await withLeaseRetry("pilots.json", async (leaseId) => {
-    let index: PilotSummary[] = [];
-    try {
-      index = await readJson(
-        getBlobClient("pilots.json"),
-        PilotsIndexSchema,
-        "pilots.json",
-      );
-    } catch (err: unknown) {
-      if ((err as { statusCode?: number }).statusCode !== 404) throw err;
-    }
-
-    const entry: PilotSummary = {
-      id: pilot.id,
-      legacyId: pilot.legacyId,
-      name: pilot.person.fullName,
-      clubId: verifiedClubId,
-      rating: pilot.pilotRating,
-    };
-
-    const idx = index.findIndex((p) => p.id === pilot.id);
-    if (idx >= 0) {
-      index[idx] = entry;
-    } else {
-      index.push(entry);
-    }
-
-    index.sort((a, b) => a.name.localeCompare(b.name) || a.id.localeCompare(b.id));
-    await writeBlob("pilots.json", index, leaseId);
-  });
-
-}
-
-async function getActiveSeasonYear(): Promise<number> {
-  try {
-    const seasons = await readJson(
-      getBlobClient("seasons.json"),
-      SeasonsIndexSchema,
-      "seasons.json",
-    );
-    const active = seasons.find((s) => s.active) ?? seasons[seasons.length - 1];
-    return active?.year ?? new Date().getFullYear();
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      return new Date().getFullYear();
-    }
-    throw err;
+  // issue #101: keep the denormalised seasons/{year}/pilot-club-map.json in sync,
+  // best-effort/idempotent. A failure is non-fatal — the pilot blob + pilots.json
+  // are authoritative and the map reconciles on the next write. Write ORDER:
+  // pilot (leased) → upsertPilotInIndex → upsertPilotClubMap.
+  if (clubChange) {
+    await upsertPilotClubMap(clubChange.year, id, clubChange.clubId).catch(() => {
+      getTelemetryClient()?.trackTrace({
+        message: "pilot.clubMapSyncFailed",
+        properties: { pilotId: id },
+      });
+    });
   }
+
+  return { status: 200, jsonBody: updated };
 }
 
 // ─── GET /api/pilots/{id}/club-history ───────────────────────────────────────

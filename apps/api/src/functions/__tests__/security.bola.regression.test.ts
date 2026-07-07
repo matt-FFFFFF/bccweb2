@@ -572,7 +572,22 @@ async function seedActiveSeason() {
 }
 
 describe("BOLA E — public pilot-club poisoning", () => {
-  test("self-declared currentClub for an unaffiliated club does NOT reach the public index", async () => {
+  // SECURITY-AUDIT NOTE — this test DELIBERATELY REVERSES the former "public
+  // pilot-club poisoning" guard, per issue #101 Decision 6 (ungated self-select;
+  // "the selected club IS the season club"). Pre-#101 a self-declared currentClub
+  // was kept OUT of the public index; now the ungated self-select is written to the
+  // pilot's active-season seasonClubs entry, which the public index derives clubId
+  // from — so it appears in pilots.json BY DESIGN. This is the same reversal the
+  // plan documents for the meProfile.ts "Security: E" comment. The guard was LIFTED
+  // ON PURPOSE, not broken. Why that is safe:
+  //   • clubId in pilots.json is a NON-PII public field → the privacy scanner is
+  //     unaffected (no PII crosses into the public container).
+  //   • A self-declared club grants NO competition access: joining a team still
+  //     requires a registered ClubTeam (addTeam), and registerSelf returns
+  //     NO_TEAM_FOR_CLUB without one.
+  //   • Coord PII visibility via getPilotById keys on currentClub, which a pilot
+  //     could ALREADY self-set before #101 — pre-existing and unchanged here.
+  test("(issue #101) self-selected club is written to the season club and now DOES appear in the public index — the old poisoning guard is intentionally lifted", async () => {
     await seedActiveSeason();
     const victimClub = await makeClub({ name: "Prestigious Club E" });
     const attacker = await makePilot({ firstName: "Mallory", lastName: "Imposter" });
@@ -593,16 +608,28 @@ describe("BOLA E — public pilot-club poisoning", () => {
     expect(res.status).toBe(200);
 
     // Private self-pick is preserved (the documented pilotClubLock behaviour)…
-    const stored = await readPrivateJson<{ currentClub?: { id: string } }>(
-      `pilots/${attacker.id}.json`,
-    );
+    const stored = await readPrivateJson<{
+      currentClub?: { id: string };
+      seasonClubs: { seasonYear: number; clubId: string; clubName: string }[];
+    }>(`pilots/${attacker.id}.json`);
     expect(stored?.currentClub?.id).toBe(victimClub.id);
 
-    // …but the anonymously-readable public index must NOT show the unaffiliated club.
+    // …and the self-selected club is now recorded as the active-season season club —
+    // this is the mechanism that drives the public-index change below.
+    const seasonEntry = stored?.seasonClubs.find(
+      (sc) => sc.seasonYear === E_ACTIVE_YEAR,
+    );
+    expect(seasonEntry).toEqual({
+      seasonYear: E_ACTIVE_YEAR,
+      clubId: victimClub.id,
+      clubName: victimClub.name,
+    });
+
+    // …so the anonymously-readable public index now DOES show the selected club
+    // (the issue #101 reversal — this assertion was previously toBeUndefined()).
     const publicIndex = await readPublicJson<PilotSummary[]>("pilots.json");
     const entry = publicIndex?.find((p) => p.id === attacker.id);
-    expect(entry?.clubId).not.toBe(victimClub.id);
-    expect(entry?.clubId).toBeUndefined();
+    expect(entry?.clubId).toBe(victimClub.id);
   });
 
   test("a verified active-season member IS shown under their club in the public index", async () => {

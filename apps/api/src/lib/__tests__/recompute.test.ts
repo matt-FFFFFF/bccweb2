@@ -1,10 +1,11 @@
 import { randomUUID } from "crypto";
 import { BlobClient } from "@azure/storage-blob";
-import type { Round, Season } from "@bccweb/types";
+import type { Round, Season, SeasonResults } from "@bccweb/types";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { getPublicContainer } from "../../__tests__/helpers/azurite.js";
 import {
   publicBlobExists,
+  readPrivateJson,
   readPublicJson,
   writePrivateJson,
   writePublicJson,
@@ -78,6 +79,95 @@ describe("recomputeSeason", () => {
     expect(Buffer.compare(snapshots[0], snapshots[1])).toBe(0);
     expect(Buffer.compare(snapshots[1], snapshots[2])).toBe(0);
   });
+
+  test("results/{year}.json carries non-PII pilotId and excludes flightless slots", async () => {
+    const year = 2600 + Math.floor(Math.random() * 7_000);
+    const round = makeCompleteRound(year);
+    const flightedSlot = round.teams[0].pilots[0];
+    // Second slot has no flight/snapshot → must be filtered out (no stray pilot row).
+    round.teams[0].pilots = [
+      flightedSlot,
+      {
+        ...flightedSlot,
+        placeInTeam: 2,
+        isScoring: false,
+        status: "Empty",
+        noScore: true,
+        pilotPoints: 0,
+        pilotId: "pilot-b",
+        snapshot: null,
+        flight: null,
+      },
+    ];
+
+    const season: Season = {
+      id: `season-${year}`,
+      year,
+      active: true,
+      rounds: [round.id],
+      leagueTable: [],
+    };
+    await writePublicJson(`seasons/${year}.json`, season);
+    await writePublicJson("rounds.json", [
+      {
+        id: round.id,
+        date: round.date,
+        siteId: round.site.id,
+        siteName: round.site.name,
+        status: round.status,
+        seasonYear: year,
+      },
+    ]);
+    await writePublicJson("pilots.json", [
+      { id: "pilot-a", name: "Pilot A" },
+      { id: "pilot-b", name: "Pilot B" },
+    ]);
+    await writePrivateJson(`rounds/${round.id}.json`, round);
+
+    await recomputeSeason(year);
+
+    const results = (await readPublicJson<SeasonResults>(`results/${year}.json`))!;
+    const pilots = results[0].teamResults[0].pilots;
+    expect(pilots).toHaveLength(1);
+    expect(pilots[0].pilotId).toBe("pilot-a");
+  });
+
+  test("league total counts only the top leagueRoundScoresCounted scores (truncated) and never mutates a stored round team.score", async () => {
+    const scores = [10.6, 20.6, 30.6, 40.6, 50.6, 60.6, 70.6];
+    const { year, roundIds } = await seedScoredSeason(scores);
+
+    await recomputeSeason(year);
+
+    const season = (await readPublicJson<Season>(`seasons/${year}.json`))!;
+    expect(season.leagueTable).toHaveLength(1);
+    const entry = season.leagueTable[0];
+    // Virgin config counts top-6; the lowest (10.6) is dropped. Sum 273.6 → trunc 273.
+    expect(entry.countedRounds).toBe(6);
+    expect(entry.totalScore).toBe(273);
+    expect(Number.isInteger(entry.totalScore)).toBe(true);
+    for (let i = 0; i < roundIds.length; i += 1) {
+      const stored = (await readPrivateJson<Round>(`rounds/${roundIds[i]}.json`))!;
+      expect(stored.teams[0].score).toBe(scores[i]);
+    }
+  });
+
+  test("editing leagueRoundScoresCounted re-windows the league total on the next recompute (D13)", async () => {
+    const scores = [10.6, 20.6, 30.6, 40.6, 50.6, 60.6, 70.6];
+    const { year } = await seedScoredSeason(scores);
+
+    await recomputeSeason(year);
+    const before = (await readPublicJson<Season>(`seasons/${year}.json`))!;
+    expect(before.leagueTable[0].totalScore).toBe(273);
+    expect(before.leagueTable[0].countedRounds).toBe(6);
+
+    await writePrivateJson("config.json", { leagueRoundScoresCounted: 2 });
+    await recomputeSeason(year);
+
+    const after = (await readPublicJson<Season>(`seasons/${year}.json`))!;
+    // Top-2 only: 70.6 + 60.6 = 131.2 → trunc 131.
+    expect(after.leagueTable[0].countedRounds).toBe(2);
+    expect(after.leagueTable[0].totalScore).toBe(131);
+  });
 });
 
 async function seedSeason(): Promise<{ year: number; seasonPath: string }> {
@@ -148,6 +238,47 @@ function makeCompleteRound(year: number): Round {
       },
     ],
   };
+}
+
+function makeScoredRound(year: number, teamScore: number): Round {
+  const round = makeCompleteRound(year);
+  round.teams[0].score = teamScore;
+  round.teams[0].pilots[0].pilotPoints = teamScore;
+  round.teams[0].pilots[0].flight!.score = teamScore;
+  return round;
+}
+
+async function seedScoredSeason(
+  scores: number[]
+): Promise<{ year: number; roundIds: string[] }> {
+  const year = 2600 + Math.floor(Math.random() * 7_000);
+  const rounds = scores.map((score) => makeScoredRound(year, score));
+  const roundIds = rounds.map((round) => round.id);
+
+  await writePublicJson(`seasons/${year}.json`, {
+    id: `season-${year}`,
+    year,
+    active: true,
+    rounds: roundIds,
+    leagueTable: [],
+  } satisfies Season);
+  await writePublicJson(
+    "rounds.json",
+    rounds.map((round) => ({
+      id: round.id,
+      date: round.date,
+      siteId: round.site.id,
+      siteName: round.site.name,
+      status: round.status,
+      seasonYear: year,
+    }))
+  );
+  await writePublicJson("pilots.json", [{ id: "pilot-a", name: "Pilot A" }]);
+  for (const round of rounds) {
+    await writePrivateJson(`rounds/${round.id}.json`, round);
+  }
+
+  return { year, roundIds };
 }
 
 async function readPublicBytes(path: string): Promise<Buffer> {

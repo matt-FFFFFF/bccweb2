@@ -6,6 +6,7 @@
  * Writes directly to Azurite/Azure Blob Storage; does not call the HTTP API.
  */
 
+import { ConfigSchema } from "@bccweb/schemas";
 import {
   deleteBlob,
   deterministicUuid,
@@ -34,12 +35,6 @@ import { performance } from "node:perf_hooks";
 
 const CHUNK_SIZE = 50;
 const SITE_NAMES = ["Site Alpha", "Site Bravo", "Site Charlie"];
-const DEFAULT_WING_FACTORS = {
-  "EN A": 1.2,
-  "EN B": 1.1,
-  "EN C": 1.0,
-  "EN D": 0.9,
-};
 
 async function inChunks(items, worker) {
   for (let i = 0; i < items.length; i += CHUNK_SIZE) {
@@ -161,19 +156,33 @@ async function wipePriorFixtures(publicContainer, privateContainer, nextManifest
 }
 
 async function patchConfig(privateContainer) {
-  const existing = (await readJson(privateContainer, "config.json")) ?? {};
+  // Seed a COMPLETE, canonical new-shape Config straight from the single schema
+  // source of truth. `ConfigSchema.parse({})` yields EVERY scoring field at its
+  // legacy-correct default (the counts, taskMaxPoints 1000, plus the pilot /
+  // wing / clubs-attending / min-distance factor tables), so a fresh read heals
+  // NOTHING — no missing field is injected — and the seed can never drift from
+  // the real Config shape (mirrors the DRY virgin fallback in roundsMutate.ts /
+  // recompute.ts / roundRegistration.ts). The intentional dev-fixture overrides
+  // below are all valid Config scalars, so the blob still heals to nothing.
+  // Overwrites any prior config.json so the fixture state is deterministic.
   const config = {
-    ...existing,
-    maxTeamsInClub: 3,
+    ...ConfigSchema.parse({}),
+    // ── Dev-fixture overrides (deliberate deviations from legacy defaults) ──
+    maxTeamsInClub: 3, // dev headroom (legacy default 2)
+    // Load-bearing: the load-test packs LOADTEST_SLOTS_PER_TEAM (=10) pilots
+    // into each of LOADTEST_TEAMS (=50) teams (500 total); canonical 9 would
+    // 409 the 10th pilot per team — keep the dev override at 10.
     maxPilotsInTeam: 10,
-    maxScoringPilotsInTeam: 5,
-    flightDateValidationEnabled: false,
-    // Fixture-only: lets the load-test's 500 pilots (sourced from 50 different
-    // clubs by T8's round-robin assignment) auto-allocate to the load-test
-    // round's organising club at first register-self. Production default is
-    // missing (≈ false), which enforces strict pilot→club seasonal binding.
+    maxScoringPilotsInTeam: 5, // dev override (legacy default 6)
+    flightDateValidationEnabled: false, // dev: accept past-/mis-dated fixture flights
+    // Fixture-only runtime flag — NOT part of Config/ConfigSchema. The
+    // registration flow reads config.json via roundRegistration.ts's
+    // RegistrationConfigSchema (ConfigSchema.extend), which preserves this key
+    // un-stripped. Lets the load-test's 500 pilots (round-robin-assigned to 50
+    // different clubs) auto-allocate to the load-test round's organising club at
+    // first register-self. Production default is missing (≈ false), which
+    // enforces strict pilot→club seasonal binding.
     autoAllocatePilotsToRoundClub: true,
-    wingFactors: existing.wingFactors ?? DEFAULT_WING_FACTORS,
   };
   await writeJson(privateContainer, "config.json", config);
   return config;

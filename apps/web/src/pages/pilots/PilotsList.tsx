@@ -1,10 +1,14 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useMemo } from "react";
 import { Link } from "react-router";
-import type { PilotSummary } from "@bccweb/types";
+import type { PilotSummary, ClubSummary } from "@bccweb/types";
 import { api, ApiError } from "../../lib/api.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
+import { useBlob } from "../../hooks/useBlob.js";
 
 export default function PilotsList() {
+  const { data: clubs } = useBlob<ClubSummary[]>("clubs.json");
+  const clubNameById = useMemo(() => new Map((clubs ?? []).map((c) => [c.id, c.name])), [clubs]);
+
   const [pilots, setPilots] = useState<PilotSummary[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -93,7 +97,7 @@ export default function PilotsList() {
                 </Link>
               </td>
               <td style={{ padding: "0.5rem 0.5rem", color: "#555" }}>
-                {p.clubId ? p.clubId : "—"}
+                {p.clubId ? (clubNameById.get(p.clubId) ?? p.clubId) : "—"}
               </td>
               <td style={{ padding: "0.5rem 0.5rem", color: "#555" }}>
                 {p.rating ?? "—"}

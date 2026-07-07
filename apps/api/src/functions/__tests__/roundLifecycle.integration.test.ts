@@ -33,6 +33,13 @@ const pureTrackMock = vi.hoisted(() => ({
   createPureTrackGroups: vi.fn(),
 }));
 
+// One-shot seam: run a racing write AFTER completeRound's pre-lease read but
+// BEFORE it acquires the completion lease, so a test can prove scoring runs on
+// the LEASED read (W3.1). Default null → no-op for every other test.
+const leaseHook = vi.hoisted(() => ({
+  beforePrivateRenewing: null as null | ((path: string) => Promise<void>),
+}));
+
 vi.mock("../../lib/blob.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/blob.js")>();
   return {
@@ -42,11 +49,18 @@ vi.mock("../../lib/blob.js", async (importOriginal) => {
       fn: (leaseId: string) => Promise<T>,
       opts: Parameters<typeof actual.withLeaseRenewing>[2] = {},
     ) => actual.withLeaseRenewing(path, fn, { renewIntervalMs: 1_000, ...opts }),
-    withPrivateLeaseRenewing: <T>(
+    withPrivateLeaseRenewing: async <T>(
       path: string,
       fn: (leaseId: string) => Promise<T>,
       opts: Parameters<typeof actual.withPrivateLeaseRenewing>[2] = {},
-    ) => actual.withPrivateLeaseRenewing(path, fn, { renewIntervalMs: 1_000, ...opts }),
+    ) => {
+      const hook = leaseHook.beforePrivateRenewing;
+      if (hook) {
+        leaseHook.beforePrivateRenewing = null;
+        await hook(path);
+      }
+      return actual.withPrivateLeaseRenewing(path, fn, { renewIntervalMs: 1_000, ...opts });
+    },
   };
 });
 
@@ -106,6 +120,7 @@ describe("round lifecycle integration", () => {
   });
 
   afterEach(() => {
+    leaseHook.beforePrivateRenewing = null;
     while (restoredSpies.length) restoredSpies.pop()?.();
     vi.restoreAllMocks();
   });
@@ -156,8 +171,19 @@ describe("round lifecycle integration", () => {
     await waitForPublicBlob(`results/${ctx.year}.json`);
 
     expect(completeRes.status).toBe(200);
-    const completed = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
-    expect(completed?.status).toBe("Complete");
+    const completed = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
+    expect(completed.status).toBe("Complete");
+    expect(completed.isLocked).toBe(false);
+    // Scored on the LEASED read: the single scoring pilot normalises to
+    // maxPointsForRound, and team.score is an integer (banker's-rounded).
+    expect(completed.teams[0].pilots[0].pilotPoints).toBe(100);
+    expect(completed.teams[0].score).toBe(100);
+    expect(Number.isInteger(completed.teams[0].score)).toBe(true);
+    expect(completed.scoring?.scoredAt).toBeTruthy();
+    expect(completed.scoring?.maxPointsForRound).toBe(100);
+    expect(completed.scoring?.maxPilotScoreInRound).toBe(42);
+    expect(completed.scoring?.maxTeamScore).toBe(100);
+    expect(completed.scoring?.teams).toEqual([{ teamId: ctx.teamId, workingTeamScore: 100 }]);
     const season = (await readPublicJson<Season>(`seasons/${ctx.year}.json`))!;
     const results = (await readPublicJson<SeasonResults>(`results/${ctx.year}.json`))!;
     const roundsIndex = (await readPublicJson<Array<{ id: string; status: string }>>("rounds.json"))!;
@@ -168,6 +194,34 @@ describe("round lifecycle integration", () => {
     await expect(publicBlobExists(`seasons/${ctx.year}.json.tmp`)).resolves.toBe(false);
     await expect(publicBlobExists(`results/${ctx.year}.json.tmp`)).resolves.toBe(false);
     await expect(publicBlobExists("rounds.json.tmp")).resolves.toBe(false);
+  });
+
+  it("completeRound scores the LEASED read so a racing no-score edit is not stale-overwritten", async () => {
+    const ctx = await seedLockedScorableRound();
+    // Given: a coordinator models a real no-score withdrawal by removing the pilot's flight in an edit that commits AFTER
+    // completeRound's pre-lease read but BEFORE it acquires the completion lease.
+    leaseHook.beforePrivateRenewing = async (path) => {
+      if (path !== `rounds/${ctx.roundId}.json`) return;
+      const racing = (await readPrivateJson<Round>(path))!;
+      racing.teams[0].pilots[0].noScore = true;
+      racing.teams[0].pilots[0].flight = null;
+      racing.teams[0].pilots[0].pilotPoints = 0;
+      await writePrivateJson(path, racing);
+    };
+
+    const res = await completeRound(ctx);
+
+    expect(res.status).toBe(200);
+    const completed = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
+    expect(completed.status).toBe("Complete");
+    // Then: the racing no-score withdrawal wins — scoring ran on the leased read, so the
+    // stale scorable snapshot (which would have yielded 100) did not overwrite it.
+    expect(completed.teams[0].pilots[0].noScore).toBe(true);
+    expect(completed.teams[0].pilots[0].pilotPoints).toBe(0);
+    expect(completed.teams[0].score).toBe(0);
+    expect(completed.scoring?.maxPilotScoreInRound).toBe(0);
+    expect(completed.scoring?.teams).toEqual([{ teamId: ctx.teamId, workingTeamScore: 0 }]);
+    await recomputeSeason(ctx.year);
   });
 
   it("lockRound when status is not BriefComplete returns 409 INVALID_STATE-style conflict", async () => {
@@ -242,6 +296,27 @@ describe("round lifecycle integration", () => {
     expect(res.status).toBe(409);
     expect((res.jsonBody as { code: string }).code).toBe("ROUND_CANCELLED");
     expect((await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))?.maxTeams).toBe(8);
+  });
+
+  it("updateRound on a Locked round returns 409 CONFLICT and leaves fields unchanged", async () => {
+    const ctx = await seedLifecycleRound({ status: "Locked", isLocked: true });
+
+    const res = await updateRoundMeta(ctx, { maxTeams: 4 });
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code?: string; error?: string }).code).toBe("CONFLICT");
+    expect((res.jsonBody as { error?: string }).error).toBe("Conflict");
+    expect((await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))?.maxTeams).toBe(8);
+  });
+
+  it("updateRound with an unknown siteId returns 409 CONFLICT and leaves the site unchanged", async () => {
+    const ctx = await seedLifecycleRound({ status: "Proposed" });
+
+    const res = await updateRoundMeta(ctx, { siteId: randomUUID() });
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code?: string }).code).toBe("CONFLICT");
+    expect((await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))?.site.id).toBe(ctx.siteId);
   });
 
   it("brief edit when round is Locked returns 409 BRIEF_LOCKED", async () => {

@@ -17,7 +17,7 @@ import {
 import { createHash, randomUUID } from "node:crypto";
 import { BlobServiceClient, type ContainerClient } from "@azure/storage-blob";
 import type { AdminUserView, Config, Pilot, PilotEmailIndex, PilotSummary, Round, User } from "@bccweb/types";
-import { AuthCredentialSchema, ConfigSchema, PilotSchema, PilotSummarySchema, RoundSchema, UserSchema } from "@bccweb/schemas";
+import { AuthCredentialSchema, ConfigPatchSchema, ConfigSchema, PilotSchema, PilotSummarySchema, RoundSchema, UserSchema } from "@bccweb/schemas";
 import * as z from "zod/v4";
 import {
   ensureJsonIndexBlob,
@@ -217,6 +217,10 @@ async function getConfig(
 
 // ─── PUT /api/admin/config ────────────────────────────────────────────────────
 
+// NOT `Partial<Config>`: nested factor maps here have OPTIONAL keys, so an admin
+// may PATCH one sub-map key without resending the siblings.
+type ConfigPatch = z.infer<typeof ConfigPatchSchema>;
+
 async function updateConfig(
   req: HttpRequest,
   _ctx: InvocationContext
@@ -235,9 +239,10 @@ async function updateConfig(
 
   // Client-input validation: reject obviously bad shapes with 400 (don't
   // route through BlobShapeError → 500, which is reserved for storage shape
-  // drift). ConfigSchema is `.strict()` on wingFactors so unknown wing keys
-  // are rejected here.
-  const parsed = ConfigSchema.partial().safeParse(body);
+  // drift). ConfigPatchSchema keeps each nested factor map `.strict()` (unknown
+  // wing/pilot/factor keys → 400) but carries NO defaults, so a partial body is
+  // never hydrated — omitted siblings stay omitted for the deep-merge below.
+  const parsed = ConfigPatchSchema.safeParse(body);
   if (!parsed.success) {
     throw new HttpError(
       400,
@@ -245,7 +250,7 @@ async function updateConfig(
       `Invalid config: ${JSON.stringify(parsed.error.issues)}`,
     );
   }
-  const patch: Partial<Config> = parsed.data;
+  const patch: ConfigPatch = parsed.data;
 
   let merged: Config = ConfigSchema.parse({});
   try {
@@ -270,7 +275,7 @@ async function updateConfig(
 }
 
 async function runConfigRmw(
-  patch: Partial<Config>,
+  patch: ConfigPatch,
   onMerged: (merged: Config) => void,
 ): Promise<void> {
   await withPrivateLease("config.json", async (leaseId) => {
@@ -279,14 +284,27 @@ async function runConfigRmw(
       ConfigSchema,
       "config.json",
     );
-    const merged: Config = {
+    // Deep-merge: each nested factor map merges key-by-key so a partial
+    // sub-map edit keeps untouched siblings (`patch` has no defaults to
+    // hydrate them). The map spreads MUST run after `...patch`, which would
+    // otherwise splice in the partial maps wholesale.
+    const mergedCandidate = {
       ...existing,
       ...patch,
-      wingFactors: {
-        ...existing.wingFactors,
-        ...(patch.wingFactors ?? {}),
+      wingFactors: { ...existing.wingFactors, ...(patch.wingFactors ?? {}) },
+      pilotFactors: { ...existing.pilotFactors, ...(patch.pilotFactors ?? {}) },
+      clubsAttendingFactors: {
+        ...existing.clubsAttendingFactors,
+        ...(patch.clubsAttendingFactors ?? {}),
+      },
+      minDistanceFactors: {
+        ...existing.minDistanceFactors,
+        ...(patch.minDistanceFactors ?? {}),
       },
     };
+    // `existing` is already complete, so this only re-affirms the stored blob
+    // is a valid full Config.
+    const merged: Config = ConfigSchema.parse(mergedCandidate);
     await writePrivateJson("config.json", ConfigSchema, merged, leaseId);
     onMerged(merged);
   });

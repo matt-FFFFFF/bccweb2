@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { Config } from "@bccweb/types";
+import { ConfigSchema } from "@bccweb/schemas";
 import { getRegisteredHandler } from "../../__tests__/helpers/setup.js";
 import { makeAuthRequest } from "../../__tests__/helpers/api.js";
 import {
@@ -34,15 +35,35 @@ describe("GET /api/manage/config — schema heal & defaults", () => {
     expect(res.status).toBe(200);
     const cfg = res.jsonBody as Config;
     expect(cfg.maxTeamsInClub).toBe(2);
-    expect(cfg.maxPilotsInTeam).toBe(12);
+    expect(cfg.maxPilotsInTeam).toBe(9);
     expect(cfg.maxScoringPilotsInTeam).toBe(6);
+    expect(cfg.maxPilotScoresCountedPerTeam).toBe(4);
+    expect(cfg.leagueRoundScoresCounted).toBe(6);
     expect(cfg.flightDateValidationEnabled).toBe(true);
+    expect(cfg.taskMaxPoints).toBe(1000);
     expect(cfg.wingFactors["EN A"]).toBe(1.0);
     expect(cfg.wingFactors["EN B"]).toBe(0.9);
     expect(cfg.wingFactors["EN C"]).toBe(0.8);
     expect(cfg.wingFactors["EN C 2-liner"]).toBe(0.7);
     expect(cfg.wingFactors["EN D"]).toBe(0.6);
     expect(cfg.wingFactors["EN D 2-liner"]).toBe(0.5);
+    expect(cfg.pilotFactors).toEqual({
+      "Club Pilot": 1,
+      Pilot: 1,
+      "Advanced Pilot": 0.9,
+    });
+    expect(cfg.clubsAttendingFactors).toEqual({
+      fewerThanThreeClubs: 0.5,
+      exactlyThreeClubs: 0.75,
+      moreThanThreeClubs: 1,
+    });
+    expect(cfg.minDistanceFactors).toEqual({
+      oneFlight: 0.2,
+      twoFlights: 0.4,
+      threeFlights: 0.6,
+      fourFlights: 0.8,
+      fiveOrMoreFlights: 1,
+    });
 
     // On 404, getConfig persists defaults so the next reader sees them.
     expect(await privateBlobExists("config.json")).toBe(true);
@@ -91,7 +112,11 @@ describe("GET /api/manage/config — schema heal & defaults", () => {
 
   test("fully-valid blob: response matches stored exactly", async () => {
     const { user } = await makeUser({ roles: ["Admin"], emailVerified: true });
+    // Spread schema defaults first so every W1 field is present: a partial
+    // literal would heal on read and the "matches stored exactly" assertion
+    // (the whole point of this case) would fail on the injected keys.
     const fullCfg: Config = {
+      ...ConfigSchema.parse({}),
       maxTeamsInClub: 5,
       maxPilotsInTeam: 10,
       maxScoringPilotsInTeam: 4,

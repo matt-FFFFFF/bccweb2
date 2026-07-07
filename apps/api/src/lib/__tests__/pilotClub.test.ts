@@ -5,7 +5,7 @@ import { describe, expect, test } from "vitest";
 import "../../__tests__/helpers/azurite.js";
 import { getPrivateBlobClient } from "../blob.js";
 import { readJson, writePrivateJson } from "../blobJson.js";
-import { ensureSeasonClubRecorded, pilotClubIdForSeason } from "../pilotClub.js";
+import { ensureSeasonClubRecorded, pilotClubIdForSeason, withSeasonClub } from "../pilotClub.js";
 
 function makePilot(
   overrides: Pick<Pilot, "seasonClubs" | "currentClub">,
@@ -67,6 +67,66 @@ describe("pilotClubIdForSeason", () => {
     const clubId = pilotClubIdForSeason(pilot, 2026);
 
     expect(clubId).toBeNull();
+  });
+});
+
+describe("withSeasonClub", () => {
+  test("replaces the entry for the same season year", () => {
+    const seasonClubs = [{ seasonYear: 2025, clubId: "a", clubName: "A" }];
+
+    const result = withSeasonClub(seasonClubs, {
+      seasonYear: 2025,
+      clubId: "b",
+      clubName: "B",
+    });
+
+    expect(result).toEqual([{ seasonYear: 2025, clubId: "b", clubName: "B" }]);
+    expect(result).toHaveLength(1);
+  });
+
+  test("inserts the entry when the season year is absent", () => {
+    const seasonClubs = [{ seasonYear: 2024, clubId: "a", clubName: "A" }];
+
+    const result = withSeasonClub(seasonClubs, {
+      seasonYear: 2025,
+      clubId: "b",
+      clubName: "B",
+    });
+
+    expect(result).toEqual([
+      { seasonYear: 2024, clubId: "a", clubName: "A" },
+      { seasonYear: 2025, clubId: "b", clubName: "B" },
+    ]);
+  });
+
+  test("keeps other season years intact when replacing one entry", () => {
+    const seasonClubs = [
+      { seasonYear: 2023, clubId: "x", clubName: "X" },
+      { seasonYear: 2024, clubId: "a", clubName: "A" },
+      { seasonYear: 2026, clubId: "z", clubName: "Z" },
+    ];
+
+    const result = withSeasonClub(seasonClubs, {
+      seasonYear: 2024,
+      clubId: "b",
+      clubName: "B",
+    });
+
+    expect(result).toEqual([
+      { seasonYear: 2023, clubId: "x", clubName: "X" },
+      { seasonYear: 2026, clubId: "z", clubName: "Z" },
+      { seasonYear: 2024, clubId: "b", clubName: "B" },
+    ]);
+  });
+
+  test("does not mutate the input array", () => {
+    const first = { seasonYear: 2024, clubId: "a", clubName: "A" };
+    const seasonClubs = [first];
+
+    withSeasonClub(seasonClubs, { seasonYear: 2025, clubId: "b", clubName: "B" });
+
+    expect(seasonClubs).toHaveLength(1);
+    expect(seasonClubs[0]).toBe(first);
   });
 });
 

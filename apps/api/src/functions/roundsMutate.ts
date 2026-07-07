@@ -333,9 +333,7 @@ async function updateRound(
       const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
 
       if (r.isLocked) {
-        const err = new Error("Round is locked — unlock before editing");
-        (err as { isValidation?: boolean }).isValidation = true;
-        throw err;
+        throw new HttpError(409, "CONFLICT", "Round is locked — unlock before editing");
       }
 
       if (r.status === "Cancelled") {
@@ -353,9 +351,7 @@ async function updateRound(
           const sitePath = `sites/${body.siteId}.json`;
           site = await readJson(getPrivateBlobClient(sitePath), SiteSchema, sitePath);
         } catch {
-          const err = new Error("Site not found");
-          (err as { isValidation?: boolean }).isValidation = true;
-          throw err;
+          throw new HttpError(409, "CONFLICT", "Site not found");
         }
         r.site = {
           id: site.id,
@@ -384,8 +380,7 @@ async function updateRound(
     });
   } catch (err: unknown) {
     if (err instanceof HttpError) throw err;
-    const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
+    const e = err as { statusCode?: number };
     if (e.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
     throw new HttpError(500, "INTERNAL");
   }
@@ -417,11 +412,11 @@ async function transition(
       const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
 
       if (!allowedFrom.includes(r.status)) {
-        const err = new Error(
+        throw new HttpError(
+          409,
+          "CONFLICT",
           `Expected status ${allowedFrom.join(" or ")}, got ${r.status}`
         );
-        (err as { isValidation?: boolean }).isValidation = true;
-        throw err;
       }
 
       r.status = to;
@@ -431,8 +426,8 @@ async function transition(
       return r;
     });
   } catch (err: unknown) {
-    const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
+    if (err instanceof HttpError) throw err;
+    const e = err as { statusCode?: number };
     if (e.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
     throw new HttpError(500, "INTERNAL");
   }
@@ -692,9 +687,7 @@ async function briefCompleteRound(
     const result = await withRoundAndBriefLease(id, async (roundLeaseId, briefLeaseId) => {
       const r = await readJson(getPrivateBlobClient(roundPath), RoundSchema, roundPath);
       if (r.status !== "Confirmed") {
-        const err = new Error(`Expected status Confirmed, got ${r.status}`);
-        (err as { isValidation?: boolean }).isValidation = true;
-        throw err;
+        throw new HttpError(409, "CONFLICT", `Expected status Confirmed, got ${r.status}`);
       }
       const briefPath = `round-briefs/${id}.json`;
       const brief = await readJson(getPrivateBlobClient(briefPath), BriefSchema, briefPath);
@@ -718,8 +711,7 @@ async function briefCompleteRound(
     invalidatedSignatureCount = result.count;
   } catch (err: unknown) {
     if (err instanceof HttpError) throw err;
-    const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
+    const e = err as { statusCode?: number };
     if (e.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
     throw new HttpError(500, "INTERNAL");
   }
@@ -1104,9 +1096,7 @@ async function lockRound(
       );
 
       if (r.status !== "BriefComplete") {
-        const err = new Error("Round status changed concurrently");
-        (err as { isValidation?: boolean }).isValidation = true;
-        throw err;
+        throw new HttpError(409, "CONFLICT", "Round status changed concurrently");
       }
 
       const briefPath = `round-briefs/${id}.json`;
@@ -1177,8 +1167,6 @@ async function lockRound(
     updated = result.round;
   } catch (err: unknown) {
     if (err instanceof HttpError) throw err;
-    const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
     throw new HttpError(
       500,
       "BRIEF_PERSIST_FAILED",
@@ -1318,8 +1306,6 @@ async function completeRound(
   assertCanManageRound(caller, current);
   await mutationRateLimit(req, caller, "completeRound", "heavy");
 
-  const config = await loadConfig();
-
   if (current.status !== "Locked") {
     return {
       status: 409,
@@ -1329,22 +1315,26 @@ async function completeRound(
     };
   }
 
-  const scoredSnapshot = scoreRound(current, config);
   let updated: Round;
 
   try {
     updated = await withPrivateLeaseRenewing(path, async (leaseId) => {
+      // Score the LEASED read — NOT a pre-lease snapshot — so a mutation
+      // committed between the pre-lease read and lease acquisition can never be
+      // stale-overwritten by an outdated score (legacy RoundsController.cs:305-310).
       const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
 
       if (r.status !== "Locked") {
-        const err = new Error(
+        throw new HttpError(
+          409,
+          "CONFLICT",
           `Round must be Locked to complete (currently ${r.status})`
         );
-        (err as { isValidation?: boolean }).isValidation = true;
-        throw err;
       }
 
-      const scored = structuredClone(scoredSnapshot);
+      const config = await loadConfig();
+      const { round: scored, derivation } = scoreRound(r, config);
+      scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
       scored.status = "Complete";
       scored.isLocked = false;
 
@@ -1352,8 +1342,8 @@ async function completeRound(
       return scored;
     });
   } catch (err: unknown) {
-    const e = err as { isValidation?: boolean; statusCode?: number; message?: string };
-    if (e.isValidation) throw new HttpError(409, "CONFLICT", e.message);
+    if (err instanceof HttpError) throw err;
+    const e = err as { statusCode?: number };
     if (e.statusCode === 404) throw new HttpError(404, "NOT_FOUND", "Round not found");
     throw new HttpError(500, "INTERNAL");
   }

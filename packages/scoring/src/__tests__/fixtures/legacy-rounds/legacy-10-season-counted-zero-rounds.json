@@ -1,0 +1,630 @@
+{
+  "name": "legacy-10-season-counted-zero-rounds",
+  "scenario": "season league includes counted zero-score rounds",
+  "notes": "Covers LegacyLeague OrderByDescending().Take(6) including completed zero-score round teams in countedRounds and roundScores.",
+  "legacySource": "net10-verbatim-copy-of-BaseController.cs@0ae338f80aae3a0242c16acea4f10cb6f87912a0",
+  "legacyId": null,
+  "legacyIdNote": "Algorithm-derived oracle fixture: no live legacy database is available in this environment, so persisted DB output legacy IDs are N/A.",
+  "capturedAt": "2026-07-06T00:00:00.000Z",
+  "input": {
+    "round": {
+      "id": "legacy-10-season-zero-r1",
+      "date": "2026-10-03",
+      "status": "Complete",
+      "isLocked": true,
+      "maxTeams": 12,
+      "minimumScore": 5,
+      "site": {
+        "id": "dea6515c-14d1-ee47-8a68-3cabbadd0728",
+        "name": "Legacy Oracle Site legacy-10-season-zero-r1"
+      },
+      "season": {
+        "year": 2026
+      },
+      "teams": [
+        {
+          "id": "06f0b8ba-0313-e04a-a28a-27e62837d686",
+          "teamName": "Oracle Alpha",
+          "club": {
+            "id": "dc3b4ca4-d011-5449-baf0-0d3ef214653a",
+            "name": "Oracle Club One"
+          },
+          "score": 0,
+          "pilots": [
+            {
+              "placeInTeam": 1,
+              "isScoring": true,
+              "status": "Filled",
+              "accountedFor": true,
+              "signToFly": true,
+              "noScore": false,
+              "pilotPoints": 0,
+              "pilotId": "adf2bc3f-9f9b-9342-bf8f-bf513c3ae281",
+              "snapshot": {
+                "wingClass": "EN A",
+                "pilotRating": "Pilot"
+              },
+              "flight": {
+                "id": "f91fb55f-fb61-284e-8228-c4cdc8fa7ae4",
+                "distance": 100,
+                "scoringType": "XC",
+                "score": 0,
+                "wingFactor": 0,
+                "isManualLog": false
+              }
+            }
+          ]
+        },
+        {
+          "id": "7da275f1-b8db-ce4a-b1d6-f77610c5697c",
+          "teamName": "Oracle Beta",
+          "club": {
+            "id": "05aa0cfc-5671-434f-b163-6e53db0fa826",
+            "name": "Oracle Club Two"
+          },
+          "score": 0,
+          "pilots": [
+            {
+              "placeInTeam": 1,
+              "isScoring": true,
+              "status": "Filled",
+              "accountedFor": true,
+              "signToFly": true,
+              "noScore": false,
+              "pilotPoints": 0,
+              "pilotId": "77819b93-f53a-9642-875d-23106b59c082",
+              "snapshot": {
+                "wingClass": "EN A",
+                "pilotRating": "Pilot"
+              },
+              "flight": {
+                "id": "24b21b75-83d5-cb46-b40f-ceaed93a9c28",
+                "distance": 50,
+                "scoringType": "XC",
+                "score": 0,
+                "wingFactor": 0,
+                "isManualLog": false
+              }
+            }
+          ]
+        },
+        {
+          "id": "e63c5816-6906-fd4a-9739-30a8a2b1beda",
+          "teamName": "Oracle Gamma",
+          "club": {
+            "id": "a972db80-276d-704e-a479-54d0d952197d",
+            "name": "Oracle Club Three"
+          },
+          "score": 0,
+          "pilots": [
+            {
+              "placeInTeam": 1,
+              "isScoring": true,
+              "status": "Filled",
+              "accountedFor": true,
+              "signToFly": true,
+              "noScore": false,
+              "pilotPoints": 0,
+              "pilotId": "3e12e39c-1277-5541-beb2-830a36cc96fd",
+              "snapshot": {
+                "wingClass": "EN A",
+                "pilotRating": "Pilot"
+              },
+              "flight": {
+                "id": "49107661-75b1-654f-97de-79117e7bea6e",
+                "distance": 30,
+                "scoringType": "XC",
+                "score": 0,
+                "wingFactor": 0,
+                "isManualLog": false
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "config": {
+      "maxTeamsInClub": 2,
+      "maxPilotsInTeam": 9,
+      "maxScoringPilotsInTeam": 6,
+      "maxPilotScoresCountedPerTeam": 4,
+      "leagueRoundScoresCounted": 6,
+      "flightDateValidationEnabled": true,
+      "wingFactors": {
+        "EN A": 1,
+        "EN B": 0.9,
+        "EN C": 0.8,
+        "EN C 2-liner": 0.7,
+        "EN D": 0.6,
+        "EN D 2-liner": 0.5
+      },
+      "taskMaxPoints": 1000,
+      "pilotFactors": {
+        "Club Pilot": 1,
+        "Pilot": 1,
+        "Advanced Pilot": 0.9
+      },
+      "clubsAttendingFactors": {
+        "fewerThanThreeClubs": 0.5,
+        "exactlyThreeClubs": 0.75,
+        "moreThanThreeClubs": 1
+      },
+      "minDistanceFactors": {
+        "oneFlight": 0.2,
+        "twoFlights": 0.4,
+        "threeFlights": 0.6,
+        "fourFlights": 0.8,
+        "fiveOrMoreFlights": 1
+      }
+    },
+    "seasonRounds": [
+      {
+        "id": "legacy-10-season-zero-r1",
+        "date": "2026-10-03",
+        "status": "Complete",
+        "isLocked": true,
+        "maxTeams": 12,
+        "minimumScore": 5,
+        "site": {
+          "id": "dea6515c-14d1-ee47-8a68-3cabbadd0728",
+          "name": "Legacy Oracle Site legacy-10-season-zero-r1"
+        },
+        "season": {
+          "year": 2026
+        },
+        "teams": [
+          {
+            "id": "06f0b8ba-0313-e04a-a28a-27e62837d686",
+            "teamName": "Oracle Alpha",
+            "club": {
+              "id": "dc3b4ca4-d011-5449-baf0-0d3ef214653a",
+              "name": "Oracle Club One"
+            },
+            "score": 0,
+            "pilots": [
+              {
+                "placeInTeam": 1,
+                "isScoring": true,
+                "status": "Filled",
+                "accountedFor": true,
+                "signToFly": true,
+                "noScore": false,
+                "pilotPoints": 0,
+                "pilotId": "adf2bc3f-9f9b-9342-bf8f-bf513c3ae281",
+                "snapshot": {
+                  "wingClass": "EN A",
+                  "pilotRating": "Pilot"
+                },
+                "flight": {
+                  "id": "f91fb55f-fb61-284e-8228-c4cdc8fa7ae4",
+                  "distance": 100,
+                  "scoringType": "XC",
+                  "score": 0,
+                  "wingFactor": 0,
+                  "isManualLog": false
+                }
+              }
+            ]
+          },
+          {
+            "id": "7da275f1-b8db-ce4a-b1d6-f77610c5697c",
+            "teamName": "Oracle Beta",
+            "club": {
+              "id": "05aa0cfc-5671-434f-b163-6e53db0fa826",
+              "name": "Oracle Club Two"
+            },
+            "score": 0,
+            "pilots": [
+              {
+                "placeInTeam": 1,
+                "isScoring": true,
+                "status": "Filled",
+                "accountedFor": true,
+                "signToFly": true,
+                "noScore": false,
+                "pilotPoints": 0,
+                "pilotId": "77819b93-f53a-9642-875d-23106b59c082",
+                "snapshot": {
+                  "wingClass": "EN A",
+                  "pilotRating": "Pilot"
+                },
+                "flight": {
+                  "id": "24b21b75-83d5-cb46-b40f-ceaed93a9c28",
+                  "distance": 50,
+                  "scoringType": "XC",
+                  "score": 0,
+                  "wingFactor": 0,
+                  "isManualLog": false
+                }
+              }
+            ]
+          },
+          {
+            "id": "e63c5816-6906-fd4a-9739-30a8a2b1beda",
+            "teamName": "Oracle Gamma",
+            "club": {
+              "id": "a972db80-276d-704e-a479-54d0d952197d",
+              "name": "Oracle Club Three"
+            },
+            "score": 0,
+            "pilots": [
+              {
+                "placeInTeam": 1,
+                "isScoring": true,
+                "status": "Filled",
+                "accountedFor": true,
+                "signToFly": true,
+                "noScore": false,
+                "pilotPoints": 0,
+                "pilotId": "3e12e39c-1277-5541-beb2-830a36cc96fd",
+                "snapshot": {
+                  "wingClass": "EN A",
+                  "pilotRating": "Pilot"
+                },
+                "flight": {
+                  "id": "49107661-75b1-654f-97de-79117e7bea6e",
+                  "distance": 30,
+                  "scoringType": "XC",
+                  "score": 0,
+                  "wingFactor": 0,
+                  "isManualLog": false
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "legacy-10-season-zero-r2",
+        "date": "2026-10-10",
+        "status": "Complete",
+        "isLocked": true,
+        "maxTeams": 12,
+        "minimumScore": 5,
+        "site": {
+          "id": "bbb7d2f4-b0d4-c443-a84a-a05a1f9c64be",
+          "name": "Legacy Oracle Site legacy-10-season-zero-r2"
+        },
+        "season": {
+          "year": 2026
+        },
+        "teams": [
+          {
+            "id": "06f0b8ba-0313-e04a-a28a-27e62837d686",
+            "teamName": "Oracle Alpha",
+            "club": {
+              "id": "dc3b4ca4-d011-5449-baf0-0d3ef214653a",
+              "name": "Oracle Club One"
+            },
+            "score": 0,
+            "pilots": [
+              {
+                "placeInTeam": 1,
+                "isScoring": true,
+                "status": "Filled",
+                "accountedFor": true,
+                "signToFly": true,
+                "noScore": false,
+                "pilotPoints": 0,
+                "pilotId": "5fbc857c-b105-874c-99ee-9d6575b8cc04",
+                "snapshot": {
+                  "wingClass": "EN A",
+                  "pilotRating": "Pilot"
+                },
+                "flight": null
+              }
+            ]
+          },
+          {
+            "id": "7da275f1-b8db-ce4a-b1d6-f77610c5697c",
+            "teamName": "Oracle Beta",
+            "club": {
+              "id": "05aa0cfc-5671-434f-b163-6e53db0fa826",
+              "name": "Oracle Club Two"
+            },
+            "score": 0,
+            "pilots": [
+              {
+                "placeInTeam": 1,
+                "isScoring": true,
+                "status": "Filled",
+                "accountedFor": true,
+                "signToFly": true,
+                "noScore": false,
+                "pilotPoints": 0,
+                "pilotId": "b70417d5-2f3b-a347-a1b2-20da8a70c015",
+                "snapshot": {
+                  "wingClass": "EN A",
+                  "pilotRating": "Pilot"
+                },
+                "flight": {
+                  "id": "5cb5f99a-3f3e-b747-bc34-edb1d0b54cc4",
+                  "distance": 55,
+                  "scoringType": "XC",
+                  "score": 0,
+                  "wingFactor": 0,
+                  "isManualLog": false
+                }
+              }
+            ]
+          },
+          {
+            "id": "e63c5816-6906-fd4a-9739-30a8a2b1beda",
+            "teamName": "Oracle Gamma",
+            "club": {
+              "id": "a972db80-276d-704e-a479-54d0d952197d",
+              "name": "Oracle Club Three"
+            },
+            "score": 0,
+            "pilots": [
+              {
+                "placeInTeam": 1,
+                "isScoring": true,
+                "status": "Filled",
+                "accountedFor": true,
+                "signToFly": true,
+                "noScore": false,
+                "pilotPoints": 0,
+                "pilotId": "a8dd9743-2399-204e-8214-eb86ee1fa072",
+                "snapshot": {
+                  "wingClass": "EN A",
+                  "pilotRating": "Pilot"
+                },
+                "flight": {
+                  "id": "a622d1bb-24f9-e642-84a7-56d2d9b7d03a",
+                  "distance": 35,
+                  "scoringType": "XC",
+                  "score": 0,
+                  "wingFactor": 0,
+                  "isManualLog": false
+                }
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "id": "legacy-10-season-zero-r3",
+        "date": "2026-10-17",
+        "status": "Complete",
+        "isLocked": true,
+        "maxTeams": 12,
+        "minimumScore": 5,
+        "site": {
+          "id": "16a37000-062e-9d42-82ed-8fb98b1f847d",
+          "name": "Legacy Oracle Site legacy-10-season-zero-r3"
+        },
+        "season": {
+          "year": 2026
+        },
+        "teams": [
+          {
+            "id": "06f0b8ba-0313-e04a-a28a-27e62837d686",
+            "teamName": "Oracle Alpha",
+            "club": {
+              "id": "dc3b4ca4-d011-5449-baf0-0d3ef214653a",
+              "name": "Oracle Club One"
+            },
+            "score": 0,
+            "pilots": [
+              {
+                "placeInTeam": 1,
+                "isScoring": true,
+                "status": "Filled",
+                "accountedFor": true,
+                "signToFly": true,
+                "noScore": false,
+                "pilotPoints": 0,
+                "pilotId": "97b4f0d6-e3f9-7d4b-b208-b5da8ce31191",
+                "snapshot": {
+                  "wingClass": "EN A",
+                  "pilotRating": "Pilot"
+                },
+                "flight": null
+              }
+            ]
+          },
+          {
+            "id": "7da275f1-b8db-ce4a-b1d6-f77610c5697c",
+            "teamName": "Oracle Beta",
+            "club": {
+              "id": "05aa0cfc-5671-434f-b163-6e53db0fa826",
+              "name": "Oracle Club Two"
+            },
+            "score": 0,
+            "pilots": [
+              {
+                "placeInTeam": 1,
+                "isScoring": true,
+                "status": "Filled",
+                "accountedFor": true,
+                "signToFly": true,
+                "noScore": false,
+                "pilotPoints": 0,
+                "pilotId": "719f062b-bc04-1240-9d0f-ba2957900891",
+                "snapshot": {
+                  "wingClass": "EN A",
+                  "pilotRating": "Pilot"
+                },
+                "flight": {
+                  "id": "1fac8d36-034b-8849-a8ef-c9a5c26d2bc0",
+                  "distance": 60,
+                  "scoringType": "XC",
+                  "score": 0,
+                  "wingFactor": 0,
+                  "isManualLog": false
+                }
+              }
+            ]
+          },
+          {
+            "id": "e63c5816-6906-fd4a-9739-30a8a2b1beda",
+            "teamName": "Oracle Gamma",
+            "club": {
+              "id": "a972db80-276d-704e-a479-54d0d952197d",
+              "name": "Oracle Club Three"
+            },
+            "score": 0,
+            "pilots": [
+              {
+                "placeInTeam": 1,
+                "isScoring": true,
+                "status": "Filled",
+                "accountedFor": true,
+                "signToFly": true,
+                "noScore": false,
+                "pilotPoints": 0,
+                "pilotId": "f0cde1e0-b071-ea4a-a9dd-9287018bcb06",
+                "snapshot": {
+                  "wingClass": "EN A",
+                  "pilotRating": "Pilot"
+                },
+                "flight": {
+                  "id": "df0337c1-9258-c748-96ff-2c9c732d1487",
+                  "distance": 40,
+                  "scoringType": "XC",
+                  "score": 0,
+                  "wingFactor": 0,
+                  "isManualLog": false
+                }
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "expected": {
+    "round": {
+      "taskMaxPoints": 1000,
+      "clubsAttendingCount": 3,
+      "clubsAttendingFactor": 0.75,
+      "minDistanceFlightCount": 3,
+      "minDistanceFactor": 0.6,
+      "maxPointsForRound": 450.00003,
+      "maxPilotScoreInRound": 100,
+      "maxTeamScore": 450,
+      "pilots": [
+        {
+          "teamId": "06f0b8ba-0313-e04a-a28a-27e62837d686",
+          "placeInTeam": 1,
+          "pilotId": "adf2bc3f-9f9b-9342-bf8f-bf513c3ae281",
+          "rawScore": 100,
+          "pilotPoints": 450.00003
+        },
+        {
+          "teamId": "7da275f1-b8db-ce4a-b1d6-f77610c5697c",
+          "placeInTeam": 1,
+          "pilotId": "77819b93-f53a-9642-875d-23106b59c082",
+          "rawScore": 50,
+          "pilotPoints": 225.00002
+        },
+        {
+          "teamId": "e63c5816-6906-fd4a-9739-30a8a2b1beda",
+          "placeInTeam": 1,
+          "pilotId": "3e12e39c-1277-5541-beb2-830a36cc96fd",
+          "rawScore": 30,
+          "pilotPoints": 135.00002
+        }
+      ],
+      "teams": [
+        {
+          "teamId": "06f0b8ba-0313-e04a-a28a-27e62837d686",
+          "workingTeamScore": 450,
+          "score": 450
+        },
+        {
+          "teamId": "7da275f1-b8db-ce4a-b1d6-f77610c5697c",
+          "workingTeamScore": 225,
+          "score": 225
+        },
+        {
+          "teamId": "e63c5816-6906-fd4a-9739-30a8a2b1beda",
+          "workingTeamScore": 135,
+          "score": 135
+        }
+      ]
+    },
+    "pilots": [
+      {
+        "teamId": "06f0b8ba-0313-e04a-a28a-27e62837d686",
+        "placeInTeam": 1,
+        "pilotId": "adf2bc3f-9f9b-9342-bf8f-bf513c3ae281",
+        "rawScore": 100,
+        "pilotPoints": 450.00003
+      },
+      {
+        "teamId": "7da275f1-b8db-ce4a-b1d6-f77610c5697c",
+        "placeInTeam": 1,
+        "pilotId": "77819b93-f53a-9642-875d-23106b59c082",
+        "rawScore": 50,
+        "pilotPoints": 225.00002
+      },
+      {
+        "teamId": "e63c5816-6906-fd4a-9739-30a8a2b1beda",
+        "placeInTeam": 1,
+        "pilotId": "3e12e39c-1277-5541-beb2-830a36cc96fd",
+        "rawScore": 30,
+        "pilotPoints": 135.00002
+      }
+    ],
+    "teams": [
+      {
+        "teamId": "06f0b8ba-0313-e04a-a28a-27e62837d686",
+        "workingTeamScore": 450,
+        "score": 450
+      },
+      {
+        "teamId": "7da275f1-b8db-ce4a-b1d6-f77610c5697c",
+        "workingTeamScore": 225,
+        "score": 225
+      },
+      {
+        "teamId": "e63c5816-6906-fd4a-9739-30a8a2b1beda",
+        "workingTeamScore": 135,
+        "score": 135
+      }
+    ],
+    "league": [
+      {
+        "teamId": "7da275f1-b8db-ce4a-b1d6-f77610c5697c",
+        "clubId": "05aa0cfc-5671-434f-b163-6e53db0fa826",
+        "teamName": "Oracle Beta",
+        "totalScore": 825,
+        "rank": 1,
+        "roundScores": {
+          "legacy-10-season-zero-r2": 300,
+          "legacy-10-season-zero-r3": 300,
+          "legacy-10-season-zero-r1": 225
+        },
+        "countedRounds": 3
+      },
+      {
+        "teamId": "e63c5816-6906-fd4a-9739-30a8a2b1beda",
+        "clubId": "a972db80-276d-704e-a479-54d0d952197d",
+        "teamName": "Oracle Gamma",
+        "totalScore": 525,
+        "rank": 2,
+        "roundScores": {
+          "legacy-10-season-zero-r3": 200,
+          "legacy-10-season-zero-r2": 190,
+          "legacy-10-season-zero-r1": 135
+        },
+        "countedRounds": 3
+      },
+      {
+        "teamId": "06f0b8ba-0313-e04a-a28a-27e62837d686",
+        "clubId": "dc3b4ca4-d011-5449-baf0-0d3ef214653a",
+        "teamName": "Oracle Alpha",
+        "totalScore": 450,
+        "rank": 3,
+        "roundScores": {
+          "legacy-10-season-zero-r1": 450,
+          "legacy-10-season-zero-r2": 0,
+          "legacy-10-season-zero-r3": 0
+        },
+        "countedRounds": 3
+      }
+    ]
+  }
+}

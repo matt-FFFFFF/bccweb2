@@ -106,6 +106,34 @@ const validRound = {
   updatedBy: "admin-1",
 } as const;
 
+const validScoring = {
+  taskMaxPoints: 1000,
+  clubsAttendingCount: 4,
+  clubsAttendingFactor: 1,
+  minDistanceFlightCount: 5,
+  minDistanceFactor: 1,
+  maxPointsForRound: 1000,
+  maxPilotScoreInRound: 43,
+  maxTeamScore: 128,
+  maxPilotScoresCountedPerTeam: 4,
+  leagueRoundScoresCounted: 6,
+  pilotFactors: {
+    "Club Pilot": 1,
+    Pilot: 1,
+    "Advanced Pilot": 0.9,
+  },
+  wingFactors: {
+    "EN A": 1,
+    "EN B": 0.9,
+    "EN C": 0.8,
+    "EN C 2-liner": 0.7,
+    "EN D": 0.6,
+    "EN D 2-liner": 0.5,
+  },
+  teams: [{ teamId: "team-1", workingTeamScore: 128 }],
+  scoredAt: "2026-06-11T18:30:00.000Z",
+} as const;
+
 describe("RoundStatusSchema", () => {
   test("round-trips canonical status values", () => {
     expect(RoundStatusSchema.parse("BriefComplete")).toBe("BriefComplete");
@@ -129,6 +157,21 @@ describe("RoundSummarySchema", () => {
     } as const;
 
     expect(RoundSummarySchema.parse(summary)).toEqual(summary);
+  });
+
+  test("is private-blind: strips scoring so it never reaches the public summary", () => {
+    const parsed = RoundSummarySchema.parse({
+      id: "round-1",
+      legacyId: 99,
+      date: "2026-06-11",
+      siteId: "site-1",
+      siteName: "Llangollen",
+      status: "Confirmed",
+      seasonYear: 2026,
+      scoring: validScoring,
+    });
+
+    expect(parsed).not.toHaveProperty("scoring");
   });
 });
 
@@ -236,6 +279,37 @@ describe("RoundSchema", () => {
 
     expect(parsed.organisingClub).toBeUndefined();
     expect(parsed.pureTrackGroupId).toBeUndefined();
+  });
+});
+
+describe("RoundSchema private scoring snapshot (W1.4)", () => {
+  test("parses a Round WITHOUT scoring and omits the key (backward-compat)", () => {
+    const parsed = RoundSchema.parse(validRound);
+
+    expect(parsed.scoring).toBeUndefined();
+    expect(parsed).not.toHaveProperty("scoring");
+  });
+
+  test("round-trips a valid scoring snapshot, preserving every denominator", () => {
+    const scored = { ...validRound, scoring: validScoring };
+    const parsed = RoundSchema.parse(scored);
+
+    expect(parsed).toEqual(scored);
+    expect(parsed.scoring?.maxPilotScoreInRound).toBe(43);
+    expect(parsed.scoring?.maxTeamScore).toBe(128);
+    expect(parsed.scoring?.maxPointsForRound).toBe(1000);
+    expect(parsed.scoring?.teams).toEqual([{ teamId: "team-1", workingTeamScore: 128 }]);
+  });
+
+  test("heals a malformed scoring snapshot to absent without dropping the round", () => {
+    const parsed = RoundSchema.parse({
+      ...validRound,
+      scoring: { taskMaxPoints: "not-a-number", teams: "broken" },
+    });
+
+    expect(parsed.scoring).toBeUndefined();
+    expect(parsed.id).toBe("round-1");
+    expect(parsed.teams).toHaveLength(1);
   });
 });
 

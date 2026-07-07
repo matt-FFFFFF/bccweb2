@@ -24,7 +24,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { execSync, spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, rmSync, existsSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -54,6 +54,16 @@ const WING_CLASSES = ["EN A", "EN B", "EN C", "EN C 2-liner", "EN D", "EN D 2-li
 const ROUND_STATUSES = ["Proposed", "Confirmed", "BriefComplete", "Locked", "Complete", "Cancelled"];
 const PILOT_SLOT_STATUSES = ["Empty", "Filled"];
 const SCORING_TYPES = ["XC", "Manual"];
+
+// W6.1 — the Complete round's LEGACY scores exactly as seeded in
+// fixtures/canned/seed.sql (RoundTeam.TeamScore / RoundTeamPilot.PilotPoints),
+// keyed by teamName. Migration PRESERVES these verbatim. They are deliberately
+// DISTINCT from RESCORED_PLACE1_POINTS (what the deleted raw-sum re-score would
+// regenerate for these flights), so equality proves pass-through not regeneration.
+const LEGACY_TEAM_ID = { "Test Club Alpha A": 501, "Test Club Bravo A": 502, "Test Club Charlie A": 503 };
+const LEGACY_TEAM_SCORE = { "Test Club Alpha A": 842, "Test Club Bravo A": 1000, "Test Club Charlie A": 205 };
+const LEGACY_PLACE1_POINTS = { "Test Club Alpha A": 842.5, "Test Club Bravo A": 1000, "Test Club Charlie A": 205 };
+const RESCORED_PLACE1_POINTS = { "Test Club Alpha A": 38.3, "Test Club Bravo A": 35.6, "Test Club Charlie A": 18 };
 
 // ─── Pre-flight availability checks ──────────────────────────────────────────
 
@@ -337,6 +347,15 @@ async function readJsonBlob(containerName, path) {
   return JSON.parse(buf.toString("utf8"));
 }
 
+async function writeJsonBlob(containerName, path, obj) {
+  const svc = BlobServiceClient.fromConnectionString(AZURITE_CS);
+  const c = svc.getContainerClient(containerName);
+  const json = JSON.stringify(obj, null, 2);
+  await c.getBlockBlobClient(path).upload(json, Buffer.byteLength(json), {
+    blobHTTPHeaders: { blobContentType: "application/json" },
+  });
+}
+
 function assertCanonical(value, allowed, label) {
   assert.ok(
     allowed.includes(value),
@@ -444,6 +463,18 @@ test("migration smoke: real run writes expected blobs", { skip: SKIP }, async ()
   const results2026 = await readJsonBlob(PUBLIC_CONTAINER, "results/2026.json");
   assert.equal(results2026.length, 1, "one Complete round → one entry in results/2026.json");
   assert.equal(results2026[0].teamResults.length, 3, "three teams in the Complete round");
+  const resultPilots = results2026[0].teamResults.flatMap((tr) => tr.pilots);
+  assert.ok(resultPilots.length >= 3, "produced results carry a pilot row per team's flighted place-1 pilot");
+  for (const p of resultPilots) {
+    assert.ok(
+      p.pilotId === null || typeof p.pilotId === "string",
+      `results pilot row pilotId is string|null, never undefined (got ${JSON.stringify(p.pilotId)})`,
+    );
+  }
+  assert.ok(
+    resultPilots.some((p) => typeof p.pilotId === "string"),
+    "migrated results carry a UUID string pilotId (ported buildSeasonResults emits pilotId in lockstep with recompute.ts)",
+  );
 
   // ── Private blob assertions ───────────────────────────────────────────
   const privateBlobs = await listBlobPaths(PRIVATE_CONTAINER);
@@ -526,11 +557,22 @@ test("migration smoke: real run writes expected blobs", { skip: SKIP }, async ()
     assert.ok(place1.flight, "place-1 slot has a flight");
     assert.ok(place1.flight.distance > 0, "flight has non-zero distance");
     assertCanonical(place1.flight.scoringType, SCORING_TYPES, `team ${team.teamName} place-1 scoringType`);
+
+    // W6.1 — team carries the legacy RoundTeam.ID (the manifest match key).
+    assert.equal(typeof team.legacyId, "number", `team ${team.teamName} carries legacy RoundTeam.ID`);
+    assert.equal(team.legacyId, LEGACY_TEAM_ID[team.teamName], `team ${team.teamName} legacyId`);
+
+    // W6.1 — legacy scores are PRESERVED VERBATIM: migrated team.score and place-1
+    // pilotPoints EQUAL the canned legacy values and are NOT the values the deleted
+    // raw-sum re-score would regenerate (proves pass-through, not recomputation).
+    assert.equal(team.score, LEGACY_TEAM_SCORE[team.teamName], `team ${team.teamName} score preserved == legacy TeamScore`);
+    assert.equal(place1.pilotPoints, LEGACY_PLACE1_POINTS[team.teamName], `team ${team.teamName} place-1 pilotPoints preserved == legacy PilotPoints`);
+    assert.notEqual(place1.pilotPoints, RESCORED_PLACE1_POINTS[team.teamName], `team ${team.teamName} place-1 pilotPoints is NOT the re-scored value`);
   }
-  // Scoring should have run: at least one team has a positive score.
+  // Legacy TeamScores were preserved (all seeded > 0), never recomputed.
   assert.ok(
-    completeRoundDoc.teams.some((t) => t.score > 0),
-    "complete round has at least one team with score > 0 after scoreRound()",
+    completeRoundDoc.teams.every((t) => t.score > 0),
+    "every team keeps its preserved legacy TeamScore (all seeded > 0)",
   );
 
   const briefDoc = await readJsonBlob(PRIVATE_CONTAINER, `round-briefs/${completeRound.id}.json`);
@@ -584,6 +626,24 @@ test("migration smoke: real run writes expected blobs", { skip: SKIP }, async ()
   }
 });
 
+test("migration smoke: legacy-score manifest emitted with nested legacy-id keying", { skip: SKIP }, async () => {
+  const manifestPath = join(tmpDir, ".migration-state", "legacy-score-manifest.json");
+  assert.ok(existsSync(manifestPath), `legacy-score manifest missing at ${manifestPath}`);
+  const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+  // Nested keying: legacy round id → legacy round-team id → { teamScore, pilots:{ place: points } }.
+  assert.deepEqual(Object.keys(manifest).sort(), ["402"], "manifest holds exactly the one Complete round (legacy id 402)");
+  const round402 = manifest["402"];
+  assert.deepEqual(Object.keys(round402).sort(), ["501", "502", "503"], "manifest keys teams by legacy RoundTeam.ID");
+
+  assert.equal(round402["501"].teamScore, 842, "manifest teamScore == legacy (Alpha 501)");
+  assert.deepEqual(round402["501"].pilots, { "1": 842.5 }, "manifest pilots keyed by placeInTeam == legacy PilotPoints (Alpha 501)");
+  assert.equal(round402["502"].teamScore, 1000, "manifest teamScore == legacy (Bravo 502)");
+  assert.deepEqual(round402["502"].pilots, { "1": 1000 }, "manifest pilots == legacy (Bravo 502)");
+  assert.equal(round402["503"].teamScore, 205, "manifest teamScore == legacy (Charlie 503)");
+  assert.deepEqual(round402["503"].pilots, { "1": 205 }, "manifest pilots == legacy (Charlie 503)");
+});
+
 test("migration smoke: schema gate validates migrated blobs", { skip: SCHEMA_GATE_SKIP }, async () => {
   const r = runValidate();
   assert.equal(
@@ -607,8 +667,63 @@ test("migration smoke: schema gate validates migrated blobs", { skip: SCHEMA_GAT
     );
   }
   assert.match(r.stdout, /CHANGE rounds\.siteId — \d+ heal\(s\), allowlisted/);
+  // W6.1 — the new validate sections PASS on the clean migrated output.
+  assert.match(r.stdout, /scoring config keys present \+ valid/, "config-keys check passes on migrated config");
+  assert.match(r.stdout, /Legacy score preservation \(manifest cross-check\)/, "manifest cross-check section runs");
+  assert.match(r.stdout, /team\.score preserved/, "migrated team.score matches the legacy manifest");
+  assert.match(r.stdout, /pilotPoints preserved/, "migrated pilotPoints matches the legacy manifest");
   assert.match(r.stdout, /Migration validation PASSED — data looks correct\./);
   console.log(`\n[validate.mjs stdout]\n${r.stdout.trim()}\n[/validate.mjs stdout]`);
+});
+
+test("migration smoke: validate FAILS on perturbed manifest value and on missing legacyId", { skip: SCHEMA_GATE_SKIP }, async () => {
+  const manifestPath = join(tmpDir, ".migration-state", "legacy-score-manifest.json");
+  const originalManifest = readFileSync(manifestPath, "utf8");
+
+  // (a) Perturb a manifest teamScore → the migrated blob no longer matches → FAIL.
+  const perturbed = JSON.parse(originalManifest);
+  perturbed["402"]["501"].teamScore += 999;
+  writeFileSync(manifestPath, `${JSON.stringify(perturbed, null, 2)}\n`, "utf8");
+  const afterPerturb = runValidate();
+  assert.notEqual(
+    afterPerturb.status,
+    0,
+    `validate must FAIL when a manifest score is perturbed:\nSTDOUT:\n${afterPerturb.stdout}\nSTDERR:\n${afterPerturb.stderr}`,
+  );
+  assert.match(`${afterPerturb.stdout}${afterPerturb.stderr}`, /not preserved/, "failure names the legacy-score mismatch");
+
+  // Restore the manifest → validate PASSES again (confirms the perturbation was the cause).
+  writeFileSync(manifestPath, originalManifest, "utf8");
+  const afterManifestRestore = runValidate();
+  assert.equal(
+    afterManifestRestore.status,
+    0,
+    `validate must PASS again after restoring the manifest:\nSTDOUT:\n${afterManifestRestore.stdout}\nSTDERR:\n${afterManifestRestore.stderr}`,
+  );
+
+  // (b) Drop a team.legacyId match key from a Complete round blob → HARD FAIL (never a silent skip).
+  const roundsIndex = await readJsonBlob(PUBLIC_CONTAINER, "rounds.json");
+  const complete = roundsIndex.find((round) => round.status === "Complete");
+  const roundDoc = await readJsonBlob(PRIVATE_CONTAINER, `rounds/${complete.id}.json`);
+  const mutated = structuredClone(roundDoc);
+  delete mutated.teams[0].legacyId;
+  await writeJsonBlob(PRIVATE_CONTAINER, `rounds/${complete.id}.json`, mutated);
+  const afterMissing = runValidate();
+  assert.notEqual(
+    afterMissing.status,
+    0,
+    `validate must FAIL when a team.legacyId match key is missing:\nSTDOUT:\n${afterMissing.stdout}\nSTDERR:\n${afterMissing.stderr}`,
+  );
+  assert.match(`${afterMissing.stdout}${afterMissing.stderr}`, /legacyId/, "failure names the missing legacyId match key");
+
+  // Restore the round blob → validate PASSES again.
+  await writeJsonBlob(PRIVATE_CONTAINER, `rounds/${complete.id}.json`, roundDoc);
+  const afterBlobRestore = runValidate();
+  assert.equal(
+    afterBlobRestore.status,
+    0,
+    `validate must PASS again after restoring the round blob:\nSTDOUT:\n${afterBlobRestore.stdout}\nSTDERR:\n${afterBlobRestore.stderr}`,
+  );
 });
 
 test("migration smoke: reconcile reports zero anomalies", { skip: SKIP }, async () => {
@@ -641,4 +756,58 @@ test("migration smoke: privacy-scan passes on public blobs (T22)", { skip: SKIP 
     /\[PASS\] public-blob-scan/,
     "privacy-scan should report PASS on public blobs",
   );
+});
+
+// MUST STAY LAST: this test PERTURBS the source DB and re-migrates, leaving the
+// Azurite blobs + manifest in a perturbed state. No later test may depend on the
+// baseline seed values.
+test("migration smoke: perturbing a canned legacy score flows through to the migrated blob (no recompute)", { skip: SKIP }, async () => {
+  // §3(a) dynamic pass-through proof. Perturb the CANNED legacy scores in the
+  // source DB to sentinel values that NO recompute of these flights could ever
+  // produce (distance×wingFactor≈38.3), then re-migrate. If migration re-scored,
+  // the blob would show the regenerated ~38.3; pass-through means it shows the
+  // perturbed legacy value verbatim — proving migration reads, never recomputes.
+  await execSqlBatch(
+    "bccweb_smoke",
+    "UPDATE RoundTeamPilots SET PilotPoints = 777.5 WHERE ID = 601;\n" +
+      "UPDATE RoundTeams SET TeamScore = 888 WHERE ID = 501;",
+  );
+  const migrated = runMigration({ dryRun: false });
+  assert.equal(
+    migrated.status,
+    0,
+    `re-migration after perturbation failed:\nSTDOUT:\n${migrated.stdout}\nSTDERR:\n${migrated.stderr}`,
+  );
+
+  const roundsIndex = await readJsonBlob(PUBLIC_CONTAINER, "rounds.json");
+  const complete = roundsIndex.find((round) => round.status === "Complete");
+  const doc = await readJsonBlob(PRIVATE_CONTAINER, `rounds/${complete.id}.json`);
+  const alpha = doc.teams.find((t) => t.teamName === "Test Club Alpha A");
+  const place1 = alpha.pilots.find((p) => p.placeInTeam === 1);
+
+  assert.equal(alpha.score, 888, "perturbed legacy TeamScore flows through verbatim (blob is not recomputed)");
+  assert.equal(place1.pilotPoints, 777.5, "perturbed legacy PilotPoints flows through verbatim (blob is not recomputed)");
+  assert.notEqual(
+    place1.pilotPoints,
+    RESCORED_PLACE1_POINTS["Test Club Alpha A"],
+    "perturbed value is not the value a re-score would regenerate",
+  );
+
+  // The manifest is sourced from the same legacy rows, so it reflects the
+  // perturbation too — keeping migrated == manifest == legacy.
+  const manifest = JSON.parse(
+    readFileSync(join(tmpDir, ".migration-state", "legacy-score-manifest.json"), "utf8"),
+  );
+  assert.equal(manifest["402"]["501"].teamScore, 888, "manifest reflects the perturbed teamScore");
+  assert.deepEqual(manifest["402"]["501"].pilots, { "1": 777.5 }, "manifest reflects the perturbed pilotPoints");
+
+  // manifest == blob, so validate still PASSES on the perturbed-but-consistent output.
+  if (!schemasOk) return;
+  const v = runValidate();
+  assert.equal(
+    v.status,
+    0,
+    `validate must PASS after a legacy-score perturbation (manifest == blob):\nSTDOUT:\n${v.stdout}\nSTDERR:\n${v.stderr}`,
+  );
+  assert.match(v.stdout, /Migration validation PASSED/);
 });
