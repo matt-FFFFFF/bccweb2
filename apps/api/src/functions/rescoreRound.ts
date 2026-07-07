@@ -10,7 +10,7 @@ import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { forbiddenResponse, getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { scoreIgc } from "../lib/igcScoring.js";
-import { acquireActiveGuard, enqueueRescore, releaseActiveGuard, writeJobStatus } from "../lib/rescoreJob.js";
+import { acquireActiveGuard, enqueueRescore, readJobStatus, releaseActiveGuard, writeJobStatus } from "../lib/rescoreJob.js";
 
 const BUDGET_MS = 8 * 60_000;
 
@@ -256,4 +256,27 @@ app.http("rescoreRound", {
   authLevel: "anonymous",
   route: "rounds/{id}/rescore",
   handler: withErrorHandler(rescoreRound),
+});
+
+async function getRescoreJob(
+  req: HttpRequest,
+  _ctx: InvocationContext,
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!caller.roles.includes("Admin")) return forbiddenResponse();
+
+  const job = await readJobStatus(req.params["jobId"]);
+  if (job === null || job.roundId !== req.params["id"]) {
+    throw new HttpError(404, "NOT_FOUND", "Rescore job not found");
+  }
+
+  return { status: 200, jsonBody: job };
+}
+
+app.http("getRescoreJob", {
+  methods: ["GET"],
+  authLevel: "anonymous",
+  route: "rounds/{id}/rescore/{jobId}",
+  handler: withErrorHandler(getRescoreJob),
 });
