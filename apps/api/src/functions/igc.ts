@@ -103,6 +103,14 @@ async function readRoundOr404(roundPath: string): Promise<Round> {
   }
 }
 
+async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
+  const chunks: Buffer[] = [];
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
+}
+
 // ─── POST /api/rounds/{id}/teams/{teamId}/pilots/{place}/igc ─────────────────────
 
 async function uploadIgc(
@@ -195,6 +203,56 @@ async function uploadIgc(
   return { status: 200, jsonBody: saved };
 }
 
+async function getIgc(
+  req: HttpRequest,
+  _ctx: InvocationContext,
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const id = req.params["id"];
+  const teamId = req.params["teamId"];
+  const place = parseInt(req.params["place"] ?? "", 10);
+  if (!id || !teamId || !Number.isInteger(place)) {
+    throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
+  }
+
+  const roundPath = `rounds/${id}.json`;
+  const round = await readRoundOr404(roundPath);
+
+  const slot = findSlot(round, teamId, place);
+  if (!slot) throw new HttpError(404, "NOT_FOUND", "Pilot slot not found");
+
+  if (!canWriteSlotIgc(caller, round, slot)) return forbiddenResponse();
+
+  const igcPath = slot.flight?.igcPath;
+  if (!igcPath) {
+    throw new HttpError(404, "NOT_FOUND", "IGC not found");
+  }
+
+  const blobClient = getPrivateBlobClient(igcPath);
+  let downloadRes: Awaited<ReturnType<typeof blobClient.download>>;
+  try {
+    downloadRes = await blobClient.download();
+  } catch (err: unknown) {
+    if ((err as { statusCode?: number }).statusCode === 404) {
+      throw new HttpError(404, "NOT_FOUND", "IGC not found");
+    }
+    throw err;
+  }
+
+  const body = await streamToBuffer(downloadRes.readableStreamBody!);
+  return {
+    status: 200,
+    body,
+    headers: {
+      "Content-Type": "text/plain; charset=utf-8",
+      "Content-Disposition": `attachment; filename="bcc-${id}-team-${teamId}-pilot-${place}.igc"`,
+      "Cache-Control": "private, max-age=300",
+    },
+  };
+}
+
 // ─── Registration ───────────────────────────────────────────────────────────────
 
 app.http("uploadIgc", {
@@ -202,4 +260,11 @@ app.http("uploadIgc", {
   authLevel: "anonymous",
   route: "rounds/{id}/teams/{teamId}/pilots/{place}/igc",
   handler: withErrorHandler(uploadIgc),
+});
+
+app.http("getIgc", {
+  methods: ["GET"],
+  authLevel: "anonymous",
+  route: "rounds/{id}/teams/{teamId}/pilots/{place}/igc",
+  handler: withErrorHandler(getIgc),
 });

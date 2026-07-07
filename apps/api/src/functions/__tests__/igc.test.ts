@@ -119,6 +119,14 @@ async function downloadPrivate(path: string): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+function igcHeaders(filename: string) {
+  return {
+    "Content-Type": "text/plain; charset=utf-8",
+    "Content-Disposition": `attachment; filename="${filename}"`,
+    "Cache-Control": "private, max-age=300",
+  };
+}
+
 // ─── Tests ───────────────────────────────────────────────────────────────────────
 
 describe("uploadIgc — POST /rounds/{id}/teams/{teamId}/pilots/{place}/igc", () => {
@@ -322,5 +330,70 @@ describe("uploadIgc — POST /rounds/{id}/teams/{teamId}/pilots/{place}/igc", ()
     );
     expect(up2.status).toBe(200);
     expect((await downloadPrivate(igcPath)).equals(Buffer.from(second))).toBe(true);
+  });
+});
+
+describe("getIgc — GET /rounds/{id}/teams/{teamId}/pilots/{place}/igc", () => {
+  it("401 when unauthenticated", async () => {
+    const r = await seedRound();
+    const req = makeRequest({ method: "GET", params: paramsFor(r) });
+
+    const res = await invoke("getIgc", req);
+
+    expect(res.status).toBe(401);
+  });
+
+  it("200 returns the uploaded IGC bytes and headers", async () => {
+    const r = await seedRound();
+    const { user } = await bootstrapAdmin();
+    const body = Buffer.from(D3P);
+
+    const up = await invoke(
+      "uploadIgc",
+      withFile(
+        makeAuthRequest(user.id, user.email, { method: "POST", params: paramsFor(r) }),
+        igcFile(body),
+      ),
+    );
+    expect(up.status).toBe(200);
+
+    const req = makeAuthRequest(user.id, user.email, { method: "GET", params: paramsFor(r) });
+    const res = await invoke("getIgc", req);
+
+    expect(res.status).toBe(200);
+    expect(Buffer.from(res.body as ArrayBuffer)).toEqual(body);
+    expect(res.headers).toMatchObject(
+      igcHeaders(`bcc-${r.roundId}-team-${r.teamId}-pilot-${r.place}.igc`),
+    );
+  });
+
+  it("403 when a Pilot requests another pilot's slot", async () => {
+    const r = await seedRound({ pilotId: randomUUID() });
+    const { user } = await makeUser({ roles: ["Pilot"], pilotId: randomUUID() });
+    const req = makeAuthRequest(user.id, user.email, { method: "GET", params: paramsFor(r) });
+
+    const res = await invoke("getIgc", req);
+
+    expect(res.status).toBe(403);
+  });
+
+  it("403 when a RoundsCoord is scoped to a different club", async () => {
+    const r = await seedRound({ organisingClubId: randomUUID() });
+    const { user } = await makeUser({ roles: ["RoundsCoord"], clubId: randomUUID() });
+    const req = makeAuthRequest(user.id, user.email, { method: "GET", params: paramsFor(r) });
+
+    const res = await invoke("getIgc", req);
+
+    expect(res.status).toBe(403);
+  });
+
+  it("404 when the slot has no IGC yet", async () => {
+    const r = await seedRound();
+    const { user } = await bootstrapAdmin();
+    const req = makeAuthRequest(user.id, user.email, { method: "GET", params: paramsFor(r) });
+
+    const res = await invoke("getIgc", req);
+
+    expect(res.status).toBe(404);
   });
 });
