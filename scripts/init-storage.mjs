@@ -39,6 +39,8 @@ const CONTAINERS = [
  * The sign-to-fly reflect pipeline enqueues reflection jobs onto
  * `signtofly-reflect`; dead-letter messages are parked onto
  * `signtofly-reflect-poison` (after maxDequeueCount=5 per host.json).
+ * The async rescore pipeline enqueues jobs onto `rescore-jobs`; dead-letter
+ * messages are parked onto `rescore-jobs-poison` by the Functions host.
  * Names MUST match the Terraform-provisioned queues + the API producer/consumer.
  */
 const QUEUES = [
@@ -46,7 +48,16 @@ const QUEUES = [
   "round-brief-pdf-poison",
   "signtofly-reflect",
   "signtofly-reflect-poison",
+  "rescore-jobs",
 ];
+
+/**
+ * Queues that are created non-fatally — if the Queue service is unavailable,
+ * log a warning and continue (blob containers remain the hard requirement).
+ * `rescore-jobs` lives here because it is a newer addition and its absence
+ * during a cold Azurite start should not block blob container creation.
+ */
+const NON_FATAL_QUEUES = new Set(["rescore-jobs"]);
 
 /**
  * Build a Shared Key Authorization header for an Azure Blob Storage PUT
@@ -331,7 +342,15 @@ async function main() {
   }
   await setBlobServiceCors();
   for (const name of QUEUES) {
-    await createQueue(name);
+    if (NON_FATAL_QUEUES.has(name)) {
+      try {
+        await createQueue(name);
+      } catch (err) {
+        console.warn(`  warning: could not create queue '${name}' (non-fatal): ${err.message}`);
+      }
+    } else {
+      await createQueue(name);
+    }
   }
   console.log("Done.");
 }

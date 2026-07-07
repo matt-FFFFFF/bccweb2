@@ -89,10 +89,13 @@ give atomic read-modify-write (30s lease).
 
 ### Storage Queues
 
-Four queues (created by `scripts/init-storage.mjs`, same storage account as blobs):
+Six queues (created by `scripts/init-storage.mjs`, same storage account as blobs):
 `round-brief-pdf` (main) and `round-brief-pdf-poison` (dead-letter after
 `maxDequeueCount=5` per `host.json`), plus `signtofly-reflect` (main) and
-`signtofly-reflect-poison` (dead-letter, same `maxDequeueCount=5` policy).
+`signtofly-reflect-poison` (dead-letter, same `maxDequeueCount=5` policy), plus
+`rescore-jobs` (main) and `rescore-jobs-poison` (dead-letter, same policy).
+`rescore-jobs` creation in `init-storage.mjs` is non-fatal — a warning is logged
+if the Queue service is unreachable, but blob container creation proceeds normally.
 
 **Async brief-PDF flow**: the lock endpoint (`POST /api/rounds/{id}/lock`) sets
 `brief.pdfStatus = "pending"` and `brief.pdfAttemptId` on the round blob, then enqueues
@@ -111,6 +114,15 @@ updated round blob. This decouples the HTTP response from the potentially expens
 full-round recompute.
 Operator recovery: `POST /api/rounds/{id}/reflect-sign-to-fly` (Admin/scoped-coord)
 synchronously re-runs the reflect and returns the corrected round.
+
+**Async rescore flow**: a trigger (e.g. IGC file upload or admin action) enqueues a
+`{ roundId, jobId }` job onto `rescore-jobs`. The `rescoreWorker` queue-trigger consumer
+(`apps/api/src/functions/rescoreWorker.ts`) re-scores the round using the IGC-based
+scoring path, writes the result, and updates the job status blob
+`rescore-jobs/{jobId}.json` (status values: `pending | processing | done | failed`).
+The Admin UI polls `GET /api/rounds/{id}/rescore/{jobId}` to surface progress and the
+final result. Dead-letter messages land on `rescore-jobs-poison` after
+`maxDequeueCount=5`; inspect the status blob + App Insights for the failure cause.
 
 **Connection invariant**: both producers (`apps/api/src/lib/queue.ts`) and all
 `app.storageQueue` triggers use the `AzureWebJobsStorage` connection setting. That is
@@ -158,6 +170,9 @@ Modules: `health`, `me`, `meProfile`, `rounds`, `roundsMutate`, `seasons`, `pilo
 and `round-brief-pdf-poison`; the first non-HTTP triggers in the codebase)**,
 `signaturesReflect` **(queue-trigger — registers `app.storageQueue(...)` for
 `signtofly-reflect` and `signtofly-reflect-poison`; the second non-HTTP trigger pair)**,
+`rescoreWorker` **(queue-trigger — registers `app.storageQueue(...)` for `rescore-jobs`
+and `rescore-jobs-poison`; re-scores a round via the IGC path and writes status to
+`rescore-jobs/{jobId}.json`; the third non-HTTP trigger pair)**,
 `puretrack`, `authFunctions`, `signatures`, `roundRegistration`, `clubTeams`,
 `seasonClubs`, `pilotSeasonClubs`, `teamsCaptain`.
 

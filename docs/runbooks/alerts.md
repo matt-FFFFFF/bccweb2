@@ -346,6 +346,64 @@ If stuck after one manual recompute attempt: escalate to project owner and inspe
 
 ---
 
+## rescore-jobs-poison
+
+**Severity**: 2 (investigate-async)
+
+### What it means
+
+A rescore job exhausted its dequeue attempts (`maxDequeueCount=5` per `host.json`) and
+was moved to `rescore-jobs-poison` by the Functions host. This means the `rescoreWorker`
+consumer failed to process the job five times in a row. The round's rescore result will
+not appear; the status blob (`rescore-jobs/{jobId}.json`) may be stuck at `processing`
+or show `failed`.
+
+### Likely causes
+
+- A malformed or corrupt IGC file in the job payload that the scoring path rejects on every attempt.
+- A transient dependency failure (blob write, scoring library) that turned permanent before
+  the retry budget ran out.
+- A schema mismatch between the enqueued job message and `RescoreJobSchema` (strict guard
+  rejects unknown keys — check for a recently changed job shape).
+
+### Immediate response
+
+1. Identify the stuck job and inspect its status blob:
+   ```bash
+   az storage blob download \
+     --container data-private \
+     --name "rescore-jobs/<jobId>.json" \
+     --account-name "$(terraform -chdir=iac/service output -raw storage_account_name)" \
+     --file /tmp/rescore-job.json
+   cat /tmp/rescore-job.json
+   ```
+
+2. Correlate with App Insights exceptions around the job's last dequeue time:
+   ```kql
+   exceptions
+   | where timestamp > ago(2h)
+   | where operation_Name == "rescoreWorker"
+   | summarize n = count(), sample_stack = any(details) by type, problemId
+   | order by n desc
+   ```
+
+3. If the cause is a bad IGC file, remove it from the round and retry the rescore via the Admin UI.
+4. If the cause is a transient infrastructure failure that has since resolved, re-enqueue the
+   job by triggering the rescore action again from the Admin UI — the old poison message can
+   be discarded.
+
+### Page vs investigate-async
+
+Investigate-async. A stuck rescore job does not affect pilot registration, round viewing,
+or any other live flow. Triage during business hours.
+
+### Escalation
+
+If multiple jobs are accumulating in `rescore-jobs-poison` within a short window, escalate
+to the project owner — this may indicate a systematic schema mismatch or a broken deploy.
+
+---
+
 ## How to add a new alert
 
 1. Add the resource to `iac/modules/stamp/alerts.tf` referencing `module.stamp.azapi_resource.ops.id`.
