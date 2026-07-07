@@ -105,6 +105,10 @@ export function getRegisteredQueueHandler(name: string) {
   return entry;
 }
 
+export function getRegisteredQueueHandlers() {
+  return _queueHandlers;
+}
+
 // ─── Mock external services ───────────────────────────────────────────────────
 
 // Mock email module — prevent real ACS email calls
