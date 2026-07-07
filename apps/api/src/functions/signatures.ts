@@ -23,6 +23,7 @@ import {
   writeSignatureToPath,
 } from "../lib/signTofly/ledger.js";
 import { appendAuditLine } from "../lib/signTofly/auditLog.js";
+import { reflectRoundSignToFly } from "../lib/signTofly/reflect.js";
 import { enqueueSignToFlyReflect } from "../lib/queue.js";
 import { getTelemetryClient } from "../lib/telemetry.js";
 import { redactObject } from "../lib/telemetryRedactor.js";
@@ -229,6 +230,34 @@ async function getRoundSignatures(
   return { status: 200, jsonBody: signatures };
 }
 
+async function reflectSignToFly(
+  req: HttpRequest,
+  _ctx: InvocationContext,
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const roundId = req.params["roundId"];
+  if (!roundId) throw new HttpError(400, "MISSING_ROUND_ID");
+
+  const round = await readRound(roundId);
+  const isAdmin = caller.roles.includes("Admin");
+  const isScopedCoord = caller.roles.includes("RoundsCoord") &&
+    caller.clubId !== null &&
+    round.organisingClub?.id === caller.clubId;
+  if (!isAdmin && !isScopedCoord) {
+    throw new HttpError(403, "FORBIDDEN");
+  }
+
+  if (round.status !== "BriefComplete") {
+    throw new HttpError(409, "INVALID_STATE", `Round status is ${round.status}`);
+  }
+
+  await reflectRoundSignToFly(roundId);
+  const updated = await readRound(roundId);
+  return { status: 200, jsonBody: updated };
+}
+
 async function readRound(roundId: string): Promise<Round> {
   const path = `rounds/${roundId}.json`;
   try {
@@ -289,4 +318,11 @@ app.http("overrideSlotSignature", {
   authLevel: "anonymous",
   route: "rounds/{roundId}/teams/{teamId}/pilots/{place}/sign-override",
   handler: withErrorHandler(overrideSlotSignature),
+});
+
+app.http("reflectSignToFly", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "rounds/{roundId}/reflect-sign-to-fly",
+  handler: withErrorHandler(reflectSignToFly),
 });

@@ -109,6 +109,8 @@ ready | failed`. On unlock the PDF status fields are cleared.
 the entire round by replaying the signature ledger (`signTofly/*`), then writes the
 updated round blob. This decouples the HTTP response from the potentially expensive
 full-round recompute.
+Operator recovery: `POST /api/rounds/{id}/reflect-sign-to-fly` (Admin/scoped-coord)
+synchronously re-runs the reflect and returns the corrected round.
 
 **Connection invariant**: both producers (`apps/api/src/lib/queue.ts`) and all
 `app.storageQueue` triggers use the `AzureWebJobsStorage` connection setting. That is
