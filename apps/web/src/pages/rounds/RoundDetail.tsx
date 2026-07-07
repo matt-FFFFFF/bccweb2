@@ -8,6 +8,7 @@ import { StatusBadge } from "../../components/StatusBadge.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
 import { IgcUploadButton } from "./components/IgcUploadButton.js";
 import { CoordIgcTable } from "./components/CoordIgcTable.js";
+import { RescoreRoundButton } from "./components/RescoreRoundButton.js";
 
 type BriefWithVersion = RoundBrief & { version?: number };
 
@@ -531,6 +532,7 @@ export default function RoundDetail() {
       )}
 
       {canManage && <CoordIgcTable round={round} onChanged={loadRound} />}
+      <RescoreRoundButton round={round} onChanged={loadRound} />
     </div>
   );
 }
