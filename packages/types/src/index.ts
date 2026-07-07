@@ -382,7 +382,8 @@ export interface PilotSnapshot {
 
 export interface Flight {
   id: string;
-  distance: number; // km
+  /** Raw kilometres from the IGC solver, before pilot-rating, wing-class, and normalization. */
+  distance: number;
   duration?: number; // minutes
   url?: string;
   dateTime?: string; // ISO datetime
@@ -393,6 +394,14 @@ export interface Flight {
   wingFactor: number;
   isManualLog: boolean;
   manualLogJustification?: string;
+  /** Blob path under data-private: flight-igcs/{roundId}/{pilotId}.igc */
+  igcPath?: string;
+  /** Advisory tags from IGC scoring; non-fatal warnings */
+  sanityFlags?: string[];
+  /** ISO datetime of last successful scoring */
+  scoredAt?: string;
+  /** semver of igc-xc-score package at scoring time, for rescore audit */
+  scoredByVersion?: string;
   isFirstXC?: boolean;
   isFirstUKXC?: boolean;
   isUKPersonalBest?: boolean;
