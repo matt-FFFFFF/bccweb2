@@ -100,6 +100,15 @@ async function recordManualFlight(
     );
   }
 
+  // Empty-slot gate: a flight cannot be attached to a slot with no pilot assigned.
+  if (!slot.pilotId) {
+    throw new HttpError(
+      409,
+      "SLOT_NOT_FILLED",
+      "Cannot record a flight on an empty slot",
+    );
+  }
+
   // Body validation. Bad distance → 400; missing/empty justification → 422.
   const body = (await req.json()) as ManualFlightBody;
   const { distance } = body;

@@ -218,6 +218,20 @@ describe("uploadIgc — POST /rounds/{id}/teams/{teamId}/pilots/{place}/igc", ()
     expect((res.jsonBody as { code: string }).code).toBe("ROUND_NOT_LOCKED");
   });
 
+  it("409 SLOT_NOT_FILLED when the slot has no pilot assigned", async () => {
+    const r = await seedRound({ pilotId: null });
+    const { user } = await bootstrapAdmin();
+    const req = withFile(
+      makeAuthRequest(user.id, user.email, { method: "POST", params: paramsFor(r) }),
+      igcFile(D3P),
+    );
+
+    const res = await invoke("uploadIgc", req);
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("SLOT_NOT_FILLED");
+  });
+
   it("400 BAD_REQUEST when no file part is supplied", async () => {
     const r = await seedRound();
     const { user } = await bootstrapAdmin();

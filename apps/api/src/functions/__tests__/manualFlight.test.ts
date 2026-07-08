@@ -135,6 +135,23 @@ describe("recordManualFlight endpoint", () => {
     expect((res.jsonBody as { code: string }).code).toBe("ROUND_NOT_LOCKED");
   });
 
+  it("empty (pilotless) slot -> 409 SLOT_NOT_FILLED", async () => {
+    const ctx = await seedRound();
+    const round = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
+    if (!round) throw new Error("round fixture missing");
+    round.teams[0].pilots[0].pilotId = null;
+    await writePrivateJson(`rounds/${ctx.roundId}.json`, round);
+    const { user } = await makeUser({ roles: ["Admin"] });
+
+    const res = await post(ctx, user.id, user.email, {
+      distance: 50,
+      manualLogJustification: VALID_JUSTIFICATION,
+    });
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("SLOT_NOT_FILLED");
+  });
+
   it("distance <= 0 -> 400 BAD_REQUEST", async () => {
     const ctx = await seedRound();
     const { user } = await makeUser({ roles: ["Admin"] });

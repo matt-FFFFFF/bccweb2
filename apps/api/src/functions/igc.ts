@@ -148,6 +148,16 @@ async function uploadIgc(
     throw new HttpError(409, "ROUND_NOT_LOCKED", `Round status is ${round.status}`);
   }
 
+  // Empty-slot gate: an Admin/coord may target a pilotless slot — reject before any
+  // scoring or blob write (a null pilotId would otherwise build `.../null.igc`).
+  if (!slot.pilotId) {
+    throw new HttpError(
+      409,
+      "SLOT_NOT_FILLED",
+      "Cannot record a flight on an empty slot",
+    );
+  }
+
   const form = await req.formData();
   const file = form.get("file");
   if (!(file instanceof File)) {
