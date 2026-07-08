@@ -125,7 +125,7 @@ async function seedMixedRound(): Promise<MixedRound> {
 
 function rescoreMessage(job: RescoreJob): RescoreJobMessage {
   return {
-    jobId: job.jobId, roundId: job.roundId, requestedByEmail: job.requestedByEmail, requestedByIp: "203.0.113.9", requestedAt: job.requestedAt,
+    jobId: job.jobId, roundId: job.roundId, requestedAt: job.requestedAt,
   };
 }
 

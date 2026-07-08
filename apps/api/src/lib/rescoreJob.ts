@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: MPL-2.0
 import { QueueClient } from "@azure/storage-queue";
+import * as z from "zod/v4";
 import type { RescoreJob, RescoreJobMessage } from "@bccweb/types";
 
 import { getPrivateBlobClient, writePrivateBlob } from "./blob.js";
@@ -63,15 +64,36 @@ export async function releaseActiveGuard(roundId: string): Promise<void> {
   await getPrivateBlobClient(activeGuardPath(roundId)).deleteIfExists();
 }
 
+// STRICT on purpose. The storage queue is NOT covered by the public-container
+// privacy scanner (scripts/privacy-scan.mjs), so `.strict()` is the compensating
+// control: it rejects ANY extra key (e.g. a PII field like requestedByEmail /
+// requestedByIp) at parse time, before the message can be serialised into a
+// queue message. Never add a field here beyond { jobId, roundId, requestedAt },
+// and never drop `.strict()`. The worker reads PII from the status blob, not the
+// message, so the message stays PII-free by construction.
+export const RescoreJobMessageSchema = z
+  .object({
+    jobId: z.string(),
+    roundId: z.string(),
+    requestedAt: z.string(),
+  })
+  .strict();
+
 export async function enqueueRescore(msg: RescoreJobMessage): Promise<void> {
+  // Parse FIRST (strict schema) so a bad/extra field is rejected before anything
+  // is serialised — no PII can leak into a queue message.
+  const parsed = RescoreJobMessageSchema.parse(msg);
   const client = new QueueClient(queueConnectionString(), RESCORE_QUEUE_NAME);
   await client.createIfNotExists();
-  await client.sendMessage(Buffer.from(JSON.stringify(msg)).toString("base64"));
+  await client.sendMessage(Buffer.from(JSON.stringify(parsed)).toString("base64"));
 }
 
 function queueConnectionString(): string {
-  const connectionString =
-    process.env["AzureWebJobsStorage"] ?? process.env["BLOB_CONNECTION_STRING"];
+  // AzureWebJobsStorage is the ONLY setting carrying a QueueEndpoint in
+  // local/docker, and it equals the rescoreWorker trigger's `connection`, so
+  // producer and trigger can never diverge. Do NOT fall back to
+  // BLOB_CONNECTION_STRING (blob-only) — that would silently break queueing.
+  const connectionString = process.env["AzureWebJobsStorage"];
   if (!connectionString) {
     throw new Error(
       "AzureWebJobsStorage environment variable is not set (required to enqueue rescore jobs)",

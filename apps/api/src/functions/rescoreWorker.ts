@@ -29,12 +29,6 @@ function parseRescoreMessage(message: unknown): RescoreJobMessage | null {
   return {
     jobId: candidate.jobId,
     roundId: candidate.roundId,
-    requestedByEmail: typeof candidate.requestedByEmail === "string"
-      ? candidate.requestedByEmail
-      : "",
-    requestedByIp: typeof candidate.requestedByIp === "string"
-      ? candidate.requestedByIp
-      : "",
     requestedAt: typeof candidate.requestedAt === "string"
       ? candidate.requestedAt
       : "",

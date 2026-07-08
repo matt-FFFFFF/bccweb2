@@ -239,8 +239,6 @@ async function rescoreRound(
     await enqueueRescore({
       jobId,
       roundId: id,
-      requestedByEmail: caller.email,
-      requestedByIp: req.headers.get("x-forwarded-for") ?? "",
       requestedAt: job.requestedAt,
     });
   } catch (err: unknown) {

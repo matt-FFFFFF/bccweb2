@@ -563,8 +563,6 @@ export interface RescoreJob {
 export interface RescoreJobMessage {
   jobId: string;
   roundId: string;
-  requestedByEmail: string;
-  requestedByIp: string;
   requestedAt: string;
 }
 
