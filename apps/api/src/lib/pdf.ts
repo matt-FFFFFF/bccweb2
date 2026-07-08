@@ -212,6 +212,11 @@ const TEMPLATE_SRC = `<!DOCTYPE html>
 <p class="brief-images">See briefing images: {{imagePaths.length}}</p>
 {{/if}}
 
+<div class="brief-section">
+  <h2>Scoring</h2>
+  <p>Open Distance — 3-turnpoint free distance, ×1 multiplier, 5km minimum. Computed from pilot's uploaded IGC file using igc-xc-score.</p>
+</div>
+
 <h2>Teams &amp; Pilots</h2>
 
 {{#each teams}}

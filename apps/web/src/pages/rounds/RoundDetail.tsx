@@ -6,6 +6,9 @@ import { useAuth } from "../../hooks/useAuth.js";
 import { api, ApiError } from "../../lib/api.js";
 import { StatusBadge } from "../../components/StatusBadge.js";
 import { LoadingSpinner, ErrorMessage } from "../../components/LoadingSpinner.js";
+import { IgcUploadButton } from "./components/IgcUploadButton.js";
+import { CoordIgcTable } from "./components/CoordIgcTable.js";
+import { RescoreRoundButton } from "./components/RescoreRoundButton.js";
 
 type BriefWithVersion = RoundBrief & { version?: number };
 
@@ -51,15 +54,20 @@ export default function RoundDetail() {
   const [notFound, setNotFound] = useState(false);
   const [accountBusy, setAccountBusy] = useState<string | null>(null);
 
-  const loadRound = useCallback(() => {
+  const loadRound = useCallback((opts?: { silent?: boolean }) => {
     if (!id) {
       setLoading(false);
       return;
     }
     let cancelled = false;
-    setLoading(true);
-    setError(null);
-    setNotFound(false);
+    // Silent refresh (post-mutation reload) must NOT toggle `loading`: the
+    // early-return spinner would unmount the round subtree and destroy transient
+    // child UI (e.g. the rescore success modal) before it paints.
+    if (!opts?.silent) {
+      setLoading(true);
+      setError(null);
+      setNotFound(false);
+    }
 
     Promise.all([
       api.get<Round>(`rounds/${id}`),
@@ -74,14 +82,20 @@ export default function RoundDetail() {
         if (!cancelled) {
           setRound(roundData);
           setBrief(briefData);
-          setLoading(false);
+          if (!opts?.silent) setLoading(false);
         }
       })
       .catch((err: unknown) => {
         if (!cancelled) {
-          setLoading(false);
-          setError(err as Error);
-          setNotFound(err instanceof ApiError && err.status === 404);
+          if (opts?.silent) {
+            // Mutation already succeeded — surface a failed background reload
+            // inline instead of unmounting the page.
+            setActionError(err as Error);
+          } else {
+            setLoading(false);
+            setError(err as Error);
+            setNotFound(err instanceof ApiError && err.status === 404);
+          }
         }
       });
 
@@ -114,7 +128,7 @@ export default function RoundDetail() {
     setActionError(null);
     try {
       await api.post(`rounds/${round.id}/unregister-self`, {});
-      loadRound();
+      loadRound({ silent: true });
     } catch (err) {
       setActionError(err as Error);
     } finally {
@@ -131,7 +145,7 @@ export default function RoundDetail() {
       await api.put(`rounds/${round.id}/teams/${teamId}/pilots/${place}/accounted`, {
         accountedFor: !current,
       });
-      loadRound();
+      loadRound({ silent: true });
     } catch (err) {
       setActionError(err as Error);
     } finally {
@@ -444,6 +458,21 @@ export default function RoundDetail() {
                               )}
                               {round.status === "Locked" &&
                                 slot.status === "Filled" &&
+                                slot.pilotId === identity?.pilotId && (
+                                  <div data-testid="my-slot">
+                                    <IgcUploadButton
+                                      roundId={round.id}
+                                      teamId={team.id}
+                                      place={slot.placeInTeam}
+                                      currentFlight={slot.flight ?? null}
+                                      onUploaded={() => {
+                                        loadRound({ silent: true });
+                                      }}
+                                    />
+                                  </div>
+                                )}
+                              {round.status === "Locked" &&
+                                slot.status === "Filled" &&
                                 (canManage ||
                                   (!!identity?.pilotId &&
                                     team.captainPilotId === identity.pilotId) ||
@@ -512,6 +541,9 @@ export default function RoundDetail() {
           </div>
         </section>
       )}
+
+      {canManage && <CoordIgcTable round={round} onChanged={() => loadRound({ silent: true })} />}
+      <RescoreRoundButton round={round} onChanged={() => loadRound({ silent: true })} />
     </div>
   );
 }

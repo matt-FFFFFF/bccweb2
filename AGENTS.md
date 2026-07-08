@@ -89,10 +89,15 @@ give atomic read-modify-write (30s lease).
 
 ### Storage Queues
 
-Four queues (created by `scripts/init-storage.mjs`, same storage account as blobs):
+Six queues (created by `scripts/init-storage.mjs`, same storage account as blobs):
 `round-brief-pdf` (main) and `round-brief-pdf-poison` (dead-letter after
 `maxDequeueCount=5` per `host.json`), plus `signtofly-reflect` (main) and
-`signtofly-reflect-poison` (dead-letter, same `maxDequeueCount=5` policy).
+`signtofly-reflect-poison` (dead-letter, same `maxDequeueCount=5` policy), plus
+`rescore-jobs` (main) and `rescore-jobs-poison` (dead-letter, same policy).
+`init-storage.mjs` creates all six queues uniformly fatally (consistent with
+`round-brief-pdf`/`signtofly-reflect`) — if the Queue service is unreachable the
+script throws and exits non-zero. Blob containers are created earlier in the same
+run, so a queue-service outage still surfaces as a hard failure.
 
 **Async brief-PDF flow**: the lock endpoint (`POST /api/rounds/{id}/lock`) sets
 `brief.pdfStatus = "pending"` and `brief.pdfAttemptId` on the round blob, then enqueues
@@ -111,6 +116,21 @@ updated round blob. This decouples the HTTP response from the potentially expens
 full-round recompute.
 Operator recovery: `POST /api/rounds/{id}/reflect-sign-to-fly` (Admin/scoped-coord)
 synchronously re-runs the reflect and returns the corrected round.
+
+**Async rescore flow**: the Admin rescore path only (`POST /api/rounds/{id}/rescore`)
+enqueues a `{ jobId, roundId, requestedAt }` job (guarded by the strict
+`RescoreJobMessageSchema` in `apps/api/src/lib/rescoreJob.ts`, so no PII can enter the
+message) onto `rescore-jobs` — single-pilot IGC file upload
+stays SYNCHRONOUS and does NOT trigger this flow. The `rescoreWorker` queue-trigger
+consumer (`apps/api/src/functions/rescoreWorker.ts`) re-scores the round using the
+IGC-based scoring path, writes the result, and updates the job status blob
+`rescore-jobs/{jobId}.json` (status values: `queued | running | completed | partial |
+failed`). The Admin UI polls `GET /api/rounds/{id}/rescore/{jobId}` to surface progress
+and the final result. Normal job failures are caught, ACKed, and recorded as `failed`
+on the job status blob (`rescore-jobs/{jobId}.json`) — NOT dead-lettered; the
+`rescore-jobs-poison` queue (provisioned in Terraform + `init-storage.mjs`) is retained
+only as a safety net for catastrophic/uncaught host-level failures (dead-lettered after
+`maxDequeueCount=5`). For failure triage, inspect the job status blob + App Insights.
 
 **Connection invariant**: both producers (`apps/api/src/lib/queue.ts`) and all
 `app.storageQueue` triggers use the `AzureWebJobsStorage` connection setting. That is
@@ -158,6 +178,11 @@ Modules: `health`, `me`, `meProfile`, `rounds`, `roundsMutate`, `seasons`, `pilo
 and `round-brief-pdf-poison`; the first non-HTTP triggers in the codebase)**,
 `signaturesReflect` **(queue-trigger — registers `app.storageQueue(...)` for
 `signtofly-reflect` and `signtofly-reflect-poison`; the second non-HTTP trigger pair)**,
+`rescoreWorker` **(queue-trigger — registers a SINGLE `app.storageQueue(...)` for the
+main `rescore-jobs` queue only; unlike `briefPdf`/`signaturesReflect` it does NOT
+register a `rescore-jobs-poison` consumer, because job failures are recorded on the job
+status blob rather than dead-lettered; re-scores a round via the IGC path and writes
+status to `rescore-jobs/{jobId}.json`; the third non-HTTP trigger — not a pair)**,
 `puretrack`, `authFunctions`, `signatures`, `roundRegistration`, `clubTeams`,
 `seasonClubs`, `pilotSeasonClubs`, `teamsCaptain`.
 

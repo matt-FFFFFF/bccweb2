@@ -382,7 +382,8 @@ export interface PilotSnapshot {
 
 export interface Flight {
   id: string;
-  distance: number; // km
+  /** Raw kilometres from the IGC solver, before pilot-rating, wing-class, and normalization. */
+  distance: number;
   duration?: number; // minutes
   url?: string;
   dateTime?: string; // ISO datetime
@@ -393,6 +394,14 @@ export interface Flight {
   wingFactor: number;
   isManualLog: boolean;
   manualLogJustification?: string;
+  /** Blob path under data-private: flight-igcs/{roundId}/{pilotId}.igc */
+  igcPath?: string;
+  /** Advisory tags from IGC scoring; non-fatal warnings */
+  sanityFlags?: string[];
+  /** ISO datetime of last successful scoring */
+  scoredAt?: string;
+  /** semver of igc-xc-score package at scoring time, for rescore audit */
+  scoredByVersion?: string;
   isFirstXC?: boolean;
   isFirstUKXC?: boolean;
   isUKPersonalBest?: boolean;
@@ -521,6 +530,40 @@ export interface Round {
    * `maxPilotScoreInRound`, `maxTeamScore`, `maxPointsForRound` — legacy
    * `BaseController.cs:2330,2384,2465`). Private-only; absent until scored. */
   scoring?: RoundScoringSnapshot;
+}
+
+export type RescoreJobStatus =
+  | "queued"
+  | "running"
+  | "completed"
+  | "partial"
+  | "failed";
+
+export interface RescoreJobCounts {
+  rescoredCount: number;
+  skippedManualCount: number;
+  skippedNoIgcCount: number;
+  skippedBudgetCount: number;
+  errorCount: number;
+}
+
+export interface RescoreJob {
+  jobId: string;
+  roundId: string;
+  status: RescoreJobStatus;
+  requestedByEmail: string;
+  requestedAt: string;
+  startedAt?: string;
+  finishedAt?: string;
+  counts?: RescoreJobCounts;
+  errors?: Array<{ teamId: string; place: number; error: string }>;
+  scoredByVersion?: string;
+}
+
+export interface RescoreJobMessage {
+  jobId: string;
+  roundId: string;
+  requestedAt: string;
 }
 
 // ─── Sign-to-Fly / Audit ─────────────────────────────────────────────────────

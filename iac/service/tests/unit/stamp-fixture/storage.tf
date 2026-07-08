@@ -180,6 +180,28 @@ resource "azapi_resource" "queue_signtofly_reflect_poison" {
   parent_id = azapi_resource.queue_service.id
 }
 
+# ─── Rescore Jobs Queues ─────────────────────────────────────────────────────
+#
+# `rescore-jobs` carries rescore-job messages (jobId, roundId, requestedAt —
+# no PII). A queue-triggered Function replays IGC scoring for the round.
+# `rescore-jobs-poison` collects messages that exhaust the Functions host retry
+# budget. Transient status/control blobs the worker writes under
+# `data-private/rescore-jobs/` are GC'd by the lifecycle policy below. Names
+# MUST match the producer / consumer AzureWebJobsStorage queue bindings — do
+# not rename.
+
+resource "azapi_resource" "queue_rescore_jobs" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "rescore-jobs"
+  parent_id = azapi_resource.queue_service.id
+}
+
+resource "azapi_resource" "queue_rescore_jobs_poison" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "rescore-jobs-poison"
+  parent_id = azapi_resource.queue_service.id
+}
+
 # ─── Storage Account Keys ────────────────────────────────────────────────────
 #
 # Used to construct the connection string for the Function App.
@@ -203,8 +225,9 @@ locals {
 
 # ─── Blob Lifecycle Management Policy ────────────────────────────────────────
 #
-# GC short-lived auth token blobs from data-private after 7 days.
-# Prevents accumulation of expired tokens that were never consumed.
+# GC short-lived control blobs from data-private after 7 days:
+#   - auth token blobs           (expired tokens that were never consumed)
+#   - rescore-jobs status blobs  (transient rescore control state)
 
 resource "azapi_resource" "storage_lifecycle" {
   type      = "Microsoft.Storage/storageAccounts/managementPolicies@2023-01-01"
@@ -223,6 +246,24 @@ resource "azapi_resource" "storage_lifecycle" {
               filters = {
                 blobTypes   = ["blockBlob"]
                 prefixMatch = ["data-private/auth/tokens/"]
+              }
+              actions = {
+                baseBlob = {
+                  delete = {
+                    daysAfterModificationGreaterThan = 7
+                  }
+                }
+              }
+            }
+          },
+          {
+            name    = "gc-rescore-status"
+            enabled = true
+            type    = "Lifecycle"
+            definition = {
+              filters = {
+                blobTypes   = ["blockBlob"]
+                prefixMatch = ["data-private/rescore-jobs/"]
               }
               actions = {
                 baseBlob = {

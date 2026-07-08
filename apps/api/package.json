@@ -25,6 +25,8 @@
     "applicationinsights": "3.15.1",
     "bcryptjs": "3.0.3",
     "handlebars": "4.7.9",
+    "igc-parser": "2.0.0",
+    "igc-xc-score": "1.8.0",
     "isomorphic-dompurify": "3.18.0",
     "jsonwebtoken": "9.0.3",
     "marked": "18.0.5",

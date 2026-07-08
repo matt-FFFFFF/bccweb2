@@ -13,6 +13,9 @@ See root [AGENTS.md](../../../../AGENTS.md) for the module list, roles, and env.
    never raw JSON except non-JSON artifacts (PDF/image/lock).
 5. Return `{ status, jsonBody }`. Wrap the handler in `withErrorHandler(...)`.
 
+- Queue-trigger test handlers are captured via `getRegisteredQueueHandler(name)` in
+  [`../__tests__/helpers/setup.ts`](../__tests__/helpers/setup.ts).
+
 ## Errors
 
 - Throw `HttpError(status, code, detail?)` for expected failures → normalized to

@@ -39,6 +39,8 @@ const CONTAINERS = [
  * The sign-to-fly reflect pipeline enqueues reflection jobs onto
  * `signtofly-reflect`; dead-letter messages are parked onto
  * `signtofly-reflect-poison` (after maxDequeueCount=5 per host.json).
+ * The async rescore pipeline enqueues jobs onto `rescore-jobs`; dead-letter
+ * messages are parked onto `rescore-jobs-poison` by the Functions host.
  * Names MUST match the Terraform-provisioned queues + the API producer/consumer.
  */
 const QUEUES = [
@@ -46,6 +48,8 @@ const QUEUES = [
   "round-brief-pdf-poison",
   "signtofly-reflect",
   "signtofly-reflect-poison",
+  "rescore-jobs",
+  "rescore-jobs-poison",
 ];
 
 /**

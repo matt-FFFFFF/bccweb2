@@ -303,6 +303,29 @@ run "storage_queues_planned" {
     )
     error_message = "The round-brief-pdf and sign-to-fly reflect queues plus their poison queues must plan under the queue service with the exact expected names, types, and parent linkage."
   }
+
+  assert {
+    condition = (
+      azapi_resource.queue_rescore_jobs.name == "rescore-jobs" &&
+      azapi_resource.queue_rescore_jobs.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
+      azapi_resource.queue_rescore_jobs.parent_id == azapi_resource.queue_service.id &&
+      azapi_resource.queue_rescore_jobs_poison.name == "rescore-jobs-poison" &&
+      azapi_resource.queue_rescore_jobs_poison.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
+      azapi_resource.queue_rescore_jobs_poison.parent_id == azapi_resource.queue_service.id
+    )
+    error_message = "The rescore-jobs queue and its poison queue must plan under the queue service with the exact expected names, types, and parent linkage."
+  }
+
+  assert {
+    condition = (
+      length(azapi_resource.storage_lifecycle.body.properties.policy.rules) == 2 &&
+      azapi_resource.storage_lifecycle.body.properties.policy.rules[0].name == "gc-auth-tokens" &&
+      azapi_resource.storage_lifecycle.body.properties.policy.rules[1].name == "gc-rescore-status" &&
+      azapi_resource.storage_lifecycle.body.properties.policy.rules[1].definition.filters.prefixMatch == ["data-private/rescore-jobs/"] &&
+      azapi_resource.storage_lifecycle.body.properties.policy.rules[1].definition.actions.baseBlob.delete.daysAfterModificationGreaterThan == 7
+    )
+    error_message = "The storage lifecycle policy must have exactly two rules (gc-auth-tokens, gc-rescore-status); gc-rescore-status must delete blockBlobs under data-private/rescore-jobs/ after 7 days."
+  }
 }
 
 run "dns_skipped_when_hostname_empty" {

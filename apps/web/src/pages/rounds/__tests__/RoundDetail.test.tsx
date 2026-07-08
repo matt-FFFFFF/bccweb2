@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router";
-import type { Round } from "@bccweb/types";
+import type { Round, RescoreJob, RescoreJobCounts, RescoreJobStatus } from "@bccweb/types";
 import RoundDetail from "../RoundDetail.js";
 import { api, ApiError } from "../../../lib/api.js";
 
@@ -177,5 +177,89 @@ describe("RoundDetail — accounted-for management outside the manage page", () 
     await waitFor(() =>
       expect(screen.queryByRole("button", { name: /accounted for/i })).not.toBeInTheDocument(),
     );
+  });
+});
+
+describe("RoundDetail — rescore success modal survives the post-mutation reload", () => {
+  const COUNTS: RescoreJobCounts = {
+    rescoredCount: 3,
+    skippedManualCount: 1,
+    skippedNoIgcCount: 2,
+    skippedBudgetCount: 0,
+    errorCount: 0,
+  };
+
+  function job(status: RescoreJobStatus, counts?: RescoreJobCounts): RescoreJob {
+    return {
+      jobId: "job-1",
+      roundId: "r1",
+      status,
+      requestedByEmail: "a@x",
+      requestedAt: "2026-06-09T10:00:00Z",
+      ...(counts ? { counts } : {}),
+    };
+  }
+
+  async function flushMicrotasks() {
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+  }
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    mockIdentity = null;
+  });
+
+  it("keeps the rescore success modal mounted after a completed poll (no full-page reload)", async () => {
+    vi.useFakeTimers();
+    mockIdentity = { userId: "u", email: "a@x", roles: ["Admin"], pilotId: null, clubId: null };
+
+    const round = makeRound("Locked");
+    let roundFetchCount = 0;
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === "rounds/r1") {
+        roundFetchCount += 1;
+        // 1st call = initial load. The post-mutation reload (2nd call) stays
+        // PENDING, modelling a real slow-network reload: on the buggy foreground
+        // path `loading` latches true and unmounts the round subtree.
+        return (roundFetchCount === 1
+          ? Promise.resolve(round)
+          : new Promise<never>(() => {})) as Promise<unknown>;
+      }
+      if (path === "rounds/r1/brief") {
+        return Promise.reject(new ApiError(404, "NOT_FOUND", "no brief"));
+      }
+      if (path === "rounds/r1/rescore/job-1") {
+        return Promise.resolve(job("completed", COUNTS)) as Promise<unknown>;
+      }
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+    vi.mocked(api.post).mockResolvedValue({ jobId: "job-1", status: "queued" });
+
+    renderPage();
+    await flushMicrotasks();
+    expect(screen.getByRole("heading", { name: "Milk Hill" })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId("rescore-round-btn"));
+    fireEvent.click(screen.getByTestId("rescore-confirm-yes"));
+    await flushMicrotasks();
+
+    // Completed poll: the button shows its success phase AND calls onChanged. A
+    // foreground reload latches loading=true (reload pending), unmounting this
+    // subtree and destroying the modal — the exact regression under lock.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(3000);
+    });
+
+    expect(screen.getByTestId("rescore-success-modal")).toBeInTheDocument();
+    expect(screen.getByTestId("rescore-count-rescored")).toHaveTextContent("3");
+    expect(screen.queryByText(/Loading round/i)).toBeNull();
+    const roundFetches = vi.mocked(api.get).mock.calls.filter(([p]) => p === "rounds/r1");
+    expect(roundFetches.length).toBeGreaterThanOrEqual(2);
   });
 });

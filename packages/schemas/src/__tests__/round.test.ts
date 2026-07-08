@@ -362,6 +362,23 @@ describe("PilotSlotSchema and FlightSchema", () => {
 
     expect(FlightSchema.safeParse(withoutId).success).toBe(false);
   });
+
+  test("preserves internalized IGC scoring fields on a round-trip parse", () => {
+    const scoredFlight = {
+      ...validFlight,
+      igcPath: "igc/round-1/flight-1.igc",
+      sanityFlags: ["GPS_SPIKE"],
+      scoredAt: "2026-06-11T18:45:00.000Z",
+      scoredByVersion: "scoring@1.2.3",
+    } as const;
+
+    const parsed = FlightSchema.parse(scoredFlight);
+
+    expect(parsed.igcPath).toBe("igc/round-1/flight-1.igc");
+    expect(parsed.sanityFlags).toEqual(["GPS_SPIKE"]);
+    expect(parsed.scoredAt).toBe("2026-06-11T18:45:00.000Z");
+    expect(parsed.scoredByVersion).toBe("scoring@1.2.3");
+  });
 });
 
 describe("RoundSchema strips time fields (T2)", () => {

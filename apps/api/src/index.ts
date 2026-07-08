@@ -44,6 +44,10 @@ import "./functions/roundRegistration.js";
 import "./functions/clubTeams.js";
 import "./functions/seasonClubs.js";
 import "./functions/pilotSeasonClubs.js";
+import "./functions/igc.js";
+import "./functions/manualFlight.js";
+import "./functions/rescoreRound.js";
+import "./functions/rescoreWorker.js";
 
 // Phase 6 — Captain management
 import "./functions/teamsCaptain.js";
