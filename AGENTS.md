@@ -94,8 +94,10 @@ Six queues (created by `scripts/init-storage.mjs`, same storage account as blobs
 `maxDequeueCount=5` per `host.json`), plus `signtofly-reflect` (main) and
 `signtofly-reflect-poison` (dead-letter, same `maxDequeueCount=5` policy), plus
 `rescore-jobs` (main) and `rescore-jobs-poison` (dead-letter, same policy).
-`rescore-jobs` creation in `init-storage.mjs` is non-fatal — a warning is logged
-if the Queue service is unreachable, but blob container creation proceeds normally.
+`init-storage.mjs` creates all six queues uniformly fatally (consistent with
+`round-brief-pdf`/`signtofly-reflect`) — if the Queue service is unreachable the
+script throws and exits non-zero. Blob containers are created earlier in the same
+run, so a queue-service outage still surfaces as a hard failure.
 
 **Async brief-PDF flow**: the lock endpoint (`POST /api/rounds/{id}/lock`) sets
 `brief.pdfStatus = "pending"` and `brief.pdfAttemptId` on the round blob, then enqueues

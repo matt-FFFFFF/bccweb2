@@ -222,6 +222,33 @@ describe("rescore enqueue/status/worker async chain", () => {
     expect(await getPrivateContainer().getBlobClient(activeGuardPath(ctx.roundId)).exists()).toBe(false);
   });
 
+  it("keeps a completed job completed when the post-completion season read fails", async () => {
+    vi.mocked(scoreIgc)
+      .mockResolvedValueOnce(scored(11))
+      .mockResolvedValueOnce(scored(22))
+      .mockResolvedValueOnce(scored(101))
+      .mockResolvedValueOnce(scored(202));
+    const ctx = await seedMixedRound();
+    const job = await seedQueuedJob(ctx.roundId, ctx.admin);
+
+    // Run runRescoreJob for real so it writes the terminal `completed` status,
+    // then delete the round blob so the worker's post-completion
+    // readRoundSeasonYear() throws. That transient failure MUST stay isolated in
+    // its own try/catch and NOT reach the outer catch that flips jobs to `failed`.
+    const realRun = rescoreRoundModule.runRescoreJob;
+    vi.spyOn(rescoreRoundModule, "runRescoreJob").mockImplementation(async (roundId, j, c) => {
+      const result = await realRun(roundId, j, c);
+      await getPrivateContainer().getBlobClient(`rounds/${roundId}.json`).deleteIfExists();
+      return result;
+    });
+
+    const worker = getRegisteredQueueHandler("rescoreWorker");
+    await expect(worker.handler(rescoreMessage(job), invocationContext("rescoreWorker"))).resolves.toBeUndefined();
+
+    expect((await readJobStatus(job.jobId))?.status).toBe("completed");
+    expect(await getPrivateContainer().getBlobClient(activeGuardPath(ctx.roundId)).exists()).toBe(false);
+  });
+
   it("marks partial when the rescore loop exhausts its budget", async () => {
     vi.mocked(scoreIgc)
       .mockResolvedValueOnce(scored(11))

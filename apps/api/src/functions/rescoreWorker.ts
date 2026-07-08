@@ -68,10 +68,21 @@ export async function rescoreWorker(
 
     const finished = await runRescoreJob(msg.roundId, job, ctx);
     void finished;
-    const year = await readRoundSeasonYear(msg.roundId);
-    recomputeSeason(year).catch((err: unknown) => {
-      ctx.error(`[rescoreWorker] recomputeSeason(${year}) failed:`, err);
-    });
+    // Best-effort season recompute. The job is already terminal here
+    // (runRescoreJob wrote completed/partial), so a transient failure of the
+    // post-completion round read MUST NOT reach the outer catch and flip the
+    // job to `failed`. Isolate it in its own try/catch.
+    try {
+      const year = await readRoundSeasonYear(msg.roundId);
+      recomputeSeason(year).catch((err: unknown) => {
+        ctx.error(`[rescoreWorker] recomputeSeason(${year}) failed:`, err);
+      });
+    } catch (err: unknown) {
+      ctx.error(
+        `[rescoreWorker] post-rescore season recompute setup failed for job ${msg.jobId}:`,
+        err,
+      );
+    }
   } catch (err: unknown) {
     const job = await readJobStatus(msg.jobId);
     if (job !== null) await markJobFailed(job, err);

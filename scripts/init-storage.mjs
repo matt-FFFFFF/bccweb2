@@ -53,14 +53,6 @@ const QUEUES = [
 ];
 
 /**
- * Queues that are created non-fatally — if the Queue service is unavailable,
- * log a warning and continue (blob containers remain the hard requirement).
- * The `rescore-jobs` pair lives here because it is a newer addition and its
- * absence during a cold Azurite start should not block blob container creation.
- */
-const NON_FATAL_QUEUES = new Set(["rescore-jobs", "rescore-jobs-poison"]);
-
-/**
  * Build a Shared Key Authorization header for an Azure Blob Storage PUT
  * that creates a container (PUT /account/container?restype=container).
  *
@@ -343,15 +335,7 @@ async function main() {
   }
   await setBlobServiceCors();
   for (const name of QUEUES) {
-    if (NON_FATAL_QUEUES.has(name)) {
-      try {
-        await createQueue(name);
-      } catch (err) {
-        console.warn(`  warning: could not create queue '${name}' (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
-      }
-    } else {
-      await createQueue(name);
-    }
+    await createQueue(name);
   }
   console.log("Done.");
 }

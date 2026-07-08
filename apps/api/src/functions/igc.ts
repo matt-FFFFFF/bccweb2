@@ -34,6 +34,7 @@ import {
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { scoreIgc } from "../lib/igcScoring.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 
 // Raw IGC uploads are plain-text B-record logs; a real track is a few hundred KB.
 const MAX_IGC_BYTES = 15 * 1024 * 1024;
@@ -157,6 +158,8 @@ async function uploadIgc(
       "Cannot record a flight on an empty slot",
     );
   }
+
+  await mutationRateLimit(req, caller, "uploadIgc", "flights");
 
   const form = await req.formData();
   const file = form.get("file");
@@ -307,6 +310,8 @@ async function deleteIgc(
   if (!slot.flight?.igcPath) {
     throw new HttpError(404, "NOT_FOUND", "IGC not found");
   }
+
+  await mutationRateLimit(req, caller, "deleteIgc", "flights");
 
   let oldPath = "";
   await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
