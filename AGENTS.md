@@ -116,7 +116,9 @@ Operator recovery: `POST /api/rounds/{id}/reflect-sign-to-fly` (Admin/scoped-coo
 synchronously re-runs the reflect and returns the corrected round.
 
 **Async rescore flow**: the Admin rescore path only (`POST /api/rounds/{id}/rescore`)
-enqueues a `{ roundId, jobId }` job onto `rescore-jobs` — single-pilot IGC file upload
+enqueues a `{ jobId, roundId, requestedAt }` job (guarded by the strict
+`RescoreJobMessageSchema` in `apps/api/src/lib/rescoreJob.ts`, so no PII can enter the
+message) onto `rescore-jobs` — single-pilot IGC file upload
 stays SYNCHRONOUS and does NOT trigger this flow. The `rescoreWorker` queue-trigger
 consumer (`apps/api/src/functions/rescoreWorker.ts`) re-scores the round using the
 IGC-based scoring path, writes the result, and updates the job status blob

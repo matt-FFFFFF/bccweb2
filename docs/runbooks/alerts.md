@@ -355,16 +355,17 @@ If stuck after one manual recompute attempt: escalate to project owner and inspe
 A rescore job exhausted its dequeue attempts (`maxDequeueCount=5` per `host.json`) and
 was moved to `rescore-jobs-poison` by the Functions host. This means the `rescoreWorker`
 consumer failed to process the job five times in a row. The round's rescore result will
-not appear; the status blob (`rescore-jobs/{jobId}.json`) may be stuck at `processing`
-or show `failed`.
+not appear; the status blob (`rescore-jobs/{jobId}.json`) may be stuck at `running`
+(statuses are `queued | running | completed | partial | failed`) or show `failed`.
 
 ### Likely causes
 
 - A malformed or corrupt IGC file in the job payload that the scoring path rejects on every attempt.
 - A transient dependency failure (blob write, scoring library) that turned permanent before
   the retry budget ran out.
-- A schema mismatch between the enqueued job message and `RescoreJobSchema` (strict guard
-  rejects unknown keys — check for a recently changed job shape).
+- A schema mismatch between the enqueued job message and `RescoreJobMessageSchema` (the
+  strict guard in `apps/api/src/lib/rescoreJob.ts` rejects unknown keys — check for a
+  recently changed job shape).
 
 ### Immediate response
 
