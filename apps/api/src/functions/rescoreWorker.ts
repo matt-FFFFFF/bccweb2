@@ -10,29 +10,16 @@ import {
   readJobStatus,
   releaseActiveGuard,
   RESCORE_QUEUE_NAME,
+  RescoreJobMessageSchema,
   writeJobStatus,
 } from "../lib/rescoreJob.js";
 import { runRescoreJob } from "./rescoreRound.js";
 
 function parseRescoreMessage(message: unknown): RescoreJobMessage | null {
   const raw: unknown = typeof message === "string" ? JSON.parse(message) : message;
-  if (raw === null || typeof raw !== "object") return null;
-
-  const candidate = raw as Partial<RescoreJobMessage>;
-  if (typeof candidate.jobId !== "string" || candidate.jobId.trim() === "") {
-    return null;
-  }
-  if (typeof candidate.roundId !== "string" || candidate.roundId.trim() === "") {
-    return null;
-  }
-
-  return {
-    jobId: candidate.jobId,
-    roundId: candidate.roundId,
-    requestedAt: typeof candidate.requestedAt === "string"
-      ? candidate.requestedAt
-      : "",
-  };
+  const parsed = RescoreJobMessageSchema.safeParse(raw);
+  if (!parsed.success) return null;
+  return parsed.data;
 }
 
 function errorMessage(err: unknown): string {

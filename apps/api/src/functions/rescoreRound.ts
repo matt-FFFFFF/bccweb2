@@ -98,11 +98,6 @@ async function buildRescoreUpdates(round: Round, startedAt: number): Promise<{
 
   for (const team of round.teams) {
     for (const slot of team.pilots) {
-      if (Date.now() - startedAt > BUDGET_MS) {
-        counters.skippedBudgetCount += 1;
-        continue;
-      }
-
       if (slot.flight?.isManualLog === true) {
         counters.skippedManualCount += 1;
         continue;
@@ -111,6 +106,13 @@ async function buildRescoreUpdates(round: Round, startedAt: number): Promise<{
       const igcPath = slot.flight?.igcPath;
       if (!igcPath) {
         counters.skippedNoIgcCount += 1;
+        continue;
+      }
+
+      // Budget check LAST: only slots that would actually be scored (IGC-bearing,
+      // non-manual) count toward skippedBudgetCount, keeping `partial` accurate.
+      if (Date.now() - startedAt > BUDGET_MS) {
+        counters.skippedBudgetCount += 1;
         continue;
       }
 

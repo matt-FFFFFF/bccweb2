@@ -238,6 +238,10 @@ describe("rescore enqueue/status/worker async chain", () => {
     const finished = await readJobStatus(job.jobId);
     expect(finished?.status).toBe("partial");
     expect(finished?.counts?.skippedBudgetCount).toBeGreaterThan(0);
+    // Only the IGC-bearing slot pushed past budget counts as budget-skipped; the
+    // manual + no-IGC slots are classified by their own reason, not the budget.
+    expect(finished?.counts?.skippedManualCount).toBe(1);
+    expect(finished?.counts?.skippedNoIgcCount).toBe(1);
   });
 
   it("returns status to Admin and hides unknown, mismatched, and non-admin job lookups", async () => {
