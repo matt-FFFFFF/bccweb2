@@ -146,7 +146,11 @@ export function ManualFlightModal({
       onClose();
     } catch (err) {
       const message =
-        err instanceof Error ? err.message : "Failed to save manual flight";
+        err instanceof ApiError
+          ? (err.detail ?? err.message)
+          : err instanceof Error
+            ? err.message
+            : "Failed to save manual flight";
       // Surface the server's 4xx near the field it concerns.
       if (err instanceof ApiError && err.status === 422) {
         setJustificationError(message);
