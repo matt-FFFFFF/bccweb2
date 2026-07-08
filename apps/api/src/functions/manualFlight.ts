@@ -37,6 +37,7 @@ import {
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 
 const MAX_DISTANCE_KM = 10000;
 
@@ -108,6 +109,8 @@ async function recordManualFlight(
       "Cannot record a flight on an empty slot",
     );
   }
+
+  await mutationRateLimit(req, caller, "recordManualFlight", "flights");
 
   // Body validation. Bad distance → 400; missing/empty justification → 422.
   const body = (await req.json()) as ManualFlightBody;

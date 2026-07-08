@@ -126,8 +126,11 @@ consumer (`apps/api/src/functions/rescoreWorker.ts`) re-scores the round using t
 IGC-based scoring path, writes the result, and updates the job status blob
 `rescore-jobs/{jobId}.json` (status values: `queued | running | completed | partial |
 failed`). The Admin UI polls `GET /api/rounds/{id}/rescore/{jobId}` to surface progress
-and the final result. Dead-letter messages land on `rescore-jobs-poison` after
-`maxDequeueCount=5`; inspect the status blob + App Insights for the failure cause.
+and the final result. Normal job failures are caught, ACKed, and recorded as `failed`
+on the job status blob (`rescore-jobs/{jobId}.json`) — NOT dead-lettered; the
+`rescore-jobs-poison` queue (provisioned in Terraform + `init-storage.mjs`) is retained
+only as a safety net for catastrophic/uncaught host-level failures (dead-lettered after
+`maxDequeueCount=5`). For failure triage, inspect the job status blob + App Insights.
 
 **Connection invariant**: both producers (`apps/api/src/lib/queue.ts`) and all
 `app.storageQueue` triggers use the `AzureWebJobsStorage` connection setting. That is
@@ -175,9 +178,11 @@ Modules: `health`, `me`, `meProfile`, `rounds`, `roundsMutate`, `seasons`, `pilo
 and `round-brief-pdf-poison`; the first non-HTTP triggers in the codebase)**,
 `signaturesReflect` **(queue-trigger — registers `app.storageQueue(...)` for
 `signtofly-reflect` and `signtofly-reflect-poison`; the second non-HTTP trigger pair)**,
-`rescoreWorker` **(queue-trigger — registers `app.storageQueue(...)` for `rescore-jobs`
-and `rescore-jobs-poison`; re-scores a round via the IGC path and writes status to
-`rescore-jobs/{jobId}.json`; the third non-HTTP trigger pair)**,
+`rescoreWorker` **(queue-trigger — registers a SINGLE `app.storageQueue(...)` for the
+main `rescore-jobs` queue only; unlike `briefPdf`/`signaturesReflect` it does NOT
+register a `rescore-jobs-poison` consumer, because job failures are recorded on the job
+status blob rather than dead-lettered; re-scores a round via the IGC path and writes
+status to `rescore-jobs/{jobId}.json`; the third non-HTTP trigger — not a pair)**,
 `puretrack`, `authFunctions`, `signatures`, `roundRegistration`, `clubTeams`,
 `seasonClubs`, `pilotSeasonClubs`, `teamsCaptain`.
 

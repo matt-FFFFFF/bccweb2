@@ -9,6 +9,7 @@ import { getPrivateBlobClient, readBlob, withPrivateLeaseRenewing, writePrivateB
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { forbiddenResponse, getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { mutationRateLimit } from "../lib/rateLimit.js";
 import { scoreIgc } from "../lib/igcScoring.js";
 import { acquireActiveGuard, enqueueRescore, readJobStatus, releaseActiveGuard, writeJobStatus } from "../lib/rescoreJob.js";
 
@@ -203,6 +204,8 @@ async function rescoreRound(
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
   if (!caller.roles.includes("Admin")) return forbiddenResponse();
+
+  await mutationRateLimit(req, caller, "rescoreRound", "heavy");
 
   const id = req.params["id"];
   if (!id) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
