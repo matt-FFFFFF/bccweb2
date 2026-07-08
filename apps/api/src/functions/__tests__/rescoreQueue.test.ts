@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { QueueClient } from "@azure/storage-queue";
 import type { HttpResponseInit } from "@azure/functions";
-import type { RescoreJob, RescoreJobMessage, Round, User } from "@bccweb/types";
+import type { Flight, RescoreJob, RescoreJobMessage, Round, User } from "@bccweb/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { makeAuthRequest, MockHttpRequest } from "../../__tests__/helpers/api.js";
@@ -208,6 +208,63 @@ describe("rescore enqueue/status/worker async chain", () => {
     expect(round?.teams[0]?.pilots[1]?.flight?.distance).toBe(202);
     expect(await auditBlobCount(ctx.roundId)).toBe(1);
     expect(await getPrivateContainer().getBlobClient(activeGuardPath(ctx.roundId)).exists()).toBe(false);
+  });
+
+  it("preserves a manual override that lands during the scoring window and reclassifies the skipped count", async () => {
+    vi.mocked(scoreIgc)
+      .mockResolvedValueOnce(scored(11))
+      .mockResolvedValueOnce(scored(22))
+      .mockResolvedValueOnce(scored(101))
+      .mockResolvedValueOnce(scored(202));
+    const ctx = await seedMixedRound();
+    const job = await seedQueuedJob(ctx.roundId, ctx.admin);
+
+    const path = `rounds/${ctx.roundId}.json`;
+    const realReadBlob = blobModule.readBlob;
+    const manualOverride: Flight = {
+      id: randomUUID(),
+      distance: 77,
+      scoringType: "Manual",
+      score: 0,
+      wingFactor: 0,
+      isManualLog: true,
+      manualLogJustification: VALID_JUSTIFICATION,
+      sanityFlags: [],
+    };
+    // Interpose the two-phase read. `readRoundOr404` (via readJson) and the leased
+    // read both funnel through readBlob, so we doctor by call order: the FIRST
+    // round read is buildRescoreUpdates' pre-lease snapshot — leave it real so the
+    // place-1 IGC is actually scored. From the leased read onward, present a manual
+    // override that a coord recorded on that slot during the (unlocked) scoring
+    // window, so applyUpdates must re-check and refuse to clobber it.
+    let roundReads = 0;
+    vi.spyOn(blobModule, "readBlob").mockImplementation(async (client) => {
+      const value = await realReadBlob(client);
+      const round = value as Round;
+      if (round?.id === ctx.roundId) {
+        roundReads += 1;
+        const staleIgcSlot = round.teams[0]?.pilots[0];
+        if (roundReads >= 2 && staleIgcSlot) staleIgcSlot.flight = { ...manualOverride };
+      }
+      return value;
+    });
+
+    const worker = getRegisteredQueueHandler("rescoreWorker");
+    await worker.handler(rescoreMessage(job), invocationContext("rescoreWorker"));
+
+    const persisted = (await realReadBlob(getPrivateBlobClient(path))) as Round;
+    const overridden = persisted.teams[0]?.pilots[0]?.flight;
+    expect(overridden?.isManualLog).toBe(true);
+    expect(overridden?.id).toBe(manualOverride.id);
+    expect(overridden?.distance).toBe(77);
+    expect(overridden?.scoredByVersion).toBeUndefined();
+    // The untouched place-2 IGC slot is still rescored normally (matching id).
+    expect(persisted.teams[0]?.pilots[1]?.flight?.distance).toBe(202);
+
+    const finished = await readJobStatus(job.jobId);
+    expect(finished?.status).toBe("completed");
+    // rescoredCount reclassified 2 → 1; the stale slot joins skippedManualCount (1 → 2).
+    expect(finished?.counts).toEqual({ rescoredCount: 1, skippedManualCount: 2, skippedNoIgcCount: 1, skippedBudgetCount: 0, errorCount: 0 });
   });
 
   it("marks failed and releases the guard when runRescoreJob throws without rejecting the queue handler", async () => {

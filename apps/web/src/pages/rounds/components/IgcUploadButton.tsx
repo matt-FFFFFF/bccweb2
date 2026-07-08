@@ -107,7 +107,6 @@ export function IgcUploadButton({
                 }}
               />
               Uploading & scoring...
-              <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
             </>
           ) : (
             currentFlight?.igcPath ? "Replace IGC" : "Upload IGC"

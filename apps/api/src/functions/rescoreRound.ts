@@ -22,7 +22,7 @@ type RescoreCounters = {
 
 type RescoreError = { teamId: string; place: number; error: string };
 
-type FlightUpdate = { teamId: string; place: number; flightPatch: Partial<Flight> };
+type FlightUpdate = { teamId: string; place: number; flightId: string; flightPatch: Partial<Flight> };
 
 async function loadConfig(): Promise<Config> {
   try {
@@ -72,12 +72,23 @@ function matchingSlot(round: Round, update: FlightUpdate): PilotSlot | undefined
   return team?.pilots.find((slot) => slot.placeInTeam === update.place);
 }
 
-function applyUpdates(round: Round, updates: readonly FlightUpdate[]): void {
+function applyUpdates(round: Round, updates: readonly FlightUpdate[]): number {
+  let skippedStale = 0;
   for (const update of updates) {
     const slot = matchingSlot(round, update);
     if (!slot?.flight) continue;
+    // Re-check under the lease: buildRescoreUpdates scored this slot's IGC
+    // OUTSIDE the lease over a window that can span minutes, during which a
+    // coord could have recorded a manual override or re-uploaded the IGC
+    // (both mint a new flight.id). Applying the now-stale patch would clobber
+    // the operator's current entry (violating the skippedManual invariant).
+    if (slot.flight.isManualLog === true || slot.flight.id !== update.flightId) {
+      skippedStale += 1;
+      continue;
+    }
     slot.flight = { ...slot.flight, ...update.flightPatch };
   }
+  return skippedStale;
 }
 
 async function buildRescoreUpdates(round: Round, startedAt: number): Promise<{
@@ -99,16 +110,17 @@ async function buildRescoreUpdates(round: Round, startedAt: number): Promise<{
 
   for (const team of round.teams) {
     for (const slot of team.pilots) {
-      if (slot.flight?.isManualLog === true) {
+      const flight = slot.flight;
+      if (flight?.isManualLog === true) {
         counters.skippedManualCount += 1;
         continue;
       }
 
-      const igcPath = slot.flight?.igcPath;
-      if (!igcPath) {
+      if (!flight?.igcPath) {
         counters.skippedNoIgcCount += 1;
         continue;
       }
+      const igcPath = flight.igcPath;
 
       // Budget check LAST: only slots that would actually be scored (IGC-bearing,
       // non-manual) count toward skippedBudgetCount, keeping `partial` accurate.
@@ -133,6 +145,7 @@ async function buildRescoreUpdates(round: Round, startedAt: number): Promise<{
         updates.push({
           teamId: team.id,
           place: slot.placeInTeam,
+          flightId: flight.id,
           flightPatch: {
             distance: result.distance,
             sanityFlags: result.sanityFlags,
@@ -172,7 +185,15 @@ export async function runRescoreJob(
 
   await withPrivateLeaseRenewing(path, async (leaseId) => {
     const leasedRound = (await readBlob(getPrivateBlobClient(path))) as Round;
-    applyUpdates(leasedRound, updates);
+    const skippedStale = applyUpdates(leasedRound, updates);
+    if (skippedStale > 0) {
+      // A manual override / IGC re-upload landed on these slots during the
+      // unlocked scoring window; they were NOT rescored. Reclassify from
+      // rescored → skippedManual (the dominant, reported race; also covers the
+      // rarer re-upload case) so the counts reported to the operator are honest.
+      counters.rescoredCount -= skippedStale;
+      counters.skippedManualCount += skippedStale;
+    }
     const config = await loadConfig();
     const { round: scored, derivation } = scoreRound(leasedRound, config);
     scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
