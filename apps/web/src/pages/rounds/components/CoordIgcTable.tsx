@@ -80,8 +80,12 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
       a.download = `bcc-${round.id}-team-${team.id}-pilot-${slot.placeInTeam}.igc`;
       document.body.appendChild(a);
       a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      // Defer link removal + revoke so the browser starts the download before the
+      // object URL is invalidated (mirrors RoundBrief/BriefImages delayed revoke).
+      setTimeout(() => {
+        a.remove();
+        URL.revokeObjectURL(url);
+      }, 1000);
     } catch (err) {
       setErrorMsg(err instanceof Error ? err.message : "Download failed");
     } finally {
