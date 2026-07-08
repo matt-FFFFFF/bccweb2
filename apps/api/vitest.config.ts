@@ -27,11 +27,6 @@ export default defineConfig({
             "src/functions/__tests__/**/*.test.ts",
             "src/lib/**/__tests__/**/*.test.ts",
             "src/lib/signTofly/__tests__/**/*.test.ts",
-            "src/lib/__tests__/igcScoring.test.ts",
-            "src/lib/__tests__/igcSanity.test.ts",
-            "src/functions/__tests__/igc.test.ts",
-            "src/functions/__tests__/manualFlight.test.ts",
-            "src/functions/__tests__/rescoreQueue.test.ts",
           ],
     exclude: runIntegration
       ? []
