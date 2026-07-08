@@ -19,14 +19,14 @@ import {
 } from "@azure/functions";
 import { randomUUID } from "node:crypto";
 import type { CallerIdentity, Flight, PilotSlot, Round } from "@bccweb/types";
-import { PilotSchema, RoundSchema } from "@bccweb/schemas";
+import { RoundSchema } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
   getPrivateBlockBlobClient,
   readBlob,
   withPrivateLeaseRenewing,
 } from "../lib/blob.js";
-import { readJson, writePrivateJson } from "../lib/blobJson.js";
+import { writePrivateJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -34,6 +34,7 @@ import {
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { scoreIgc } from "../lib/igcScoring.js";
+import { findSlot, readRoundOr404, resolveExpectedPilotName, streamToBuffer } from "../lib/flightHelpers.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 
 // Raw IGC uploads are plain-text B-record logs; a real track is a few hundred KB.
@@ -42,12 +43,6 @@ const MAX_IGC_BYTES = 15 * 1024 * 1024;
 const IGC_FIRST_BYTE = 0x41;
 
 // ─── Shared helpers (reused by T10 GET / T11 DELETE) ────────────────────────────
-
-/** Locate a slot by its 1-based `placeInTeam` within `teamId`. */
-function findSlot(round: Round, teamId: string, place: number): PilotSlot | null {
-  const team = round.teams.find((candidate) => candidate.id === teamId);
-  return team?.pilots.find((slot) => slot.placeInTeam === place) ?? null;
-}
 
 /**
  * IGC write access: an Admin unconditionally, a RoundsCoord scoped to the
@@ -81,44 +76,6 @@ function canDeleteSlotIgc(caller: CallerIdentity, round: Round): boolean {
     caller.clubId !== null &&
     round.organisingClub?.id === caller.clubId
   );
-}
-
-/**
- * Best-effort expected pilot name for the IGC_PILOT_MISMATCH sanity check. The
- * round slot's `snapshot` does NOT carry a name, so resolve it from the pilot
- * blob; any miss (unlinked slot, absent/corrupt blob) yields `undefined`, which
- * scoreIgc treats as "skip the name check".
- */
-async function resolveExpectedPilotName(
-  pilotId: string | null,
-): Promise<string | undefined> {
-  if (!pilotId) return undefined;
-  const path = `pilots/${pilotId}.json`;
-  try {
-    const pilot = await readJson(getPrivateBlobClient(path), PilotSchema, path);
-    return pilot.person.fullName || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function readRoundOr404(roundPath: string): Promise<Round> {
-  try {
-    return await readJson(getPrivateBlobClient(roundPath), RoundSchema, roundPath);
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(404, "NOT_FOUND", "Round not found");
-    }
-    throw err;
-  }
-}
-
-async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks);
 }
 
 // ─── POST /api/rounds/{id}/teams/{teamId}/pilots/{place}/igc ─────────────────────

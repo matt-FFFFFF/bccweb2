@@ -26,7 +26,7 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import { randomUUID } from "node:crypto";
-import type { Flight, PilotSlot, Round } from "@bccweb/types";
+import type { Flight, Round } from "@bccweb/types";
 import { RoundSchema } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
@@ -37,6 +37,7 @@ import {
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
+import { findSlot } from "../lib/flightHelpers.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 
 const MAX_DISTANCE_KM = 10000;
@@ -47,12 +48,6 @@ interface ManualFlightBody {
   url?: unknown;
   duration?: unknown;
   dateTime?: unknown;
-}
-
-/** Locate the slot at `place` within team `teamId`, or null if either is absent. */
-function findSlot(round: Round, teamId: string, place: number): PilotSlot | null {
-  const team = round.teams.find((candidate) => candidate.id === teamId);
-  return team?.pilots.find((slot) => slot.placeInTeam === place) ?? null;
 }
 
 async function recordManualFlight(

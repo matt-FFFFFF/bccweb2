@@ -188,6 +188,30 @@ describe("rescore enqueue/status/worker async chain", () => {
     expect((await callHttp("rescoreRound", makeAuthRequest(ctx.pilot.id, ctx.pilot.email, { method: "POST", params: { id: ctx.roundId } }))).status).toBe(403);
   });
 
+  it("rejects rescore with 409 ROUND_NOT_RESCORABLE when the round is neither Locked nor Complete", async () => {
+    const admin = await seedUser(["Admin"]);
+    const roundId = randomUUID();
+    const round: Round = {
+      id: roundId, date: "2019-06-15", status: "Proposed", isLocked: false, maxTeams: 8, minimumScore: 0,
+      site: { id: randomUUID(), name: "Milk Hill" },
+      organisingClub: { id: randomUUID(), name: "Test Club" },
+      season: { year: 2019 },
+      teams: [],
+    };
+    await writePrivateBlob(`rounds/${roundId}.json`, round);
+
+    const res = await callHttp("rescoreRound", makeAuthRequest(admin.id, admin.email, {
+      method: "POST",
+      params: { id: roundId },
+    }));
+
+    expect(res.status).toBe(409);
+    // withErrorHandler blanks `error` to generic status text, keeping only `code`+`detail`.
+    const body = res.jsonBody as { code: string; detail?: string };
+    expect(body.code).toBe("ROUND_NOT_RESCORABLE");
+    expect(body.detail).toContain("Proposed");
+  });
+
   it("completes a mixed queued job, updates flights, writes audit, and releases the guard", async () => {
     vi.mocked(scoreIgc)
       .mockResolvedValueOnce(scored(11))

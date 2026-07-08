@@ -3,7 +3,7 @@ import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/fu
 import { randomUUID } from "node:crypto";
 import type { Config, Flight, PilotSlot, RescoreJob, Round } from "@bccweb/types";
 import { scoreRound } from "@bccweb/scoring";
-import { ConfigSchema, PilotSchema, RoundSchema } from "@bccweb/schemas";
+import { ConfigSchema, RoundSchema } from "@bccweb/schemas";
 
 import { getPrivateBlobClient, readBlob, withPrivateLeaseRenewing, writePrivateBlob } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
@@ -11,6 +11,7 @@ import { forbiddenResponse, getCallerIdentity, unauthorizedResponse } from "../l
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 import { scoreIgc } from "../lib/igcScoring.js";
+import { readRoundOr404, resolveExpectedPilotName, streamToBuffer } from "../lib/flightHelpers.js";
 import { acquireActiveGuard, enqueueRescore, readJobStatus, releaseActiveGuard, writeJobStatus } from "../lib/rescoreJob.js";
 
 const BUDGET_MS = 8 * 60_000;
@@ -30,37 +31,6 @@ async function loadConfig(): Promise<Config> {
   } catch {
     return ConfigSchema.parse({});
   }
-}
-
-async function readRoundOr404(path: string): Promise<Round> {
-  try {
-    return await readJson(getPrivateBlobClient(path), RoundSchema, path);
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(404, "NOT_FOUND", "Round not found");
-    }
-    throw err;
-  }
-}
-
-async function resolveExpectedPilotName(pilotId: string | null): Promise<string | undefined> {
-  if (!pilotId) return undefined;
-
-  const path = `pilots/${pilotId}.json`;
-  try {
-    const pilot = await readJson(getPrivateBlobClient(path), PilotSchema, path);
-    return pilot.person.fullName || undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-async function streamToBuffer(stream: NodeJS.ReadableStream): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of stream) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks);
 }
 
 function errorMessage(err: unknown): string {
@@ -236,7 +206,9 @@ async function rescoreRound(
     return {
       status: 409,
       jsonBody: {
-        error: `Round must be Locked or Complete to rescore (currently ${round.status})`,
+        error: "Round not rescorable",
+        code: "ROUND_NOT_RESCORABLE",
+        detail: `Round must be Locked or Complete to rescore (currently ${round.status})`,
       },
     };
   }
