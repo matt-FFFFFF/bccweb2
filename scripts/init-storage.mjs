@@ -49,15 +49,16 @@ const QUEUES = [
   "signtofly-reflect",
   "signtofly-reflect-poison",
   "rescore-jobs",
+  "rescore-jobs-poison",
 ];
 
 /**
  * Queues that are created non-fatally — if the Queue service is unavailable,
  * log a warning and continue (blob containers remain the hard requirement).
- * `rescore-jobs` lives here because it is a newer addition and its absence
- * during a cold Azurite start should not block blob container creation.
+ * The `rescore-jobs` pair lives here because it is a newer addition and its
+ * absence during a cold Azurite start should not block blob container creation.
  */
-const NON_FATAL_QUEUES = new Set(["rescore-jobs"]);
+const NON_FATAL_QUEUES = new Set(["rescore-jobs", "rescore-jobs-poison"]);
 
 /**
  * Build a Shared Key Authorization header for an Azure Blob Storage PUT

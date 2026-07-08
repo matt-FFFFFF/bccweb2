@@ -308,9 +308,12 @@ run "storage_queues_planned" {
     condition = (
       azapi_resource.queue_rescore_jobs.name == "rescore-jobs" &&
       azapi_resource.queue_rescore_jobs.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
-      azapi_resource.queue_rescore_jobs.parent_id == azapi_resource.queue_service.id
+      azapi_resource.queue_rescore_jobs.parent_id == azapi_resource.queue_service.id &&
+      azapi_resource.queue_rescore_jobs_poison.name == "rescore-jobs-poison" &&
+      azapi_resource.queue_rescore_jobs_poison.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
+      azapi_resource.queue_rescore_jobs_poison.parent_id == azapi_resource.queue_service.id
     )
-    error_message = "The rescore-jobs queue must plan under the queue service with the exact expected name, type, and parent linkage."
+    error_message = "The rescore-jobs queue and its poison queue must plan under the queue service with the exact expected names, types, and parent linkage."
   }
 
   assert {
