@@ -262,7 +262,11 @@ async function getIgc(
     throw err;
   }
 
-  const body = await streamToBuffer(downloadRes.readableStreamBody!);
+  const readableStreamBody = downloadRes.readableStreamBody;
+  if (!readableStreamBody) {
+    throw new HttpError(500, "IGC_DOWNLOAD_FAILED", "IGC download returned no body");
+  }
+  const body = await streamToBuffer(readableStreamBody);
   return {
     status: 200,
     body,

@@ -17,6 +17,7 @@ import {
   writePrivateJson,
 } from "../../__tests__/helpers/seed.js";
 import { getPrivateContainer } from "../../__tests__/helpers/azurite.js";
+import * as blobModule from "../../lib/blob.js";
 
 // scoreIgc is wrapped so the happy path runs the REAL solver while individual
 // tests can force a rejection (IGC_PARSE_ERROR) or a fast canned result (overwrite).
@@ -420,6 +421,43 @@ describe("getIgc — GET /rounds/{id}/teams/{teamId}/pilots/{place}/igc", () => 
     const res = await invoke("getIgc", req);
 
     expect(res.status).toBe(404);
+  });
+
+  it("500 IGC_DOWNLOAD_FAILED when the stored blob download yields no readable stream", async () => {
+    const r = await seedRound();
+    const { user } = await bootstrapAdmin();
+    const igcPath = `flight-igcs/${r.roundId}/${r.pilotId}.igc`;
+
+    const up = await invoke(
+      "uploadIgc",
+      withFile(
+        makeAuthRequest(user.id, user.email, { method: "POST", params: paramsFor(r) }),
+        igcFile(D3P),
+      ),
+    );
+    expect(up.status).toBe(200);
+
+    // Stub ONLY the IGC path so download() resolves without a readableStreamBody;
+    // the removed non-null assertion used to crash here instead of returning 500.
+    const realGetPrivateBlobClient = blobModule.getPrivateBlobClient;
+    const spy = vi
+      .spyOn(blobModule, "getPrivateBlobClient")
+      .mockImplementation((p: string) => {
+        if (p !== igcPath) return realGetPrivateBlobClient(p);
+        return {
+          download: async () => ({ readableStreamBody: undefined }),
+        } as unknown as ReturnType<typeof realGetPrivateBlobClient>;
+      });
+
+    try {
+      const req = makeAuthRequest(user.id, user.email, { method: "GET", params: paramsFor(r) });
+      const res = await invoke("getIgc", req);
+
+      expect(res.status).toBe(500);
+      expect((res.jsonBody as { code: string }).code).toBe("IGC_DOWNLOAD_FAILED");
+    } finally {
+      spy.mockRestore();
+    }
   });
 });
 

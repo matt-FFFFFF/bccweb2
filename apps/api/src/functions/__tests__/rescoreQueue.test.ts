@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { makeAuthRequest, MockHttpRequest } from "../../__tests__/helpers/api.js";
 import { getRegisteredHandler, getRegisteredQueueHandler } from "../../__tests__/helpers/setup.js";
 import { getPrivateContainer } from "../../__tests__/helpers/azurite.js";
+import * as blobModule from "../../lib/blob.js";
 import { getPrivateBlobClient, readBlob, writePrivateBlob } from "../../lib/blob.js";
 import { acquireActiveGuard, activeGuardPath, readJobStatus, RESCORE_QUEUE_NAME, writeJobStatus } from "../../lib/rescoreJob.js";
 
@@ -258,6 +259,34 @@ describe("rescore enqueue/status/worker async chain", () => {
     expect((await callHttp("getRescoreJob", makeAuthRequest(admin.id, admin.email, { method: "GET", params: { id: roundId, jobId: randomUUID() } }))).status).toBe(404);
     expect((await callHttp("getRescoreJob", makeAuthRequest(admin.id, admin.email, { method: "GET", params: { id: otherRoundId, jobId: job.jobId } }))).status).toBe(404);
     expect((await callHttp("getRescoreJob", makeAuthRequest(pilot.id, pilot.email, { method: "GET", params: { id: roundId, jobId: job.jobId } }))).status).toBe(403);
+  });
+});
+
+describe("acquireActiveGuard — release-race re-acquire", () => {
+  it("returns true when getProperties 404s after the initial create-conflict", async () => {
+    const roundId = randomUUID();
+    const path = activeGuardPath(roundId);
+
+    // Hold the guard so the next acquire's create-only write conflicts.
+    expect(await acquireActiveGuard(roundId)).toBe(true);
+    expect(await getPrivateContainer().getBlobClient(path).exists()).toBe(true);
+
+    // Simulate a concurrent release landing between the create-conflict and the
+    // getProperties probe: the probe deletes the guard, then 404s.
+    const realGetPrivateBlobClient = blobModule.getPrivateBlobClient;
+    vi.spyOn(blobModule, "getPrivateBlobClient").mockImplementation((p: string) => {
+      if (p !== path) return realGetPrivateBlobClient(p);
+      const realClient = realGetPrivateBlobClient(p);
+      return {
+        getProperties: async () => {
+          await realClient.deleteIfExists();
+          throw Object.assign(new Error("BlobNotFound"), { statusCode: 404 });
+        },
+      } as unknown as ReturnType<typeof realGetPrivateBlobClient>;
+    });
+
+    expect(await acquireActiveGuard(roundId)).toBe(true);
+    expect(await getPrivateContainer().getBlobClient(path).exists()).toBe(true);
   });
 });
 

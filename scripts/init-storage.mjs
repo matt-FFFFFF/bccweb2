@@ -347,7 +347,7 @@ async function main() {
       try {
         await createQueue(name);
       } catch (err) {
-        console.warn(`  warning: could not create queue '${name}' (non-fatal): ${err.message}`);
+        console.warn(`  warning: could not create queue '${name}' (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
       }
     } else {
       await createQueue(name);

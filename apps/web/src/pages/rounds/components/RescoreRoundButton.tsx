@@ -62,7 +62,7 @@ function errMessage(err: unknown): string {
     if (err.code === "RESCORE_IN_PROGRESS") {
       return "A re-score is already running for this round. Wait for it to finish, then try again.";
     }
-    return err.message;
+    return err.detail ?? err.message;
   }
   if (err instanceof Error) return err.message;
   return "Unexpected error while re-scoring.";

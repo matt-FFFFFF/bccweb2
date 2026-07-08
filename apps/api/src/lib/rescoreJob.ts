@@ -44,7 +44,22 @@ export async function acquireActiveGuard(roundId: string): Promise<boolean> {
     if (!isConflict(err)) throw err;
   }
 
-  const properties = await client.getProperties();
+  let properties;
+  try {
+    properties = await client.getProperties();
+  } catch (err: unknown) {
+    // Guard was released between the conflict and here — try to re-acquire it.
+    if (statusCodeOf(err) === 404) {
+      try {
+        await writePrivateBlob(path, {}, undefined, { ifNoneMatch: "*" });
+        return true;
+      } catch (err2: unknown) {
+        if (isConflict(err2)) return false;
+        throw err2;
+      }
+    }
+    throw err;
+  }
   const lastModified = properties.lastModified?.getTime();
   const ageMs = lastModified === undefined ? 0 : Date.now() - lastModified;
   if (!Number.isFinite(ageMs) || ageMs <= STALE_ACTIVE_GUARD_MS) return false;
