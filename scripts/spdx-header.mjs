@@ -23,13 +23,18 @@
  * matches the holder + licence id only, never the year, so a file stamped in a
  * prior year is never flagged as stale.
  *
- * The pure functions (`isInScope`, `headerLines`, `hasHeader`, `applyFix`) are
- * exported so the unit suite can drive them directly with in-memory fixtures —
- * no child_process, git, or filesystem needed in tests.
+ * The pure functions (`isInScope`, `headerLines`, `hasHeader`, `applyFix`,
+ * `isViolation`) plus the `walkDir` fallback enumerator are exported so the unit
+ * suite can drive them directly with in-memory / temp-dir fixtures — no
+ * child_process or git needed in tests.
+ *
+ * Enumeration is git-first: `git ls-files` (auto-respects .gitignore) is the
+ * primary source; outside a git repo it falls back to `walkDir` (which skips the
+ * same ignored dirs), so the checker degrades gracefully instead of crashing.
  */
 
 import { execFileSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 
 // ─── Config ─────────────────────────────────────────────────────────────────
@@ -129,7 +134,8 @@ export function headerLines(style) {
  * @returns {boolean}
  */
 export function hasHeader(content) {
-  const head = content.split("\n").slice(0, MAX_HEADER_LINES);
+  // Strip a leading UTF-8 BOM first so it can't hide the header from the scan.
+  const head = content.replace(/^\uFEFF/, "").split("\n").slice(0, MAX_HEADER_LINES);
   return head.some((l) => COPYRIGHT_RE.test(l)) && head.some((l) => LICENSE_RE.test(l));
 }
 
@@ -139,13 +145,22 @@ export function hasHeader(content) {
  *  - licence-only (no copyright) within first 15 lines → insert copyright
  *    directly ABOVE the existing licence line (the 23-file upgrade case)
  *  - no SPDX at all → insert both lines after a shebang, else at the top
- * Empty content is skipped. Trailing newline / other blank lines are preserved.
+ * Empty content is skipped. A leading UTF-8 BOM is preserved at position 0 (the
+ * header lands immediately after it). Trailing newline / other blank lines are
+ * preserved.
  * @param {string} content
  * @param {{kind:"line",prefix:string}|{kind:"block",open:string,close:string}} style
  * @returns {string}
  */
 export function applyFix(content, style) {
   if (content === "") return content;
+
+  // Preserve a leading UTF-8 BOM: strip it, stamp the remainder, then re-prepend
+  // it so the BOM stays at position 0 with the header immediately after.
+  if (content.charCodeAt(0) === 0xfeff) {
+    return `\uFEFF${applyFix(content.slice(1), style)}`;
+  }
+
   if (hasHeader(content)) return content;
 
   const lines = content.split("\n");
@@ -168,6 +183,19 @@ export function applyFix(content, style) {
   return lines.join("\n");
 }
 
+/**
+ * CHECK-mode predicate: is this file content a header violation?
+ * A zero-length (or BOM-only) file is NOT a violation — `applyFix` can never
+ * stamp it, so flagging it would be an unfixable CI lock. Mirrors the empty
+ * skip in `applyFix`.
+ * @param {string} content
+ * @returns {boolean}
+ */
+export function isViolation(content) {
+  if (content.replace(/^\uFEFF/, "") === "") return false;
+  return !hasHeader(content);
+}
+
 // ─── Reporters (privacy-scan shape) ───────────────────────────────────────────
 
 function pass(check, detail) {
@@ -176,6 +204,54 @@ function pass(check, detail) {
 
 function fail(check, detail) {
   console.error(`[FAIL] ${check}${detail ? `: ${detail}` : ""}`);
+}
+
+// ─── File enumeration ─────────────────────────────────────────────────────────
+
+// Directory names skipped by the non-git `walkDir` fallback. When `git ls-files`
+// is available (the primary path) .gitignore already excludes these; this set
+// reproduces that outside a git repo (e.g. an exported source tarball).
+const IGNORED_DIRS = new Set([
+  "node_modules",
+  "dist",
+  "build",
+  "coverage",
+  ".git",
+  ".terraform",
+  ".azurite",
+  ".omo",
+  ".worktrees",
+  ".playwright-mcp",
+  "playwright-report",
+  "test-results",
+  "logs",
+  ".turbo",
+]);
+
+/**
+ * Recursively yield repo-relative POSIX file paths under `dir`, skipping the
+ * IGNORED_DIRS by directory name. The non-git fallback enumerator: the yielded
+ * paths run through the SAME `isInScope` filter as the git path, so scope is
+ * identical either way.
+ * @param {string} dir
+ * @returns {Generator<string>}
+ */
+export function* walkDir(dir = ".") {
+  let entries;
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const rel = dir === "." ? entry.name : `${dir}/${entry.name}`;
+    if (entry.isDirectory()) {
+      if (IGNORED_DIRS.has(entry.name)) continue;
+      yield* walkDir(rel);
+    } else if (entry.isFile()) {
+      yield rel;
+    }
+  }
 }
 
 // ─── CLI ──────────────────────────────────────────────────────────────────────
@@ -188,9 +264,20 @@ async function main() {
   console.log(`Mode: ${doFix ? "fix" : "check"}`);
   console.log("");
 
-  const files = execFileSync("git", ["ls-files"], { encoding: "utf8" })
-    .split("\n")
-    .filter(Boolean);
+  // Primary: git ls-files (auto-respects .gitignore). Fallback: a directory
+  // walk skipping the same ignored dirs, so the checker still runs outside a git
+  // repo (e.g. a source tarball) instead of throwing.
+  let files;
+  try {
+    files = execFileSync("git", ["ls-files"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .split("\n")
+      .filter(Boolean);
+  } catch {
+    files = [...walkDir(".")];
+  }
 
   const violations = [];
   let scanned = 0;
@@ -215,7 +302,7 @@ async function main() {
         writeFileSync(rel, fixed);
         changed++;
       }
-    } else if (!hasHeader(content)) {
+    } else if (isViolation(content)) {
       violations.push(rel);
     }
   }

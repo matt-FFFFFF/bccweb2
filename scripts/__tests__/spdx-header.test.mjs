@@ -5,19 +5,25 @@
  * Unit suite for scripts/spdx-header.mjs — stdlib-only (node:test + node:assert),
  * runs without node_modules: `node --test scripts/__tests__/spdx-header.test.mjs`.
  *
- * Drives the exported pure functions directly with in-memory fixtures; never
- * touches git, child_process, or the filesystem. Assertions avoid hard-coding
- * the (informational) copyright year by building expectations from headerLines().
+ * Drives the exported pure functions directly with in-memory fixtures; the only
+ * exception is the `walkDir` case, which builds a throwaway temp-dir tree (no
+ * git / child_process). Assertions avoid hard-coding the (informational)
+ * copyright year by building expectations from headerLines().
  */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import {
   isInScope,
   headerLines,
   hasHeader,
   applyFix,
+  isViolation,
+  walkDir,
   COPYRIGHT_RE,
   LICENSE_RE,
 } from "../spdx-header.mjs";
@@ -181,3 +187,52 @@ test("applyFix: already-compliant content is returned unchanged", () => {
 test("applyFix: empty content is skipped", () => {
   assert.equal(applyFix("", LINE), "");
 });
+
+// ─── walkDir fallback (Fix A) ─────────────────────────────────────────────────
+
+test("walkDir: yields in-scope files and skips ignored dirs", () => {
+  const dir = mkdtempSync(join(tmpdir(), "spdx-walk-"));
+  try {
+    writeFileSync(join(dir, "foo.ts"), "import x;\n");
+    mkdirSync(join(dir, "sub"));
+    writeFileSync(join(dir, "sub", "nested.tf"), "x = 1\n");
+    mkdirSync(join(dir, "node_modules"));
+    writeFileSync(join(dir, "node_modules", "bar.ts"), "import y;\n");
+
+    const found = [...walkDir(dir)];
+
+    // Yields the in-scope files (top-level + nested).
+    assert.ok(found.some((p) => p.endsWith("/foo.ts")), "yields foo.ts");
+    assert.ok(found.some((p) => p.endsWith("/sub/nested.tf")), "yields nested.tf");
+    // Excludes anything under an ignored directory (node_modules).
+    assert.ok(!found.some((p) => p.includes("node_modules")), "skips node_modules");
+    // The yielded in-scope file still passes the SAME isInScope filter.
+    assert.ok(found.filter((p) => isInScope(p)).some((p) => p.endsWith("foo.ts")));
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ─── BOM preservation (Fix B) ─────────────────────────────────────────────────
+
+test("applyFix: preserves a leading UTF-8 BOM at position 0", () => {
+  const [c, l] = headerLines(LINE);
+  const result = applyFix("\uFEFFimport x;\n", LINE);
+  assert.equal(result.charCodeAt(0), 0xfeff, "BOM stays first");
+  const lines = result.replace(/^\uFEFF/, "").split("\n");
+  assert.equal(lines[0], c, "copyright immediately after the BOM");
+  assert.equal(lines[1], l, "licence next");
+  assert.equal(lines[2], "import x;");
+  assert.equal(result, applyFix(result, LINE), "idempotent");
+});
+
+// ─── Empty-file skip (Fix C) ──────────────────────────────────────────────────
+
+test("isViolation: empty (or BOM-only) in-scope file is not a violation", () => {
+  assert.equal(isViolation(""), false, "empty file is skipped, not flagged");
+  assert.equal(isViolation("\uFEFF"), false, "BOM-only file is skipped");
+  assert.equal(isViolation("import x;\n"), true, "no header → violation");
+  const [c, l] = headerLines(LINE);
+  assert.equal(isViolation(`${c}\n${l}\n`), false, "compliant → not a violation");
+});
+
