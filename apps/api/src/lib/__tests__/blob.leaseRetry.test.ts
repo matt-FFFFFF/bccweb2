@@ -4,17 +4,18 @@
  *   withPrivateLeaseRetry(path, fn) → wraps withPrivateLease
  * in apps/api/src/lib/blob.ts.
  *
- * This encodes the EXACT current semantics of the 20-attempt retry copied in
+ * This encodes the EXACT current semantics of the shared lease-retry helpers in
  *   apps/api/src/functions/pilots.ts:395-411 (withLeaseRetry, public)
  *   apps/api/src/lib/auth.ts:162-178       (withPrivateLeaseRetry, private)
  *   apps/api/src/functions/meProfile.ts:235-251 (byte-identical copy)
  *
  * Contract (both helpers):
- *   - maxAttempts = 20
+ *   - maxAttempts = 40
  *   - on caught error: if statusCode is NOT 409 and NOT 412 → rethrow immediately
  *   - if statusCode IS 409 || 412: retry, unless this was attempt === maxAttempts,
  *     in which case rethrow the ORIGINAL error (identity + statusCode preserved)
- *   - backoff between retries = 25 * attempt milliseconds
+ *   - backoff between retries = full jitter over capped exponential:
+ *     random in [0, min(250, 25 * 2^(attempt-1))) milliseconds
  *
  * LIGHT suite: the lease layer is mocked at the @azure/storage-blob seam, so
  * 409/412 sequences are injected WITHOUT Azurite and WITHOUT real wall-clock
@@ -84,7 +85,7 @@ beforeEach(() => {
   azureMock.releaseLease.mockReset();
   azureMock.releaseLease.mockResolvedValue(undefined);
   azureMock.fromConnectionString.mockClear();
-  // Fake timers so the `setTimeout(resolve, 25 * attempt)` backoff never sleeps.
+  // Fake timers so the jittered backoff never sleeps in real wall-clock time.
   vi.useFakeTimers();
 });
 
@@ -95,7 +96,7 @@ afterEach(() => {
 
 // ─── Case 1: 409 then success → retries and resolves with fn's result ────────
 
-describe("withLeaseRetry / withPrivateLeaseRetry — 20-attempt contract", () => {
+describe("withLeaseRetry / withPrivateLeaseRetry — retry contract", () => {
   test("409 then success → retries once and resolves (public)", async () => {
     failThenSucceed([409]);
     const { withLeaseRetry } = await importBlob();
@@ -185,9 +186,9 @@ describe("withLeaseRetry / withPrivateLeaseRetry — 20-attempt contract", () =>
     expect(azureMock.acquireLease).toHaveBeenCalledTimes(1);
   });
 
-  // ─── Case 4: 20 consecutive 409s → throws ORIGINAL error, exactly 20 tries ─
+  // ─── Case 4: maxAttempts consecutive conflicts → throws ORIGINAL error ─────
 
-  test("20 consecutive 409s → throws original error after exactly maxAttempts (public)", async () => {
+  test("consecutive 409s → throws original error after exactly maxAttempts (public)", async () => {
     const conflict = leaseError(409);
     azureMock.acquireLease.mockReset();
     azureMock.acquireLease.mockRejectedValue(conflict);
@@ -201,11 +202,11 @@ describe("withLeaseRetry / withPrivateLeaseRetry — 20-attempt contract", () =>
 
     await assertion; // ORIGINAL error identity preserved
     await statusAssertion;
-    expect(azureMock.acquireLease).toHaveBeenCalledTimes(20); // maxAttempts
+    expect(azureMock.acquireLease).toHaveBeenCalledTimes(40); // maxAttempts
     expect(fn).not.toHaveBeenCalled();
   });
 
-  test("20 consecutive 412s → throws original error after exactly maxAttempts (private)", async () => {
+  test("consecutive 412s → throws original error after exactly maxAttempts (private)", async () => {
     const conflict = leaseError(412);
     azureMock.acquireLease.mockReset();
     azureMock.acquireLease.mockRejectedValue(conflict);
@@ -219,12 +220,25 @@ describe("withLeaseRetry / withPrivateLeaseRetry — 20-attempt contract", () =>
 
     await assertion;
     await statusAssertion;
-    expect(azureMock.acquireLease).toHaveBeenCalledTimes(20);
+    expect(azureMock.acquireLease).toHaveBeenCalledTimes(40);
   });
 
-  // ─── Case 5: backoff is 25 * attempt (fake timers, no real sleeps) ─────────
+  // ─── Case 5: backoff is full jitter over capped exponential ────────────────
 
-  test("backoff between retries is 25 * attempt ms (public)", async () => {
+  const BACKOFF_BASE_MS = 25;
+  const BACKOFF_CAP_MS = 250;
+  function backoffCeilingMs(attempt: number): number {
+    return Math.min(BACKOFF_CAP_MS, BACKOFF_BASE_MS * 2 ** (attempt - 1));
+  }
+  function expectJitteredBackoff(delays: (number | undefined)[]): void {
+    delays.forEach((delay, i) => {
+      const ceiling = backoffCeilingMs(i + 1);
+      expect(delay).toBeGreaterThanOrEqual(0);
+      expect(delay).toBeLessThan(ceiling);
+    });
+  }
+
+  test("backoff between retries is full jitter within the capped-exponential ceiling (public)", async () => {
     // 3 failures then success → backoffs scheduled after attempts 1,2,3.
     failThenSucceed([409, 409, 409]);
     const { withLeaseRetry } = await importBlob();
@@ -236,11 +250,12 @@ describe("withLeaseRetry / withPrivateLeaseRetry — 20-attempt contract", () =>
     await expect(promise).resolves.toBeUndefined();
 
     const delays = setTimeoutSpy.mock.calls.map((c) => c[1]);
-    expect(delays).toEqual([25, 50, 75]); // 25*1, 25*2, 25*3
+    expect(delays).toHaveLength(3);
+    expectJitteredBackoff(delays); // ceilings 25, 50, 100
     expect(azureMock.acquireLease).toHaveBeenCalledTimes(4); // 3 fail + 1 ok
   });
 
-  test("backoff between retries is 25 * attempt ms (private)", async () => {
+  test("backoff between retries is full jitter within the capped-exponential ceiling (private)", async () => {
     failThenSucceed([409, 412]); // mixed conflict codes, both retry
     const { withPrivateLeaseRetry } = await importBlob();
 
@@ -251,6 +266,7 @@ describe("withLeaseRetry / withPrivateLeaseRetry — 20-attempt contract", () =>
     await expect(promise).resolves.toBe("ok");
 
     const delays = setTimeoutSpy.mock.calls.map((c) => c[1]);
-    expect(delays).toEqual([25, 50]); // 25*1, 25*2
+    expect(delays).toHaveLength(2);
+    expectJitteredBackoff(delays); // ceilings 25, 50
   });
 });

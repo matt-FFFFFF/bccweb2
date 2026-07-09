@@ -238,20 +238,36 @@ export async function withPrivateLease<T>(
   return withLeaseOnClient(path, getPrivateBlockBlobClient(path), fn);
 }
 
+// Full-jitter capped exponential backoff: synchronized linear retries form a
+// thundering herd (only one waiter drains per round), so a burst of concurrent
+// RMW jobs on one blob (e.g. the sign-to-fly reflect queue) can exhaust attempts
+// before draining. Jitter decorrelates contenders so the lease pipelines; the
+// attempt budget must exceed realistic concurrency.
+const LEASE_RETRY_MAX_ATTEMPTS = 40;
+const LEASE_RETRY_BASE_MS = 25;
+const LEASE_RETRY_CAP_MS = 250;
+
+function leaseRetryBackoffMs(attempt: number): number {
+  const exp = Math.min(
+    LEASE_RETRY_CAP_MS,
+    LEASE_RETRY_BASE_MS * 2 ** (attempt - 1)
+  );
+  return Math.random() * exp;
+}
+
 export async function withLeaseRetry(
   path: string,
   fn: (leaseId: string) => Promise<unknown>
 ): Promise<void> {
-  const maxAttempts = 20;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+  for (let attempt = 1; attempt <= LEASE_RETRY_MAX_ATTEMPTS; attempt += 1) {
     try {
       await withLease(path, fn);
       return;
     } catch (err) {
       const statusCode = (err as { statusCode?: number }).statusCode;
       if (statusCode !== 409 && statusCode !== 412) throw err;
-      if (attempt === maxAttempts) throw err;
-      await new Promise((r) => setTimeout(r, 25 * attempt));
+      if (attempt === LEASE_RETRY_MAX_ATTEMPTS) throw err;
+      await new Promise((r) => setTimeout(r, leaseRetryBackoffMs(attempt)));
     }
   }
 }
@@ -260,17 +276,16 @@ export async function withPrivateLeaseRetry<T>(
   path: string,
   fn: (leaseId: string) => Promise<T>
 ): Promise<T> {
-  const maxAttempts = 20;
   let lastErr: unknown;
-  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+  for (let attempt = 1; attempt <= LEASE_RETRY_MAX_ATTEMPTS; attempt += 1) {
     try {
       return await withPrivateLease(path, fn);
     } catch (err) {
       const statusCode = (err as { statusCode?: number }).statusCode;
       if (statusCode !== 409 && statusCode !== 412) throw err;
       lastErr = err;
-      if (attempt < maxAttempts) {
-        await new Promise((r) => setTimeout(r, 25 * attempt));
+      if (attempt < LEASE_RETRY_MAX_ATTEMPTS) {
+        await new Promise((r) => setTimeout(r, leaseRetryBackoffMs(attempt)));
       }
     }
   }
