@@ -1,4 +1,4 @@
-import { SpanKind, SpanStatusCode, TraceFlags } from "@opentelemetry/api";
+import { SpanKind, SpanStatusCode, TraceFlags, type Attributes } from "@opentelemetry/api";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import type { SdkLogRecord } from "@opentelemetry/sdk-logs";
 import { describe, it, expect, vi } from "vitest";
@@ -35,7 +35,7 @@ function createMockSpan(
     startTime: [0, 0],
     endTime: [0, 1],
     status: { code: overrides.statusCode ?? SpanStatusCode.UNSET },
-    attributes: overrides.attributes ?? { "http.response.status_code": 200 },
+    attributes: (overrides.attributes ?? { "http.response.status_code": 200 }) as Attributes,
     links: [],
     events: [],
     duration: [0, 1],
@@ -53,7 +53,7 @@ function createMockLogRecord(attributes: SdkLogRecord["attributes"] = {}): {
   readonly setAttribute: ReturnType<typeof vi.fn>;
 } {
   const setAttribute = vi.fn((_key: string, _value?: unknown) => logRecord);
-  const logRecord = {
+  const logRecord: SdkLogRecord = {
     hrTime: [0, 0],
     hrTimeObserved: [0, 0],
     resource: {} as SdkLogRecord["resource"],
@@ -66,7 +66,7 @@ function createMockLogRecord(attributes: SdkLogRecord["attributes"] = {}): {
     setEventName: vi.fn(() => logRecord),
     setSeverityNumber: vi.fn(() => logRecord),
     setSeverityText: vi.fn(() => logRecord),
-  } satisfies SdkLogRecord;
+  };
 
   return { logRecord, setAttribute };
 }

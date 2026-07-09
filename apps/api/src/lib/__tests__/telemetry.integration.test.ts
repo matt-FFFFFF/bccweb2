@@ -1,4 +1,4 @@
-import { SpanKind, SpanStatusCode, TraceFlags } from "@opentelemetry/api";
+import { SpanKind, SpanStatusCode, TraceFlags, type Attributes } from "@opentelemetry/api";
 import type { SdkLogRecord } from "@opentelemetry/sdk-logs";
 import type { ReadableSpan } from "@opentelemetry/sdk-trace-base";
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
@@ -28,7 +28,7 @@ function createIntegrationSpan(attributes: Record<string, unknown>): ReadableSpa
     startTime: [0, 0],
     endTime: [0, 1],
     status: { code: SpanStatusCode.UNSET },
-    attributes,
+    attributes: attributes as Attributes,
     links: [],
     events: [],
     duration: [0, 1],
@@ -46,7 +46,7 @@ function createIntegrationLogRecord(): {
   readonly setAttribute: ReturnType<typeof vi.fn>;
 } {
   const setAttribute = vi.fn((_key: string, _value?: unknown) => logRecord);
-  const logRecord = {
+  const logRecord: SdkLogRecord = {
     hrTime: [0, 0],
     hrTimeObserved: [0, 0],
     resource: {} as SdkLogRecord["resource"],
@@ -59,7 +59,7 @@ function createIntegrationLogRecord(): {
     setEventName: vi.fn(() => logRecord),
     setSeverityNumber: vi.fn(() => logRecord),
     setSeverityText: vi.fn(() => logRecord),
-  } satisfies SdkLogRecord;
+  };
 
   return { logRecord, setAttribute };
 }

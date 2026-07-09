@@ -76,7 +76,8 @@ describe("getCallerIdentity sessionVersion binding (issue #122)", () => {
   it("mints an identical sessionVersion from login and refresh, both accepted", async () => {
     const { user, password } = await makeUser();
     // Bump to a non-zero version so the assertion proves the value is READ, not hardcoded 0.
-    await writePrivateJson(`users/${user.id}.json`, UserSchema, { ...user, sessionVersion: 2 });
+    const updated: User = { ...user, sessionVersion: 2 };
+    await writePrivateJson(`users/${user.id}.json`, UserSchema, updated);
 
     const loginRes = await invoke(
       "authLogin",

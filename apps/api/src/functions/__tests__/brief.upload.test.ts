@@ -95,7 +95,9 @@ describe("brief image upload / delete (UUID paths, lease-gated)", () => {
       await adminReq({ method: "GET", params: { id, n: "1" } }),
     );
     expect(getRes.status).toBe(200);
-    expect(String(getRes.headers?.["Content-Type"])).toContain("image/jpeg");
+    expect(
+      String((getRes.headers as Record<string, string> | undefined)?.["Content-Type"]),
+    ).toContain("image/jpeg");
   });
 
   it("GET image when the brief is absent soft-fails 404 (never 500)", async () => {
