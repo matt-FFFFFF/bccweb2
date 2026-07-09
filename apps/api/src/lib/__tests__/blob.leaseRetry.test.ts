@@ -4,7 +4,7 @@
  *   withPrivateLeaseRetry(path, fn) → wraps withPrivateLease
  * in apps/api/src/lib/blob.ts.
  *
- * This encodes the EXACT current semantics of the 20-attempt retry copied in
+ * This encodes the EXACT current semantics of the shared lease-retry helpers in
  *   apps/api/src/functions/pilots.ts:395-411 (withLeaseRetry, public)
  *   apps/api/src/lib/auth.ts:162-178       (withPrivateLeaseRetry, private)
  *   apps/api/src/functions/meProfile.ts:235-251 (byte-identical copy)
@@ -96,7 +96,7 @@ afterEach(() => {
 
 // ─── Case 1: 409 then success → retries and resolves with fn's result ────────
 
-describe("withLeaseRetry / withPrivateLeaseRetry — 20-attempt contract", () => {
+describe("withLeaseRetry / withPrivateLeaseRetry — retry contract", () => {
   test("409 then success → retries once and resolves (public)", async () => {
     failThenSucceed([409]);
     const { withLeaseRetry } = await importBlob();
