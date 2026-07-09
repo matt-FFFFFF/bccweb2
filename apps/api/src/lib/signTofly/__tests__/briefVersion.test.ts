@@ -150,7 +150,7 @@ describe("brief version hashing", () => {
   // ─── Stability lock: undefined vs absent material field → identical hash ───────
   it("undefined vs absent for a material field produce the SAME hash", () => {
     const absent = makeBrief();
-    delete (absent as Record<string, unknown>).NOTAMs;
+    delete absent.NOTAMs;
     const explicitUndefined = makeBrief({ NOTAMs: undefined });
 
     expect(computeBriefHash(explicitUndefined)).toBe(computeBriefHash(absent));

@@ -112,7 +112,7 @@ describe("auth index concurrency", () => {
 
     // When: the same wrong-identity JWT is used through getCallerIdentity.
     const identity = await getCallerIdentity(
-      makeAuthRequest(userB, email) as Parameters<typeof getCallerIdentity>[0],
+      makeAuthRequest(userB, email) as unknown as Parameters<typeof getCallerIdentity>[0],
     );
 
     // Then: identity resolution remains bare and does not throw or persist.
