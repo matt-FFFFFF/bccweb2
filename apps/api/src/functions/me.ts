@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import type { Pilot, SeasonSummary, User } from "@bccweb/types";
 import { PilotSchema, SeasonSummarySchema, UserSchema } from "@bccweb/schemas";

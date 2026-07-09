@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # Required inputs from root: app_insights_id, app_insights_connection_string,
 # acs_email_domain_id, terraform_principal_object_id.
 #

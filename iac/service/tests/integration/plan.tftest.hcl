@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # REQUIRES ambient 'az login' AND backend init. Plan-only; NEVER 'apply'.
 # Run:
 #   terraform -chdir=iac/service init -backend-config=../env/<env>.backend.hcl

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # COMMITTED — no secrets. Replace the acs_email_domain placeholder with the
 # real prod sending domain before the first apply.
 # Use with:

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # TEST FIXTURE ONLY — see iac/tests/unit/stamp-fixture/README.md.
 # This file substitutes the real module's `ephemeral` resources (random_password
 # and azapi_resource_action.acs_keys) with plain sentinel locals so that

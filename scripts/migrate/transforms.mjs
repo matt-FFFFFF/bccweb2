@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 // Migration transforms extracted from migrate.mjs. No SQL-driver (mssql) or uuid-package dependency, so this module is safe to import from any test context without installing the migrate package's own deps.
 // Note: manufacturerFromLegacyRow / legacyMigratedSignature call getOrCreateUuid(), which may read/write .migration-state/id-map.json — i.e. these two are not strictly side-effect-free.
 import { getOrCreateUuid } from "./id-map.mjs";

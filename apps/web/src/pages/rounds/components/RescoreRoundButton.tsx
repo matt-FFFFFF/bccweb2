@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import { useCallback, useEffect, useRef, useState, type CSSProperties } from "react";
 import type { RescoreJob, RescoreJobStatus, Round } from "@bccweb/types";

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 // DEV-ONLY: seeds 2 fixed QA users (admin, pilot) + 1 pilot record + supporting
 // club/site/season fixtures into Azurite for the F3 brief-lifecycle manual QA.
 // NOT for production. Hardcoded password "test1234!" + deterministic UUIDs.

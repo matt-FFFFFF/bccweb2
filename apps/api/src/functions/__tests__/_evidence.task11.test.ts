@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Evidence harness for Task 11 (mutationRateLimit application).
  *

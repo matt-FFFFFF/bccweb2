@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # Service stack root assembly. Run: terraform -chdir=iac/service init -backend-config=../env/<env>.backend.hcl && terraform -chdir=iac/service apply -var-file=../env/<env>.tfvars
 #
 # Observability (LAW + App Insights) lives in the sibling iac/common stack;

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # COMMITTED TEMPLATE. Copy to prod.tfvars (gitignored) and fill in:
 #   cp iac/env/prod.tfvars.example iac/env/prod.tfvars
 # Use with:

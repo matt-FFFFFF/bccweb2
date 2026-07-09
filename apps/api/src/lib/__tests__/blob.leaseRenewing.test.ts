@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Characterization + RED-contract tests for `withLeaseRenewing` (public) in
  * apps/api/src/lib/blob.ts (currently `withLeaseRenewingOnClient`, lines 311-391).

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * End-to-end brief lifecycle integration test (Vitest, NOT real HTTP).
  *

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { app } from "@azure/functions";
 import { describe, expect, test, vi } from "vitest";
 import { invokeQueue } from "./helpers/api.js";

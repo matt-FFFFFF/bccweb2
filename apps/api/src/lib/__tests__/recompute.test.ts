@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { randomUUID } from "crypto";
 import { BlobClient } from "@azure/storage-blob";
 import type { Round, Season, SeasonResults } from "@bccweb/types";

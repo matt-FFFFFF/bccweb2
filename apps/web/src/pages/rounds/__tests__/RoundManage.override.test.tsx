@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 
 vi.mock("../../../components/MarkdownEditor.js", () => ({
   MarkdownEditor: ({ value, onChange }: { value: string, onChange: (val: string) => void }) => <textarea value={value} onChange={e => onChange(e.target.value)} />

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * session-invalidation.e2e.test.ts — issue #122 end-to-end lock (T8).
  *

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 locals {
   # Storage account names: lowercase, no hyphens, ≤24 chars.
   # Mirrors legacy iac/storage.tf naming (`replace("st${local.prefix}", "-", "")`)

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 // Shared, composable ESLint base fragments for the bccweb2 workspace.
 //
 // This is NOT an auto-loaded ESLint config. It exports named fragments that

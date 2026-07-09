@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import http from "k6/http";
 import { check, fail, sleep } from "k6";
 import { Counter } from "k6/metrics";

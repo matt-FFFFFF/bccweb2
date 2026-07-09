@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { randomUUID } from "crypto";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 import { getPublicContainer } from "../../__tests__/helpers/azurite.js";

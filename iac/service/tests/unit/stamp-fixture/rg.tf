@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # The stamp RG is pre-created by iac/bootstrap (which grants the per-env
 # Terraform UMI RG-scoped Owner on it). The module never reads or manages the
 # RG — its ID is fully determined by subscription + name, so child resources

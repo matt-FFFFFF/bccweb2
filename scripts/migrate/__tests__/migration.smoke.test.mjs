@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * migration.smoke.test.mjs — End-to-end smoke test for scripts/migrate/migrate.mjs.
  *

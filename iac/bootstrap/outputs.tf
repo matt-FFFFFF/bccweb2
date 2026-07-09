@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # Outputs for the bccweb2 tfstate bootstrap.
 #
 # `backend_config_hcl` is a copy-pasteable HCL snippet that the operator drops

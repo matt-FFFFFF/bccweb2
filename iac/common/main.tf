@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # Per-env common stack: Log Analytics workspace + Application Insights + ACS
 # email service/domain. These outlive service-stack churn — in particular the
 # DNS-verified email domain, whose registrar records and sender reputation

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
 import { randomUUID } from "crypto";
 import type { PureTrackGroup } from "@bccweb/types";

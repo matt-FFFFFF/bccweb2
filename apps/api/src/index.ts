@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 // Entry point — registers all Azure Functions (v4 programming model).
 // Each function module registers itself via app.http() on import.
 

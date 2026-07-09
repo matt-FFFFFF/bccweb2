@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 const COACH_TYPES = ["None", "ClubCoach", "SeniorCoach", "Instructor", "SeniorInstructor"];
 const PILOT_RATINGS = ["Club Pilot", "Pilot", "Advanced Pilot"];
 const WING_CLASSES = ["EN A", "EN B", "EN C", "EN C 2-liner", "EN D", "EN D 2-liner"];

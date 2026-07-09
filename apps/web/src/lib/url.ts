@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Returns `value` only when it is a safe external URL (http/https scheme),
  * otherwise `null`. Guards against `javascript:`, `data:` and other unsafe

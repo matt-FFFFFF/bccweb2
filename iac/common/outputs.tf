@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # Outputs consumed by the service stack via data.terraform_remote_state.common.
 
 output "app_insights_id" {

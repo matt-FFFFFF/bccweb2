@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import { createRequire } from "node:module";
 import IGCParser from "igc-parser";

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Tests for the shared `withLease` / `withPrivateLease` lease wrappers
  * (apps/api/src/lib/blob.ts:149-195).

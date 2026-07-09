@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import type { HttpRequest } from "@azure/functions";
 
 // SECURITY: Azure App Service overwrites the `client-ip` header with the real

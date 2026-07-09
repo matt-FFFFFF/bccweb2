@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Tests for `withRoundAndBriefLease` (apps/api/src/lib/blob.ts) — the cross-blob
  * lease primitive that T7/T8/T9 route through. Driven by a REAL Azurite lease

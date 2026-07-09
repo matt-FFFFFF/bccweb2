@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { beforeEach, describe, expect, it } from "vitest";
 import { getRegisteredHandler } from "../../__tests__/helpers/setup.js";
 import { MockHttpRequest } from "../../__tests__/helpers/api.js";

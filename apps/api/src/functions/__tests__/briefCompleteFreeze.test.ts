@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * T7 — brief-complete safety invariant: freeze + sign-to-fly invalidation.
  *

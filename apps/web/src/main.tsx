@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./router.js";

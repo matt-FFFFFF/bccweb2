@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Shared pilot public-index upsert — extracted from pilots.ts + meProfile.ts (issue #101).
  *

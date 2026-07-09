@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * privacy-scan.mjs — CI success gate: fail if PII leaks into public blobs,
  * SPA bundle, telemetry fixture, or function log fixture.

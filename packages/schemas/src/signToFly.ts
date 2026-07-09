@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import type { Signature, SignToFlyWording } from "@bccweb/types";
 import * as z from "zod/v4";
 
