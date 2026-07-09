@@ -83,7 +83,7 @@ make dev-web                   # Vite dev server on :5173 (proxies /api, /blob)
 | `make test` | Run Vitest. **API tests require Azurite running.** |
 | `npm run test:watch` | Vitest in watch mode |
 | `npm run e2e` | Playwright E2E (see [tests/e2e/README.md](tests/e2e/README.md)) |
-| `npm run lint` | ESLint — only `apps/web` has a lint script |
+| `npm run lint` | ESLint across all workspaces + `tests/e2e`/`scripts`, then the SPDX license-header check |
 | `make clean` | Remove `dist/` and `*.tsbuildinfo` |
 | `make docker-down` | Stop the Docker Compose stack |
 
@@ -145,4 +145,4 @@ round/club/pilot decision matrix.
 
 ## License
 
-Mozilla Public License 2.0 (MPL-2.0) — see LICENSE.
+Mozilla Public License 2.0 (MPL-2.0) — see LICENSE. Every source file carries an SPDX header (`SPDX-License-Identifier: MPL-2.0`); run `npm run license:fix` to stamp new files. See the [License headers (SPDX)](AGENTS.md#license-headers-spdx) section in AGENTS.md for the full convention.
