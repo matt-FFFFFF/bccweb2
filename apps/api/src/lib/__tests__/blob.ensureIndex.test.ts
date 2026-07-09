@@ -69,7 +69,7 @@ describe("ensureJsonIndexBlob / ensurePrivateJsonIndexBlob — create-only contr
   });
 
   // ── 2. 409 → return immediately, NO retry (already exists) ─────────────────
-  // KEY divergence from the 20-attempt lease family: on 409 the create-only
+  // KEY divergence from the retrying lease family: on 409 the create-only
   // helper treats the blob as already-present and resolves WITHOUT retrying.
   test("409 → resolves immediately with no retry (no-op)", async () => {
     uploadData.mockRejectedValueOnce({ statusCode: 409 });
