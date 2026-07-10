@@ -32,91 +32,101 @@ vi.mock("../../../lib/api.js", async (importOriginal) => {
 
 vi.mock("../../../lib/blobClient.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../../lib/blobClient.js")>();
-
-  let teamCallCount = 0;
-
   return {
     ...actual,
-    readPublicBlob: vi.fn(async (path: string) => {
-      const base = path.split("?")[0];
-
-      if (base === "clubs.json") {
-        return [{ id: "club-1", name: "Alpha" }];
-      }
-
-      if (base === "seasons.json") {
-        return [{ year: 2026, active: true }];
-      }
-
-      if (base === "club-teams.json") {
-        teamCallCount++;
-        if (teamCallCount === 1) {
-          return [];
-        } else {
-          return [{ id: "t1", clubId: "club-1", clubName: "Alpha", seasonYear: 2026, teamName: "Alpha A" }];
-        }
-      }
-
-      throw new actual.BlobNotFoundError("Not found");
-    }),
+    readPublicBlob: vi.fn(),
   };
 });
 
-import { readPublicBlob } from "../../../lib/blobClient.js";
+import { readPublicBlob, BlobNotFoundError } from "../../../lib/blobClient.js";
 import { api, ApiError } from "../../../lib/api.js";
+
+const TEAM = { id: "t1", clubId: "club-1", clubName: "Alpha", seasonYear: 2026, teamName: "Alpha A" };
+
+function defaultBlobImpl() {
+  vi.mocked(readPublicBlob).mockImplementation(async (path: string) => {
+    const base = path.split("?")[0];
+    if (base === "clubs.json") return [{ id: "club-1", name: "Alpha" }] as never;
+    if (base === "seasons.json") return [{ year: 2026, active: true }] as never;
+    if (base === "club-teams.json") return [TEAM] as never;
+    throw new BlobNotFoundError("Not found");
+  });
+}
 
 describe("AdminClubs refresh", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    defaultBlobImpl();
   });
 
-  it("auto-refreshes data and keeps the club edit panel expanded", async () => {
+  it("keeps the club edit panel expanded when adding the first-ever team", async () => {
+    // First-ever visit: club-teams.json does not exist yet (BlobNotFoundError),
+    // and the post-add refetch is held pending so the in-flight UI can be
+    // inspected — that pending window is exactly when the buggy full-page
+    // spinner would unmount the list and collapse the open panel.
+    let resolveTeamsRefetch!: () => void;
+    const teamsRefetch = new Promise<void>((r) => { resolveTeamsRefetch = r; });
+    let teamsCall = 0;
+
+    vi.mocked(readPublicBlob).mockImplementation(async (path: string) => {
+      const base = path.split("?")[0];
+      if (base === "clubs.json") return [{ id: "club-1", name: "Alpha" }] as never;
+      if (base === "seasons.json") return [{ year: 2026, active: true }] as never;
+      if (base === "club-teams.json") {
+        teamsCall++;
+        if (teamsCall === 1) throw new BlobNotFoundError("Not found");
+        await teamsRefetch;
+        return [TEAM] as never;
+      }
+      throw new BlobNotFoundError("Not found");
+    });
+
     render(
       <MemoryRouter>
         <AdminClubs />
       </MemoryRouter>
     );
 
-    // Initial mount calls
-    await waitFor(() => {
-      expect(readPublicBlob).toHaveBeenCalledWith("clubs.json?v=0", undefined);
-      expect(readPublicBlob).toHaveBeenCalledWith("club-teams.json?v=0", undefined);
-    });
+    // Open the club's Edit panel (Teams management lives inside it).
+    fireEvent.click(await screen.findByRole("button", { name: "Edit" }));
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
 
-    // 1. CLUBS PATH: create a club
-    const clubNameInput = screen.getByPlaceholderText("Club name");
-    fireEvent.change(clubNameInput, { target: { value: "Beta" } });
+    // Add the first team; its index refetch stays pending (teamsRefetch).
+    fireEvent.change(screen.getByPlaceholderText("New team name"), { target: { value: "Alpha A" } });
+    fireEvent.click(screen.getByRole("button", { name: "Add Team" }));
 
-    const createClubBtn = screen.getByRole("button", { name: "Create" });
-    fireEvent.click(createClubBtn);
-
-    // Ensure it refetched clubs.json
-    await waitFor(() => {
-      expect(readPublicBlob).toHaveBeenCalledWith("clubs.json?v=1", undefined);
-    });
-
-    // 2. TEAMS PATH: open the club's Edit panel (Teams management lives inside it)
-    const editBtn = screen.getByRole("button", { name: "Edit" });
-    fireEvent.click(editBtn);
-
-    // Add team
-    const newTeamInput = screen.getByPlaceholderText("New team name");
-    fireEvent.change(newTeamInput, { target: { value: "Alpha A" } });
-
-    const addTeamBtn = screen.getByRole("button", { name: "Add Team" });
-    fireEvent.click(addTeamBtn);
-
-    // Ensure it refetched club-teams.json
     await waitFor(() => {
       expect(readPublicBlob).toHaveBeenCalledWith("club-teams.json?v=1", undefined);
     });
 
-    // KEEP-EXPANDED (Bug 1b):
-    // The edit panel should still be open (toggle now reads "Close")
+    // Regression guard: while the refetch is in flight the panel must stay open
+    // and the full-page loading spinner must NOT replace the club list.
+    expect(screen.queryByText("Loading clubs…")).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
 
-    // And the new team should be visible
-    expect(screen.getByText("Alpha A")).toBeInTheDocument();
+    // Complete the refetch: the new team appears and the panel is still open.
+    resolveTeamsRefetch();
+    expect(await screen.findByText("Alpha A")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Close" })).toBeInTheDocument();
+  });
+
+  it("refetches clubs.json after creating a club", async () => {
+    render(
+      <MemoryRouter>
+        <AdminClubs />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(readPublicBlob).toHaveBeenCalledWith("clubs.json?v=0", undefined);
+    });
+
+    fireEvent.change(screen.getByPlaceholderText("Club name"), { target: { value: "Beta" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create" }));
+
+    await waitFor(() => {
+      expect(readPublicBlob).toHaveBeenCalledWith("clubs.json?v=1", undefined);
+    });
   });
 
   it("deletes an unreferenced club via api.delete (204)", async () => {
