@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # Bootstrap configuration for the bccweb2 Terraform remote state backend.
 #
 # Provisions (one-shot, per Azure subscription/region):

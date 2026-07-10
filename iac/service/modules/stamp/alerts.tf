@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # ─── Monitor Action Group ────────────────────────────────────────────────────
 #
 # Single action group fans out every alert rule below to the on-call email and,

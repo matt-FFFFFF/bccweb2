@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 function pick(row, names) {
   for (const name of names) {
     if (Object.prototype.hasOwnProperty.call(row, name) && row[name] != null) return row[name];

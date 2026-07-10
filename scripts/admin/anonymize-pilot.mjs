@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * anonymize-pilot.mjs — GDPR Article 17 right-to-erasure for a single pilot.
  *

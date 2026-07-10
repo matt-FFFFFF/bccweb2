@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { useEffect, useState } from "react";
 import type { Config, WingClass, PilotRatingValue } from "@bccweb/types";
 import { WING_CLASSES, PILOT_RATINGS } from "@bccweb/types";

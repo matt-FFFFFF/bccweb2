@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import crypto from "crypto";
 import { describe, expect, test, vi, beforeEach } from "vitest";
 import type { User } from "@bccweb/types";

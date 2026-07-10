@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 /**
  * E2E seed: a Locked round with two IGC-scored slots (plus a manual-flight slot

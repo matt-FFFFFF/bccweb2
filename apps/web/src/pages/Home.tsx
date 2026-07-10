@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { Link } from "react-router";
 import { useState, useEffect, useRef } from "react";
 import * as z from "zod/v4";

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { describe, expect, test } from "vitest";
 
 import { ClubTeamSchema, ClubTeamSummarySchema } from "../clubTeam.js";

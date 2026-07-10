@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { describe, expect, it } from "vitest";
 
 import { readPrivateJson } from "../../__tests__/helpers/seed.js";

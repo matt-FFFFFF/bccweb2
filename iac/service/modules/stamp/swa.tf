@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 resource "azapi_resource" "swa" {
   type      = "Microsoft.Web/staticSites@2025-03-01"
   name      = "swa-bccweb-${var.stamp_name}"

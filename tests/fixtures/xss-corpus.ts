@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 export const XSS_CORPUS: readonly string[] = [
   "<script>alert('xss')</script>",
   "<img src=x onerror=alert(1)>",

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # Per-env common (observability) stack. AzAPI-only. Backend config via -backend-config=../env/common-<env>.backend.hcl.
 
 terraform {

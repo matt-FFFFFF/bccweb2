@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 output "resource_group_name" {
   description = "Name of the stamp resource group used by root outputs and operator commands."
   value       = var.stamp_rg_name

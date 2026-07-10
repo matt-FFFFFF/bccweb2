@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { useAuth, AuthError } from "../../hooks/useAuth.js";

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 name: CI
 
 on:
@@ -53,6 +55,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: SPDX header unit tests
+        run: node --test scripts/__tests__/spdx-header.test.mjs
 
       - name: Build shared packages
         run: make build-types build-schemas build-scoring

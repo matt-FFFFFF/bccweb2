@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import type { BriefPdfStatus, Round, RoundBrief, RoundStatus } from "@bccweb/types";
 import { RoundSchema } from "@bccweb/schemas";
 

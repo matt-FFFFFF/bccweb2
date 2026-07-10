@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * Regression tests for Security PR-1 — Broken Object-Level Authorization (BOLA / IDOR).
  *

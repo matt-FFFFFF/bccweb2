@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # Inputs for the per-env common (observability + email domain) stack. Per-env
 # values live in ../env/common-<env>.tfvars (committed — nothing here is
 # sensitive).

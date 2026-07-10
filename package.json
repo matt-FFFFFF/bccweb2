@@ -11,7 +11,10 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "lint": "npm run lint --workspaces --if-present && eslint tests/e2e scripts --max-warnings 0",
+    "lint": "npm run lint --workspaces --if-present && eslint tests/e2e scripts --max-warnings 0 && npm run license:check",
+    "license:check": "node scripts/spdx-header.mjs",
+    "license:fix": "node scripts/spdx-header.mjs --fix",
+    "license:test": "node --test scripts/__tests__/spdx-header.test.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "e2e": "playwright test --config tests/e2e/playwright.config.ts"
   },

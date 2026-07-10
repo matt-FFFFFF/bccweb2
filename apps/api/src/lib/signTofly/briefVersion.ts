@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { createHash } from "node:crypto";
 import type { RoundBrief } from "@bccweb/types";
 import { MATERIAL_BRIEF_FIELDS } from "@bccweb/schemas";

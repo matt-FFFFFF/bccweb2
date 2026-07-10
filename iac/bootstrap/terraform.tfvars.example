@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # COMMITTED TEMPLATE. Copy to terraform.tfvars (gitignored) and adjust:
 #   cp iac/bootstrap/terraform.tfvars.example iac/bootstrap/terraform.tfvars
 #

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useParams } from "react-router";
 import type { ClubSummary, SeasonClub } from "@bccweb/types";

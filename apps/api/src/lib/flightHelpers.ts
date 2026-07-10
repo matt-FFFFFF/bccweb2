@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 /**
  * Shared flight-endpoint helpers — round/slot/stream/pilot-name utilities reused

@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * move-manufacturers-to-public.mjs — one-time operational move of the
  * manufacturers reference list from the PRIVATE blob container to the PUBLIC one.

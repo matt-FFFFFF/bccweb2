@@ -57,10 +57,28 @@ own lockfile (pulls `mssql`, kept out of the deployed tree); root `npm ci` skips
 | `make seed`      | Dev fixtures (500 pilots / 50 clubs / teams / seasons). `seed-rounds` too.|
 | `make clean`     | Removes `dist/` AND `*.tsbuildinfo`.                                      |
 | `npm run e2e`    | Playwright (`tests/e2e/playwright.config.ts`, base URL `:5173`).          |
-| `npm run lint`   | eslint all workspaces + `tests/e2e` + `scripts`; each workspace has its own `lint` (`eslint src --max-warnings 0`). |
+| `npm run lint`   | eslint all workspaces + `tests/e2e` + `scripts`; each workspace has its own `lint` (`eslint src --max-warnings 0`), then the SPDX header check (`license:check`). |
 
 Single-file: `npx vitest run path/to/file.test.ts`. Watch: `npm run test:watch`.
 Local dev needs Docker (or Podman) for Azurite.
+
+## License headers (SPDX)
+
+Every comment-capable, git-tracked source file carries a two-line MPL-2.0 SPDX header (copyright line above licence line). The `//` form for TypeScript/JavaScript/MJS:
+
+```
+// SPDX-FileCopyrightText: <year> British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
+```
+
+Use `#` for Terraform/HCL/YAML/shell/TOML/Dockerfile.dev/Caddyfile/Makefile; `/* */` for CSS.
+
+The bespoke, zero-dependency checker `scripts/spdx-header.mjs` enumerates tracked files via `git ls-files` and is chained into `npm run lint` (local + the CI `lint` job — no separate workflow).
+
+- **New file?** Run `npm run license:fix` to stamp or upgrade in place (idempotent). `npm run license:check` just verifies. `npm run license:test` runs the checker's own node:test suite.
+- **Enforcement is PRESENCE-ONLY**: requires the "British Club Challenge authors" copyright line and the `MPL-2.0` licence line; the year is informational and never policed.
+- **Scope**: `apps/**`, `packages/**`, `iac/**`, `scripts/**` (including the standalone `scripts/migrate/` package — the gate reaches past eslint's ignore of it) + root config files.
+- **Out of scope** (never stamped): JSON/`.jsonc` (no comment syntax), Markdown, declaration files (`*.d.ts`/`.d.mts`/`.d.cts`), `apps/web/index.html`, `.github/FUNDING.yml`, and anything gitignored.
 
 ## TypeScript Quirks
 

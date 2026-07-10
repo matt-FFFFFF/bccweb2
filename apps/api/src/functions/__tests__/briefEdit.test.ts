@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * PUT /rounds/{id}/brief — reworked (T6). Brief edit is gated to Proposed/
  * Confirmed, authorized to Admin or the organising-club RoundsCoord, lazily

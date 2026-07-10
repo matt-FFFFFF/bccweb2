@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import type { Pilot } from "@bccweb/types";
 import { describe, expect, test } from "vitest";
 import { getRegisteredHandler } from "../../__tests__/helpers/setup.js";

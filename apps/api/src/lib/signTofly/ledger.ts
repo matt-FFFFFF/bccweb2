@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import type { HttpRequest } from "@azure/functions";
 import type { RoundBrief, Signature, SignToFlyWording } from "@bccweb/types";
 import { BlobServiceClient, ContainerClient } from "@azure/storage-blob";

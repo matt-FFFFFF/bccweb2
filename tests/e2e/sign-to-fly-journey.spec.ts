@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { expect, test, type Page, type Route } from "@playwright/test";
 import fs from "node:fs/promises";
 import path from "node:path";

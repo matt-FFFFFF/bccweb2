@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * T5 — brief consolidation: the brief is created at ROUND CREATE, times move
  * off the Round onto the brief, and createRound forces `Proposed`.

@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 /**
  * MyClub — self-service page for RoundsCoord users to manage their club's
  * teams for the active season.

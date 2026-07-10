@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { beforeAll, describe, expect, test, vi } from "vitest";
 
 let email: typeof import("../email.js");

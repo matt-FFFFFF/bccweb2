@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 const PII_FIELDS: ReadonlyArray<string> = [
   "email",
   "password",

@@ -1,3 +1,4 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import { QueueClient } from "@azure/storage-queue";
 import * as z from "zod/v4";

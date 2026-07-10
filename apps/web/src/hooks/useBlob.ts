@@ -1,3 +1,5 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
 import { useState, useEffect } from "react";
 import type * as z from "zod/v4";
 import { readPublicBlob, BlobNotFoundError } from "../lib/blobClient.js";

@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
 # All variables flow into module "stamp" in main.tf. Per-env values live in ../env/<env>.tfvars.
 
 variable "stamp_name" {
