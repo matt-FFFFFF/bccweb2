@@ -41,6 +41,19 @@ async function armPage(page: Page): Promise<string[]> {
   return errors;
 }
 
+test.beforeAll(async ({ request }) => {
+  const res = await request.get("/");
+  const html = await res.text();
+  // A production `vite build` injects a hashed entry chunk (/assets/index-<hash>.js);
+  // the dev server serves /src/main.tsx + /@vite/client instead. Fail loudly if this
+  // spec is pointed at the dev server (e.g. a naive `npm run e2e` at :5173) rather than
+  // the intended `vite preview` prod build (E2E_BASE_URL=http://localhost:4173).
+  expect(
+    /\/assets\/index-[\w-]+\.js/.test(html),
+    "lazy-routes.spec.ts must run against a production `vite preview` build (E2E_BASE_URL=http://localhost:4173), not the Vite dev server; served HTML has no hashed /assets/index-*.js entry chunk.",
+  ).toBe(true);
+});
+
 test("cold goto /about renders the lazy About route with a clean console", async ({ page }) => {
   const errors = await armPage(page);
 
