@@ -367,8 +367,14 @@ export default function AdminClubs() {
   if (clubs) clubsRef.current = clubs;
   if (allTeams) teamsRef.current = allTeams;
 
+  // Latch on the initial load settling (data, empty, or not-found alike) so the
+  // full-page spinner never re-arms on background refetches. A not-found
+  // `club-teams.json` is normal until the first team exists — keying on truthy
+  // data would keep the spinner armed and collapse the open panel on Add Team.
   const [loadedOnce, setLoadedOnce] = useState(false);
-  useEffect(() => { if (clubs && seasons && allTeams) setLoadedOnce(true); }, [clubs, seasons, allTeams]);
+  useEffect(() => {
+    if (!clubsLoading && !seasonsLoading && !teamsLoading) setLoadedOnce(true);
+  }, [clubsLoading, seasonsLoading, teamsLoading]);
 
   const isAdmin = identity?.roles.includes("Admin");
 
