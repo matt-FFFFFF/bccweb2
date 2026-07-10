@@ -15,7 +15,7 @@
   },
   "dependencies": {
     "@azure/communication-email": "1.1.0",
-    "@azure/functions": "4.16.1",
+    "@azure/functions": "4.16.2",
     "@azure/identity": "4.13.1",
     "@azure/storage-blob": "12.33.0",
     "@azure/storage-queue": "12.31.0",
@@ -30,7 +30,7 @@
     "igc-xc-score": "1.8.0",
     "isomorphic-dompurify": "3.18.0",
     "jsonwebtoken": "9.0.3",
-    "marked": "18.0.5",
+    "marked": "18.0.6",
     "puppeteer-core": "25.3.0"
   },
   "devDependencies": {
