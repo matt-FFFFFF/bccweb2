@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
+import { lazy, Suspense } from "react";
 import { BrowserRouter, Routes, Route, Link, NavLink, Navigate, useLocation, type NavLinkRenderProps } from "react-router";
 import * as z from "zod/v4";
 import { SeasonSummarySchema } from "@bccweb/schemas";
@@ -8,36 +9,37 @@ import { AuthProvider } from "./components/AuthProvider.js";
 import { useBlob } from "./hooks/useBlob.js";
 import type { SeasonSummary } from "@bccweb/types";
 import { NavDropdown } from "./components/NavDropdown.js";
-import Home from "./pages/Home.js";
-import RoundsList from "./pages/rounds/RoundsList.js";
-import RoundDetail from "./pages/rounds/RoundDetail.js";
-import CreateRound from "./pages/rounds/CreateRound.js";
-import RoundManage from "./pages/rounds/RoundManage.js";
-import RoundBrief from "./pages/rounds/RoundBrief.js";
-import SignToFly from "./pages/rounds/SignToFly.js";
-import RegisterForRound from "./pages/rounds/RegisterForRound.js";
-import League from "./pages/results/League.js";
-import RoundResults from "./pages/results/RoundResults.js";
-import PilotsList from "./pages/pilots/PilotsList.js";
-import PilotProfile from "./pages/pilots/PilotProfile.js";
-import Profile from "./pages/Profile.js";
-import Login from "./pages/auth/Login.js";
-import Register from "./pages/auth/Register.js";
-import VerifyEmail from "./pages/auth/VerifyEmail.js";
-import ForgotPassword from "./pages/auth/ForgotPassword.js";
-import ResetPassword from "./pages/auth/ResetPassword.js";
-import Terms from "./pages/Terms.js";
-import About from "./pages/About.js";
-import AdminUsers from "./pages/admin/Users.js";
-import AdminClubs from "./pages/admin/Clubs.js";
-import AdminSeasons from "./pages/admin/Seasons.js";
-import SeasonClubs from "./pages/admin/SeasonClubs.js";
-import PilotSeasonClubs from "./pages/admin/PilotSeasonClubs.js";
-import AdminSites from "./pages/admin/Sites.js";
-import AdminConfig from "./pages/admin/Config.js";
-import AdminManufacturers from "./pages/admin/Manufacturers.js";
-import SignToFlyWording from "./pages/admin/SignToFlyWording.js";
-import MyClub from "./pages/club/MyClub.js";
+import { LoadingSpinner } from "./components/LoadingSpinner.js";
+const Home = lazy(() => import("./pages/Home.js"));
+const RoundsList = lazy(() => import("./pages/rounds/RoundsList.js"));
+const RoundDetail = lazy(() => import("./pages/rounds/RoundDetail.js"));
+const CreateRound = lazy(() => import("./pages/rounds/CreateRound.js"));
+const RoundManage = lazy(() => import("./pages/rounds/RoundManage.js"));
+const RoundBrief = lazy(() => import("./pages/rounds/RoundBrief.js"));
+const SignToFly = lazy(() => import("./pages/rounds/SignToFly.js"));
+const RegisterForRound = lazy(() => import("./pages/rounds/RegisterForRound.js"));
+const League = lazy(() => import("./pages/results/League.js"));
+const RoundResults = lazy(() => import("./pages/results/RoundResults.js"));
+const PilotsList = lazy(() => import("./pages/pilots/PilotsList.js"));
+const PilotProfile = lazy(() => import("./pages/pilots/PilotProfile.js"));
+const Profile = lazy(() => import("./pages/Profile.js"));
+const Login = lazy(() => import("./pages/auth/Login.js"));
+const Register = lazy(() => import("./pages/auth/Register.js"));
+const VerifyEmail = lazy(() => import("./pages/auth/VerifyEmail.js"));
+const ForgotPassword = lazy(() => import("./pages/auth/ForgotPassword.js"));
+const ResetPassword = lazy(() => import("./pages/auth/ResetPassword.js"));
+const Terms = lazy(() => import("./pages/Terms.js"));
+const About = lazy(() => import("./pages/About.js"));
+const AdminUsers = lazy(() => import("./pages/admin/Users.js"));
+const AdminClubs = lazy(() => import("./pages/admin/Clubs.js"));
+const AdminSeasons = lazy(() => import("./pages/admin/Seasons.js"));
+const SeasonClubs = lazy(() => import("./pages/admin/SeasonClubs.js"));
+const PilotSeasonClubs = lazy(() => import("./pages/admin/PilotSeasonClubs.js"));
+const AdminSites = lazy(() => import("./pages/admin/Sites.js"));
+const AdminConfig = lazy(() => import("./pages/admin/Config.js"));
+const AdminManufacturers = lazy(() => import("./pages/admin/Manufacturers.js"));
+const SignToFlyWording = lazy(() => import("./pages/admin/SignToFlyWording.js"));
+const MyClub = lazy(() => import("./pages/club/MyClub.js"));
 import FirstLoginOfSeasonGate from "./components/FirstLoginOfSeasonGate.js";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import "./bcc-theme.css";
@@ -226,6 +228,7 @@ function RoutedContent() {
   const location = useLocation();
   return (
     <ErrorBoundary key={location.pathname}>
+      <Suspense fallback={<LoadingSpinner />}>
       <Routes>
           <Route path="/" element={<Home />} />
 
@@ -276,6 +279,7 @@ function RoutedContent() {
           {/* Fallback */}
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+      </Suspense>
     </ErrorBoundary>
   );
 }

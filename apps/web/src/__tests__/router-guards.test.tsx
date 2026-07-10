@@ -78,7 +78,7 @@ describe("router guards (AC#1: protected-route redirect)", () => {
     expect(window.location.search).toBe("?return=%2Frounds");
 
     // The real Login page rendered at the redirect target.
-    expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+    expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
   });
 
   // Sibling test (same unauth beforeEach setup): pins React Router's transition
@@ -118,7 +118,7 @@ describe("router guards (AC#1: protected-route redirect)", () => {
       //  (c) no console.error / console.warn fired during the transition (no act()
       //      churn, no ErrorBoundary remount noise).
       expect(window.location.pathname).toBe("/login");
-      expect(screen.getByRole("heading", { name: "Sign in" })).toBeInTheDocument();
+      expect(await screen.findByRole("heading", { name: "Sign in" })).toBeInTheDocument();
       expect(errorSpy).not.toHaveBeenCalled();
       expect(warnSpy).not.toHaveBeenCalled();
     } finally {
