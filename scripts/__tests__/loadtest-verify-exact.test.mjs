@@ -28,6 +28,20 @@ test("artifact parser projects exactly 185 prepared targets and final100", () =>
   assert.deepEqual(parsed.cohortCounts, { 10: 10, 25: 25, 50: 50, 100: 100 });
 });
 
+for (const roundId of [undefined, null, "", "   "]) {
+  test(`artifact parser rejects invalid roundId ${JSON.stringify(roundId)} before state access`, () => {
+    // Given
+    const prepared = { ...preparedFixture(), roundId };
+    const artifact = artifactFixture(prepared);
+
+    // When / Then
+    assert.throws(
+      () => parseVerificationArtifacts(prepared, artifact.events, artifact.summary),
+      /PREPARED_ROUND_ID_INVALID: prepared artifact roundId must be a non-empty string/,
+    );
+  });
+}
+
 for (const mutation of ["duplicate", "missing", "extra", "wrong-cohort", "wrong-final100"]) {
   test(`artifact parser rejects ${mutation} target evidence with its key`, () => {
     // Given
@@ -81,6 +95,32 @@ test("ledger independently names a final100 ID mismatch", () => {
   assert.throws(
     () => inspectExactLedger(signaturesFixture(parsed, "wrong-final100-id"), parsed),
     /final100 signature ID mismatch.*team-18:5/,
+  );
+});
+
+test("ledger rejects a foreign-round record with its ID and key", () => {
+  // Given
+  const prepared = preparedFixture();
+  const artifact = artifactFixture(prepared);
+  const parsed = parseVerificationArtifacts(prepared, artifact.events, artifact.summary);
+
+  // When / Then
+  assert.throws(
+    () => inspectExactLedger(signaturesFixture(parsed, "foreign-round"), parsed),
+    /LEDGER_FOREIGN_ROUND: signature signature-0 key team-0:1 belongs to round different-round; expected round-1/,
+  );
+});
+
+test("ledger classifies a missing final100 record by cohort and key", () => {
+  // Given
+  const prepared = preparedFixture();
+  const artifact = artifactFixture(prepared);
+  const parsed = parseVerificationArtifacts(prepared, artifact.events, artifact.summary);
+
+  // When / Then
+  assert.throws(
+    () => inspectExactLedger(signaturesFixture(parsed, "missing"), parsed),
+    /FINAL100_SIGNATURE_MISSING: final100 missing signature key team-18:5/,
   );
 });
 

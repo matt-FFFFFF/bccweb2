@@ -49,8 +49,9 @@ function exactSetupByKey(setupEvents, expectedTargets) {
 }
 
 export function parseVerificationArtifacts(prepared, events, summary) {
-  if (!prepared || typeof prepared !== "object" || typeof prepared.roundId !== "string") {
-    fail("prepared artifact must identify one round");
+  if (!prepared || typeof prepared !== "object" ||
+      typeof prepared.roundId !== "string" || prepared.roundId.trim().length === 0) {
+    fail("PREPARED_ROUND_ID_INVALID: prepared artifact roundId must be a non-empty string");
   }
   if (!Array.isArray(prepared.teams) || prepared.teams.length !== PREPARED_COUNT) {
     fail(`prepared artifact must contain exactly ${PREPARED_COUNT} slots`);
