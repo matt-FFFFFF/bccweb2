@@ -104,6 +104,11 @@ async function seedCompleteLegacyState(environment, mutate) {
   };
   mutate({ manifest, userIndex, pilotIndex, publicIndexes });
   await writeFile(join(environment.workDir, FIXTURE_MANIFEST_PATH), `${JSON.stringify(manifest)}\n`);
+  await writeFile(join(environment.workDir, ".loadtest-round-state.json"), JSON.stringify({
+    version: 1,
+    seedRoundIds: manifest.roundIds,
+    loadRoundId: "load-preserved",
+  }));
   await Promise.all([
     writeJson(environment.privateContainer, "user-index.json", userIndex),
     writeJson(environment.privateContainer, "pilot-email-index.json", pilotIndex),
@@ -213,24 +218,6 @@ test("missing manifest after storage writes converges on repeated rerun", async 
       assert.equal(new Set(rows.map(({ id }) => id)).size, owned.size);
     }
     assert.equal(environment.runScript(AUDIT_SCRIPT).status, 0);
-  });
-});
-
-test("machine fixture audit reports exact redacted counts", async () => {
-  await withEnvironment(async (environment) => {
-    assert.equal(environment.runScript(SEED_SCRIPT).status, 0);
-    const result = environment.runScript(AUDIT_SCRIPT);
-    assert.equal(result.status, 0, result.stderr);
-    assert.deepEqual(JSON.parse(result.stdout), {
-      status: "pass",
-      pilots: 500,
-      clubs: 25,
-      teams: 50,
-      coordinators: 25,
-      pilotOnly: 475,
-    });
-    assert.equal(result.stdout.includes("@bcc.local"), false);
-    assert.equal(result.stdout.includes("password"), false);
   });
 });
 

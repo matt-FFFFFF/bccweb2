@@ -17,16 +17,23 @@ import {
   writeJson,
 } from "./lib/blobSeed.mjs";
 import {
-  cleanupFixtureOwnership,
   legacyFixtureRemainder,
   parseFixtureOwnership,
 } from "./lib/fixtureOwnership.mjs";
+import {
+  cleanupFixturesTransaction,
+  removePreparedMetadataForSeedRound,
+} from "./lib/fixtureCleanupTransaction.mjs";
+import {
+  readCleanupState,
+  withFixtureOperationLock,
+  writeJsonDurably,
+} from "./lib/fixtureOperation.mjs";
 import {
   CLUB_COUNT,
   FIXTURE_MANIFEST_PATH,
   FIXTURE_PILOT_PASSWORD,
   PILOT_COUNT,
-  PREPARED_ROUND_PATH,
   SEASON_YEAR,
 } from "./lib/loadTestConsts.mjs";
 import {
@@ -34,7 +41,7 @@ import {
   validateLoadTestManifest,
 } from "./lib/loadTestTopology.mjs";
 import { buildFixturePilots } from "./lib/seedFixturePilots.mjs";
-import { existsSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 
@@ -79,6 +86,13 @@ function buildManifest() {
 
 async function wipePriorFixtures(publicContainer, privateContainer, nextManifest) {
   if (!existsSync(FIXTURE_MANIFEST_PATH)) {
+    const checkpoint = await readCleanupState();
+    if (checkpoint) {
+      await cleanupFixturesTransaction(publicContainer, privateContainer, {
+        manifest: checkpoint.manifest,
+        retainedManifest: checkpoint.retainedManifest,
+      });
+    }
     const currentOwnership = parseFixtureOwnership(nextManifest);
     const legacyRemainder = legacyFixtureRemainder(currentOwnership);
     await inChunks(
@@ -92,19 +106,15 @@ async function wipePriorFixtures(publicContainer, privateContainer, nextManifest
       ],
       (job) => job()
     );
+    await removePreparedMetadataForSeedRound();
     return legacyRemainder;
   }
 
   const manifest = JSON.parse(await readFile(FIXTURE_MANIFEST_PATH, "utf8"));
-  const ownership = parseFixtureOwnership(manifest);
-  const retainedOwnership = parseFixtureOwnership(nextManifest);
-  await cleanupFixtureOwnership(publicContainer, privateContainer, {
-    ownership,
-    retainedOwnership,
+  await cleanupFixturesTransaction(publicContainer, privateContainer, {
+    manifest,
+    retainedManifest: nextManifest,
   });
-
-  if (existsSync(PREPARED_ROUND_PATH)) unlinkSync(PREPARED_ROUND_PATH);
-  unlinkSync(FIXTURE_MANIFEST_PATH);
   return { clubIds: [], teamIds: [] };
 }
 
@@ -240,7 +250,7 @@ async function main() {
     writeJson(publicContainer, `seasons/${SEASON_YEAR}.json`, season),
   ]);
 
-  writeFileSync(FIXTURE_MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
+  await writeJsonDurably(FIXTURE_MANIFEST_PATH, manifest);
 
   const elapsedSeconds = ((performance.now() - startedAt) / 1000).toFixed(2);
   process.stderr.write(
@@ -248,7 +258,7 @@ async function main() {
   );
 }
 
-main().catch((err) => {
+withFixtureOperationLock(main).catch((err) => {
   process.stderr.write(`seed-fixtures: ${err?.stack ?? err?.message ?? String(err)}\n`);
   process.exit(1);
 });

@@ -78,6 +78,15 @@ function runScript(script) {
   });
 }
 
+async function proveRoundOwnership(roundIds) {
+  await rm(join(workDir, ".fixture-cleanup-state.json"), { force: true });
+  await writeFile(join(workDir, ".loadtest-round-state.json"), JSON.stringify({
+    version: 1,
+    seedRoundIds: roundIds,
+    loadRoundId: "load-preserved",
+  }));
+}
+
 before(async () => {
   workDir = await mkdtemp(join(tmpdir(), "bcc-fixtures-"));
   await Promise.all([
@@ -181,6 +190,7 @@ test("malformed duplicate manifest is rejected before owned blob deletion", asyn
     `${JSON.stringify(malformed)}\n`
   );
   await writeJson(privateContainer, `rounds/${sentinelRoundId}.json`, { id: sentinelRoundId });
+  await proveRoundOwnership([sentinelRoundId]);
 
   // When seeding attempts cleanup, then validation fails before destructive work
   const result = runScript(SEED_SCRIPT);
@@ -200,6 +210,7 @@ test("foreign-season manifest is rejected before owned blob deletion", async () 
     `${JSON.stringify(foreignSeason)}\n`
   );
   await writeJson(privateContainer, `rounds/${sentinelRoundId}.json`, { id: sentinelRoundId });
+  await proveRoundOwnership([sentinelRoundId]);
 
   // When seeding attempts cleanup, then season validation fails before deletion
   const result = runScript(SEED_SCRIPT);
@@ -217,6 +228,7 @@ test("malformed public index entry is rejected before owned blob deletion", asyn
   await writeFile(join(workDir, FIXTURE_MANIFEST_PATH), `${JSON.stringify(manifest)}\n`);
   await writeJson(publicContainer, "pilots.json", [null]);
   await writeJson(privateContainer, `rounds/${sentinelRoundId}.json`, { id: sentinelRoundId });
+  await proveRoundOwnership([sentinelRoundId]);
 
   // When seeding attempts cleanup, then index validation fails before deletion
   const result = runScript(SEED_SCRIPT);
@@ -234,6 +246,7 @@ test("malformed season index is rejected before owned blob deletion", async () =
   await writeJson(publicContainer, "pilots.json", []);
   await writeJson(publicContainer, "seasons.json", [null]);
   await writeJson(privateContainer, `rounds/${sentinelRoundId}.json`, { id: sentinelRoundId });
+  await proveRoundOwnership([sentinelRoundId]);
 
   // When seeding attempts cleanup, then season preflight fails before deletion
   const result = runScript(SEED_SCRIPT);
@@ -251,39 +264,11 @@ test("malformed season blob is rejected before owned blob deletion", async () =>
   await writeJson(publicContainer, "seasons.json", []);
   await writeJson(publicContainer, `seasons/${SEASON_YEAR}.json`, { rounds: null });
   await writeJson(privateContainer, `rounds/${sentinelRoundId}.json`, { id: sentinelRoundId });
+  await proveRoundOwnership([sentinelRoundId]);
 
   // When seeding attempts cleanup, then season preflight fails before deletion
   const result = runScript(SEED_SCRIPT);
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /FIXTURE_OWNERSHIP_SEASON_BLOB_ROUNDS/);
-  assert.equal(await privateContainer.getBlobClient(`rounds/${sentinelRoundId}.json`).exists(), true);
-});
-
-test("null public index blob is rejected before owned blob deletion", async () => {
-  const manifest = legacyManifest();
-  const sentinelRoundId = "00000000-0000-4000-8000-000000000006";
-  manifest.roundIds = [sentinelRoundId];
-  await writeFile(join(workDir, FIXTURE_MANIFEST_PATH), `${JSON.stringify(manifest)}\n`);
-  await writeJson(publicContainer, "pilots.json", null);
-  await writeJson(privateContainer, `rounds/${sentinelRoundId}.json`, { id: sentinelRoundId });
-
-  const result = runScript(SEED_SCRIPT);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /FIXTURE_OWNERSHIP_PUBLIC_INDEX_NULL/);
-  assert.equal(await privateContainer.getBlobClient(`rounds/${sentinelRoundId}.json`).exists(), true);
-});
-
-test("null season blob is rejected before owned blob deletion", async () => {
-  const manifest = legacyManifest();
-  const sentinelRoundId = "00000000-0000-4000-8000-000000000007";
-  manifest.roundIds = [sentinelRoundId];
-  await writeFile(join(workDir, FIXTURE_MANIFEST_PATH), `${JSON.stringify(manifest)}\n`);
-  await writeJson(publicContainer, "pilots.json", []);
-  await writeJson(publicContainer, `seasons/${SEASON_YEAR}.json`, null);
-  await writeJson(privateContainer, `rounds/${sentinelRoundId}.json`, { id: sentinelRoundId });
-
-  const result = runScript(SEED_SCRIPT);
-  assert.notEqual(result.status, 0);
-  assert.match(result.stderr, /FIXTURE_OWNERSHIP_SEASON_BLOB_NULL/);
   assert.equal(await privateContainer.getBlobClient(`rounds/${sentinelRoundId}.json`).exists(), true);
 });

@@ -21,35 +21,44 @@ import {
   getPublicContainer,
 } from "./lib/blobSeed.mjs";
 import {
-  cleanupFixtureOwnership,
-  parseFixtureOwnership,
-} from "./lib/fixtureOwnership.mjs";
-import { FIXTURE_MANIFEST_PATH, PREPARED_ROUND_PATH } from "./lib/loadTestConsts.mjs";
-import { readFileSync, existsSync, unlinkSync } from "node:fs";
+  cleanupFixturesTransaction,
+} from "./lib/fixtureCleanupTransaction.mjs";
+import {
+  readCleanupState,
+  withFixtureOperationLock,
+} from "./lib/fixtureOperation.mjs";
+import { FIXTURE_MANIFEST_PATH } from "./lib/loadTestConsts.mjs";
+import { readFileSync, existsSync } from "node:fs";
 
 const privateContainer = getPrivateContainer();
 const publicContainer = getPublicContainer();
 
 async function main() {
   if (!existsSync(FIXTURE_MANIFEST_PATH)) {
-    console.error("[wipe-fixtures] no manifest; nothing to wipe");
-    process.exit(0);
+    const checkpoint = await readCleanupState();
+    if (!checkpoint) {
+      console.error("[wipe-fixtures] no manifest; nothing to wipe");
+      return;
+    }
+    const { ownership } = await cleanupFixturesTransaction(publicContainer, privateContainer, {
+      manifest: checkpoint.manifest,
+      retainedManifest: checkpoint.retainedManifest,
+    });
+    console.error(`[wipe-fixtures] OK: resumed ${ownership.pilotIds.length} pilots`);
+    return;
   }
 
-  const ownership = parseFixtureOwnership(
-    JSON.parse(readFileSync(FIXTURE_MANIFEST_PATH, "utf8"))
-  );
-  await cleanupFixtureOwnership(publicContainer, privateContainer, { ownership });
-
-  if (existsSync(FIXTURE_MANIFEST_PATH)) unlinkSync(FIXTURE_MANIFEST_PATH);
-  if (existsSync(PREPARED_ROUND_PATH)) unlinkSync(PREPARED_ROUND_PATH);
+  const manifest = JSON.parse(readFileSync(FIXTURE_MANIFEST_PATH, "utf8"));
+  const { ownership } = await cleanupFixturesTransaction(publicContainer, privateContainer, {
+    manifest,
+  });
 
   console.error(
     `[wipe-fixtures] OK: ${ownership.pilotIds.length} pilots / ${ownership.clubIds.length} clubs / ${ownership.teamIds.length} teams / ${ownership.roundIds.length} rounds / ${ownership.siteIds.length} sites removed`,
   );
 }
 
-main().catch((err) => {
+withFixtureOperationLock(main).catch((err) => {
   console.error(`[wipe-fixtures] fatal: ${err?.message ?? err}`);
   process.exit(1);
 });
