@@ -28,6 +28,9 @@ import type {
   Pilot,
 } from "@bccweb/types";
 import { isRosterFrozen } from "@bccweb/types";
+import { pilotDisplayName, inputStyle, btnStyle, sectionStyle } from "./RoundManage.shared.js";
+import { Banner } from "../../components/Banner.js";
+import { TeamCard } from "./TeamCard.js";
 import { COACH_TYPES, coachLabel } from "../../lib/coach.js";
 import { MarkdownEditor } from "../../components/MarkdownEditor.js";
 import { MarkdownView } from "../../components/MarkdownView.js";
@@ -74,62 +77,14 @@ function PilotName({
   );
 }
 
-function pilotDisplayName(pilotId: string | null, index: PilotSummary[] | null): string {
-  if (!pilotId) return "Empty";
-  return index?.find((p) => p.id === pilotId)?.name ?? pilotId;
-}
+
 
 // ─── Shared styles ────────────────────────────────────────────────────────────
 
-const inputStyle: React.CSSProperties = {
-  padding: "0.35rem 0.5rem",
-  border: "1px solid #ccc",
-  borderRadius: "0.3rem",
-  fontSize: "0.875rem",
-  boxSizing: "border-box",
-};
-
-const btnStyle = (
-  color: string,
-  bg: string
-): React.CSSProperties => ({
-  padding: "0.35rem 0.75rem",
-  background: bg,
-  color,
-  border: "none",
-  borderRadius: "0.3rem",
-  cursor: "pointer",
-  fontWeight: 600,
-  fontSize: "0.8rem",
-  whiteSpace: "nowrap",
-});
-
-const sectionStyle: React.CSSProperties = {
-  marginBottom: "2rem",
-  padding: "1rem",
-  border: "1px solid #dee2e6",
-  borderRadius: "0.5rem",
-};
 
 
-// ─── Inline error/success banner ─────────────────────────────────────────────
 
-function Banner({ msg, ok }: { msg: string; ok?: boolean }) {
-  return (
-    <div
-      style={{
-        padding: "0.5rem 0.75rem",
-        borderRadius: "0.35rem",
-        marginTop: "0.5rem",
-        fontSize: "0.85rem",
-        background: ok ? "#d1e7dd" : "#f8d7da",
-        color: ok ? "#0a3622" : "#58151c",
-      }}
-    >
-      {msg}
-    </div>
-  );
-}
+
 
 // ─── Status workflow buttons ──────────────────────────────────────────────────
 
@@ -911,209 +866,7 @@ function PilotRow({
 
 // ─── Team card ────────────────────────────────────────────────────────────────
 
-function ChangeCaptainSelect({
-  roundId,
-  team,
-  pilots,
-  onChanged,
-}: {
-  roundId: string;
-  team: Team;
-  pilots: PilotSummary[] | null;
-  onChanged: () => void;
-}) {
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
 
-  const filledPilots = team.pilots
-    .filter((s) => s.status === "Filled" && s.pilotId !== null)
-    .sort((a, b) => a.placeInTeam - b.placeInTeam);
-
-  async function handleChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const newPilotId = e.target.value || null;
-    setBusy(true);
-    setErr(null);
-    try {
-      await api.put(`rounds/${roundId}/teams/${team.id}/captain`, {
-        pilotId: newPilotId,
-      });
-      onChanged();
-    } catch (ex) {
-      setErr(ex instanceof Error ? ex.message : "Failed to update captain");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  return (
-    <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", marginTop: "0.25rem" }}>
-      <label style={{ fontSize: "0.75rem", color: "#555", whiteSpace: "nowrap" }}>
-        Captain:
-      </label>
-      <select
-        style={{ ...inputStyle, fontSize: "0.78rem", padding: "0.2rem 0.35rem" }}
-        value={team.captainPilotId ?? ""}
-        disabled={busy}
-        onChange={(e) => { void handleChange(e); }}
-      >
-        <option value="">— none —</option>
-        {filledPilots.map((s) => (
-          <option key={s.pilotId} value={s.pilotId!}>
-            {pilotDisplayName(s.pilotId, pilots)}
-          </option>
-        ))}
-      </select>
-      {err && (
-        <span style={{ fontSize: "0.75rem", color: "#721c24" }}>{err}</span>
-      )}
-    </div>
-  );
-}
-
-function TeamCard({
-  roundId,
-  team,
-  pilots,
-  status,
-  canOverrideSign,
-  canManage,
-  canManageCaptain,
-  canEditTeam,
-  onChanged,
-}: {
-  roundId: string;
-  team: Team;
-  pilots: PilotSummary[] | null;
-  status: RoundStatus;
-  canOverrideSign: boolean;
-  canManage: boolean;
-  canManageCaptain: boolean;
-  canEditTeam: boolean;
-  onChanged: () => void;
-}) {
-  const [showAddPilot, setShowAddPilot] = useState(false);
-  const [removeErr, setRemoveErr] = useState<string | null>(null);
-
-  const canEdit = !isRosterFrozen(status) && canEditTeam;
-
-  async function removeTeam() {
-    if (!confirm(`Remove team "${team.teamName}"?`)) return;
-    setRemoveErr(null);
-    try {
-      await api.delete(`rounds/${roundId}/teams/${team.id}`);
-      onChanged();
-    } catch (ex) {
-      setRemoveErr(ex instanceof Error ? ex.message : "Failed");
-    }
-  }
-
-  const filledSlots = team.pilots.filter((s) => s.status === "Filled");
-
-  return (
-    <div
-      style={{
-        border: "1px solid #dee2e6",
-        borderRadius: "0.5rem",
-        overflow: "hidden",
-        marginBottom: "1rem",
-      }}
-    >
-      {/* Team header */}
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          alignItems: "center",
-          padding: "0.6rem 0.8rem",
-          background: "#f8f9fa",
-          borderBottom: "1px solid #dee2e6",
-        }}
-      >
-        <div>
-          <strong>{team.teamName}</strong>
-          <span style={{ marginLeft: "0.5rem", color: "#888", fontSize: "0.85em" }}>
-            {team.club.name}
-          </span>
-          {canManageCaptain ? (
-            <ChangeCaptainSelect
-              roundId={roundId}
-              team={team}
-              pilots={pilots}
-              onChanged={onChanged}
-            />
-          ) : (
-            <div style={{ fontSize: "0.78rem", color: "#555", marginTop: "0.2rem" }}>
-              Captain:{" "}
-              <strong>
-                {team.captainPilotId
-                  ? pilotDisplayName(team.captainPilotId, pilots)
-                  : "—"}
-              </strong>
-            </div>
-          )}
-        </div>
-        <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
-          {team.score > 0 && (
-            <span style={{ fontWeight: 700, color: "#0a3622" }}>
-              {team.score}
-            </span>
-          )}
-          {canEdit && (
-            <button
-              style={btnStyle("#58151c", "#f8d7da")}
-              onClick={() => { void removeTeam(); }}
-            >
-              Remove Team
-            </button>
-          )}
-        </div>
-      </div>
-
-      {removeErr && <Banner msg={removeErr} />}
-
-      {/* Pilot slots */}
-      <div style={{ padding: "0.25rem 0.75rem" }}>
-        {filledSlots.map((slot) => (
-          <PilotRow
-            key={slot.placeInTeam}
-            roundId={roundId}
-            team={team}
-            slot={slot}
-            pilots={pilots}
-            status={status}
-            canOverrideSign={canOverrideSign}
-            canManage={canManage}
-            canEditTeam={canEditTeam}
-            onChanged={onChanged}
-          />
-        ))}
-
-        {/* Add pilot */}
-        {canEdit && (
-          <div style={{ marginTop: "0.5rem", paddingBottom: "0.5rem" }}>
-            {showAddPilot ? (
-              <AddPilotForm
-                roundId={roundId}
-                teamId={team.id}
-                teamClubId={team.club.id}
-                teamClubName={team.club.name}
-                pilots={pilots ?? []}
-                onAdded={() => { setShowAddPilot(false); onChanged(); }}
-              />
-            ) : (
-              <button
-                style={btnStyle("#0a6640", "#e8f5e9")}
-                onClick={() => setShowAddPilot(true)}
-              >
-                + Add Pilot
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
 
 // ─── Metadata edit form ───────────────────────────────────────────────────────
 
@@ -1754,17 +1507,46 @@ export default function RoundManage() {
           .map((team) => {
             const canEditTeam = canManage || (isRoundsCoord && myClubId !== null && myClubId === team.club.id);
             return (
-            <TeamCard
+                        <TeamCard
               key={team.id}
               roundId={r.id}
               team={team}
               pilots={pilotsIndex ?? null}
               status={r.status}
-              canOverrideSign={canOverrideSign}
-              canManage={canManage}
               canManageCaptain={!isRosterFrozen(r.status) && (isAdmin || (isRoundsCoord && myClubId !== null && myClubId === team.club.id))}
               canEditTeam={canEditTeam}
               onChanged={() => { void loadRound(); }}
+              renderPilotRow={(slot) => (
+                <PilotRow
+                  key={slot.placeInTeam}
+                  roundId={r.id}
+                  team={team}
+                  slot={slot}
+                  pilots={pilotsIndex ?? null}
+                  status={r.status}
+                  canOverrideSign={canOverrideSign}
+                  canManage={canManage}
+                  canEditTeam={canEditTeam}
+                  onChanged={() => { void loadRound(); }}
+                />
+              )}
+              renderAddPilotForm={(showAddPilot, setShowAddPilot) => showAddPilot ? (
+                <AddPilotForm
+                  roundId={r.id}
+                  teamId={team.id}
+                  teamClubId={team.club.id}
+                  teamClubName={team.club.name}
+                  pilots={pilotsIndex ?? []}
+                  onAdded={() => { setShowAddPilot(false); void loadRound(); }}
+                />
+              ) : (
+                <button
+                  style={btnStyle("#0a6640", "#e8f5e9")}
+                  onClick={() => setShowAddPilot(true)}
+                >
+                  + Add Pilot
+                </button>
+              )}
             />
             );
           })}
