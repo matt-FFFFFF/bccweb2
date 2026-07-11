@@ -228,6 +228,48 @@ test("captured child output and secrets never enter aggregate status", async () 
   assert.doesNotMatch(records.join("\n"), /token=secret|password=secret/u);
 });
 
+test("thrown SAS and connection-string errors are redacted before status persistence", async () => {
+  // Given
+  const records = [];
+
+  // When
+  const report = await runLoadTestOrchestration({
+    runPhase: async () => {
+      throw new Error("https://worker.invalid/blob?sv=2024&sig=status-secret AccountKey=key-secret");
+    },
+    inspectCheckpoint: async () => false,
+    record: async (value) => records.push(JSON.stringify(value)),
+    now: () => 1,
+  });
+
+  // Then
+  assert.equal(report.exitCode, 1);
+  assert.doesNotMatch(records.join("\n"), /status-secret|key-secret/u);
+  assert.match(status(report, "prepare").error, /\[REDACTED\]/u);
+});
+
+test("returned child SAS errors are redacted before status persistence", async () => {
+  // Given
+  const records = [];
+
+  // When
+  const report = await runLoadTestOrchestration({
+    runPhase: async () => ({
+      exitCode: null,
+      signal: null,
+      error: "sig=returned-secret AccountKey=returned-key",
+      timedOut: false,
+    }),
+    inspectCheckpoint: async () => false,
+    record: async (value) => records.push(JSON.stringify(value)),
+    now: () => 1,
+  });
+
+  // Then
+  assert.equal(report.exitCode, 1);
+  assert.doesNotMatch(records.join("\n"), /returned-secret|returned-key/u);
+});
+
 test("phase status records its safe captured-output path", async () => {
   // Given
   const outputPath = "/worker/logs/load-test/run-prepare.log";
