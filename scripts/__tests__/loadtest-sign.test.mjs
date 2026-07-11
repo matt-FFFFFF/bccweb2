@@ -120,7 +120,7 @@ test("setup artifact parser preserves a bad credential slot without secrets", ()
   const line = JSON.stringify({
     metric: "sign_setup_attempts",
     type: "Point",
-    data: { value: 1, tags: { cohort: "50", slot_key: "team-7:3", status: "401", outcome: "login_error" } },
+    data: { value: 1, tags: { cohort: "50", group: "", slot_key: "team-7:3", status: "401", outcome: "login_error" } },
   });
 
   // When
@@ -157,7 +157,10 @@ test("artifact parser returns recoverable attempt evidence", () => {
     type: "Point",
     data: {
       value: 1,
-      tags: { cohort: "25", slot_key: "team-2:7", status: "201", signature_id: "sig-7", outcome: "created" },
+      tags: {
+        cohort: "25", group: "", phase: "sign", scenario: "sign_25",
+        slot_key: "team-2:7", status: "201", signature_id: "sig-7", outcome: "created",
+      },
     },
   });
 

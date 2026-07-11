@@ -7,6 +7,7 @@ function fail(message) {
 }
 
 function parseEvents(jsonLines, metricName, fields) {
+  const expectedTags = [...fields].sort();
   const events = [];
   for (const line of jsonLines.split("\n")) {
     if (line.trim().length === 0) continue;
@@ -15,8 +16,15 @@ function parseEvents(jsonLines, metricName, fields) {
     if (event.data?.value !== 1) fail(`${metricName} event has invalid value`);
     const tags = event.data.tags;
     if (!tags || typeof tags !== "object") fail(`${metricName} event is missing tags`);
+    const actualTags = Object.keys(tags).sort();
+    for (const key of actualTags) {
+      if (!expectedTags.includes(key)) fail(`${metricName} event has unknown tag ${key}`);
+    }
+    for (const key of expectedTags) {
+      if (!actualTags.includes(key)) fail(`${metricName} event is missing tag ${key}`);
+    }
     for (const field of fields) {
-      if (typeof tags[field] !== "string" || tags[field].length === 0) {
+      if (typeof tags[field] !== "string" || (field !== "group" && tags[field].length === 0)) {
         fail(`${metricName} event has invalid ${field}`);
       }
     }
@@ -29,7 +37,7 @@ function parseEvents(jsonLines, metricName, fields) {
 
 export function parseSignAttemptEvents(jsonLines) {
   return parseEvents(jsonLines, "sign_attempts", [
-    "cohort", "slot_key", "status", "signature_id", "outcome",
+    "cohort", "group", "outcome", "phase", "scenario", "signature_id", "slot_key", "status",
   ]).map(({ tags, status }) => ({
     cohort: tags.cohort,
     slotKey: tags.slot_key,
@@ -41,7 +49,7 @@ export function parseSignAttemptEvents(jsonLines) {
 
 export function parseSignSetupEvents(jsonLines) {
   return parseEvents(jsonLines, "sign_setup_attempts", [
-    "cohort", "slot_key", "status", "outcome",
+    "cohort", "group", "outcome", "slot_key", "status",
   ]).map(({ tags, status }) => ({
     cohort: tags.cohort,
     slotKey: tags.slot_key,
