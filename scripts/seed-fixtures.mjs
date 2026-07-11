@@ -18,6 +18,7 @@ import {
 } from "./lib/blobSeed.mjs";
 import {
   cleanupFixtureOwnership,
+  legacyFixtureRemainder,
   parseFixtureOwnership,
 } from "./lib/fixtureOwnership.mjs";
 import {
@@ -77,7 +78,22 @@ function buildManifest() {
 }
 
 async function wipePriorFixtures(publicContainer, privateContainer, nextManifest) {
-  if (!existsSync(FIXTURE_MANIFEST_PATH)) return;
+  if (!existsSync(FIXTURE_MANIFEST_PATH)) {
+    const currentOwnership = parseFixtureOwnership(nextManifest);
+    const legacyRemainder = legacyFixtureRemainder(currentOwnership);
+    await inChunks(
+      [
+        ...legacyRemainder.clubIds.map((id) => () =>
+          privateContainer.getBlobClient(`clubs/${id}.json`).deleteIfExists()
+        ),
+        ...legacyRemainder.teamIds.map((id) => () =>
+          privateContainer.getBlobClient(`club-teams/${id}.json`).deleteIfExists()
+        ),
+      ],
+      (job) => job()
+    );
+    return legacyRemainder;
+  }
 
   const manifest = JSON.parse(await readFile(FIXTURE_MANIFEST_PATH, "utf8"));
   const ownership = parseFixtureOwnership(manifest);
@@ -89,6 +105,7 @@ async function wipePriorFixtures(publicContainer, privateContainer, nextManifest
 
   if (existsSync(PREPARED_ROUND_PATH)) unlinkSync(PREPARED_ROUND_PATH);
   unlinkSync(FIXTURE_MANIFEST_PATH);
+  return { clubIds: [], teamIds: [] };
 }
 
 async function patchConfig(privateContainer) {
@@ -128,7 +145,7 @@ async function main() {
   ]);
 
   const pilotPasswordHash = await precomputeBcryptHash(FIXTURE_PILOT_PASSWORD);
-  await wipePriorFixtures(publicContainer, privateContainer, manifest);
+  const staleOwnership = await wipePriorFixtures(publicContainer, privateContainer, manifest);
 
   const now = new Date().toISOString();
 
@@ -212,8 +229,8 @@ async function main() {
 
   await Promise.all([
     writeJson(publicContainer, "pilots.json", sortedByNameThenId(replaceOwnedRows(existingPilots, pilots.map((p) => p.summary), manifest.pilotIds))),
-    writeJson(publicContainer, "clubs.json", sortedByNameThenId(replaceOwnedRows(existingClubs, clubs.map(({ id, name }) => ({ id, name })), manifest.clubIds))),
-    writeJson(publicContainer, "club-teams.json", replaceOwnedRows(existingTeams, clubTeams.map(({ id, clubId, clubName, seasonYear, teamName }) => ({ id, clubId, clubName, seasonYear, teamName })), manifest.teamIds).sort((a, b) => {
+    writeJson(publicContainer, "clubs.json", sortedByNameThenId(replaceOwnedRows(existingClubs, clubs.map(({ id, name }) => ({ id, name })), [...manifest.clubIds, ...staleOwnership.clubIds]))),
+    writeJson(publicContainer, "club-teams.json", replaceOwnedRows(existingTeams, clubTeams.map(({ id, clubId, clubName, seasonYear, teamName }) => ({ id, clubId, clubName, seasonYear, teamName })), [...manifest.teamIds, ...staleOwnership.teamIds]).sort((a, b) => {
       if (b.seasonYear !== a.seasonYear) return b.seasonYear - a.seasonYear;
       if (a.clubName !== b.clubName) return a.clubName.localeCompare(b.clubName);
       return a.teamName.localeCompare(b.teamName);
