@@ -4,7 +4,7 @@
  * Round-level authorization helpers (Security PR-1 — BOLA / IDOR).
  *
  * Centralises the "who may act on this round" rule that several handlers
- * (teams, flights, rounds, brief, roundsMutate) previously each got wrong by
+ * (flights, rounds, brief, roundsMutate) previously each got wrong by
  * checking role membership (`isCoord`) WITHOUT scoping a RoundsCoord to the
  * round's organising club. The same organising-club rule is already enforced
  * (and tested) for the puretrack and brief-mutation endpoints; this module
@@ -59,7 +59,7 @@ export function assertCanManageRound(
  * round: a full manager (Admin / organising-club coord), or any RoundsCoord
  * acting on their OWN club. This lets a club's coord enter that club's teams and
  * pilots into a round another club organises, without granting them control of
- * the round itself (status, metadata, brief, captains — still canManageRound).
+ * the round itself (status, metadata, brief — still canManageRound).
  */
 export function canRegisterClubForRound(
   caller: CallerIdentity,

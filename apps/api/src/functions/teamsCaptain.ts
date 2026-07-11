@@ -3,8 +3,8 @@
 /**
  * PUT /api/rounds/{id}/teams/{teamId}/captain
  *
- * Manual captain override — Admin or (RoundsCoord scoped to the round's
- * organising club). Blocked once the roster is frozen — i.e. any status
+ * Manual captain override — Admin or (RoundsCoord scoped to the target
+ * team's club). Blocked once the roster is frozen — i.e. any status
  * past Confirmed (BriefComplete, Locked, Complete) and Cancelled — via
  * isRosterFrozen(status).
  *
@@ -24,7 +24,7 @@ import { isRosterFrozen, rosterFrozenReason } from "@bccweb/types";
 import { RoundSchema } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
-  withPrivateLease,
+  withPrivateLeaseRetry,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import {
@@ -56,7 +56,7 @@ async function setTeamCaptain(
   const path = `rounds/${id}.json`;
 
   if (isCoord && !isAdmin) {
-    // Authorization-only pre-read; the leased read below remains authoritative, so club-reassignment races fail closed at worst.
+    // Authorization-only pre-read; the leased read below remains authoritative.
     let authRound: Round;
     try {
       authRound = await readJson(getPrivateBlobClient(path), RoundSchema, path);
@@ -67,12 +67,13 @@ async function setTeamCaptain(
       throw new HttpError(500, "INTERNAL");
     }
 
-    if (
-      !caller.clubId ||
-      !authRound.organisingClub?.id ||
-      caller.clubId !== authRound.organisingClub.id
-    ) {
-      throw new HttpError(403, "FORBIDDEN", "Not your round");
+    const authTeam = authRound.teams.find((t) => t.id === teamId);
+    if (!authTeam) {
+      throw new HttpError(404, "NOT_FOUND", "Team not found");
+    }
+
+    if (!caller.clubId || caller.clubId !== authTeam.club.id) {
+      throw new HttpError(403, "FORBIDDEN", "Not your team");
     }
   }
 
@@ -82,7 +83,7 @@ async function setTeamCaptain(
   // undefined body.pilotId means caller omitted the field → treat as null
   const newCaptainId: string | null = body.pilotId ?? null;
 
-  const updatedTeam = await withPrivateLease(path, async (leaseId) => {
+  const updatedTeam = await withPrivateLeaseRetry(path, async (leaseId) => {
     let round: Round;
     try {
       round = await readJson(getPrivateBlobClient(path), RoundSchema, path);
@@ -93,14 +94,16 @@ async function setTeamCaptain(
       throw new HttpError(500, "INTERNAL");
     }
 
-    // RoundsCoord must belong to the round's organising club
+    const teamIdx = round.teams.findIndex((t) => t.id === teamId);
+    if (teamIdx === -1) {
+      throw new HttpError(404, "NOT_FOUND", "Team not found");
+    }
+    const team = round.teams[teamIdx];
+
+    // RoundsCoord must belong to the target team's club
     if (isCoord && !isAdmin) {
-      if (
-        !caller.clubId ||
-        !round.organisingClub?.id ||
-        caller.clubId !== round.organisingClub.id
-      ) {
-        throw new HttpError(403, "FORBIDDEN", "Not your round");
+      if (!caller.clubId || caller.clubId !== team.club.id) {
+        throw new HttpError(403, "FORBIDDEN", "Not your team");
       }
     }
 
@@ -111,12 +114,6 @@ async function setTeamCaptain(
         `Cannot change the team captain while ${rosterFrozenReason(round.status)}`,
       );
     }
-
-    const teamIdx = round.teams.findIndex((t) => t.id === teamId);
-    if (teamIdx === -1) {
-      throw new HttpError(404, "NOT_FOUND", "Team not found");
-    }
-    const team = round.teams[teamIdx];
 
     // Validate pilotId is a filled member of this team (when non-null)
     if (newCaptainId !== null) {

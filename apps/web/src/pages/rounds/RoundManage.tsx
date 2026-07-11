@@ -1541,7 +1541,6 @@ export default function RoundManage() {
   const isRoundsCoord = identity.roles.includes("RoundsCoord");
   
   const canManage = isAdmin || (isRoundsCoord && myClubId !== null && myClubId === r.organisingClub?.id);
-  const canManageCaptain = canManage && !isRosterFrozen(r.status);
   const canOverrideSign = r.status === "BriefComplete" && canManage;
 
   return (
@@ -1755,18 +1754,18 @@ export default function RoundManage() {
           .map((team) => {
             const canEditTeam = canManage || (isRoundsCoord && myClubId !== null && myClubId === team.club.id);
             return (
-              <TeamCard
-                key={team.id}
-                roundId={r.id}
-                team={team}
-                pilots={pilotsIndex}
-                status={r.status}
-                canOverrideSign={canOverrideSign}
-                canManage={canManage}
-                canManageCaptain={canManageCaptain}
-                canEditTeam={canEditTeam}
-                onChanged={() => { void loadRound(); }}
-              />
+            <TeamCard
+              key={team.id}
+              roundId={r.id}
+              team={team}
+              pilots={pilotsIndex ?? null}
+              status={r.status}
+              canOverrideSign={canOverrideSign}
+              canManage={canManage}
+              canManageCaptain={!isRosterFrozen(r.status) && (isAdmin || (isRoundsCoord && myClubId !== null && myClubId === team.club.id))}
+              canEditTeam={canManage}
+              onChanged={() => { void loadRound(); }}
+            />
             );
           })}
 
