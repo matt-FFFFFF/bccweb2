@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
+import { LOADTEST_PHASES } from "../lib/loadTestOrchestration.mjs";
 
 test("full Make target is one sequential Node orchestrator recipe", async () => {
   // Given
@@ -58,4 +59,9 @@ test("evergreen docs state the final topology, gates, ownership, and failure pol
   ]) {
     assert.match(docs, claim);
   }
+  const persistedSequence = LOADTEST_PHASES.join("/");
+  assert.match(agents, new RegExp(persistedSequence, "u"));
+  assert.match(readme, new RegExp(persistedSequence, "u"));
+  assert.match(runbook, new RegExp(persistedSequence, "u"));
+  assert.doesNotMatch(docs, /eight operational steps/iu);
 });
