@@ -41,6 +41,12 @@ import {
   validateLoadTestManifest,
 } from "./lib/loadTestTopology.mjs";
 import { buildFixturePilots } from "./lib/seedFixturePilots.mjs";
+import {
+  ACTIVE_WORDING_PATH,
+  WORDING_PATH,
+  activeWordingPointer,
+  buildCanonicalSignToFlyWording,
+} from "./lib/loadTestWording.mjs";
 import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
@@ -181,6 +187,10 @@ async function main() {
   };
 
   await patchConfig(privateContainer);
+  await Promise.all([
+    writeJson(privateContainer, WORDING_PATH, buildCanonicalSignToFlyWording(now)),
+    writeJson(privateContainer, ACTIVE_WORDING_PATH, activeWordingPointer()),
+  ]);
 
   const clubs = manifest.clubs.map(({ id, name }) => ({
       id,
