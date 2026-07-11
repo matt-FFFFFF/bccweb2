@@ -99,6 +99,10 @@ loadtest-register: ## k6 register-self phase (500 VUs)
 	@mkdir -p $(CURDIR)/logs/load-test
 	cd tests/load && k6 run --env PHASE=register sign-to-fly.js | tee $(CURDIR)/logs/load-test/register-$$(date +%s).log
 
+.PHONY: loadtest-captains
+loadtest-captains: ## Assign captains and reconcile authoritative slot places
+	node scripts/set-captains-loadtest.mjs
+
 .PHONY: loadtest-transition
 loadtest-transition: ## POST brief-complete on the prepared round
 	node scripts/transition-loadtest.mjs
@@ -117,7 +121,7 @@ loadtest-cleanup: ## Delete load-test round + signatures, keep fixtures
 	node scripts/cleanup-loadtest.mjs
 
 .PHONY: loadtest
-loadtest: loadtest-prepare loadtest-register loadtest-transition loadtest-sign loadtest-verify loadtest-cleanup ## Full loadtest pipeline (prepare to cleanup)
+loadtest: loadtest-prepare loadtest-register loadtest-captains loadtest-transition loadtest-sign loadtest-verify loadtest-cleanup ## Full loadtest pipeline (prepare to cleanup)
 	@echo "[loadtest] full pipeline complete"
 
 .PHONY: clean
