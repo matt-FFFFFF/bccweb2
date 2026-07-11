@@ -1,7 +1,8 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi, afterEach } from "vitest";
 import { randomUUID } from "crypto";
+import { BlobLeaseClient } from "@azure/storage-blob";
 import type { Round, Team } from "@bccweb/types";
 import { makeAuthRequest, invoke } from "../../__tests__/helpers/api.js";
 import { resetAllBuckets } from "../../lib/rateLimit.js";
@@ -75,9 +76,34 @@ function makeSetCaptainRequest(
   });
 }
 
+function leaseError(statusCode: number): Error & { readonly statusCode: number } {
+  return Object.assign(new Error(`lease conflict (${statusCode})`), { statusCode });
+}
+
+function failRoundLeaseOnce(roundPath: string, statusCode: number) {
+  const originalAcquireLease = BlobLeaseClient.prototype.acquireLease;
+  const acquireLease = vi.spyOn(BlobLeaseClient.prototype, "acquireLease");
+  let pendingFailure = true;
+  let roundAttempts = 0;
+  acquireLease.mockImplementation(function (this: BlobLeaseClient, duration, options) {
+    if (pendingFailure && this.url.includes(roundPath)) {
+      roundAttempts += 1;
+      pendingFailure = false;
+      return Promise.reject(leaseError(statusCode));
+    }
+    if (this.url.includes(roundPath)) roundAttempts += 1;
+    return originalAcquireLease.call(this, duration, options);
+  });
+  return { roundAttempts: () => roundAttempts };
+}
+
 // ─── Tests ────────────────────────────────────────────────────────────────────
 
 describe("PUT /api/rounds/{id}/teams/{teamId}/captain", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("admin role: 200 + captainPilotId updated in blob", async () => {
     const { round, team, pilot } = await seedRoundWithTeam();
     const { user } = await makeUser({ roles: ["Admin"] });
@@ -309,6 +335,64 @@ describe("PUT /api/rounds/{id}/teams/{teamId}/captain", () => {
     const after = await readPrivateJson<Round>(`rounds/${round.id}.json`);
     expect(after?.teams[0].captainPilotId ?? null).toBeNull();
   });
+
+  it.each([409, 412])("raw lease acquisition %i is retried server-side", async (statusCode) => {
+    const { round, team, pilot } = await seedRoundWithTeam();
+    const { user } = await makeUser({ roles: ["Admin"] });
+    const roundPath = `rounds/${round.id}.json`;
+    const leaseFailure = failRoundLeaseOnce(roundPath, statusCode);
+
+    const req = makeAuthRequest(user.id, user.email, {
+      method: "PUT",
+      params: { id: round.id, teamId: team.id },
+      body: { pilotId: pilot.id },
+    });
+
+    const res = await invoke("setTeamCaptain", req);
+
+    expect(res.status).toBe(200);
+    expect(leaseFailure.roundAttempts()).toBe(2);
+    const saved = await readPrivateJson<Round>(roundPath);
+    expect(saved?.teams[0].captainPilotId).toBe(pilot.id);
+  });
+
+  it("TOCTOU inside lease: team club changes between pre-read and lease read -> 403", async () => {
+    resetAllBuckets();
+    const { round, team, pilot, clubId } = await seedRoundWithTeam();
+    const { user } = await makeUser({ roles: ["RoundsCoord"], clubId });
+    const roundPath = `rounds/${round.id}.json`;
+
+    // Mock acquireLease to mutate the blob just before the lease is acquired,
+    // simulating a race where another process reassigned the team to a different club
+    const originalAcquireLease = BlobLeaseClient.prototype.acquireLease;
+    const acquireLease = vi.spyOn(BlobLeaseClient.prototype, "acquireLease");
+    let mutated = false;
+    acquireLease.mockImplementation(async function (this: BlobLeaseClient, duration, options) {
+      if (!mutated && this.url.includes(roundPath)) {
+        mutated = true;
+        const stored = await readPrivateJson<Round>(roundPath);
+        if (stored) {
+          stored.teams[0].club.id = randomUUID(); // Reassign to different club!
+          await writePrivateJson(roundPath, stored);
+        }
+      }
+      return originalAcquireLease.call(this, duration, options);
+    });
+
+    const req = makeAuthRequest(user.id, user.email, {
+      method: "PUT",
+      params: { id: round.id, teamId: team.id },
+      body: { pilotId: pilot.id },
+    });
+
+    const res = await invoke("setTeamCaptain", req);
+
+    expect(res.status).toBe(403);
+    expect((res.jsonBody as { code: string }).code).toBe("FORBIDDEN");
+
+    const after = await readPrivateJson<Round>(roundPath);
+    expect(after?.teams[0].captainPilotId ?? null).toBeNull();
+  });
 });
 
 // ─── addPilot — first-free-place positional slot eligibility (W4.1) ─────────────
@@ -358,8 +442,6 @@ describe("POST /api/rounds/{id}/teams/{teamId}/pilots — positional eligibility
     const { round, team } = await seedEmptyTeamRound(clubId);
     const { user } = await makeUser({ roles: ["Admin"] });
 
-    // Given nine distinct pilots added one by one, each lands in the next free
-    // place 1..9, scoring iff place <= maxScoringPilotsInTeam (6).
     for (let place = 1; place <= 9; place += 1) {
       const pilot = await makePilot({ firstName: `Fill${place}`, clubId });
       const res = await addPilotReq(user, round, team, pilot.id);
@@ -369,8 +451,6 @@ describe("POST /api/rounds/{id}/teams/{teamId}/pilots — positional eligibility
       expect(slot?.isScoring).toBe(place <= 6);
     }
 
-    // When place 2 (a scoring slot) is removed and a new pilot is added, first-free
-    // must REUSE place 2 — the old max(place)+1 logic would have assigned place 10.
     const removeRes = await invoke(
       "removePilot",
       makeAuthRequest(user.id, user.email, {
@@ -388,8 +468,6 @@ describe("POST /api/rounds/{id}/teams/{teamId}/pilots — positional eligibility
     expect(rejoinSlot?.placeInTeam).toBe(2);
     expect(rejoinSlot?.isScoring).toBe(true);
 
-    // Then the team is full again (places 1..9) and a further add is TEAM_FULL —
-    // the old logic had no cap and would have grown to place 10.
     const overflow = await makePilot({ firstName: "Overflow", clubId });
     const overflowRes = await addPilotReq(user, round, team, overflow.id);
     expect(overflowRes.status).toBe(409);

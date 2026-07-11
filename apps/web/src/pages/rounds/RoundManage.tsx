@@ -1763,7 +1763,7 @@ export default function RoundManage() {
               canOverrideSign={canOverrideSign}
               canManage={canManage}
               canManageCaptain={!isRosterFrozen(r.status) && (isAdmin || (isRoundsCoord && myClubId !== null && myClubId === team.club.id))}
-              canEditTeam={canManage}
+              canEditTeam={canEditTeam}
               onChanged={() => { void loadRound(); }}
             />
             );
