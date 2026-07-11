@@ -20,6 +20,7 @@ import {
   pilotTopologyAt,
   validateLoadTestManifest,
 } from "../lib/loadTestTopology.mjs";
+import { buildFixturePilots } from "../lib/seedFixturePilots.mjs";
 
 const TEST_SEASON_YEAR = 2031;
 const TEST_SITE_NAMES = ["Site Alpha", "Site Bravo", "Site Charlie"];
@@ -161,6 +162,23 @@ test("manifest construction exposes ordered canonical topology records", () => {
   );
 });
 
+test("extracted pilot fixtures preserve pre-Todo-5 storage records", () => {
+  // Given the canonical manifest and fixed persistence inputs
+  const manifest = freshManifest();
+
+  // When pilot storage records are constructed
+  const fixtures = buildFixturePilots({ manifest, now: "2031-01-02T03:04:05.000Z", pilotPasswordHash: "hash" });
+
+  // Then legacy round-robin assignment and Pilot-only records remain unchanged
+  assert.deepEqual(fixtures.pilots[0].user.roles, ["Pilot"]);
+  assert.equal(fixtures.pilots[0].privatePilot.seasonClubs[0].clubTeamId, null);
+  assert.equal(fixtures.pilots[0].auth.passwordHash, "hash");
+  assert.equal(fixtures.pilots[0].user.clubId, manifest.clubIds[0]);
+  assert.equal(fixtures.pilots[25].user.clubId, manifest.clubIds[0]);
+  assert.equal(fixtures.userIndexEntries["pilot001@bcc.local"], manifest.userIds[0]);
+  assert.equal(fixtures.pilotEmailIndexEntries["pilot001@bcc.local"], manifest.pilotIds[0]);
+});
+
 const malformedCases = [
   {
     name: "wrong pilot count",
@@ -196,6 +214,16 @@ const malformedCases = [
     name: "pilot team mismatch",
     mutate: (manifest) => { manifest.pilots[0].clubTeamId = manifest.teamIds[1]; },
     error: /LOADTEST_TOPOLOGY_PILOT_TEAM_MISMATCH/,
+  },
+  {
+    name: "pilot local rank mismatch",
+    mutate: (manifest) => { manifest.pilots[0].teamLocalRank = 9; },
+    error: /LOADTEST_TOPOLOGY_PILOT_LOCAL_RANK_MISMATCH: pilot .* must have team-local rank 0/,
+  },
+  {
+    name: "pilot canonical team name mismatch",
+    mutate: (manifest) => { manifest.pilots[0].teamName = "Wrong Team"; },
+    error: /LOADTEST_TOPOLOGY_PILOT_TEAM_NAME_MISMATCH: pilot .* must use team name Club 01 Team A/,
   },
   {
     name: "pilot user mismatch",

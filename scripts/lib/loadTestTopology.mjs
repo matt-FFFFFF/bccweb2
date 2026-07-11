@@ -160,6 +160,8 @@ export function validateLoadTestManifest(manifest, expectedSeasonYear) {
     if (pilot.userId !== userIds[pilotIndex]) fail("PILOT_USER_MISMATCH", `pilot ${pilot.id} user does not match userIds`);
     if (pilot.clubId !== expectedClub.id) fail("PILOT_CLUB_MISMATCH", `pilot ${pilot.id} must belong to club ${expectedClub.id}`);
     if (pilot.clubTeamId !== expectedTeam.id) fail("PILOT_TEAM_MISMATCH", `pilot ${pilot.id} must belong to team ${expectedTeam.id}`);
+    if (pilot.teamLocalRank !== topology.teamLocalRank) fail("PILOT_LOCAL_RANK_MISMATCH", `pilot ${pilot.id} must have team-local rank ${topology.teamLocalRank}`);
+    if (pilot.teamName !== expectedTeam.teamName) fail("PILOT_TEAM_NAME_MISMATCH", `pilot ${pilot.id} must use team name ${expectedTeam.teamName}`);
     if (pilot.seasonYear !== expectedSeasonYear) fail("PILOT_SEASON_YEAR_MISMATCH", `pilot ${pilot.id} has season ${pilot.seasonYear}`);
   }
   const expectedCoordinatorIndices = coordinatorPilotIndices();
