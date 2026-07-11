@@ -10,11 +10,11 @@ import { after, before, test } from "node:test";
 import { BlobServiceClient } from "@azure/storage-blob";
 import { ActiveWordingPointerSchema, SignToFlyWordingSchema } from "@bccweb/schemas";
 
-import { deterministicUuid } from "../lib/blobSeed.mjs";
 import {
   FIXTURE_MANIFEST_PATH,
   SEASON_YEAR,
 } from "../lib/loadTestConsts.mjs";
+import { buildLegacyFixtureManifest } from "./helpers/legacyFixtureManifest.mjs";
 
 const AZURITE_CONNECTION_STRING = process.env.FIXTURE_TEST_CONNECTION_STRING ??
   "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
@@ -29,31 +29,6 @@ const blobService = BlobServiceClient.fromConnectionString(AZURITE_CONNECTION_ST
 const publicContainer = blobService.getContainerClient(publicName);
 const privateContainer = blobService.getContainerClient(privateName);
 let workDir;
-
-function legacyManifest() {
-  const siteNames = ["Site Alpha", "Site Bravo", "Site Charlie"];
-  const siteIds = siteNames.map((name) => deterministicUuid("fixture-site", name));
-  const clubIds = Array.from({ length: 50 }, (_, index) =>
-    deterministicUuid("fixture-club", `club${index + 1}`)
-  );
-  const teamIds = clubIds.flatMap((clubId) =>
-    [1, 2].map((teamNumber) =>
-      deterministicUuid("fixture-club-team", `${clubId}-${teamNumber}`)
-    )
-  );
-  const emails = Array.from({ length: 500 }, (_, index) =>
-    `pilot${String(index + 1).padStart(3, "0")}@bcc.local`
-  );
-  return {
-    seasonYear: SEASON_YEAR,
-    siteIds,
-    clubIds,
-    teamIds,
-    pilotIds: emails.map((email) => deterministicUuid("fixture-pilot", email)),
-    userIds: emails.map((email) => deterministicUuid("fixture-user", email)),
-    roundIds: [],
-  };
-}
 
 async function writeJson(container, path, value) {
   const body = JSON.stringify(value);
@@ -108,7 +83,7 @@ test("seed twice removes stale legacy ownership and preserves nonfixture entries
   // Given a complete current seed extended into the exact legacy generation
   const initial = runScript(SEED_SCRIPT);
   assert.equal(initial.status, 0, initial.stderr);
-  const staleManifest = legacyManifest();
+  const staleManifest = buildLegacyFixtureManifest();
   const staleClubId = staleManifest.clubIds[49];
   const staleTeamId = staleManifest.teamIds[99];
   const userIndex = await readJson(privateContainer, "user-index.json");
@@ -200,7 +175,7 @@ test("fresh seed publishes schema-valid private sign wording", async () => {
 
 test("malformed duplicate manifest is rejected before owned blob deletion", async () => {
   // Given a malformed legacy manifest that claims a sentinel round
-  const malformed = legacyManifest();
+  const malformed = buildLegacyFixtureManifest();
   malformed.teamIds[1] = malformed.teamIds[0];
   const sentinelRoundId = "00000000-0000-4000-8000-000000000001";
   malformed.roundIds = [sentinelRoundId];
@@ -220,7 +195,7 @@ test("malformed duplicate manifest is rejected before owned blob deletion", asyn
 
 test("foreign-season manifest is rejected before owned blob deletion", async () => {
   // Given an otherwise valid legacy manifest for a non-fixture season
-  const foreignSeason = legacyManifest();
+  const foreignSeason = buildLegacyFixtureManifest();
   const sentinelRoundId = "00000000-0000-4000-8000-000000000002";
   foreignSeason.seasonYear = SEASON_YEAR - 1;
   foreignSeason.roundIds = [sentinelRoundId];
@@ -258,7 +233,7 @@ test("malformed public index entry is rejected before owned blob deletion", asyn
 
 test("malformed season index is rejected before owned blob deletion", async () => {
   // Given valid ownership, a malformed season summary, and an owned sentinel round
-  const manifest = legacyManifest();
+  const manifest = buildLegacyFixtureManifest();
   const sentinelRoundId = "00000000-0000-4000-8000-000000000004";
   manifest.roundIds = [sentinelRoundId];
   await writeFile(join(workDir, FIXTURE_MANIFEST_PATH), `${JSON.stringify(manifest)}\n`);
@@ -276,7 +251,7 @@ test("malformed season index is rejected before owned blob deletion", async () =
 
 test("malformed season blob is rejected before owned blob deletion", async () => {
   // Given valid ownership, malformed season rounds, and an owned sentinel round
-  const manifest = legacyManifest();
+  const manifest = buildLegacyFixtureManifest();
   const sentinelRoundId = "00000000-0000-4000-8000-000000000005";
   manifest.roundIds = [sentinelRoundId];
   await writeFile(join(workDir, FIXTURE_MANIFEST_PATH), `${JSON.stringify(manifest)}\n`);
