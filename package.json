@@ -17,7 +17,7 @@
     "license:fix": "node scripts/spdx-header.mjs --fix",
     "license:test": "node --test scripts/__tests__/spdx-header.test.mjs",
     "fixtures:audit": "node scripts/audit-fixtures.mjs --json",
-    "fixtures:test": "node --test scripts/__tests__/loadtest-topology.test.mjs scripts/__tests__/seed-fixture-pilots.test.mjs scripts/__tests__/seed-fixtures.integration.test.mjs",
+    "fixtures:test": "node --test scripts/__tests__/loadtest-topology.test.mjs scripts/__tests__/seed-fixture-pilots.test.mjs scripts/__tests__/seed-fixtures.integration.test.mjs scripts/__tests__/seed-fixtures.adversarial.test.mjs",
     "typecheck": "npm run typecheck --workspaces --if-present",
     "e2e": "playwright test --config tests/e2e/playwright.config.ts"
   },
