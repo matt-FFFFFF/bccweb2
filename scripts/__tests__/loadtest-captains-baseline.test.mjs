@@ -42,7 +42,7 @@ test("k6 registration and signing address slots by prepared team and place", asy
   ]);
 
   // When / Then
-  assert.match(registerSource, /teamId: slot\.teamId, preferredPlace: slot\.place/);
+  assert.match(registerSource, /JSON\.stringify\(\{ teamId: slot\.teamId \}\)/);
   assert.match(signSource, /teams\/\$\{target\.teamId\}\/pilots\/\$\{target\.place\}\/sign/);
 });
 
