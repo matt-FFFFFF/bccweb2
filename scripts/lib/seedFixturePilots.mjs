@@ -1,25 +1,20 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import {
-  CLUB_COUNT,
-  FIXTURE_CLUB_NAME,
-  FIXTURE_PILOT_EMAIL_PATTERN,
   PILOT_COUNT,
-  SEASON_YEAR,
   TS_CS_VERSION,
 } from "./loadTestConsts.mjs";
 
 export function buildFixturePilots({ manifest, now, pilotPasswordHash }) {
   const userIndexEntries = {};
   const pilotEmailIndexEntries = {};
+  const coordinatorPilotIds = new Set(
+    manifest.coordinators.map(({ pilotId }) => pilotId)
+  );
   const pilots = Array.from({ length: PILOT_COUNT }, (_, i) => {
     const n = i + 1;
-    const email = FIXTURE_PILOT_EMAIL_PATTERN(n).toLowerCase();
-    const pilotId = manifest.pilotIds[i];
-    const userId = manifest.userIds[i];
-    const clubIndex = (n - 1) % CLUB_COUNT;
-    const clubId = manifest.clubIds[clubIndex];
-    const clubName = FIXTURE_CLUB_NAME(clubIndex + 1);
+    const topologyPilot = manifest.pilots[i];
+    const { id: pilotId, userId, email, clubId, clubName, clubTeamId, seasonYear } = topologyPilot;
     const lastName = `P${String(n).padStart(3, "0")}`;
     const fullName = `Pilot ${lastName}`;
 
@@ -38,7 +33,7 @@ export function buildFixturePilots({ manifest, now, pilotPasswordHash }) {
           fullName,
         },
         currentClub: { id: clubId, name: clubName },
-        seasonClubs: [{ seasonYear: SEASON_YEAR, clubId, clubName, clubTeamId: null }],
+        seasonClubs: [{ seasonYear, clubId, clubName, clubTeamId }],
         userId,
         profileUpdatedAt: now,
       },
@@ -50,7 +45,9 @@ export function buildFixturePilots({ manifest, now, pilotPasswordHash }) {
       user: {
         id: userId,
         email,
-        roles: ["Pilot"],
+        roles: coordinatorPilotIds.has(pilotId)
+          ? ["Pilot", "RoundsCoord"]
+          : ["Pilot"],
         pilotId,
         clubId,
         createdAt: now,

@@ -20,7 +20,6 @@ import {
   pilotTopologyAt,
   validateLoadTestManifest,
 } from "../lib/loadTestTopology.mjs";
-import { buildFixturePilots } from "../lib/seedFixturePilots.mjs";
 
 const TEST_SEASON_YEAR = 2031;
 const TEST_SITE_NAMES = ["Site Alpha", "Site Bravo", "Site Charlie"];
@@ -160,23 +159,6 @@ test("manifest construction exposes ordered canonical topology records", () => {
     aggregate.coordinatorPilotIds,
     coordinatorPilotIndices().map((pilotIndex) => manifest.pilotIds[pilotIndex])
   );
-});
-
-test("extracted pilot fixtures preserve pre-Todo-5 storage records", () => {
-  // Given the canonical manifest and fixed persistence inputs
-  const manifest = freshManifest();
-
-  // When pilot storage records are constructed
-  const fixtures = buildFixturePilots({ manifest, now: "2031-01-02T03:04:05.000Z", pilotPasswordHash: "hash" });
-
-  // Then legacy round-robin assignment and Pilot-only records remain unchanged
-  assert.deepEqual(fixtures.pilots[0].user.roles, ["Pilot"]);
-  assert.equal(fixtures.pilots[0].privatePilot.seasonClubs[0].clubTeamId, null);
-  assert.equal(fixtures.pilots[0].auth.passwordHash, "hash");
-  assert.equal(fixtures.pilots[0].user.clubId, manifest.clubIds[0]);
-  assert.equal(fixtures.pilots[25].user.clubId, manifest.clubIds[0]);
-  assert.equal(fixtures.userIndexEntries["pilot001@bcc.local"], manifest.userIds[0]);
-  assert.equal(fixtures.pilotEmailIndexEntries["pilot001@bcc.local"], manifest.pilotIds[0]);
 });
 
 const malformedCases = [

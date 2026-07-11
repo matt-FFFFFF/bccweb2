@@ -79,7 +79,7 @@ docker-down: ## Stop Docker Compose stack
 	$(CONTAINER_RUNTIME) compose down
 
 .PHONY: seed
-seed: ## Seed 500 pilots / 50 clubs / 100 club-teams + season fixtures
+seed: ## Seed 500 pilots / 25 clubs / 50 club-teams + season fixtures
 	node scripts/seed-fixtures.mjs
 
 .PHONY: seed-rounds

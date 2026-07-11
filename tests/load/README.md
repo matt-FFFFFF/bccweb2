@@ -116,9 +116,9 @@ As a reference, these metrics were observed on a standard local dev stack:
 
 ## Design Choices & Safety
 
-### Single Organising Club
+### Canonical Fixture Clubs and Teams
 
-The load-test round uses one organising club and all 50 teams belong to that same club. This is because the `register-self` API requires the pilot to belong to a club in the round. The fixture-only flag `autoAllocatePilotsToRoundClub: true` is set during `make seed` to allow all 500 pilots to auto-allocate to this club. This ensures we measure the **round-blob lease contention** rather than club-membership logic.
+Fixture seeding binds 500 pilots to 25 clubs and 50 canonical teams, with 10 pilots per team. Load-test preparation must preserve those club/team relationships so `register-self` exercises normal seasonal membership checks; no fixture-only club auto-allocation flag is used.
 
 ### Safety Guards
 
