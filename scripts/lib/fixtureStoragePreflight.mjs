@@ -63,7 +63,8 @@ function requireExactOwnedValues(index, expectedEntries, path) {
 export async function preflightFixtureStorage(
   publicContainer,
   privateContainer,
-  ownership
+  ownership,
+  options = {}
 ) {
   const privateIndexes = new Map();
   for (const path of ["user-index.json", "pilot-email-index.json"]) {
@@ -123,24 +124,26 @@ export async function preflightFixtureStorage(
     fail("SEASON_BLOB_LEAGUE", `${seasonPath} leagueTable must be an array`);
   }
 
-  requireExactOwnedValues(
-    privateIndexes.get("user-index.json"),
-    ownership.userIndexEntries,
-    "user-index.json"
-  );
-  requireExactOwnedValues(
-    privateIndexes.get("pilot-email-index.json"),
-    ownership.pilotEmailIndexEntries,
-    "pilot-email-index.json"
-  );
-  for (const [path, expectedIds] of [
-    ["pilots.json", ownership.pilotIds],
-    ["clubs.json", ownership.clubIds],
-    ["club-teams.json", ownership.teamIds],
-    ["sites.json", ownership.siteIds],
-    ["rounds.json", ownership.roundIds],
-  ]) {
-    requireExactOwnedMembership(publicIndexes.get(path), expectedIds, path);
+  if (options.requireMembership !== false) {
+    requireExactOwnedValues(
+      privateIndexes.get("user-index.json"),
+      ownership.userIndexEntries,
+      "user-index.json"
+    );
+    requireExactOwnedValues(
+      privateIndexes.get("pilot-email-index.json"),
+      ownership.pilotEmailIndexEntries,
+      "pilot-email-index.json"
+    );
+    for (const [path, expectedIds] of [
+      ["pilots.json", ownership.pilotIds],
+      ["clubs.json", ownership.clubIds],
+      ["club-teams.json", ownership.teamIds],
+      ["sites.json", ownership.siteIds],
+      ["rounds.json", ownership.roundIds],
+    ]) {
+      requireExactOwnedMembership(publicIndexes.get(path), expectedIds, path);
+    }
   }
 
   return {
