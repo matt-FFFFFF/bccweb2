@@ -21,7 +21,10 @@ trusted client IP. Unique `X-Forwarded-For` values partition only local Function
 traffic; Azure uses its trusted `client-ip`. One remote generator therefore cannot
 perform 500 setup logins without an approved partitioned-generator or token design.
 
-## Eight operational steps
+## Persisted status phases
+
+The status artifact always contains these rows in this exact order:
+`prepare/register/captains/transition/sign/artifact/verify/cleanup`.
 
 1. **Prepare** (`loadtest-prepare`) replaces any prior checkpointed load round,
    creates a +35-day Confirmed round with 50 teams/500 slots, and atomically writes
@@ -39,13 +42,12 @@ perform 500 setup logins without an approved partitioned-generator or token desi
 5. **Sign** (`loadtest-sign`) authenticates the selected 185 pilots and runs disjoint
    one-shot cohorts of 10, 25, 50, and 100 at prepared offsets 0, 10, 35, and 85.
    The other 315 slots remain unsigned. Signing never retries.
-6. **Verify artifacts and persisted state** (`artifact` then `loadtest-verify`)
-   validates the k6 JSON/summary, exact 185-key ledger, 185 true flags, 315 false
+6. **Artifact** validates the k6 JSON/summary contract independently of k6 exit.
+7. **Verify** (`loadtest-verify`) validates the exact 185-key ledger, 185 true flags, 315 false
    flags, final-100 IDs, and one same-ID HTTP 200 replay. A persisted errored key is
    replayed when coherent; otherwise the verifier labels a deterministic successful
-   key `replay=fallback`.
-7. **Prove queue quiescence** (inside `loadtest-verify`) observes the dedicated
-   `signtofly-reflect` and poison queues through `AzureWebJobsStorage`. It requires
+   key `replay=fallback`. This phase also observes the dedicated `signtofly-reflect`
+   and poison queues through `AzureWebJobsStorage`; it requires
    approximate global counts of zero twice at least two seconds apart after replay;
    it never peeks, dequeues, or treats this approximation as valid on a shared stack.
 8. **Cleanup** (`loadtest-cleanup`) deletes only the checkpoint-owned round,
@@ -69,9 +71,9 @@ disable external effects (`PURETRACK_ENABLED=false`, `ROUND_BRIEF_EMAILS=""`). R
 hostnames must contain `loadtest` or `staging`; production-looking names are rejected
 before any directory, checkpoint, or API mutation.
 
-The narrow Make targets remain available for diagnosis. Run them in the eight-step
-order above; `make help` lists prepare, register, captains, transition, sign, verify,
-and cleanup. The queue gate is part of verify rather than a separate Make target.
+The narrow Make targets remain available for diagnosis. Run them in the phase order
+above; `make help` lists prepare, register, captains, transition, sign, verify, and
+cleanup. `artifact` is an internal status phase; the queue gate is inside `verify`.
 
 ## Gates and artifacts
 
@@ -83,7 +85,8 @@ failures/5xx.
 
 Runtime output is kept under ignored `logs/load-test/`: private per-phase logs, sign
 events/summary, and `orchestration-<run>.json`. The status artifact records only phase
-name, state, timing, exit code/signal/timeout, and sanitized runner errors—never command
+name, state, timing, exit code/signal/timeout, attempted/skip reason where applicable,
+safe log path, and sanitized runner errors—never command
 arguments, environment, credentials, request bodies, or child output. Its phase rows
 include the corresponding safe log path. `SIGN_EVENTS_PATH`, `SIGN_SUMMARY_PATH`, and
 `LOADTEST_STATUS_PATH` overrides must be relative paths beneath `logs/load-test/`.

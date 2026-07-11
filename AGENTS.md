@@ -56,7 +56,7 @@ own lockfile (pulls `mssql`, kept out of the deployed tree); root `npm ci` skips
 | `make dev-api` / `dev-web` | Functions host `:7071` (needs Azurite) / Vite dev `:5173`.      |
 | `make seed`      | Dev fixtures (500 pilots / 25 clubs / 50 teams / season).                  |
 | `make seed-rounds` | Optional 4-round browsing data; not a `make loadtest` prerequisite.       |
-| `make loadtest`  | Sequential prepare/register/captains/transition/sign/verify/queue/cleanup transaction on a dedicated stack. |
+| `make loadtest`  | Sequential prepare/register/captains/transition/sign/artifact/verify/cleanup status transaction on a dedicated stack. |
 | `npm run loadtest:test` | Pure load orchestration/artifact/static contracts; no k6/Azurite.      |
 | `make clean`     | Removes `dist/` AND `*.tsbuildinfo`.                                      |
 | `npm run e2e`    | Playwright (`tests/e2e/playwright.config.ts`, base URL `:5173`).          |
@@ -68,7 +68,9 @@ Local dev needs Docker (or Podman) for Azurite.
 **Load testing**: canonical fixtures are 500 pilots / 25 clubs / 50 teams / 10
 pilots per team, with 25 coordinators and 50 captains. `make loadtest` is one Node
 orchestrator recipe, so `make -j` cannot reorder phases; individual `loadtest-*`
-targets remain diagnostic tools. Preparation checkpoints exact `loadRoundId`
+targets remain diagnostic tools. Persisted status rows are exactly
+`prepare/register/captains/transition/sign/artifact/verify/cleanup`; queue quiescence
+is part of `verify`. Preparation checkpoints exact `loadRoundId`
 ownership before team creation. Register and sign never retry; production
 `withPrivateLeaseRetry` owns lease contention. Sign selects 185 slots in disjoint
 10/25/50/100 cohorts (315 remain false), with hard per-cohort 201-only,

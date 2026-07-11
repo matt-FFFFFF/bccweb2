@@ -28,9 +28,10 @@ make loadtest
 cannot fan out or reorder its children. Narrow `make loadtest-*` targets remain for
 controlled diagnosis; `make help` is the authoritative target list.
 
-## Operational topology
+## Persisted status phases
 
-The eight operational steps are:
+The status artifact always contains these rows in this exact order:
+`prepare/register/captains/transition/sign/artifact/verify/cleanup`.
 
 1. **Prepare** — replace only a prior checkpoint-owned load round; create and
    checkpoint a +35-day Confirmed 50-team/500-slot round before adding teams.
@@ -41,9 +42,9 @@ The eight operational steps are:
 4. **Transition** — one request to `BriefComplete`.
 5. **Sign** — one-shot cohorts 10/25/50/100 over offsets 0/10/35/85: 185 selected,
    315 deliberately unsigned.
-6. **Verify** — parse sign events/summary, require first-write 201s, inspect exact
-   ledger IDs and flags, and replay exactly one persisted signature for the same ID.
-7. **Queue gate** — after replay, require `signtofly-reflect` and poison approximate
+6. **Artifact** — parse sign events/summary and require the exact first-write contract.
+7. **Verify** — inspect exact ledger IDs and flags, replay exactly one persisted
+   signature for the same ID, then require `signtofly-reflect` and poison approximate
    counts zero in two observations at least two seconds apart.
 8. **Cleanup** — remove only the durable `loadRoundId` ownership set and its exact
    artifacts/references.
@@ -71,7 +72,8 @@ metrics to make a run pass.
 
 The orchestrator writes phase state before and after every command with duration and
 exact exit/signal/timeout. It captures stdout/stderr without a shell pipe and reports
-all attempted/skipped outcomes. Status JSON never contains command args/env, tokens,
+all attempted/skipped outcomes, attempted state, skip reason, and safe log path.
+Status JSON never contains command args/env, tokens,
 passwords, bodies, or captured output.
 
 | Observed failure | Required action |
