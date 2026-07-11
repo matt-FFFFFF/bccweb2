@@ -10,6 +10,7 @@ import {
   PREPARED_ROUND_PATH,
 } from "./lib/loadTestConsts.mjs";
 import { createReflectQueueReader, waitForReflectQueues } from "./lib/loadTestReflectQueues.mjs";
+import { parseRawVerificationArtifacts } from "./lib/loadTestSignVerificationArtifacts.mjs";
 import { runSignVerification } from "./lib/loadTestSignVerificationRunner.mjs";
 import { createVerifierApi } from "./lib/loadTestVerifierApi.mjs";
 
@@ -79,6 +80,8 @@ async function main() {
   const { eventsPath, summaryPath } = artifactPaths();
   const prepared = readJson(PREPARED_ROUND_PATH, "prepared round artifact");
   const summary = readJson(summaryPath, "sign summary artifact");
+  const jsonLines = readText(eventsPath, "sign events artifact");
+  const parsed = parseRawVerificationArtifacts(prepared, jsonLines, summary);
   if (prepared.baseUrl !== BCC_API_BASE_URL) {
     fail("prepared artifact baseUrl does not match BCC_API_BASE_URL; state preserved");
   }
@@ -97,8 +100,7 @@ async function main() {
   const readCounts = createReflectQueueReader({ environment: process.env });
   const report = await runSignVerification({
     prepared,
-    jsonLines: readText(eventsPath, "sign events artifact"),
-    summary,
+    parsed,
     dedicatedStack: process.env.LOADTEST_DEDICATED_STACK === "1",
     login,
     getSignatures: (roundId) => requireStatus(

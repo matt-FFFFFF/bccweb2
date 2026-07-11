@@ -2,7 +2,6 @@
 // SPDX-License-Identifier: MPL-2.0
 
 import { replayPersistedSignature } from "./loadTestSignReplay.mjs";
-import { parseRawVerificationArtifacts } from "./loadTestSignVerificationArtifacts.mjs";
 import { inspectExactLedger, pollExactFlags } from "./loadTestSignStateVerify.mjs";
 
 function fail(message) {
@@ -11,13 +10,12 @@ function fail(message) {
 
 export async function runSignVerification(options) {
   const {
-    prepared, jsonLines, summary, dedicatedStack, login, getSignatures,
+    prepared, parsed, dedicatedStack, login, getSignatures,
     postReplay, loadRound, waitForQueues, flagPolling,
   } = options;
   if (dedicatedStack !== true) {
     fail("dedicated stack confirmation LOADTEST_DEDICATED_STACK=1 is required before global reflect queue counts are meaningful");
   }
-  const parsed = parseRawVerificationArtifacts(prepared, jsonLines, summary);
   const signatures = await getSignatures(parsed.roundId);
   const ledger = inspectExactLedger(signatures, parsed);
   const flags = await pollExactFlags({
