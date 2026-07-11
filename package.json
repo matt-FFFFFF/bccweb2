@@ -27,6 +27,7 @@
   },
   "devDependencies": {
     "@azure/storage-blob": "12.33.0",
+    "@azure/storage-queue": "12.31.0",
     "@eslint/js": "10.0.1",
     "@playwright/test": "1.61.1",
     "@vitest/coverage-v8": "4.1.9",
