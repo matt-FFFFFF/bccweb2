@@ -132,7 +132,7 @@ async function runJobs(jobs) {
 export async function cleanupFixtureOwnership(
   publicContainer,
   privateContainer,
-  { ownership, retainedOwnership }
+  { ownership, retainedOwnership, recovery = false, afterPhase = async () => {} }
 ) {
   const removingAllOwnership = retainedOwnership === undefined;
   const retained = retainedOwnership ?? {
@@ -153,7 +153,8 @@ export async function cleanupFixtureOwnership(
   } = await preflightFixtureStorage(
     publicContainer,
     privateContainer,
-    ownership
+    ownership,
+    { requireMembership: !recovery }
   );
   await runJobs([
     ...ownership.roundIds.flatMap((id) => [
@@ -170,6 +171,7 @@ export async function cleanupFixtureOwnership(
     ...staleTeamIds.map((id) => () => deleteBlob(privateContainer, `club-teams/${id}.json`)),
     ...staleSiteIds.map((id) => () => deleteBlob(privateContainer, `sites/${id}.json`)),
   ]);
+  await afterPhase(1);
 
   for (const [path, ids] of [
     ["user-index.json", new Set(ownership.userIds)],
@@ -182,6 +184,7 @@ export async function cleanupFixtureOwnership(
       Object.fromEntries(Object.entries(index).filter(([, id]) => !ids.has(id)))
     );
   }
+  await afterPhase(2);
 
   for (const [path, ids] of [
     ["pilots.json", ownership.pilotIds],
@@ -198,6 +201,7 @@ export async function cleanupFixtureOwnership(
       index.filter(({ id }) => !ownedIds.has(id))
     );
   }
+  await afterPhase(3);
 
   const remainingRoundIds = seasonRoundIds
     .filter((id) => !ownership.roundIds.includes(id));
@@ -218,4 +222,5 @@ export async function cleanupFixtureOwnership(
       seasonIndex.filter(({ year }) => year !== ownership.seasonYear)
     );
   }
+  await afterPhase(4);
 }
