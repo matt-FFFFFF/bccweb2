@@ -7,25 +7,10 @@ import { verifySignArtifacts, verifySignSummary } from "../lib/loadTestSignArtif
 
 test("combined artifact verifier cross-checks setup, attempts, and summary", () => {
   // Given
-  const lines = [];
-  for (const { name, offset, size } of SIGN_COHORTS) {
-    for (let index = 0; index < size; index += 1) {
-      const slotKey = `team:${offset + index}`;
-      lines.push(JSON.stringify(point("sign_setup_attempts", {
-        cohort: name, slot_key: slotKey, status: "200", outcome: "authenticated",
-      })));
-      lines.push(JSON.stringify(point("sign_attempts", {
-        cohort: name,
-        slot_key: slotKey,
-        status: "201",
-        signature_id: `signature-${offset + index}`,
-        outcome: "created",
-      })));
-    }
-  }
+  const lines = artifactLines();
 
   // When
-  const report = verifySignArtifacts(`${lines.join("\n")}\n`, { metrics: summaryMetrics() });
+  const report = verifySignArtifacts(`${lines.map(JSON.stringify).join("\n")}\n`, { metrics: summaryMetrics() });
 
   // Then
   assert.equal(report.setupEvents, 185);
@@ -60,16 +45,32 @@ test("combined verifier rejects sign cohort that differs from setup cohort", () 
   );
 });
 
+test("raw event parser rejects unknown application tag by name", () => {
+  // Given
+  const lines = artifactLines();
+  const attempt = lines.find((event) => event.metric === "sign_attempts");
+  attempt.data.tags.email = "must-not-be-hidden@example.invalid";
+
+  // When / Then
+  assert.throws(
+    () => verifySignArtifacts(`${lines.map(JSON.stringify).join("\n")}\n`, { metrics: summaryMetrics() }),
+    /sign_attempts event has unknown tag email/,
+  );
+});
+
 function artifactLines() {
   const lines = [];
   for (const { name, offset, size } of SIGN_COHORTS) {
     for (let index = 0; index < size; index += 1) {
       const slotKey = `team:${offset + index}`;
       lines.push(point("sign_setup_attempts", {
-        cohort: name, slot_key: slotKey, status: "200", outcome: "authenticated",
+        cohort: name, group: "", slot_key: slotKey, status: "200", outcome: "authenticated",
       }));
       lines.push(point("sign_attempts", {
         cohort: name,
+        group: "",
+        phase: "sign",
+        scenario: `sign_${name}`,
         slot_key: slotKey,
         status: "201",
         signature_id: `signature-${offset + index}`,
