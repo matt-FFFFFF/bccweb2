@@ -15,6 +15,13 @@ export const LOADTEST_PHASES = [
 
 const PRE_SIGN_PHASES = LOADTEST_PHASES.slice(0, 4);
 const PHASE_STATUSES = new Set(["pending", "running", "passed", "failed", "skipped"]);
+const REPORT_KEYS = new Set([
+  "version", "status", "exitCode", "startedAtMs", "finishedAtMs", "phases", "notes",
+]);
+const PHASE_KEYS = new Set([
+  "name", "status", "reason", "startedAtMs", "finishedAtMs", "durationMs", "exitCode",
+  "signal", "timedOut", "error", "outputPath", "attempted",
+]);
 
 function skippedPhase(name) {
   return { name, status: "pending", reason: "not attempted" };
@@ -28,10 +35,16 @@ function errorMessage(error) {
   return redactLoadTestOutput(error instanceof Error ? error.message : "unknown error");
 }
 
+function rejectUnknownKeys(value, allowed, label) {
+  const unknown = Object.keys(value).find((key) => !allowed.has(key));
+  if (unknown) throw new Error(`${label} has unknown key ${unknown}`);
+}
+
 function parsePhase(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("orchestration phase must be an object");
   }
+  rejectUnknownKeys(value, PHASE_KEYS, `orchestration phase ${String(value.name)}`);
   if (!LOADTEST_PHASES.includes(value.name)) throw new Error(`unknown phase ${String(value.name)}`);
   if (!PHASE_STATUSES.has(value.status)) throw new Error(`invalid phase status ${String(value.status)}`);
   return structuredClone(value);
@@ -41,12 +54,15 @@ export function parseOrchestrationReport(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("orchestration report must be an object");
   }
+  rejectUnknownKeys(value, REPORT_KEYS, "orchestration report");
   if (value.version !== 1 || !Array.isArray(value.phases) || !Array.isArray(value.notes)) {
     throw new Error("orchestration report has invalid shape");
   }
   const phases = value.phases.map(parsePhase);
-  if (new Set(phases.map(({ name }) => name)).size !== phases.length) {
-    throw new Error("orchestration report has duplicate phases");
+  const actualPhases = phases.map(({ name }) => name).join("/");
+  const expectedPhases = LOADTEST_PHASES.join("/");
+  if (actualPhases !== expectedPhases) {
+    throw new Error(`orchestration phases must exactly equal ${expectedPhases}; got ${actualPhases}`);
   }
   return { ...structuredClone(value), phases };
 }
