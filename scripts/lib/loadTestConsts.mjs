@@ -12,7 +12,7 @@ export const FIXTURE_TEAM_NAME = (clubN, teamN) =>
   `Club ${String(clubN).padStart(2, "0")} Team ${teamN === 1 ? "A" : "B"}`;
 
 export const PILOT_COUNT = 500;
-export const CLUB_COUNT = 50;
+export const CLUB_COUNT = 25;
 export const TEAMS_PER_CLUB = 2;
 export const LOADTEST_TEAMS = 50;
 export const LOADTEST_SLOTS_PER_TEAM = 10;
