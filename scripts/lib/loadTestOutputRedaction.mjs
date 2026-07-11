@@ -8,7 +8,8 @@ const SAS_KEYS = new Set([
 ]);
 const PATTERNS = [
   [/((?:"|')?(?:access_?token|refresh_?token|id_?token|token|password|password_?hash)(?:"|')?\s*[:=]\s*(?:"|'))[^"']*((?:"|'))/giu, `$1${REDACTED}$2`],
-  [/(Authorization\s*:\s*Bearer\s+)[^\s"']+/giu, `$1${REDACTED}`],
+  [/(Authorization\s*[:=]\s*["']?Bearer\s+)(?!\[REDACTED\])[^\s"']+/giu, `$1${REDACTED}`],
+  [/(\bBearer\s+)(["']?)(?!\[REDACTED\])[^\s"']+(["']?)/giu, `$1$2${REDACTED}$3`],
   [/((?:AccountKey|SharedAccessKey|SharedAccessSignature)\s*[:=]\s*)[^;\s]+/giu, `$1${REDACTED}`],
   [/((?:SAS_?TOKEN|ADMIN_PASSWORD|JWT_SECRET|ACCESS_?TOKEN)\s*[:=]\s*)[^\s]+/giu, `$1${REDACTED}`],
   [/(\b(?:access_?token|refresh_?token|id_?token|token)\s*[:=]\s*)(?!["'])[^\s,;}]+/giu, `$1${REDACTED}`],
@@ -40,10 +41,10 @@ function redactUrl(candidate) {
       url.username = REDACTED;
       url.password = REDACTED;
     }
-    for (const key of [...url.searchParams.keys()]) {
-      if (!SAS_KEYS.has(normalizedKey(key))) continue;
+    const queryKeys = [...url.searchParams.keys()];
+    if (queryKeys.some((key) => SAS_KEYS.has(normalizedKey(key)))) {
       credentialBearing = true;
-      url.searchParams.set(key, REDACTED);
+      for (const key of queryKeys) url.searchParams.set(key, REDACTED);
     }
     return credentialBearing ? url.toString() : candidate;
   } catch {
