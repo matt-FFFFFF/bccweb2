@@ -3,6 +3,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { redactLoadTestOutput } from "../lib/loadTestOutputRedaction.mjs";
+import { runLoadTestOrchestration } from "../lib/loadTestOrchestration.mjs";
 
 test("phase-log redaction removes credentials while retaining diagnostics", () => {
   // Given
@@ -41,7 +42,7 @@ test("redaction removes Azure SAS and connection credentials case-insensitively"
   // Then
   assert.doesNotMatch(redacted, /secret-sas|encoded-secret|shared-secret|shared-key|env-secret|account-secret/u);
   assert.match(redacted, /worker\.invalid\/blob\/file/);
-  assert.match(redacted, /safe=count/);
+  assert.doesNotMatch(redacted, /safe=count/u);
 });
 
 test("redaction removes generic token JSON and bare JWT while preserving metrics", () => {
@@ -72,7 +73,7 @@ test("redaction removes URL credentials and colon or encoded SAS assignments", (
   // Then
   assert.doesNotMatch(redacted, /password-secret|double-secret|colon-secret|assignment-secret|encoded-connection-secret/u);
   assert.match(redacted, /worker\.invalid\/path/);
-  assert.match(redacted, /safe=count/);
+  assert.doesNotMatch(redacted, /safe=count/u);
 });
 
 test("redaction removes unquoted generic token assignments", () => {
@@ -84,4 +85,66 @@ test("redaction removes unquoted generic token assignments", () => {
 
   // Then
   assert.doesNotMatch(redacted, /equals-secret|colon-secret|camel-secret/u);
+});
+
+test("redaction removes Authorization Bearer with colon or equals separators", () => {
+  // Given
+  const output = [
+    "Authorization=Bearer auth-equals-marker",
+    "authorization : bearer auth-colon-marker",
+    'AUTHORIZATION = "Bearer auth-quoted-marker"',
+  ].join("\n");
+
+  // When
+  const redacted = redactLoadTestOutput(output);
+
+  // Then
+  assert.doesNotMatch(redacted, /auth-equals-marker|auth-colon-marker|auth-quoted-marker/u);
+  assert.match(redacted, /Authorization=Bearer \[REDACTED\]/u);
+});
+
+test("redaction removes bare Bearer tokens without hiding the word alone", () => {
+  // Given
+  const output = 'Bearer bare-token-marker\nBearer "quoted-bearer-marker"\nBearer';
+
+  // When
+  const redacted = redactLoadTestOutput(output);
+
+  // Then
+  assert.doesNotMatch(redacted, /bare-token-marker|quoted-bearer-marker/u);
+  assert.match(redacted, /^Bearer$/mu);
+});
+
+test("SAS-bearing URLs redact every query value including unknown future keys", () => {
+  // Given
+  const output = [
+    "GET https://worker.invalid/blob/file?sv=version-marker&SIG=sas-marker&custom=future-marker&count=185",
+    "GET https://worker.invalid/blob/file?S%2569G=encoded-sas-marker&FutureKey=encoded-future-marker",
+    "GET https://worker.invalid/health?count=185&durationMs=42",
+  ].join("\n");
+
+  // When
+  const redacted = redactLoadTestOutput(output);
+
+  // Then
+  assert.doesNotMatch(redacted, /version-marker|sas-marker|future-marker|encoded-sas-marker|encoded-future-marker/u);
+  assert.match(redacted, /https:\/\/worker\.invalid\/blob\/file\?/u);
+  assert.match(redacted, /https:\/\/worker\.invalid\/health\?count=185&durationMs=42/u);
+});
+
+test("Authorization, bare Bearer, and mixed SAS values never persist in status", async () => {
+  // Given
+  const records = [];
+  const leaked = "Authorization=Bearer status-auth-marker Bearer status-bare-marker https://worker.invalid/blob?sig=status-sas-marker&custom=status-future-marker";
+
+  // When
+  await runLoadTestOrchestration({
+    runPhase: async () => ({ exitCode: null, signal: null, error: leaked, timedOut: false }),
+    inspectCheckpoint: async () => false,
+    record: async (value) => records.push(JSON.stringify(value)),
+    now: () => 1,
+  });
+
+  // Then
+  assert.doesNotMatch(records.join("\n"), /status-auth-marker|status-bare-marker|status-sas-marker|status-future-marker/u);
 });
