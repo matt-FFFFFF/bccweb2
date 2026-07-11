@@ -129,6 +129,20 @@ test("partial valid fixture index fails before destructive cleanup", async () =>
   });
 });
 
+test("partial public fixture index fails before destructive cleanup", async () => {
+  await withEnvironment(async (environment) => {
+    const manifest = await seedCompleteLegacyState(environment, ({ publicIndexes }) => {
+      publicIndexes["pilots.json"].shift();
+    });
+    const result = environment.runScript(WIPE_SCRIPT);
+    assert.notEqual(result.status, 0);
+    assert.equal(
+      await environment.privateContainer.getBlobClient(`rounds/${manifest.roundIds[0]}.json`).exists(),
+      true
+    );
+  });
+});
+
 test("duplicate fixture index entry fails before destructive cleanup", async () => {
   await withEnvironment(async (environment) => {
     const manifest = await seedCompleteLegacyState(environment, ({ publicIndexes }) => {
