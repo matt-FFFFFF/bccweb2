@@ -7,11 +7,11 @@ import { existsSync, readFileSync, unlinkSync } from "node:fs";
 import { performance } from "node:perf_hooks";
 import { cleanupOwnedRoundIds } from "./lib/loadTestRoundCleanup.mjs";
 import { createLoadTestApi, loginLoadTestUser } from "./lib/loadTestApi.mjs";
+import { resolveAdminPassword } from "./lib/devCredentials.mjs";
 import {
   ADMIN_EMAIL,
   ADMIN_PASSWORD_OVERRIDE,
   BCC_API_BASE_URL,
-  DEV_CREDENTIALS_PATH,
   FIXTURE_MANIFEST_PATH,
   FIXTURE_PILOT_PASSWORD,
   LOADTEST_SLOTS_PER_TEAM,
@@ -31,15 +31,6 @@ const LOAD_ROUND_OFFSET_DAYS = 35;
 
 function fail(message) {
   throw new Error(`[prepare-loadtest] ${message}`);
-}
-
-function resolveAdminPassword() {
-  if (ADMIN_PASSWORD_OVERRIDE) return ADMIN_PASSWORD_OVERRIDE;
-  if (existsSync(DEV_CREDENTIALS_PATH)) {
-    const match = readFileSync(DEV_CREDENTIALS_PATH, "utf8").match(/^ADMIN_PASSWORD=(.+)$/m);
-    if (match?.[1]) return match[1].trim();
-  }
-  fail("missing admin password; set ADMIN_PASSWORD or create .dev-credentials");
 }
 
 function isoDatePlusDays(days) {
@@ -85,7 +76,7 @@ async function main() {
   });
   const token = await loginLoadTestUser(callApi, {
     email: ADMIN_EMAIL,
-    password: resolveAdminPassword(),
+    password: resolveAdminPassword(ADMIN_PASSWORD_OVERRIDE),
   });
   const siteId = manifest.siteIds[0];
   const created = await callApi("POST", "/api/rounds", {

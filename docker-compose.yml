@@ -86,10 +86,10 @@ services:
       start_period: 30s
     restart: unless-stopped
 
-  # ─── Init: seed admin user + print credentials ──────────────────────────────
+  # ─── Init: seed admin user + private credentials ───────────────────────────
   # One-shot: runs after api is healthy, exits 0. Idempotent — re-running prints
-  # "already exists". Writes plaintext password to STDERR (3x, yellow) and to
-  # `.dev-credentials` on the host via bind-mount. Pre-condition: host file
+  # "already exists". Writes the password only to `.dev-credentials` on the host
+  # via bind-mount; it is never logged. Pre-condition: host file
   # `.dev-credentials` must exist (the `make dev` target / T16 will touch it).
   api-init:
     image: node:24-slim

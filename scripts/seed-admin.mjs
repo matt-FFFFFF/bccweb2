@@ -18,15 +18,13 @@
  *          `acceptedTsCsVersion: TS_CS_VERSION` (so the SPA doesn't block on T&Cs).
  *       6. Re-read `user-index.json` (refresh in case of race), merge in the new
  *          entry, write back.
- *       7. Print the password to STDERR three times (ANSI yellow + bold) so it's
- *          visible above docker-compose noise.
- *       8. Write `.dev-credentials` (chmod 600) with the credentials so other
+ *       7. Write `.dev-credentials` (mode 0600) with the credentials so other
  *          scripts (e.g. `make e2e`) can pick them up.
  *
  * Output rules:
- *   - All status / password output goes to STDERR. STDOUT stays clean so
+ *   - Status output goes to STDERR. STDOUT stays clean so
  *     compose log integration (T14) can redirect freely.
- *   - The password is NEVER written to a blob — STDERR + `.dev-credentials` only.
+ *   - The password is NEVER logged or written to a blob.
  *
  * Usage:
  *   node scripts/seed-admin.mjs
@@ -45,43 +43,53 @@ import {
 } from "./lib/blobSeed.mjs";
 import {
   ADMIN_EMAIL,
-  DEV_CREDENTIALS_PATH,
   TS_CS_VERSION,
 } from "./lib/loadTestConsts.mjs";
+import {
+  devCredentialsPath,
+  readInitializedDevCredentials,
+  writeDevCredentials,
+} from "./lib/devCredentials.mjs";
 import { randomBytes } from "node:crypto";
-import { writeFileSync, chmodSync } from "node:fs";
-
-// ─── ANSI helpers ────────────────────────────────────────────────────────────
-
-const ANSI_YELLOW_BOLD = "\x1b[1;33m";
-const ANSI_YELLOW = "\x1b[33m";
-const ANSI_RESET = "\x1b[0m";
-
-function logYellow(line) {
-  process.stderr.write(`${ANSI_YELLOW}${line}${ANSI_RESET}\n`);
-}
-
-function logYellowBold(line) {
-  process.stderr.write(`${ANSI_YELLOW_BOLD}${line}${ANSI_RESET}\n`);
-}
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
+  const prepareOnly = process.argv.includes("--prepare-credentials");
+  const credentialPath = devCredentialsPath();
+  const override = process.env.ADMIN_PASSWORD;
+  const existingCredentials = override
+    ? null
+    : readInitializedDevCredentials(credentialPath);
+  if (existingCredentials && existingCredentials.email !== ADMIN_EMAIL) {
+    throw new Error(`seed-admin: admin credential email must be ${ADMIN_EMAIL}`);
+  }
+  const password = override ?? existingCredentials?.password ?? randomBytes(12).toString("base64url").slice(0, 16);
+
   const privateContainer = getPrivateContainer();
 
   const existingIndex =
     (await readJson(privateContainer, "user-index.json")) ?? {};
 
   if (existingIndex[ADMIN_EMAIL]) {
-    logYellow(
-      `=== BCC ADMIN: ${ADMIN_EMAIL} already exists. Run 'docker compose down -v' to regenerate. ===`
+    if (!override && !existingCredentials) {
+      throw new Error("seed-admin: existing admin requires ADMIN_PASSWORD or an initialized .dev-credentials file");
+    }
+    process.stderr.write(
+      `[seed-admin] ${ADMIN_EMAIL} already exists; admin credential source is available.\n`
     );
-    process.exit(0);
+    return;
+  }
+
+  if (!override && !existingCredentials) {
+    writeDevCredentials({ email: ADMIN_EMAIL, password }, credentialPath);
+  }
+  if (prepareOnly) {
+    process.stderr.write(`[seed-admin] private admin credential is ready at ${credentialPath}.\n`);
+    return;
   }
 
   // Cold-run path — create the admin.
-  const password = randomBytes(12).toString("base64url").slice(0, 16);
   const userId = deterministicUuid("admin-user", ADMIN_EMAIL);
   const now = new Date().toISOString();
 
@@ -109,20 +117,8 @@ async function main() {
   refreshedIndex[ADMIN_EMAIL] = userId;
   await writeJson(privateContainer, "user-index.json", refreshedIndex);
 
-  // Print the password 3x to STDERR in bold yellow so it's hard to miss in
-  // docker-compose logs / scrollback.
-  const passwordLine = `=== BCC ADMIN PASSWORD: ${password} (email: ${ADMIN_EMAIL}) ===`;
-  for (let i = 0; i < 3; i++) {
-    logYellowBold(passwordLine);
-  }
-
-  // Persist credentials for downstream scripts (e2e, smoke tests). chmod 600
-  // because this file contains a plaintext password.
-  writeFileSync(
-    DEV_CREDENTIALS_PATH,
-    `ADMIN_EMAIL=${ADMIN_EMAIL}\nADMIN_PASSWORD=${password}\n`
-  );
-  chmodSync(DEV_CREDENTIALS_PATH, 0o600);
+  const source = override ? "ADMIN_PASSWORD override" : `private credential at ${credentialPath}`;
+  process.stderr.write(`[seed-admin] OK: ${ADMIN_EMAIL}; using ${source}.\n`);
 }
 
 main().catch((err) => {

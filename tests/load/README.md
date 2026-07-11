@@ -8,13 +8,14 @@ orchestrator process; even `make -j loadtest` cannot reorder its phases.
 
 - Install k6 (`brew install k6`, a supported Linux package, or `grafana/k6`).
 - Start an isolated local stack, or select a dedicated Azure load-test stack.
-- Run `make seed` once. `make seed-rounds` is optional browsing data and is not a
+- Run `make seed` once. It creates/reuses the ignored mode-0600 `.dev-credentials`
+  file without logging its value. `make seed-rounds` is optional browsing data and is not a
   load-pipeline phase. Seeding creates 500 pilots, 25 clubs, 50 canonical teams,
   10 pilots per team, 25 coordinators, and 50 captains.
 - Set `LOADTEST_DEDICATED_STACK=1`. The exact verifier refuses global queue
   claims without this explicit confirmation.
-- Supply the seeded admin password through `ADMIN_PASSWORD` or
-  `.dev-credentials`. Do not copy credentials into logs or evidence.
+- `ADMIN_PASSWORD` remains an explicit override; otherwise admin scripts use the
+  generated `.dev-credentials`. Do not copy credentials into logs or evidence.
 
 Remote authentication is intentionally limited: login is 10 requests/minute per
 trusted client IP. Unique `X-Forwarded-For` values partition only local Functions

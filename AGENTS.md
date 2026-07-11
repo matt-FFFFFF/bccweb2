@@ -54,7 +54,7 @@ own lockfile (pulls `mssql`, kept out of the deployed tree); root `npm ci` skips
 | `make test-heavy`| The 3 excluded heavy API tests (see Testing).                            |
 | `make dev`       | Full stack via Docker Compose (Azurite + API + Web/Caddy).                |
 | `make dev-api` / `dev-web` | Functions host `:7071` (needs Azurite) / Vite dev `:5173`.      |
-| `make seed`      | Dev fixtures (500 pilots / 25 clubs / 50 teams / season).                  |
+| `make seed`      | Generate/reuse private admin credentials, then seed fixtures.              |
 | `make seed-rounds` | Optional 4-round browsing data; not a `make loadtest` prerequisite.       |
 | `make loadtest`  | Sequential prepare/register/captains/transition/sign/artifact/verify/cleanup status transaction on a dedicated stack. |
 | `npm run loadtest:test` | Pure load orchestration/artifact/static contracts; no k6/Azurite.      |
@@ -78,6 +78,12 @@ p95<2s/p99<5s, zero-error/5xx gates. The exact verifier checks artifacts, ledger
 flags, replay and dedicated approximate reflect-queue quiescence. Pre-sign failure
 cleans an owned checkpoint; verifier/queue failure preserves all state and forbids
 cleanup. See `docs/runbooks/load-testing.md`.
+
+Local `make seed` bootstraps `admin@bcc.local` and writes its generated credential only
+to the ignored root `.dev-credentials` at mode 0600; the value is never logged.
+Subsequent seed/load control scripts consume that file automatically. `ADMIN_PASSWORD`
+remains the explicit override. Malformed, linked, foreign-owned, or non-0600 files fail
+before API/storage mutation.
 
 ## License headers (SPDX)
 

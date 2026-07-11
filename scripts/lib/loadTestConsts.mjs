@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
+export { DEV_CREDENTIALS_PATH } from "./devCredentials.mjs";
 export const ADMIN_EMAIL = "admin@bcc.local";
 export const FIXTURE_PILOT_PASSWORD = "loadtest-pw-bcc";
 
@@ -19,8 +20,6 @@ export const LOADTEST_SLOTS_PER_TEAM = 10;
 
 export const FIXTURE_MANIFEST_PATH = ".fixture-manifest.json";
 export const PREPARED_ROUND_PATH = "tests/load/.prepared-round.json";
-export const DEV_CREDENTIALS_PATH = ".dev-credentials";
-
 export const SEASON_YEAR = new Date().getFullYear();
 
 export const TS_CS_VERSION = 1; // MIRROR: apps/api/src/lib/termsConstants.ts — keep in lockstep

@@ -4,10 +4,10 @@ import {
   BCC_API_BASE_URL,
   ADMIN_EMAIL,
   ADMIN_PASSWORD_OVERRIDE,
-  DEV_CREDENTIALS_PATH,
   PREPARED_ROUND_PATH,
 } from "./lib/loadTestConsts.mjs";
 import { readFileSync, existsSync } from "node:fs";
+import { resolveAdminPassword } from "./lib/devCredentials.mjs";
 
 if (!existsSync(PREPARED_ROUND_PATH)) {
   console.error(
@@ -24,26 +24,7 @@ if (!roundId) {
   process.exit(1);
 }
 
-function resolveAdminPassword() {
-  if (ADMIN_PASSWORD_OVERRIDE) return ADMIN_PASSWORD_OVERRIDE;
-
-  if (existsSync(DEV_CREDENTIALS_PATH)) {
-    const contents = readFileSync(DEV_CREDENTIALS_PATH, "utf8");
-    const match = contents.match(/^ADMIN_PASSWORD=(.+)$/m);
-    if (match?.[1]) return match[1];
-    console.error(
-      `[transition-loadtest] ${DEV_CREDENTIALS_PATH} exists but does not contain ADMIN_PASSWORD=...`
-    );
-    process.exit(1);
-  }
-
-  console.error(
-    `[transition-loadtest] missing admin password. Set ADMIN_PASSWORD_OVERRIDE or create ${DEV_CREDENTIALS_PATH}.`
-  );
-  process.exit(1);
-}
-
-const password = resolveAdminPassword();
+const password = resolveAdminPassword(ADMIN_PASSWORD_OVERRIDE);
 
 const loginRes = await fetch(`${BCC_API_BASE_URL}/api/auth/login`, {
   method: "POST",
