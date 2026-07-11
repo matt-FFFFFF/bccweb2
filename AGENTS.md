@@ -55,12 +55,27 @@ own lockfile (pulls `mssql`, kept out of the deployed tree); root `npm ci` skips
 | `make dev`       | Full stack via Docker Compose (Azurite + API + Web/Caddy).                |
 | `make dev-api` / `dev-web` | Functions host `:7071` (needs Azurite) / Vite dev `:5173`.      |
 | `make seed`      | Dev fixtures (500 pilots / 25 clubs / 50 teams / season).                  |
+| `make seed-rounds` | Optional 4-round browsing data; not a `make loadtest` prerequisite.       |
+| `make loadtest`  | Sequential prepare/register/captains/transition/sign/verify/queue/cleanup transaction on a dedicated stack. |
+| `npm run loadtest:test` | Pure load orchestration/artifact/static contracts; no k6/Azurite.      |
 | `make clean`     | Removes `dist/` AND `*.tsbuildinfo`.                                      |
 | `npm run e2e`    | Playwright (`tests/e2e/playwright.config.ts`, base URL `:5173`).          |
 | `npm run lint`   | eslint all workspaces + `tests/e2e` + `scripts`; each workspace has its own `lint` (`eslint src --max-warnings 0`), then the SPDX header check (`license:check`). |
 
 Single-file: `npx vitest run path/to/file.test.ts`. Watch: `npm run test:watch`.
 Local dev needs Docker (or Podman) for Azurite.
+
+**Load testing**: canonical fixtures are 500 pilots / 25 clubs / 50 teams / 10
+pilots per team, with 25 coordinators and 50 captains. `make loadtest` is one Node
+orchestrator recipe, so `make -j` cannot reorder phases; individual `loadtest-*`
+targets remain diagnostic tools. Preparation checkpoints exact `loadRoundId`
+ownership before team creation. Register and sign never retry; production
+`withPrivateLeaseRetry` owns lease contention. Sign selects 185 slots in disjoint
+10/25/50/100 cohorts (315 remain false), with hard per-cohort 201-only,
+p95<2s/p99<5s, zero-error/5xx gates. The exact verifier checks artifacts, ledger,
+flags, replay and dedicated approximate reflect-queue quiescence. Pre-sign failure
+cleans an owned checkpoint; verifier/queue failure preserves all state and forbids
+cleanup. See `docs/runbooks/load-testing.md`.
 
 ## License headers (SPDX)
 
@@ -297,7 +312,7 @@ same proxy shape ([`Caddyfile`](file:///Volumes/code/bccweb2/apps/web/Caddyfile)
 ## Operations
 
 Runbooks in `docs/runbooks/`: `alerts`, `cutover`, `decommission`, `deploy-smoke-failure`,
-`dns-cutover`, `gdpr-erasure`, `privacy`, `round-club-pilot-decision` — read the relevant
+`dns-cutover`, `gdpr-erasure`, `load-testing`, `privacy`, `round-club-pilot-decision` — read the relevant
 one before the matching op. Migration scripts in `scripts/migrate/` (legacy .NET → blob)
 keep state under `.migration-state/` (gitignored); `scripts/admin/anonymize-pilot.mjs` for GDPR erasure.
 

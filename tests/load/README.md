@@ -1,137 +1,119 @@
 # Load Testing (k6)
 
-High-contention performance tests for the Sign-to-Fly journey. These tests measure the system's ability to handle hundreds of pilots registering and signing for a round simultaneously.
+The load suite exercises registration and Sign-to-Fly contention on a dedicated
+stack. Never run it against production. `make loadtest` is one sequential Node
+orchestrator process; even `make -j loadtest` cannot reorder its phases.
 
 ## Prerequisites
 
-- **k6**: [Install k6](https://k6.io/docs/getting-started/installation/) on your machine.
-  - macOS: `brew install k6`
-  - Linux: Follow the official k6 docs for your distro.
-  - Docker: `docker pull grafana/k6`
-- **Target Environment**:
-  - **Local**: A running dev stack (`make dev` or `docker compose up`).
-  - **Azure**: A dedicated test instance. **NEVER run these tests against production.**
+- Install k6 (`brew install k6`, a supported Linux package, or `grafana/k6`).
+- Start an isolated local stack, or select a dedicated Azure load-test stack.
+- Run `make seed` once. `make seed-rounds` is optional browsing data and is not a
+  load-pipeline phase. Seeding creates 500 pilots, 25 clubs, 50 canonical teams,
+  10 pilots per team, 25 coordinators, and 50 captains.
+- Set `LOADTEST_DEDICATED_STACK=1`. The exact verifier refuses global queue
+  claims without this explicit confirmation.
+- Supply the seeded admin password through `ADMIN_PASSWORD` or
+  `.dev-credentials`. Do not copy credentials into logs or evidence.
 
-## The 6-Step Pipeline
+Remote authentication is intentionally limited: login is 10 requests/minute per
+trusted client IP. Unique `X-Forwarded-For` values partition only local Functions
+traffic; Azure uses its trusted `client-ip`. One remote generator therefore cannot
+perform 500 setup logins without an approved partitioned-generator or token design.
 
-The load test is split into phases because k6 (based on Goja) cannot easily share state with the Node.js seeding scripts, and the API enforces strict status guards that require multiple HTTP phases.
+## Eight operational steps
 
-1.  **Prepare** (`make loadtest-prepare`): Creates a dedicated load-test round with 50 teams and 500 slots. It generates `tests/load/.prepared-round.json` which contains the metadata needed by k6.
-2.  **Register** (`make loadtest-register`): Setup logs in all 500 pilots once in batches of 25, then 500 one-iteration virtual users (VUs) each call `/register-self` exactly once. This is the primary contention point for the round blob lease.
-3.  **Transition** (`make loadtest-transition`): A single administrative call to move the round to the "Brief Complete" status, enabling the signing phase.
-4.  **Sign** (`make loadtest-sign`): a `ramping-vus` executor drives 10 → 25 → 50 → 100 concurrent VUs calling the `/sign` endpoint on the same round to find the contention knee. A hard `sign_5xx: count==0` threshold fails the run on any sign-phase 5xx.
-5.  **Verify** (`make loadtest-verify`): Logs in as admin, checks that all expected signatures persisted, waits up to 30 seconds for `slot.signToFly` to be materialized by the async `signtofly-reflect` queue consumer, and re-signs one slot to prove idempotency returns the same signature id.
-6.  **Cleanup** (`make loadtest-cleanup`): Deletes the load-test round and its associated signatures to return the storage to a clean state.
+1. **Prepare** (`loadtest-prepare`) replaces any prior checkpointed load round,
+   creates a +35-day Confirmed round with 50 teams/500 slots, and atomically writes
+   `tests/load/.prepared-round.json`. The exact created round ID is checkpointed in
+   `.loadtest-round-state.json` before team creation.
+2. **Register** (`loadtest-register`) logs in 500 pilots in batches of 25, then runs
+   twenty 25-VU one-shot cohorts five seconds apart. Each pilot sends one
+   `/register-self`; the client never retries registration.
+3. **Captains/reconcile** (`loadtest-captains`) logs in the 25 club coordinators,
+   sets all 50 captains, reads authoritative places, and atomically rewrites the
+   prepared artifact. Setup HTTP may honor bounded `Retry-After` 429 responses;
+   captain operations never retry 409/5xx.
+4. **Transition** (`loadtest-transition`) advances the prepared round to
+   `BriefComplete` with one administrative request.
+5. **Sign** (`loadtest-sign`) authenticates the selected 185 pilots and runs disjoint
+   one-shot cohorts of 10, 25, 50, and 100 at prepared offsets 0, 10, 35, and 85.
+   The other 315 slots remain unsigned. Signing never retries.
+6. **Verify artifacts and persisted state** (`artifact` then `loadtest-verify`)
+   validates the k6 JSON/summary, exact 185-key ledger, 185 true flags, 315 false
+   flags, final-100 IDs, and one same-ID HTTP 200 replay. A persisted errored key is
+   replayed when coherent; otherwise the verifier labels a deterministic successful
+   key `replay=fallback`.
+7. **Prove queue quiescence** (inside `loadtest-verify`) observes the dedicated
+   `signtofly-reflect` and poison queues through `AzureWebJobsStorage`. It requires
+   approximate global counts of zero twice at least two seconds apart after replay;
+   it never peeks, dequeues, or treats this approximation as valid on a shared stack.
+8. **Cleanup** (`loadtest-cleanup`) deletes only the checkpoint-owned round,
+   signatures, briefs, and known references. It never scans for ownership and
+   preserves fixtures and optional seed rounds.
 
-## Running Locally
+The production server owns lease-conflict retry through `withPrivateLeaseRetry`.
+The register and sign clients deliberately do not retry failed operations, so every
+response remains visible in the result.
 
-To run the full pipeline against your local Azurite/Functions stack:
+## Running
 
 ```sh
-# 1. Ensure fixtures are seeded (first time only)
 make seed
-
-# 2. Run the full load test pipeline
+export LOADTEST_DEDICATED_STACK=1
 make loadtest
 ```
 
-The `make loadtest` command chains all six steps. If any step fails, the pipeline stops.
+For a dedicated Azure stack also set `BCC_API_BASE_URL` and `ADMIN_PASSWORD`, and
+disable external effects (`PURETRACK_ENABLED=false`, `ROUND_BRIEF_EMAILS=""`). Remote
+hostnames must contain `loadtest` or `staging`; production-looking names are rejected
+before any directory, checkpoint, or API mutation.
 
-### Step-by-Step execution
+The narrow Make targets remain available for diagnosis. Run them in the eight-step
+order above; `make help` lists prepare, register, captains, transition, sign, verify,
+and cleanup. The queue gate is part of verify rather than a separate Make target.
 
-You can also run phases individually for debugging:
+## Gates and artifacts
 
-```sh
-make loadtest-prepare
-make loadtest-register
-make loadtest-transition
-make loadtest-sign
-make loadtest-verify
-make loadtest-cleanup
-```
+Each sign cohort requires exactly its configured number of HTTP **201** creations,
+zero errors/5xx, p95 below 2 seconds, and p99 below 5 seconds. These are hard,
+user-approved release gates, not advisory baselines. HTTP 200 during first-write load
+is a stale replay and fails. Register requires exactly 500 attempts/successes and zero
+failures/5xx.
 
-Stdout from k6 is persisted to `logs/load-test/{phase}-{timestamp}.log` (gitignored).
+Runtime output is kept under ignored `logs/load-test/`: private per-phase logs, sign
+events/summary, and `orchestration-<run>.json`. The status artifact records only phase
+name, state, timing, exit code/signal/timeout, and sanitized runner errors—never command
+arguments, environment, credentials, request bodies, or child output. Its phase rows
+include the corresponding safe log path. `SIGN_EVENTS_PATH`, `SIGN_SUMMARY_PATH`, and
+`LOADTEST_STATUS_PATH` overrides must be relative paths beneath `logs/load-test/`.
 
-## Running Against Azure
+## Failure and cleanup policy
 
-To target a dedicated Azure test instance, you must provide the environment variables and configure the Function App.
+| Failure point | Later work | Cleanup |
+| --- | --- | --- |
+| Prepare before a load-round checkpoint exists | Stop | Skip; nothing is owned |
+| Prepare after checkpoint, register, captains, or transition | Skip dependent phases | Always attempt exact checkpoint cleanup |
+| Sign/k6 or artifact parser | Run artifact/exact verifier as applicable; aggregate every status | Only when exact verifier and post-replay queue gate pass |
+| Exact ledger/flags/replay or queue quiescence | Stop | **Forbidden**; preserve round, checkpoint, prepared file, events, summary, logs, and status |
+| Cleanup | Report aggregate failure | Nonzero; checkpoint remains diagnostic/retry ownership |
 
-### 1. Environment Variables
+An all-success run returns zero. Any child exit, signal, timeout, artifact failure,
+verifier failure, status-write failure, or cleanup failure makes the aggregate result
+nonzero. The final report distinguishes attempted, skipped, passed, and failed phases.
 
-Set these in your shell before running the `make` targets:
+## Recovery
 
-```sh
-export BCC_API_BASE_URL="https://your-loadtest-api.azurewebsites.net"
-export ADMIN_PASSWORD="your-admin-password"
-```
+- After an exact verifier/queue failure, inspect the preserved status and phase logs,
+  then rerun `make loadtest-verify` with the retained event/summary paths. Do not clean
+  first.
+- After a pre-sign failure, the orchestrator already attempted cleanup when ownership
+  existed. If cleanup failed, fix the cause and run `make loadtest-cleanup`; exact
+  checkpoint ownership makes interruption/resume surgical.
+- `make loadtest-prepare` replaces a prior checkpoint-owned load round. It does not
+  replace the four optional `make seed-rounds` rounds.
+- k6 setup waits are bounded. A bad credential, missing token, setup timeout, 409, or
+  5xx is surfaced rather than retried or masked.
 
-### 2. Function App Configuration
-
-Ensure the following App Settings are set on the target Function App:
-
-- `PURETRACK_ENABLED=false` (to avoid hitting PureTrack rate limits or costs)
-- `ROUND_BRIEF_EMAILS=""` (to avoid sending 500 emails)
-- `JWT_SECRET` (should already be a Key Vault reference)
-- `ACS_CONNECTION_STRING` (should be a non-production resource or omitted)
-
-### 3. Execution
-
-```sh
-# 1. Seed the 500 fixture pilots once
-make seed
-
-# 2. Run the load test cycles
-make loadtest
-
-# 3. Clean up the round
-make loadtest-cleanup
-```
-
-## Interpreting Output
-
-k6 produces a summary at the end of each phase. Look for these key metrics:
-
-- `http_req_duration`: End-to-end request time (p90, p95).
-- `http_req_failed`: The percentage of failed requests.
-- `checks`: The success rate of the "login 200", "register ok", and "sign ok" assertions.
-
-The register phase is the primary lease-contention measurement. It never retries: exactly 500 attempts, 500 successes, zero failures, and zero 5xx are hard thresholds. Its machine summary separates the 500 setup login requests/tokens from register attempts and register-only latency. The sign phase is a hard gate: server-side 5xx responses fail the k6 run. After k6 exits, `make loadtest-verify` is the correctness gate for persisted state: it fails non-zero if the signature ledger count is not the expected 500, if `signToFly` remains false after the bounded async drain window, or if re-signing an already signed slot creates a different signature id.
-
-`signToFly` is not asserted instantaneously because signing now enqueues a `{ roundId }` job for the `signtofly-reflect` queue consumer. The verifier polls `GET /api/rounds/{roundId}` for about 30 seconds so the queue can drain while still preventing a hung or misleading-success load test.
-
-### Baseline Metrics (Local)
-
-> **These are illustrative observations, not latency SLO gates.** The register phase has exact count/error thresholds, and the sign phase is hard-gated on 5xx (see [§Interpreting output](#interpreting-output)). Numbers vary by hardware, contention, Azurite version. Don't compare local to Azure.
-
-As a reference, these metrics were observed on a standard local dev stack:
-- **Register phase**: 500 VUs finished in ~7m 40s.
-- **Sign phase**: staged ramp 10 → 25 → 50 → 100 concurrent VUs on one round (~2m20s of staged load; the `sign_5xx` gate must stay at 0).
-
-## Local vs Azure Differences
-
-- **Cold Starts**: Azure Functions may experience cold starts on the first few requests.
-- **Auto-scale**: Azure will attempt to scale out the Function App instances under load, whereas local execution is limited to your machine's CPU/RAM.
-- **Lease Semantics**: Azure Storage lease timing and consistency may differ slightly from Azurite's emulation.
-- **Register authentication**: Login is limited to 10 requests/minute per trusted client IP. One Azure load generator therefore cannot perform the required 500 setup logins. The script's unique `X-Forwarded-For` values only partition local Functions traffic; Azure uses its trusted `client-ip` value. Remote execution requires an approved partitioned-generator or token-provisioning design, which this load test does not supply.
-- **Cost**: Running 500 VUs against Azure consumes execution units and storage transactions. Use dedicated test instances only.
-
-## Design Choices & Safety
-
-### Fixture Topology
-
-Fixture seeding creates 500 pilots, 25 clubs, and 50 canonical teams, with 10 pilots per team. Preparation and full-pipeline behavior are documented with their orchestration changes.
-
-### Safety Guards
-
-- **Base URL**: `BCC_API_BASE_URL` should always point to a `loadtest` or `staging` environment. **NEVER target production.**
-- **PHASE Guard**: The k6 script will exit immediately if the `PHASE` environment variable is not set to `register` or `sign`.
-- **Operator Responsibility**: The scripts do not enforce environment safety; the operator must verify the target URL.
-
-## Troubleshooting
-
-- **Missing .prepared-round.json**: Run `make loadtest-prepare` first.
-- **Wrong Round Status**: If you skip `make loadtest-transition`, the sign phase will fail because the round is not in "Brief Complete" status.
-- **HTTP 429 (Too Many Requests)**: Setup authentication is limited to 10/min per trusted client IP. A local run uses unique XFF fallbacks; an Azure run from one generator IP is unsupported without an approved partitioned/token design.
-- **HTTP 500 (Internal Server Error)**: Register and sign 500s are never retried and fail their runs.
-- **Verify timeout**: `make loadtest-verify` timed out waiting for `signToFly=true`; inspect the Functions host logs for the `signtofly-reflect` queue consumer before cleanup.
-- **Cold-start Latency**: In Azure, the first few iterations might show significantly higher latency.
+Run the pure contract suite with `npm run loadtest:test`; CI runs it without k6 or
+Azurite.

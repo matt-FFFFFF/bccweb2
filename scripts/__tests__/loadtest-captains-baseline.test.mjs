@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { resolve } from "node:path";
+import { LOADTEST_PHASES } from "../lib/loadTestOrchestration.mjs";
 
 const preparePath = resolve("scripts/prepare-loadtest.mjs");
 const transitionPath = resolve("scripts/transition-loadtest.mjs");
@@ -46,16 +47,12 @@ test("k6 registration and signing address slots by prepared team and place", asy
   assert.match(signSource, /teams\/\$\{target\.teamId\}\/pilots\/\$\{target\.place\}\/sign/);
 });
 
-test("Make runs captain reconciliation between registration and transition", async () => {
+test("orchestrator runs captain reconciliation between registration and transition", async () => {
   // Given
   const source = await readFile(makefilePath, "utf8");
 
-  // When
-  const pipeline = source.match(/^loadtest: (.+)$/m)?.[1];
-
-  // Then
-  assert.ok(pipeline);
+  // When / Then
   assert.match(source, /^loadtest-captains:.*\n\tnode scripts\/set-captains-loadtest\.mjs$/m);
-  assert.ok(pipeline.indexOf("loadtest-register") < pipeline.indexOf("loadtest-captains"));
-  assert.ok(pipeline.indexOf("loadtest-captains") < pipeline.indexOf("loadtest-transition"));
+  assert.ok(LOADTEST_PHASES.indexOf("register") < LOADTEST_PHASES.indexOf("captains"));
+  assert.ok(LOADTEST_PHASES.indexOf("captains") < LOADTEST_PHASES.indexOf("transition"));
 });

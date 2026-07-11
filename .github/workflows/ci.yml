@@ -62,6 +62,9 @@ jobs:
       - name: Build shared packages
         run: make build-types build-schemas build-scoring
 
+      - name: Run load-test contract tests
+        run: npm run loadtest:test
+
       - name: Lint
         run: npm run lint
 

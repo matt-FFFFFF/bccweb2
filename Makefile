@@ -133,8 +133,8 @@ loadtest-cleanup: ## Delete load-test round + signatures, keep fixtures
 	node scripts/cleanup-loadtest.mjs
 
 .PHONY: loadtest
-loadtest: loadtest-prepare loadtest-register loadtest-captains loadtest-transition loadtest-sign loadtest-verify loadtest-cleanup ## Full loadtest pipeline (prepare to cleanup)
-	@echo "[loadtest] full pipeline complete"
+loadtest: ## Run sequential load pipeline with verified cleanup policy
+	node scripts/run-loadtest.mjs
 
 .PHONY: clean
 clean: ## Remove all dist/ directories and tsbuildinfo files
