@@ -116,9 +116,9 @@ As a reference, these metrics were observed on a standard local dev stack:
 
 ## Design Choices & Safety
 
-### Canonical Fixture Clubs and Teams
+### Fixture Topology
 
-Fixture seeding binds 500 pilots to 25 clubs and 50 canonical teams, with 10 pilots per team. Load-test preparation must preserve those club/team relationships so `register-self` exercises normal seasonal membership checks; no fixture-only club auto-allocation flag is used.
+Fixture seeding creates 500 pilots, 25 clubs, and 50 canonical teams, with 10 pilots per team. Preparation and full-pipeline behavior are documented with their orchestration changes.
 
 ### Safety Guards
 

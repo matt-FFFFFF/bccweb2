@@ -111,8 +111,8 @@ Load test fixtures contain synthetic data only (`pilotXXX@bcc.local`). The `scri
 - **Remediation**: Verify the deployed commit includes the `confirmRound` auto-brief block.
 
 ### register-self returns 409 NOT_IN_CLUB_FOR_SEASON "Round has no organising club"
-- **Cause**: The load-test round was created without an organising club, or its teams do not match the pilots' canonical fixture clubs.
-- **Remediation**: Re-run fixture seeding and preparation. Fixtures bind each pilot to one of 50 canonical teams across 25 clubs; no fixture-only club auto-allocation flag is used.
+- **Cause**: The prepared round and pilot fixture clubs do not agree.
+- **Remediation**: Inspect the prepared round and fixture manifest before retrying. The end-to-end preparation workflow is documented when its orchestration ships.
 
 ### bcrypt slow on cold start
 - **Cause**: First login involves high CPU cost for bcrypt.
