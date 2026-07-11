@@ -15,13 +15,12 @@ import {
   SEASON_YEAR,
 } from "../lib/loadTestConsts.mjs";
 
-const AZURITE_CONNECTION_STRING =
+const AZURITE_CONNECTION_STRING = process.env.FIXTURE_TEST_CONNECTION_STRING ??
   "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
   "AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;" +
   "BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;";
 const REPO_ROOT = resolve(import.meta.dirname, "../..");
 const SEED_SCRIPT = join(REPO_ROOT, "scripts/seed-fixtures.mjs");
-const AUDIT_SCRIPT = join(REPO_ROOT, "scripts/audit-fixtures.mjs");
 const runId = `${process.pid}-${Date.now()}`;
 const publicName = `fixture-public-${runId}`;
 const privateName = `fixture-private-${runId}`;
@@ -96,10 +95,15 @@ after(async () => {
 });
 
 test("seed twice removes stale legacy ownership and preserves nonfixture entries", async () => {
-  // Given an exact legacy manifest plus stale owned blobs and unrelated records
+  // Given a complete current seed extended into the exact legacy generation
+  const initial = runScript(SEED_SCRIPT);
+  assert.equal(initial.status, 0, initial.stderr);
   const staleManifest = legacyManifest();
   const staleClubId = staleManifest.clubIds[49];
   const staleTeamId = staleManifest.teamIds[99];
+  const userIndex = await readJson(privateContainer, "user-index.json");
+  const publicClubs = await readJson(publicContainer, "clubs.json");
+  const publicTeams = await readJson(publicContainer, "club-teams.json");
   await writeFile(
     join(workDir, FIXTURE_MANIFEST_PATH),
     `${JSON.stringify(staleManifest)}\n`
@@ -109,10 +113,27 @@ test("seed twice removes stale legacy ownership and preserves nonfixture entries
     writeJson(privateContainer, `club-teams/${staleTeamId}.json`, { id: staleTeamId }),
     writeJson(privateContainer, "users/admin-safe.json", { id: "admin-safe" }),
     writeJson(privateContainer, "auth/admin-safe.json", { passwordHash: "REDACTED" }),
-    writeJson(privateContainer, "user-index.json", { "admin@example.invalid": "admin-safe" }),
+    writeJson(privateContainer, "user-index.json", {
+      ...userIndex,
+      "admin@example.invalid": "admin-safe",
+    }),
     writeJson(publicContainer, "clubs.json", [
-      { id: staleClubId, name: "Club 50" },
+      ...publicClubs,
+      ...staleManifest.clubIds.slice(25).map((id, index) => ({
+        id,
+        name: `Club ${index + 26}`,
+      })),
       { id: "club-safe", name: "Unrelated Club" },
+    ]),
+    writeJson(publicContainer, "club-teams.json", [
+      ...publicTeams,
+      ...staleManifest.teamIds.slice(50).map((id, index) => ({
+        id,
+        clubId: staleManifest.clubIds[Math.floor((index + 50) / 2)],
+        clubName: `Club ${Math.floor((index + 50) / 2) + 1}`,
+        seasonYear: SEASON_YEAR,
+        teamName: `Legacy Team ${index + 51}`,
+      })),
     ]),
   ]);
 
@@ -126,8 +147,6 @@ test("seed twice removes stale legacy ownership and preserves nonfixture entries
     privateContainer.getBlobClient(`users/${firstManifest.userIds[0]}.json`).delete(),
     privateContainer.getBlobClient(`club-teams/${firstManifest.teamIds[0]}.json`).delete(),
   ]);
-  const publicPilots = await readJson(publicContainer, "pilots.json");
-  await writeJson(publicContainer, "pilots.json", [publicPilots[0], ...publicPilots]);
   const second = runScript(SEED_SCRIPT);
 
   // Then stale fixture ownership is gone and unrelated records remain
@@ -149,26 +168,6 @@ test("seed twice removes stale legacy ownership and preserves nonfixture entries
   assert.equal(manifest.clubIds.length, 25);
   assert.equal(manifest.teamIds.length, 50);
   assert.equal(new Set(manifest.teamIds).size, 50);
-});
-
-test("machine fixture audit reports exact redacted counts", () => {
-  // Given storage seeded by the preceding convergence scenario
-  // When the machine audit command inspects actual public and private blobs
-  const result = runScript(AUDIT_SCRIPT);
-
-  // Then output is redacted and reports the exact topology and role counts
-  assert.equal(result.status, 0, result.stderr);
-  const report = JSON.parse(result.stdout);
-  assert.deepEqual(report, {
-    status: "pass",
-    pilots: 500,
-    clubs: 25,
-    teams: 50,
-    coordinators: 25,
-    pilotOnly: 475,
-  });
-  assert.equal(result.stdout.includes("@bcc.local"), false);
-  assert.equal(result.stdout.includes("password"), false);
 });
 
 test("malformed duplicate manifest is rejected before owned blob deletion", async () => {

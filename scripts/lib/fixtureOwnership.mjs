@@ -93,6 +93,12 @@ export function parseFixtureOwnership(manifest) {
       "userIds",
       emails.map((email) => deterministicUuid("fixture-user", email))
     ),
+    userIndexEntries: Object.fromEntries(
+      emails.map((email, index) => [email, manifest.userIds[index]])
+    ),
+    pilotEmailIndexEntries: Object.fromEntries(
+      emails.map((email, index) => [email, manifest.pilotIds[index]])
+    ),
     roundIds: optionalRoundIds(manifest),
   };
 }
@@ -132,7 +138,7 @@ export async function cleanupFixtureOwnership(
   } = await preflightFixtureStorage(
     publicContainer,
     privateContainer,
-    ownership.seasonYear
+    ownership
   );
   await runJobs([
     ...ownership.roundIds.flatMap((id) => [
