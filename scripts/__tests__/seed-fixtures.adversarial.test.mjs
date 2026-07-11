@@ -219,3 +219,35 @@ test("machine fixture audit reports exact redacted counts", async () => {
     assert.equal(result.stdout.includes("password"), false);
   });
 });
+
+test("missing manifest removes deterministic legacy remainder without touching sentinels", async () => {
+  await withEnvironment(async (environment) => {
+    const legacy = legacyManifest();
+    const staleClubId = legacy.clubIds[49];
+    const staleTeamId = legacy.teamIds[99];
+    await Promise.all([
+      writeJson(environment.privateContainer, `clubs/${staleClubId}.json`, { id: staleClubId }),
+      writeJson(environment.privateContainer, `club-teams/${staleTeamId}.json`, { id: staleTeamId }),
+      writeJson(environment.privateContainer, "clubs/foreign.json", { id: "foreign" }),
+      writeJson(environment.publicContainer, "clubs.json", [
+        { id: staleClubId, name: "Legacy Club" },
+        { id: "foreign", name: "Foreign Club" },
+      ]),
+      writeJson(environment.publicContainer, "club-teams.json", [{
+        id: staleTeamId,
+        clubId: staleClubId,
+        clubName: "Legacy Club",
+        seasonYear: SEASON_YEAR,
+        teamName: "Legacy Team",
+      }]),
+    ]);
+    assert.equal(environment.runScript(SEED_SCRIPT).status, 0);
+    assert.equal(await environment.privateContainer.getBlobClient(`clubs/${staleClubId}.json`).exists(), false);
+    assert.equal(await environment.privateContainer.getBlobClient(`club-teams/${staleTeamId}.json`).exists(), false);
+    assert.equal(await environment.privateContainer.getBlobClient("clubs/foreign.json").exists(), true);
+    assert.equal(
+      (await readJson(environment.publicContainer, "clubs.json")).some(({ id }) => id === "foreign"),
+      true
+    );
+  });
+});

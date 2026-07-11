@@ -103,6 +103,21 @@ export function parseFixtureOwnership(manifest) {
   };
 }
 
+export function legacyFixtureRemainder(currentOwnership) {
+  const legacyClubIds = Array.from({ length: 50 }, (_, index) =>
+    deterministicUuid("fixture-club", `club${index + 1}`)
+  );
+  const legacyTeamIds = legacyClubIds.flatMap((clubId) =>
+    Array.from({ length: TEAMS_PER_CLUB }, (_, index) =>
+      deterministicUuid("fixture-club-team", `${clubId}-${index + 1}`)
+    )
+  );
+  return {
+    clubIds: difference(legacyClubIds, currentOwnership.clubIds),
+    teamIds: difference(legacyTeamIds, currentOwnership.teamIds),
+  };
+}
+
 function difference(values, retainedValues) {
   const retained = new Set(retainedValues);
   return values.filter((value) => !retained.has(value));
