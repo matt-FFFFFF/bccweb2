@@ -29,7 +29,21 @@ export function artifactFixture(prepared, mutation = "valid") {
   if (mutation === "wrong-cohort") attempts[0].cohort = "25";
   if (mutation === "wrong-final100") targets[3] = { ...targets[3], offset: 84 };
   if (mutation === "persisted-error") attempts[0] = { ...attempts[0], status: 0, signatureId: "missing", outcome: "request_error" };
-  return { events: attempts, summary: { contractVersion: 1, targets } };
+  return {
+    events: attempts,
+    summary: {
+      contractVersion: 1,
+      targets,
+      thresholds: {
+        attempts: "exact",
+        createdStatus: 201,
+        errors: 0,
+        serverErrors: 0,
+        latencyMs: { p95: 2_000, p99: 5_000 },
+      },
+      metrics: {},
+    },
+  };
 }
 
 export function signaturesFixture(parsed, mutation = "valid") {

@@ -4,13 +4,25 @@ import { parseSignAttemptEvents, parseSignSetupEvents } from "./loadTestSignArti
 import { SIGN_COHORTS, selectSignTargets } from "./loadTestSign.mjs";
 
 const PREPARED_COUNT = 500;
+const SUMMARY_KEYS = new Set(["contractVersion", "targets", "thresholds", "metrics"]);
+const TARGET_KEYS = new Set(["cohort", "offset", "size", "startTime"]);
+const THRESHOLD_KEYS = new Set(["attempts", "createdStatus", "errors", "serverErrors", "latencyMs"]);
+const LATENCY_KEYS = new Set(["p95", "p99"]);
 
 function fail(message) {
   throw new Error(`[verify-loadtest-signtofly] ${message}`);
 }
 
+function fixedObject(value, allowed, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) fail(`${label} must be an object`);
+  const unknown = Object.keys(value).find((key) => !allowed.has(key));
+  if (unknown) fail(`${label} has unknown key ${unknown}`);
+  return value;
+}
+
 function requireExactSummary(summary) {
-  if (!summary || typeof summary !== "object" || summary.contractVersion !== 1) {
+  fixedObject(summary, SUMMARY_KEYS, "sign summary");
+  if (summary.contractVersion !== 1) {
     fail("sign summary must have contractVersion 1");
   }
   if (!Array.isArray(summary.targets) || summary.targets.length !== SIGN_COHORTS.length) {
@@ -19,6 +31,7 @@ function requireExactSummary(summary) {
   for (let index = 0; index < SIGN_COHORTS.length; index += 1) {
     const expected = SIGN_COHORTS[index];
     const actual = summary.targets[index];
+    fixedObject(actual, TARGET_KEYS, `sign summary target ${expected.name}`);
     for (const field of ["name", "offset", "size", "startTime"]) {
       const summaryField = field === "name" ? "cohort" : field;
       if (actual?.[summaryField] !== expected[field]) {
@@ -26,6 +39,18 @@ function requireExactSummary(summary) {
       }
     }
   }
+  const thresholds = fixedObject(summary.thresholds, THRESHOLD_KEYS, "sign summary thresholds");
+  const latencyMs = fixedObject(
+    thresholds.latencyMs,
+    LATENCY_KEYS,
+    "sign summary thresholds latencyMs",
+  );
+  if (thresholds.attempts !== "exact" || thresholds.createdStatus !== 201 ||
+      thresholds.errors !== 0 || thresholds.serverErrors !== 0 ||
+      latencyMs.p95 !== 2_000 || latencyMs.p99 !== 5_000) {
+    fail("sign summary thresholds do not match the exact verification contract");
+  }
+  fixedObject(summary.metrics, new Set(Object.keys(summary.metrics ?? {})), "sign summary metrics");
 }
 
 function exactSetupByKey(setupEvents, expectedTargets) {
