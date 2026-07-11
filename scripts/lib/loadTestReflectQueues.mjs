@@ -1,0 +1,64 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
+import { QueueClient } from "@azure/storage-queue";
+
+const MAIN_QUEUE = "signtofly-reflect";
+const POISON_QUEUE = "signtofly-reflect-poison";
+
+function fail(message) {
+  throw new Error(`[verify-loadtest-signtofly] ${message}`);
+}
+
+export function createReflectQueueReader(options) {
+  const { environment = process.env, queueClientFactory = (secret, name) => (
+    new QueueClient(secret, name)
+  ), requestTimeoutMs = 15_000,
+  abortSignalFactory = (timeoutMs) => AbortSignal.timeout(timeoutMs) } = options;
+  const connectionString = environment.AzureWebJobsStorage;
+  if (typeof connectionString !== "string" || connectionString.length === 0) {
+    fail("AzureWebJobsStorage is required for reflect queue verification");
+  }
+  const main = queueClientFactory(connectionString, MAIN_QUEUE);
+  const poison = queueClientFactory(connectionString, POISON_QUEUE);
+  return async () => {
+    let mainProperties;
+    let poisonProperties;
+    try {
+      [mainProperties, poisonProperties] = await Promise.all([
+        main.getProperties({ abortSignal: abortSignalFactory(requestTimeoutMs) }),
+        poison.getProperties({ abortSignal: abortSignalFactory(requestTimeoutMs) }),
+      ]);
+    } catch {
+      fail("reflect queue properties request failed; state preserved");
+    }
+    const mainCount = mainProperties.approximateMessagesCount;
+    const poisonCount = poisonProperties.approximateMessagesCount;
+    if (!Number.isInteger(mainCount) || !Number.isInteger(poisonCount)) {
+      fail("reflect queue properties returned invalid approximate counts");
+    }
+    return { main: mainCount, poison: poisonCount };
+  };
+}
+
+export async function waitForReflectQueues(options) {
+  const { readCounts, deadlineMs, intervalMs, now, sleep } = options;
+  if (intervalMs < 2_000) fail("reflect queue observation interval must be at least 2000ms");
+  const deadline = now() + deadlineMs;
+  let firstZeroAt = null;
+  let last = null;
+  while (now() <= deadline) {
+    last = await readCounts();
+    if (last.poison > 0) fail(`reflect poison queue count is ${last.poison}; state preserved`);
+    if (last.main === 0 && last.poison === 0) {
+      if (firstZeroAt !== null && now() - firstZeroAt >= 2_000) {
+        return { main: 0, poison: 0, stable: true };
+      }
+      if (firstZeroAt === null) firstZeroAt = now();
+    } else {
+      firstZeroAt = null;
+    }
+    if (now() >= deadline) break;
+    await sleep(Math.min(intervalMs, deadline - now()));
+  }
+  fail(`timed out waiting for reflect queues; main=${last?.main ?? "unknown"} poison=${last?.poison ?? "unknown"}; state preserved`);
+}
