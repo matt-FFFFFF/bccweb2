@@ -1,215 +1,168 @@
 #!/usr/bin/env node
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
-/**
- * seed-rounds.mjs
- *
- * Pure-HTTP dev seed: drives 4 rounds through the production API lifecycle to
- * reach the four headline statuses (Proposed, Confirmed, BriefComplete, Locked)
- * so the rounds list page has something meaningful to render without manual
- * setup. Uses fixture pilots/clubs/sites/season from `.fixture-manifest.json`
- * (T8). Pure HTTP — never imports the Azure Blob SDK; the API owns the full
- * lifecycle including auto-creation of `round-briefs/{id}.json` on
- * `confirmRound` (apps/api/src/functions/roundsMutate.ts:397-407).
- *
- * Sibling of `scripts/transition-loadtest.mjs` — same env-aware, pure-HTTP
- * shape (admin login, JWT, manifest IO).
- */
+/** Seed four canonical, snapshotted browsing rounds through the production API. */
 
+import { existsSync, readFileSync } from "node:fs";
+import { cleanupOwnedRoundIds } from "./lib/loadTestRoundCleanup.mjs";
+import { createLoadTestApi, loginLoadTestUser } from "./lib/loadTestApi.mjs";
 import {
-  BCC_API_BASE_URL,
-  IS_AZURE_TARGET,
   ADMIN_EMAIL,
   ADMIN_PASSWORD_OVERRIDE,
+  BCC_API_BASE_URL,
   DEV_CREDENTIALS_PATH,
   FIXTURE_MANIFEST_PATH,
+  FIXTURE_PILOT_PASSWORD,
+  SEASON_YEAR,
 } from "./lib/loadTestConsts.mjs";
-import { readFileSync, writeFileSync, existsSync } from "node:fs";
-
-// ─── Configuration ───────────────────────────────────────────────────────────
+import {
+  appendSeedRoundId,
+  readLoadTestRoundState,
+  replaceSeedRoundIds,
+  writeJsonAtomically,
+} from "./lib/loadTestRoundState.mjs";
+import { validateLoadTestManifest } from "./lib/loadTestTopology.mjs";
 
 const TARGET_STATUSES = ["Proposed", "Confirmed", "BriefComplete", "Locked"];
-const STATUS_RANK = { Proposed: 0, Confirmed: 1, BriefComplete: 2, Locked: 3 };
-const DATE_OFFSETS_DAYS = [7, 14, 21, 28]; // one per status, visual differentiation
-const TEAMS_PER_ROUND = 4;
+const DATE_OFFSETS_DAYS = [7, 14, 21, 28];
+const CLUBS_PER_ROUND = 4;
 const PILOTS_PER_TEAM = 3;
+const SETUP_DEADLINE_MS = 15 * 60 * 1_000;
 
-// ─── Preconditions ───────────────────────────────────────────────────────────
-
-if (!existsSync(FIXTURE_MANIFEST_PATH)) {
-  process.stderr.write(
-    `[seed-rounds] Run 'make seed' first (target: ${BCC_API_BASE_URL})\n`
-  );
-  process.exit(1);
-}
-
-const manifest = JSON.parse(readFileSync(FIXTURE_MANIFEST_PATH, "utf8"));
-const { siteIds, clubIds, pilotIds, seasonYear } = manifest;
-if (
-  !Array.isArray(siteIds) ||
-  siteIds.length < 1 ||
-  !Array.isArray(clubIds) ||
-  clubIds.length < TEAMS_PER_ROUND ||
-  !Array.isArray(pilotIds) ||
-  pilotIds.length < TARGET_STATUSES.length * TEAMS_PER_ROUND * PILOTS_PER_TEAM ||
-  !seasonYear
-) {
-  process.stderr.write(
-    `[seed-rounds] manifest at ${FIXTURE_MANIFEST_PATH} is missing required fixture data (siteIds/clubIds/pilotIds/seasonYear). Re-run 'make seed'.\n`
-  );
-  process.exit(1);
+function fail(message) {
+  throw new Error(`[seed-rounds] ${message}`);
 }
 
 function resolveAdminPassword() {
   if (ADMIN_PASSWORD_OVERRIDE) return ADMIN_PASSWORD_OVERRIDE;
-
   if (existsSync(DEV_CREDENTIALS_PATH)) {
-    const contents = readFileSync(DEV_CREDENTIALS_PATH, "utf8");
-    const match = contents.match(/^ADMIN_PASSWORD=(.+)$/m);
+    const match = readFileSync(DEV_CREDENTIALS_PATH, "utf8").match(/^ADMIN_PASSWORD=(.+)$/m);
     if (match?.[1]) return match[1].trim();
-    process.stderr.write(
-      `[seed-rounds] ${DEV_CREDENTIALS_PATH} exists but does not contain ADMIN_PASSWORD=...\n`
-    );
-    process.exit(1);
   }
-
-  process.stderr.write(
-    `[seed-rounds] missing admin password. Set ADMIN_PASSWORD${IS_AZURE_TARGET ? "" : ""} or create ${DEV_CREDENTIALS_PATH}.\n`
-  );
-  process.exit(1);
+  fail("missing admin password; set ADMIN_PASSWORD or create .dev-credentials");
 }
-
-// ─── HTTP helpers ────────────────────────────────────────────────────────────
-
-async function apiFetch(method, path, { token, body } = {}) {
-  const url = `${BCC_API_BASE_URL}${path}`;
-  const headers = { "Content-Type": "application/json" };
-  if (token) headers["Authorization"] = `Bearer ${token}`;
-  const res = await fetch(url, {
-    method,
-    headers,
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
-  if (!res.ok) {
-    const errBody = await res.text();
-    throw new Error(`HTTP ${res.status} on ${method} ${url}: ${errBody}`);
-  }
-  const text = await res.text();
-  return text ? JSON.parse(text) : null;
-}
-
-// ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 function isoDate(offsetDays) {
-  const d = new Date();
-  d.setUTCDate(d.getUTCDate() + offsetDays);
-  return d.toISOString().slice(0, 10);
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+  return date.toISOString().slice(0, 10);
 }
 
-async function seedOneRound(token, statusIdx) {
-  const targetStatus = TARGET_STATUSES[statusIdx];
-  const date = isoDate(DATE_OFFSETS_DAYS[statusIdx]);
-
-  // 1. Create round (Proposed)
-  const createdRound = await apiFetch("POST", "/api/rounds", {
-    token,
-    body: { date, siteId: siteIds[0], seasonYear },
-  });
-  const roundId = createdRound.id;
-
-  // 2. Add 4 teams, each with 3 pilots
-  for (let clubIdx = 0; clubIdx < TEAMS_PER_ROUND; clubIdx += 1) {
-    const team = await apiFetch("POST", `/api/rounds/${roundId}/teams`, {
-      token,
-      body: {
-        clubId: clubIds[clubIdx],
-        teamName: `Dev Team ${clubIdx + 1}`,
-      },
-    }).then((r) =>
-      // addTeam returns the updated Round; find the team we just appended.
-      r.teams[r.teams.length - 1]
+function selectedTeamsAndPilots(manifest) {
+  const teams = manifest.clubs.slice(0, CLUBS_PER_ROUND).map((club) => {
+    const team = manifest.teams.find(
+      (candidate) => candidate.clubId === club.id && candidate.teamName.endsWith(" Team A"),
     );
-    const teamId = team.id;
+    if (!team) fail(`missing canonical Team A for ${club.name}`);
+    const pilots = manifest.pilots
+      .filter((pilot) => pilot.clubTeamId === team.id)
+      .sort((left, right) => left.teamLocalRank - right.teamLocalRank)
+      .slice(0, PILOTS_PER_TEAM);
+    if (pilots.length !== PILOTS_PER_TEAM) fail(`missing pilots for ${team.teamName}`);
+    return { team, pilots };
+  });
+  return { teams, pilots: teams.flatMap(({ pilots }) => pilots) };
+}
 
-    for (let place = 1; place <= PILOTS_PER_TEAM; place += 1) {
-      // Deterministic, stable index across reruns + statuses; well within
-      // the 500-pilot fixture pool: 4 statuses * 4 teams * 3 pilots = 48.
-      const pilotIdx =
-        statusIdx * TEAMS_PER_ROUND * PILOTS_PER_TEAM +
-        clubIdx * PILOTS_PER_TEAM +
-        (place - 1);
-      // Slot eligibility is derived server-side and positionally at slot
-      // creation (teams.ts addPilot: isScoring = place <=
-      // config.maxScoringPilotsInTeam, =6). The addPilot handler IGNORES any
-      // request-body `isScoring`, so we omit it and let the API be the single
-      // source of truth — replacing the old, now-dead `isScoring: place === 1`.
-      // With 3 pilots per team every slot lands in a scoring place (1..3 <= 6).
-      await apiFetch(
-        "POST",
-        `/api/rounds/${roundId}/teams/${teamId}/pilots`,
-        {
-          token,
-          body: { pilotId: pilotIds[pilotIdx] },
-        }
-      );
+async function persistSeedOwnership(manifest, roundId) {
+  await appendSeedRoundId(roundId);
+  const roundIds = Array.isArray(manifest.roundIds) ? manifest.roundIds : [];
+  if (!roundIds.includes(roundId)) roundIds.push(roundId);
+  manifest.roundIds = roundIds;
+  await writeJsonAtomically(FIXTURE_MANIFEST_PATH, manifest);
+}
+
+async function replacePriorRounds(manifest) {
+  const state = await readLoadTestRoundState();
+  const manifestIds = Array.isArray(manifest.roundIds) ? manifest.roundIds : [];
+  const priorIds = [...new Set([...state.seedRoundIds, ...manifestIds])];
+  await cleanupOwnedRoundIds(priorIds, { seasonYears: [manifest.seasonYear] });
+  await replaceSeedRoundIds([]);
+  manifest.roundIds = [];
+  await writeJsonAtomically(FIXTURE_MANIFEST_PATH, manifest);
+}
+
+async function transitionRound(callApi, token, roundId, targetStatus) {
+  if (targetStatus !== "Proposed") {
+    await callApi("POST", `/api/rounds/${roundId}/confirm`, { token, body: {} });
+  }
+  if (targetStatus === "BriefComplete" || targetStatus === "Locked") {
+    await callApi("POST", `/api/rounds/${roundId}/brief-complete`, { token, body: {} });
+  }
+  if (targetStatus === "Locked") {
+    await callApi("POST", `/api/rounds/${roundId}/lock`, { token, body: {} });
+  }
+}
+
+async function seedRound(callApi, manifest, adminToken, pilotTokens, selected, statusIndex) {
+  const created = await callApi("POST", "/api/rounds", {
+    token: adminToken,
+    body: {
+      date: isoDate(DATE_OFFSETS_DAYS[statusIndex]),
+      siteId: manifest.siteIds[0],
+      seasonYear: manifest.seasonYear,
+      organisingClubId: selected.teams[0].team.clubId,
+    },
+  });
+  if (typeof created?.id !== "string" || created.id.length === 0) fail("createRound response missing id");
+  const roundId = created.id;
+  await persistSeedOwnership(manifest, roundId);
+
+  for (const { team, pilots } of selected.teams) {
+    const round = await callApi("POST", `/api/rounds/${roundId}/teams`, {
+      token: adminToken,
+      body: { clubId: team.clubId, teamName: team.teamName },
+    });
+    const added = round?.teams?.find(
+      (candidate) => candidate.club?.id === team.clubId && candidate.teamName === team.teamName,
+    );
+    if (typeof added?.id !== "string") fail(`team ${team.teamName} missing from API response`);
+    for (const pilot of pilots) {
+      await callApi("POST", `/api/rounds/${roundId}/register-self`, {
+        token: pilotTokens.get(pilot.id),
+        body: { teamId: added.id },
+      });
     }
   }
-
-  // 3. Drive to target status via lifecycle transitions
-  const rank = STATUS_RANK[targetStatus];
-  if (rank >= STATUS_RANK.Confirmed) {
-    // confirmRound auto-creates round-briefs/{id}.json
-    // (apps/api/src/functions/roundsMutate.ts:397-407).
-    await apiFetch("POST", `/api/rounds/${roundId}/confirm`, { token, body: {} });
-  }
-  if (rank >= STATUS_RANK.BriefComplete) {
-    await apiFetch("POST", `/api/rounds/${roundId}/brief-complete`, {
-      token,
-      body: {},
-    });
-  }
-  if (rank >= STATUS_RANK.Locked) {
-    // lockRound catches its own PDF-generation failures internally
-    // (roundsMutate.ts:724-733), so the HTTP call succeeds even if chromium
-    // is missing. No script-level try/catch.
-    await apiFetch("POST", `/api/rounds/${roundId}/lock`, { token, body: {} });
-  }
-
-  return roundId;
+  await transitionRound(callApi, adminToken, roundId, TARGET_STATUSES[statusIndex]);
 }
-
-// ─── Main ────────────────────────────────────────────────────────────────────
 
 async function main() {
-  const password = resolveAdminPassword();
+  if (!existsSync(FIXTURE_MANIFEST_PATH)) fail("run 'make seed' first");
+  const manifest = JSON.parse(readFileSync(FIXTURE_MANIFEST_PATH, "utf8"));
+  validateLoadTestManifest(manifest, SEASON_YEAR);
+  if (!Array.isArray(manifest.siteIds) || manifest.siteIds.length === 0) fail("canonical manifest has no siteIds");
+  const selected = selectedTeamsAndPilots(manifest);
+  await replacePriorRounds(manifest);
 
-  const loginJson = await apiFetch("POST", "/api/auth/login", {
-    body: { email: ADMIN_EMAIL, password },
+  const callApi = createLoadTestApi({
+    baseUrl: BCC_API_BASE_URL,
+    deadlineMs: Date.now() + SETUP_DEADLINE_MS,
   });
-  const token = loginJson?.accessToken;
-  if (!token) {
-    throw new Error(
-      `login response missing accessToken: ${JSON.stringify(loginJson)}`
-    );
+  const adminToken = await loginLoadTestUser(callApi, {
+    email: ADMIN_EMAIL,
+    password: resolveAdminPassword(),
+  });
+  const pilotTokens = new Map();
+  for (const [index, pilot] of selected.pilots.entries()) {
+    // Azure supplies `client-ip`; local Functions falls back to the right-most XFF hop.
+    const headers = BCC_API_BASE_URL.startsWith("http://localhost") || BCC_API_BASE_URL.startsWith("http://127.")
+      ? { "x-forwarded-for": `127.77.0.${index + 1}` }
+      : {};
+    const token = await loginLoadTestUser(callApi, {
+      email: pilot.email,
+      password: FIXTURE_PILOT_PASSWORD,
+    }, headers);
+    pilotTokens.set(pilot.id, token);
+    console.error(`[seed-rounds] authenticated synthetic pilot ${pilot.email}`);
   }
-
-  const roundIds = [];
-  for (let i = 0; i < TARGET_STATUSES.length; i += 1) {
-    const id = await seedOneRound(token, i);
-    roundIds.push(id);
+  for (let statusIndex = 0; statusIndex < TARGET_STATUSES.length; statusIndex += 1) {
+    await seedRound(callApi, manifest, adminToken, pilotTokens, selected, statusIndex);
   }
-
-  manifest.roundIds = roundIds;
-  writeFileSync(FIXTURE_MANIFEST_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
-
-  process.stderr.write(
-    `[seed-rounds] OK: target=${BCC_API_BASE_URL} 4 rounds (${TARGET_STATUSES.join("/")})\n`
-  );
+  console.error(`[seed-rounds] OK: 4 rounds (${TARGET_STATUSES.join("/")})`);
 }
 
-main().catch((err) => {
-  process.stderr.write(
-    `[seed-rounds] ${err?.stack ?? err?.message ?? String(err)}\n`
-  );
-  process.exit(1);
+main().catch((error) => {
+  console.error(error?.stack ?? error?.message ?? String(error));
+  process.exitCode = 1;
 });
