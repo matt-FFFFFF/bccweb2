@@ -1,150 +1,127 @@
 # Load Testing Runbook
 
-This runbook describes how to execute and interpret the BCC load test suite. The suite simulates a high-concurrency "round opening" event where 500 pilots register for a round and subsequently sign the safety briefing.
+Use this runbook for an operator-owned, dedicated load-test stack. The suite measures
+round-blob contention without client replay and proves exact Sign-to-Fly persistence
+before destructive cleanup. Never target production or a shared queue.
 
-## 1. Purpose
+## Preconditions
 
-The load test verifies that the API's blob-lease orchestration correctly handles high contention. It proves that the identity-keyed rate limit allows simultaneous registration from shared-NAT locations (e.g., the same takeoff hill) while protecting against individual abuse.
+1. Install k6 and start a worker-owned local stack or dedicated Azure test stack.
+2. Seed canonical fixtures with `make seed`: 500 pilots, 25 clubs, 50 teams, 10
+   pilots/team, 25 `RoundsCoord` users, and 50 captain assignments. `make seed-rounds`
+   is optional operator browsing data, not part of `make loadtest`.
+3. Export `LOADTEST_DEDICATED_STACK=1`. Queue counts are approximate and global;
+   cleanup permission is meaningful only when this suite owns the stack.
+4. For Azure, set `BCC_API_BASE_URL` and `ADMIN_PASSWORD`, disable PureTrack/email,
+   and use an approved authentication design. Azure login remains limited to 10/min
+   per trusted `client-ip`; local synthetic XFF partitioning does not bypass it.
+   Remote hostnames must contain `loadtest` or `staging`; production-looking names
+   fail before the orchestrator creates state or starts prepare.
 
-## 2. Prerequisites
-
-- **k6**: Installed and on PATH (`brew install k6` or equivalent).
-- **Admin Access**: For local dev, this is seeded automatically. For Azure, the operator must have the `ADMIN_PASSWORD` or a valid `.dev-credentials` file.
-- **Fixture State**: The environment must be seeded with 500 pilots, 25 clubs, and 50 canonical teams before running the load test.
-
-## 3. Standard run (local)
-
-The local suite runs against the `docker compose` stack.
-
-```bash
-# 1. Start the stack
-make dev
-
-# 2. Run the full chain (seed -> prepare -> register -> transition -> sign -> cleanup)
+```sh
+make seed
+export LOADTEST_DEDICATED_STACK=1
 make loadtest
 ```
 
-Individual phases can be run via:
-- `make loadtest-prepare`: Creates a Confirmed round with 50 teams.
-- `make loadtest-register`: Runs k6 register phase (500 VUs).
-- `make loadtest-transition`: Moves round to BriefComplete.
-- `make loadtest-sign`: Runs k6 sign phase (500 VUs).
+`make loadtest` invokes `scripts/run-loadtest.mjs` as one recipe. Make parallelism
+cannot fan out or reorder its children. Narrow `make loadtest-*` targets remain for
+controlled diagnosis; `make help` is the authoritative target list.
 
-## 4. Standard run (Azure target)
+## Operational topology
 
-Running against an Azure target requires setting the target URL and providing the admin password.
+The eight operational steps are:
 
-```bash
-# 1. Set environment
-export BCC_API_BASE_URL="https://your-loadtest-api.azurewebsites.net"
-export ADMIN_PASSWORD="your-vault-secret"
+1. **Prepare** — replace only a prior checkpoint-owned load round; create and
+   checkpoint a +35-day Confirmed 50-team/500-slot round before adding teams.
+2. **Register** — 500 setup logins in batches of 25, then 20 cohorts of 25 one-shot
+   registrations at five-second intervals.
+3. **Captains/reconcile** — 25 coordinator logins, 50 captain writes, authoritative
+   place reconciliation, private atomic prepared-artifact replacement.
+4. **Transition** — one request to `BriefComplete`.
+5. **Sign** — one-shot cohorts 10/25/50/100 over offsets 0/10/35/85: 185 selected,
+   315 deliberately unsigned.
+6. **Verify** — parse sign events/summary, require first-write 201s, inspect exact
+   ledger IDs and flags, and replay exactly one persisted signature for the same ID.
+7. **Queue gate** — after replay, require `signtofly-reflect` and poison approximate
+   counts zero in two observations at least two seconds apart.
+8. **Cleanup** — remove only the durable `loadRoundId` ownership set and its exact
+   artifacts/references.
 
-# 2. Execute
-make loadtest
-```
+Register and sign do not retry failed operations. Bounded setup may wait only for a
+valid HTTP 429 `Retry-After`; permanent errors remain one attempt. Server lease
+contention is handled by the production `withPrivateLeaseRetry` transaction, never by
+k6 retry/sleep or a production bypass.
 
-## 5. Azure test-instance configuration
+## Hard release gates
 
-Never run load tests against the production instance. A dedicated load-test Function App must be configured with these settings:
+- Register: 500 attempts, 500 successes, zero failures, zero 5xx.
+- Sign cohorts: exactly 10/25/50/100 attempts and creations, HTTP 201 only, zero
+  errors/5xx, p95 <2,000 ms and p99 <5,000 ms for every cohort.
+- Persisted result: 185 exact unique signatures and signed flags, final burst
+  100/100, and all 315 non-target flags false.
+- Replay: one HTTP 200 with the same persisted signature ID. A coherent persisted
+  error key is preferred; otherwise output explicitly says `replay=fallback`.
+- Queue: main=0 and poison=0, stable twice after replay on a dedicated stack.
 
-- `PURETRACK_ENABLED=false`: Disables outbound calls to PureTrack.
-- `ROUND_BRIEF_EMAILS=""`: Disables briefing emails to avoid spamming pilots.
-- `JWT_SECRET`: Standard Key Vault reference.
-- `ACS_CONNECTION_STRING`: Standard connection string or omitted.
-- `AZURE_FUNCTIONS_ENVIRONMENT`: `Development` or `Staging`.
+These gates are user-approved release criteria. Do not downgrade them to advisory
+metrics to make a run pass.
 
-To set via Azure CLI:
-```bash
-az functionapp config appsettings set \
-  --name <app_name> \
-  --resource-group <rg> \
-  --settings PURETRACK_ENABLED=false ROUND_BRIEF_EMAILS=""
-```
+## Failure transaction
 
-The storage account must have `data` and `data-private` containers created.
+The orchestrator writes phase state before and after every command with duration and
+exact exit/signal/timeout. It captures stdout/stderr without a shell pipe and reports
+all attempted/skipped outcomes. Status JSON never contains command args/env, tokens,
+passwords, bodies, or captured output.
 
-## 6. Warm-up recommendation
+| Observed failure | Required action |
+| --- | --- |
+| Prepare fails with no checkpoint | Stop. Do not invoke cleanup. |
+| Prepare fails after create/checkpoint | Cleanup the exact owned round; aggregate remains failed. |
+| Register/captains/transition fails | Skip dependants and cleanup exact owned state. Never retry the failed operation. |
+| Sign k6 exits nonzero or is signalled | Still parse artifacts and run the exact verifier. Preserve the sign status in the aggregate. |
+| Artifact parser fails | Still run the exact persisted verifier; parser and verifier statuses remain separate. |
+| Exact verifier, replay, or queue gate fails | Return nonzero and preserve round/checkpoint/prepared/events/summary/logs. **Do not cleanup.** |
+| Exact verifier and queue gate pass | Cleanup is permitted even when k6/artifact status failed; aggregate still returns nonzero. |
+| Cleanup fails | Return nonzero and retain checkpoint ownership for a surgical retry. |
 
-Azure Functions on the Y1 (Consumption) SKU experience cold-starts. Before running k6 against an idle Azure instance, prime the host:
+An interrupt terminates the active child with a signal and lets this same policy decide
+safe follow-up. Every command has a finite timeout; a hung child receives SIGTERM and
+then bounded SIGKILL escalation.
 
-```bash
-for i in $(seq 1 30); do 
-  curl -s ${BCC_API_BASE_URL}/api/health > /dev/null
-done
-```
+## Evidence and diagnosis
 
-## 7. Observed Metrics (Baselines)
+Ignored private artifacts live under `logs/load-test/`:
 
-These metrics were recorded on a local M-series Mac using the Azurite stack. They are advisory baselines, not hard gates:
+- `orchestration-<run>.json` — aggregate phase status/timing only;
+- `<run>-<phase>.log` — captured child streams;
+- sign event and summary JSON — count/key/status evidence, no credentials;
+- `.loadtest-round-state.json` and `tests/load/.prepared-round.json` — mode-0600
+  ownership and synthetic credential state.
 
-- **Register Phase**: 500/500 pilots registered in **07m 39s**.
-- **Sign Phase**: 500/500 pilots signed in **07m 58s**.
+Phase status rows link to their private log paths. Artifact/status path overrides are
+relative to, and confined beneath, `logs/load-test/`; absolute and parent paths fail
+before execution.
 
-## 8. Why the load test works without bypass
+On verifier/quiescence failure, retain all artifacts and inspect Function host logs,
+the exact named slot/signature mismatch, and both reflect queues. Retry
+`make loadtest-verify` with the retained `SIGN_EVENTS_PATH`/`SIGN_SUMMARY_PATH`; only
+after a passing exact verifier may `make loadtest-cleanup` run.
 
-Historically, load tests required a "bypass" environment variable to skip rate limits. This suite uses the production rate-limit implementation from `apps/api/src/lib/rateLimit.ts`.
+On cleanup failure, fix storage access and rerun `make loadtest-cleanup`. Cleanup uses
+the checkpoint, not prefix discovery, so interrupted runs remain recoverable and
+unrelated fixtures/seed rounds survive.
 
-By passing `identityKey: caller.pilotId` to the rate limiter, every pilot has their own 10/min budget. Because 500 different pilots register in the test, they never collide with each other's rate-limit buckets. This identity-keyed limiting is a permanent production improvement that solves the "Shared NAT" problem where multiple pilots on the same network would previously share a single IP-based budget.
+## Azure configuration and cost controls
 
-## 9. Data lifecycle
+Use `PURETRACK_ENABLED=false`, `ROUND_BRIEF_EMAILS=""`, a dedicated JWT secret and
+storage account, and non-production/omitted ACS. Warm the health endpoint if cold-start
+behavior is not the subject. Azure scale, storage leases, and authentication topology
+differ from Azurite; record those differences with the result rather than weakening
+gates.
 
-1. **Prepare**: Creates a `tests/load/.prepared-round.json` file containing the round ID and the 500 pilot credentials used for the run.
-2. **Cleanup**: Deletes the round blob and all 500 signature blobs created during the run.
-3. **Fixtures**: The 500 pilot/user/auth blobs are preserved between runs to save seeding time (~14s).
+## Contract CI
 
-## 10. Privacy note
-
-Load test fixtures contain synthetic data only (`pilotXXX@bcc.local`). The `scripts/privacy-scan.mjs` utility runs in CI to ensure these synthetic fields do not leak into the public container. Never use real pilot data in a load test environment.
-
-## 11. Failure modes & remediation
-
-### register-self returns 429
-- **Cause**: Stuck buckets from a prior aborted run or a single pilot VU looping too fast.
-- **Remediation**: Wait 5 minutes for buckets to refill or restart the API process.
-
-### sign returns 409 INVALID_STATE
-- **Cause**: The round was not transitioned to `BriefComplete`.
-- **Remediation**: Re-run `make loadtest-transition`.
-
-### sign returns 500 in Azure mode
-- **Cause**: The brief-lifecycle fix (auto-brief creation on confirm) is not deployed.
-- **Remediation**: Verify the deployed commit includes the `confirmRound` auto-brief block.
-
-### register-self returns 409 NOT_IN_CLUB_FOR_SEASON "Round has no organising club"
-- **Cause**: The prepared round and pilot fixture clubs do not agree.
-- **Remediation**: Inspect the prepared round and fixture manifest before retrying. The end-to-end preparation workflow is documented when its orchestration ships.
-
-### bcrypt slow on cold start
-- **Cause**: Setup authenticates every prepared pilot once, and bcrypt verification is CPU intensive.
-- **Remediation**: Expected on first run; register VU latency excludes setup authentication.
-
-### Azurite OOM (local)
-- **Cause**: Azurite memory leak during long high-concurrency runs.
-- **Remediation**: `make docker-down && make dev`.
-
-### p95 latency outliers
-- **Cause**: Blob lease contention. Multiple VUs attempting to write to the same round blob simultaneously.
-- **Remediation**: Inspect the exact failure counters. The k6 script deliberately does not retry 409 or 5xx responses.
-
-### Surprise emails/PureTrack groups
-- **Cause**: `ROUND_BRIEF_EMAILS` or `PURETRACK_ENABLED` not configured correctly.
-- **Remediation**: Check Section 5 and update app settings.
-
-## 12. Cost note
-
-A 500-VU load test against Azure Consumption (Y1) costs approximately $0.05 in execution time and storage transactions. The primary cost is operator time.
-
-## 13. Security & Identity
-
-The test uses `tests/load/.prepared-round.json` which contains synthetic login tokens. This file is chmod 600 and ignored by git. Do not share this file.
-
-## 14. Safety convention
-
-`BCC_API_BASE_URL` must contain `loadtest` or `staging`. **NEVER run against a production hostname.** The scripts do not enforce this; it is the operator's responsibility.
-
-## 15. References
-
-- `AGENTS.md`: Repository conventions.
-- `apps/api/src/lib/rateLimit.ts`: Identity-keyed limiting source.
-- `scripts/prepare-loadtest.mjs`: Test setup logic.
-- `tests/load/sign-to-fly.js`: k6 script source.
+`npm run loadtest:test` runs deterministic Node/k6-source/orchestration/artifact
+contracts. CI runs it after install/build without requiring k6, Azurite, or a live
+Function host. Live load execution remains an explicit operator action.
