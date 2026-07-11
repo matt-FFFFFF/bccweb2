@@ -138,10 +138,12 @@ test("setup timeout starts no register VUs", async () => {
   // Given login responses that exceed an injected short setup timeout
   const fixture = await makeFixture({ loginDelayMs: 500 });
   try {
-    // When k6 overrides the production 10m timeout with 100ms for simulation
-    const result = await runK6(fixture, ["--setup-timeout", "100ms"]);
-    // Then k6 fails and no register request is issued
+    // When supported k6 configuration overrides the production 10m timeout
+    const result = await runK6(fixture, { K6_SETUP_TIMEOUT: "100ms" });
+    // Then setup reaches its deadline and no register request is issued
     assert.notEqual(result.code, 0, result.output);
+    assert.match(result.output, /setup\(\) execution timed out|context deadline exceeded/);
+    assert.doesNotMatch(result.output, /unknown flag/);
     assert.equal(fixture.state.registerRequests, 0);
   } finally {
     await fixture.close();
@@ -221,9 +223,12 @@ async function makeFixture({
   };
 }
 
-function runK6(fixture, extraArgs = []) {
+function runK6(fixture, extraEnv = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn("k6", ["run", "--quiet", "--no-color", ...extraArgs, "--env", "PHASE=register", "--env", `REGISTER_SUMMARY_PATH=${fixture.summaryPath}`, "sign-to-fly.js"], { cwd: fixture.directory });
+    const child = spawn("k6", ["run", "--quiet", "--no-color", "--env", "PHASE=register", "--env", `REGISTER_SUMMARY_PATH=${fixture.summaryPath}`, "sign-to-fly.js"], {
+      cwd: fixture.directory,
+      env: { ...process.env, ...extraEnv },
+    });
     let output = "";
     child.stdout.on("data", (chunk) => { output += chunk; });
     child.stderr.on("data", (chunk) => { output += chunk; });
