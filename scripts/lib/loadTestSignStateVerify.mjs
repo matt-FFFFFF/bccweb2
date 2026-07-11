@@ -16,11 +16,15 @@ export function inspectExactLedger(signatures, parsed) {
   const ledgerByKey = new Map();
   const ledgerIds = new Set();
   for (const signature of signatures) {
-    if (!signature || typeof signature.teamId !== "string" || !Number.isInteger(signature.place) ||
+    if (!signature || typeof signature.roundId !== "string" ||
+        typeof signature.teamId !== "string" || !Number.isInteger(signature.place) ||
         typeof signature.id !== "string" || signature.id.length === 0) {
       fail("GET signatures returned an invalid record");
     }
     const key = keyOf(signature);
+    if (signature.roundId !== parsed.roundId) {
+      fail(`LEDGER_FOREIGN_ROUND: signature ${signature.id} key ${key} belongs to round ${signature.roundId}; expected ${parsed.roundId}`);
+    }
     if (ledgerByKey.has(key)) fail(`duplicate signature key ${key}`);
     if (ledgerIds.has(signature.id)) fail(`duplicate signature ID ${signature.id} at ${key}`);
     ledgerByKey.set(key, signature);
@@ -28,8 +32,11 @@ export function inspectExactLedger(signatures, parsed) {
   }
   for (const target of parsed.final100) {
     const signature = ledgerByKey.get(target.slotKey);
+    if (!signature) {
+      fail(`FINAL100_SIGNATURE_MISSING: final100 missing signature key ${target.slotKey}`);
+    }
     if (target.event.signatureId !== "missing" && signature?.id !== target.event.signatureId) {
-      fail(`final100 signature ID mismatch for ${target.slotKey}`);
+      fail(`FINAL100_SIGNATURE_ID_MISMATCH: final100 signature ID mismatch for ${target.slotKey}`);
     }
   }
   for (const target of parsed.targets) {

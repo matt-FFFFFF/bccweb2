@@ -34,16 +34,18 @@ export function artifactFixture(prepared, mutation = "valid") {
 
 export function signaturesFixture(parsed, mutation = "valid") {
   const signatures = parsed.targets.map((target) => ({
+    roundId: parsed.roundId,
     teamId: target.teamId,
     place: target.place,
     id: target.event.signatureId === "missing" ? `signature-${target.preparedIndex}` : target.event.signatureId,
   }));
   if (mutation === "duplicate") signatures[1] = { ...signatures[0] };
   if (mutation === "missing") signatures.pop();
-  if (mutation === "extra") signatures.push({ teamId: "team-extra", place: 1, id: "extra" });
+  if (mutation === "extra") signatures.push({ roundId: parsed.roundId, teamId: "team-extra", place: 1, id: "extra" });
   if (mutation === "wrong-id") signatures[0].id = "wrong";
   if (mutation === "duplicate-id") signatures[1].id = signatures[0].id;
   if (mutation === "wrong-final100-id") signatures[184].id = "wrong-final100";
+  if (mutation === "foreign-round") signatures[0].roundId = "different-round";
   return signatures;
 }
 
