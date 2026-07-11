@@ -97,7 +97,10 @@ loadtest-prepare: ## Create load-test round + 50 teams + confirm
 .PHONY: loadtest-register
 loadtest-register: ## k6 register-self phase (500 VUs)
 	@mkdir -p $(CURDIR)/logs/load-test
-	cd tests/load && k6 run --env PHASE=register sign-to-fly.js | tee $(CURDIR)/logs/load-test/register-$$(date +%s).log
+	@run_id=$$(date +%s); \
+	log="$${REGISTER_LOG_PATH:-$(CURDIR)/logs/load-test/register-$$run_id.log}"; \
+	cd tests/load && k6 run --env PHASE=register sign-to-fly.js >"$$log" 2>&1; \
+	result=$$?; cat "$$log"; exit $$result
 
 .PHONY: loadtest-captains
 loadtest-captains: ## Assign captains and reconcile authoritative slot places
