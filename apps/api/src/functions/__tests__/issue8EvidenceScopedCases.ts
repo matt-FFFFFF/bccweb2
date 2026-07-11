@@ -1,0 +1,29 @@
+// SPDX-FileCopyrightText: 2026 British Club Challenge authors
+// SPDX-License-Identifier: MPL-2.0
+import { randomUUID } from "node:crypto";
+import type { Team } from "@bccweb/types";
+import { makeClubTeam, makeRound, makeSite } from "../../__tests__/helpers/seed.js";
+import type { CallSiteCase } from "./issue8EvidenceHarness.js";
+import { crossClubCoord } from "./issue8EvidenceHarness.js";
+import {
+  roundForOtherClub,
+  seedPilotSeasonClubAssignment,
+} from "./issue8EvidenceFixtures.js";
+
+export const SCOPED_CASES: readonly CallSiteCase[] = [
+  { file: "brief.ts", handler: "updateRoundBrief", endpoint: "updateRoundBrief", tier: "heavy", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "PUT", params: { id: (await roundForOtherClub("Confirmed")).id }, body: {} } }) },
+  { file: "brief.ts", handler: "regenerateRoundBriefPdf", endpoint: "regenerateRoundBriefPdf", tier: "heavy", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "POST", params: { id: (await roundForOtherClub("Locked")).id } } }) },
+  { file: "brief.ts", handler: "uploadBriefImage", endpoint: "uploadBriefImage", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "POST", params: { id: (await roundForOtherClub("Confirmed")).id } } }) },
+  { file: "brief.ts", handler: "deleteBriefImage", endpoint: "deleteBriefImage", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "DELETE", params: { id: (await roundForOtherClub("Confirmed")).id, index: "1" } } }) },
+  { file: "clubTeams.ts", handler: "createClubTeam", endpoint: "createClubTeam", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "POST", body: { clubId: randomUUID(), seasonYear: 2026, teamName: "Other" } } }) },
+  { file: "clubTeams.ts", handler: "updateClubTeam", endpoint: "updateClubTeam", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "PUT", params: { id: (await makeClubTeam({ clubId: randomUUID(), seasonYear: 2026, teamName: `Other-${randomUUID().slice(0, 6)}` })).id }, body: { teamName: "Nope" } } }) },
+  { file: "clubTeams.ts", handler: "deleteClubTeam", endpoint: "deleteClubTeam", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "DELETE", params: { id: (await makeClubTeam({ clubId: randomUUID(), seasonYear: 2026, teamName: `Delete-${randomUUID().slice(0, 6)}` })).id } } }) },
+  { file: "pilotSeasonClubs.ts", handler: "assignPilotSeasonClub", endpoint: "assignPilotSeasonClub", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "POST", body: { pilotId: randomUUID(), clubId: randomUUID(), seasonYear: 2026 } } }) },
+  { file: "pilotSeasonClubs.ts", handler: "deletePilotSeasonClub", endpoint: "deletePilotSeasonClub", tier: "standard", forbiddenKind: "coord-scope", setup: async () => { const clubId = randomUUID(); const pilotId = await seedPilotSeasonClubAssignment(2026, clubId); return { forbidden: await crossClubCoord(), request: { method: "DELETE", params: { pilotId, seasonYear: "2026" } } }; } },
+  { file: "puretrack.ts", handler: "createPureTrackGroups", endpoint: "createPureTrackGroups", tier: "heavy", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "POST", params: { id: (await roundForOtherClub("Locked")).id } } }) },
+  { file: "sites.ts", handler: "createSite", endpoint: "createSite", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "POST", body: { name: "Other Site", clubId: randomUUID() } } }) },
+  { file: "sites.ts", handler: "updateSite", endpoint: "updateSite", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "PUT", params: { id: (await makeSite({ clubId: randomUUID() })).id }, body: { parkingW3W: "///nope.nope.nope" } } }) },
+  { file: "sites.ts", handler: "deleteSite", endpoint: "deleteSite", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "DELETE", params: { id: (await makeSite({ clubId: randomUUID() })).id } } }) },
+  { file: "teams.ts", handler: "updateAccounted", endpoint: "updateAccounted", tier: "standard", forbiddenKind: "coord-scope", setup: async () => { const clubId = randomUUID(); const team: Team = { id: randomUUID(), teamName: "Acct Team", club: { id: clubId, name: "Acct Club" }, score: 0, pilots: [{ placeInTeam: 1, pilotId: randomUUID(), isScoring: true, status: "Filled", accountedFor: false, signToFly: false, noScore: false, pilotPoints: 0, snapshot: { wingClass: "EN B", pilotRating: "Pilot" }, flight: null }] }; const round = await makeRound({ organisingClubId: clubId, status: "Locked", teams: [team] }); return { forbidden: await crossClubCoord(), request: { method: "PUT", params: { id: round.id, teamId: team.id, place: "1" }, body: { accountedFor: true } } }; } },
+  { file: "teamsCaptain.ts", handler: "setTeamCaptain", endpoint: "setTeamCaptain", tier: "standard", forbiddenKind: "coord-scope", setup: async () => { const clubId = randomUUID(); const round = await makeRound({ organisingClubId: clubId, teams: [{ id: "t1", club: { id: clubId, name: "Other" }, teamName: "T", score: 0, captainPilotId: null, pilots: [] }] }); return { forbidden: await crossClubCoord(), request: { method: "PUT", params: { id: round.id, teamId: "t1" }, body: { pilotId: null } } }; } },
+];
