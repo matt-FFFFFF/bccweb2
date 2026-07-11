@@ -23,3 +23,65 @@ test("phase-log redaction removes credentials while retaining diagnostics", () =
   assert.doesNotMatch(redacted, /secret-access|secret-refresh|secret-password|secret-bearer|secret-storage-key|secret-admin|secret-seeded/u);
   assert.match(redacted, /\[REDACTED\]/u);
 });
+
+test("redaction removes Azure SAS and connection credentials case-insensitively", () => {
+  // Given
+  const output = [
+    "GET https://worker.invalid/blob/file?sv=2024-11-04&sp=rw&se=2099-01-01&sig=secret-sas&safe=count",
+    "GET https://worker.invalid/blob/file?S%69G=encoded-secret&SPR=https",
+    "SharedAccessSignature=sv=2024&sig=shared-secret;BlobEndpoint=https://worker.invalid;",
+    "SharedAccessKey=shared-key;AccountName=devstoreaccount1;",
+    "SAS_TOKEN=?sv=2024&sig=env-secret",
+    "DefaultEndpointsProtocol=https;AccountKey=account-secret;EndpointSuffix=core.windows.net",
+  ].join("\n");
+
+  // When
+  const redacted = redactLoadTestOutput(output);
+
+  // Then
+  assert.doesNotMatch(redacted, /secret-sas|encoded-secret|shared-secret|shared-key|env-secret|account-secret/u);
+  assert.match(redacted, /worker\.invalid\/blob\/file/);
+  assert.match(redacted, /safe=count/);
+});
+
+test("redaction removes generic token JSON and bare JWT while preserving metrics", () => {
+  // Given
+  const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJwaWxvdCJ9.signature-secret";
+  const output = `phase=verify durationMs=123 count=185 {"token":"token-secret"} jwt=${jwt}`;
+
+  // When
+  const redacted = redactLoadTestOutput(output);
+
+  // Then
+  assert.doesNotMatch(redacted, /token-secret|signature-secret/u);
+  assert.match(redacted, /phase=verify durationMs=123 count=185/);
+});
+
+test("redaction removes URL credentials and colon or encoded SAS assignments", () => {
+  // Given
+  const output = [
+    "https://user:password-secret@worker.invalid/path?S%2569G=double-secret&safe=count",
+    "sas_token: colon-secret",
+    "Access_Token = assignment-secret",
+    "SharedAccessSignature = sv%3D2024%26sig%3Dencoded-connection-secret",
+  ].join("\n");
+
+  // When
+  const redacted = redactLoadTestOutput(output);
+
+  // Then
+  assert.doesNotMatch(redacted, /password-secret|double-secret|colon-secret|assignment-secret|encoded-connection-secret/u);
+  assert.match(redacted, /worker\.invalid\/path/);
+  assert.match(redacted, /safe=count/);
+});
+
+test("redaction removes unquoted generic token assignments", () => {
+  // Given
+  const output = "token=equals-secret token: colon-secret accessToken = camel-secret";
+
+  // When
+  const redacted = redactLoadTestOutput(output);
+
+  // Then
+  assert.doesNotMatch(redacted, /equals-secret|colon-secret|camel-secret/u);
+});

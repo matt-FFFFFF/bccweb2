@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
+import { redactLoadTestOutput } from "./loadTestOutputRedaction.mjs";
 
 export const LOADTEST_PHASES = [
   "prepare",
@@ -24,7 +25,7 @@ function resultPassed(result) {
 }
 
 function errorMessage(error) {
-  return error instanceof Error ? error.message : "unknown error";
+  return redactLoadTestOutput(error instanceof Error ? error.message : "unknown error");
 }
 
 function parsePhase(value) {
@@ -94,7 +95,7 @@ export async function runLoadTestOrchestration(options) {
       exitCode: result.exitCode,
       signal: result.signal,
       timedOut: result.timedOut === true,
-      error: result.error ?? null,
+      error: typeof result.error === "string" ? redactLoadTestOutput(result.error) : null,
       outputPath: typeof result.outputPath === "string" ? result.outputPath : undefined,
       attempted: typeof result.attempted === "boolean" ? result.attempted : undefined,
     });
