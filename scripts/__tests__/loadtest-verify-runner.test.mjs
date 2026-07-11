@@ -32,7 +32,7 @@ test("runner reports exact state and drains replay queue after flag convergence"
 
   // When
   const report = await runSignVerification({
-    prepared, jsonLines: rawLines(artifact.events), summary: artifact.summary, dedicatedStack: true,
+    prepared, parsed, dedicatedStack: true,
     login: async () => "token",
     getSignatures: async () => signatures,
     postReplay: async () => { order.push("replay"); return { status: 200, id: signatures[0].id }; },
@@ -50,11 +50,26 @@ test("runner refuses queue claims without a dedicated stack", async () => {
   // Given
   const prepared = preparedFixture();
   const artifact = artifactFixture(prepared);
+  const parsed = parseRawVerificationArtifacts(prepared, rawLines(artifact.events), artifact.summary);
 
   // When / Then
   await assert.rejects(() => runSignVerification({
-    prepared, jsonLines: rawLines(artifact.events), summary: artifact.summary, dedicatedStack: false,
+    prepared, parsed, dedicatedStack: false,
   }), /dedicated stack/);
+});
+
+test("CLI parses artifacts before HTTP login or queue client construction", async () => {
+  // Given / When
+  const source = await import("node:fs/promises").then(({ readFile }) => (
+    readFile(new URL("../verify-loadtest-signtofly.mjs", import.meta.url), "utf8")
+  ));
+
+  // Then
+  const parseAt = source.indexOf("parseRawVerificationArtifacts(prepared, jsonLines, summary)");
+  assert.ok(parseAt >= 0);
+  assert.ok(parseAt < source.indexOf("createVerifierApi("));
+  assert.ok(parseAt < source.indexOf("login(ADMIN_EMAIL"));
+  assert.ok(parseAt < source.indexOf("createReflectQueueReader("));
 });
 
 test("verifier API uses one bounded fetch attempt and preserves status", async () => {
