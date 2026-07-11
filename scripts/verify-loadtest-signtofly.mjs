@@ -2,17 +2,7 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import { existsSync, readFileSync } from "node:fs";
-import {
-  ADMIN_EMAIL,
-  ADMIN_PASSWORD_OVERRIDE,
-  BCC_API_BASE_URL,
-  DEV_CREDENTIALS_PATH,
-  PREPARED_ROUND_PATH,
-} from "./lib/loadTestConsts.mjs";
-import { createReflectQueueReader, waitForReflectQueues } from "./lib/loadTestReflectQueues.mjs";
-import { parseRawVerificationArtifacts } from "./lib/loadTestSignVerificationArtifacts.mjs";
-import { runSignVerification } from "./lib/loadTestSignVerificationRunner.mjs";
-import { createVerifierApi } from "./lib/loadTestVerifierApi.mjs";
+import { assertLoadTestTarget } from "./lib/loadTestRuntimeGuard.mjs";
 
 const VERIFY_DEADLINE_MS = 5 * 60 * 1_000;
 const FLAG_TIMEOUT_MS = 2 * 60 * 1_000;
@@ -41,20 +31,14 @@ function readText(path, label) {
   }
 }
 
-function adminPassword() {
-  if (ADMIN_PASSWORD_OVERRIDE) return ADMIN_PASSWORD_OVERRIDE;
-  if (existsSync(DEV_CREDENTIALS_PATH)) {
-    const match = readFileSync(DEV_CREDENTIALS_PATH, "utf8").match(/^ADMIN_PASSWORD=(.+)$/m);
+function adminPassword(path) {
+  const override = process.env.ADMIN_PASSWORD;
+  if (override) return override;
+  if (existsSync(path)) {
+    const match = readFileSync(path, "utf8").match(/^ADMIN_PASSWORD=(.+)$/m);
     if (match?.[1]) return match[1].trim();
   }
   fail("missing admin password; set ADMIN_PASSWORD or create .dev-credentials; state preserved");
-}
-
-function assertSafeTarget() {
-  const host = new URL(BCC_API_BASE_URL).hostname.toLowerCase();
-  if (/(^|[.-])prod([.-]|$)/u.test(host) || host.includes("production")) {
-    fail("refusing to run against a production-looking target; state preserved");
-  }
 }
 
 function artifactPaths() {
@@ -76,17 +60,35 @@ async function requireStatus(callApi, method, path, request, expectedStatus) {
 }
 
 async function main() {
-  assertSafeTarget();
+  const baseUrl = process.env.BCC_API_BASE_URL ?? "http://localhost:7071";
+  const dedicatedStack = process.env.LOADTEST_DEDICATED_STACK === "1";
+  assertLoadTestTarget(baseUrl, dedicatedStack);
+  if (!dedicatedStack) {
+    fail("dedicated stack confirmation LOADTEST_DEDICATED_STACK=1 is required before verification");
+  }
+  const [
+    { ADMIN_EMAIL, DEV_CREDENTIALS_PATH, PREPARED_ROUND_PATH },
+    { createReflectQueueReader, waitForReflectQueues },
+    { parseRawVerificationArtifacts },
+    { runSignVerification },
+    { createVerifierApi },
+  ] = await Promise.all([
+    import("./lib/loadTestConsts.mjs"),
+    import("./lib/loadTestReflectQueues.mjs"),
+    import("./lib/loadTestSignVerificationArtifacts.mjs"),
+    import("./lib/loadTestSignVerificationRunner.mjs"),
+    import("./lib/loadTestVerifierApi.mjs"),
+  ]);
   const { eventsPath, summaryPath } = artifactPaths();
   const prepared = readJson(PREPARED_ROUND_PATH, "prepared round artifact");
   const summary = readJson(summaryPath, "sign summary artifact");
   const jsonLines = readText(eventsPath, "sign events artifact");
   const parsed = parseRawVerificationArtifacts(prepared, jsonLines, summary);
-  if (prepared.baseUrl !== BCC_API_BASE_URL) {
+  if (prepared.baseUrl !== baseUrl) {
     fail("prepared artifact baseUrl does not match BCC_API_BASE_URL; state preserved");
   }
   const deadlineMs = Date.now() + VERIFY_DEADLINE_MS;
-  const callApi = createVerifierApi({ baseUrl: BCC_API_BASE_URL, deadlineMs });
+  const callApi = createVerifierApi({ baseUrl, deadlineMs });
   const login = async (email, password) => {
     const json = await requireStatus(callApi, "POST", "/api/auth/login", {
       body: { email, password },
@@ -96,12 +98,12 @@ async function main() {
     }
     return json.accessToken;
   };
-  const adminToken = await login(ADMIN_EMAIL, adminPassword());
+  const adminToken = await login(ADMIN_EMAIL, adminPassword(DEV_CREDENTIALS_PATH));
   const readCounts = createReflectQueueReader({ environment: process.env });
   const report = await runSignVerification({
     prepared,
     parsed,
-    dedicatedStack: process.env.LOADTEST_DEDICATED_STACK === "1",
+    dedicatedStack,
     login,
     getSignatures: (roundId) => requireStatus(
       callApi, "GET", `/api/rounds/${encodeURIComponent(roundId)}/signatures`, { token: adminToken }, 200,

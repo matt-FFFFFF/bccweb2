@@ -1,11 +1,47 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import test from "node:test";
 import { createVerifierApi } from "../lib/loadTestVerifierApi.mjs";
 import { runSignVerification } from "../lib/loadTestSignVerificationRunner.mjs";
 import { parseRawVerificationArtifacts } from "../lib/loadTestSignVerificationArtifacts.mjs";
 import { artifactFixture, preparedFixture, roundFixture, signaturesFixture } from "./helpers/signVerifyFixtures.mjs";
+
+const VERIFY_CLI = resolve("scripts/verify-loadtest-signtofly.mjs");
+
+async function writeCliArtifacts(cwd, baseUrl) {
+  const prepared = { ...preparedFixture(), baseUrl };
+  const artifact = artifactFixture(prepared);
+  const eventsPath = join(cwd, "events.json");
+  const summaryPath = join(cwd, "summary.json");
+  await mkdir(join(cwd, "tests", "load"), { recursive: true });
+  await Promise.all([
+    writeFile(join(cwd, "tests", "load", ".prepared-round.json"), JSON.stringify(prepared)),
+    writeFile(eventsPath, rawLines(artifact.events)),
+    writeFile(summaryPath, JSON.stringify(artifact.summary)),
+  ]);
+  return { eventsPath, summaryPath };
+}
+
+function runCli(cwd, args, environment) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, [VERIFY_CLI, ...args], {
+      cwd,
+      env: { ...process.env, ...environment },
+      stdio: ["ignore", "ignore", "pipe"],
+    });
+    let stderr = "";
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk) => { stderr += chunk; });
+    child.once("error", reject);
+    child.once("close", (status) => resolve({ status, stderr }));
+  });
+}
 
 test("raw parser requires exact setup and attempt keys from Todo 9 JSON lines", () => {
   // Given
@@ -70,6 +106,62 @@ test("CLI parses artifacts before HTTP login or queue client construction", asyn
   assert.ok(parseAt < source.indexOf("createVerifierApi("));
   assert.ok(parseAt < source.indexOf("login(ADMIN_EMAIL"));
   assert.ok(parseAt < source.indexOf("createReflectQueueReader("));
+});
+
+test("standalone verifier rejects an unclassified target before credential-file access", async (t) => {
+  // Given
+  const cwd = await mkdtemp(join(tmpdir(), "bcc-verify-target-"));
+  const baseUrl = "https://api.example.test";
+  const paths = await writeCliArtifacts(cwd, baseUrl);
+  await mkdir(join(cwd, ".dev-credentials"));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+
+  // When
+  const result = await runCli(cwd, Object.values(paths), {
+    BCC_API_BASE_URL: baseUrl,
+    ADMIN_PASSWORD: "",
+    LOADTEST_DEDICATED_STACK: "1",
+  });
+
+  // Then
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /hostname must contain loadtest or staging/);
+  assert.doesNotMatch(result.stderr, /EISDIR|credential|password/iu);
+});
+
+test("standalone verifier requires dedicated confirmation before login or queue clients", async (t) => {
+  // Given
+  let requests = 0;
+  const server = createServer((_request, response) => {
+    requests += 1;
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ accessToken: "must-not-be-used" }));
+  });
+  await new Promise((resolve, reject) => {
+    server.once("error", reject);
+    server.listen(0, "127.0.0.1", resolve);
+  });
+  const address = server.address();
+  assert.ok(address && typeof address === "object");
+  const baseUrl = `http://127.0.0.1:${address.port}`;
+  const cwd = await mkdtemp(join(tmpdir(), "bcc-verify-dedicated-"));
+  const paths = await writeCliArtifacts(cwd, baseUrl);
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+
+  // When
+  const result = await runCli(cwd, Object.values(paths), {
+    BCC_API_BASE_URL: baseUrl,
+    ADMIN_PASSWORD: "must-not-be-used",
+    AzureWebJobsStorage: "invalid-connection-string",
+    LOADTEST_DEDICATED_STACK: "0",
+  });
+
+  // Then
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /dedicated stack confirmation/);
+  assert.equal(requests, 0);
+  assert.doesNotMatch(result.stderr, /connection string|AzureWebJobsStorage/iu);
 });
 
 test("verifier API uses one bounded fetch attempt and preserves status", async () => {
