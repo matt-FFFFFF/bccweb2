@@ -10,7 +10,6 @@
 
 import { ConfigSchema } from "@bccweb/schemas";
 import {
-  deleteBlob,
   getPrivateContainer,
   getPublicContainer,
   precomputeBcryptHash,
@@ -18,15 +17,16 @@ import {
   writeJson,
 } from "./lib/blobSeed.mjs";
 import {
+  cleanupFixtureOwnership,
+  parseFixtureOwnership,
+} from "./lib/fixtureOwnership.mjs";
+import {
   CLUB_COUNT,
-  FIXTURE_CLUB_NAME,
   FIXTURE_MANIFEST_PATH,
   FIXTURE_PILOT_PASSWORD,
-  FIXTURE_TEAM_NAME,
   PILOT_COUNT,
   PREPARED_ROUND_PATH,
   SEASON_YEAR,
-  TEAMS_PER_CLUB,
 } from "./lib/loadTestConsts.mjs";
 import {
   buildLoadTestManifest,
@@ -65,73 +65,12 @@ async function wipePriorFixtures(publicContainer, privateContainer, nextManifest
   if (!existsSync(FIXTURE_MANIFEST_PATH)) return;
 
   const manifest = JSON.parse(await readFile(FIXTURE_MANIFEST_PATH, "utf8"));
-  const pilotIds = new Set(manifest.pilotIds ?? []);
-  const userIds = new Set(manifest.userIds ?? []);
-  const clubIds = new Set(manifest.clubIds ?? []);
-  const teamIds = new Set(manifest.teamIds ?? []);
-  const siteIds = new Set(manifest.siteIds ?? []);
-  const roundIds = new Set(manifest.roundIds ?? []);
-  const nextPilotIds = new Set(nextManifest.pilotIds ?? []);
-  const nextUserIds = new Set(nextManifest.userIds ?? []);
-  const nextClubIds = new Set(nextManifest.clubIds ?? []);
-  const nextTeamIds = new Set(nextManifest.teamIds ?? []);
-  const nextSiteIds = new Set(nextManifest.siteIds ?? []);
-
-  const deleteJobs = [
-    ...[...roundIds].flatMap((id) => [
-      () => deleteBlob(privateContainer, `rounds/${id}.json`),
-      () => deleteBlob(privateContainer, `round-briefs/${id}.json`),
-      () => deleteBlob(privateContainer, `round-briefs/${id}.pdf`),
-    ]),
-    // Deterministic T8 IDs are overwritten below. Only delete stale IDs from an
-    // older manifest shape; this keeps re-seed fast while still being surgical.
-    ...[...pilotIds].filter((id) => !nextPilotIds.has(id)).map((id) => () => deleteBlob(privateContainer, `pilots/${id}.json`)),
-    ...[...userIds].flatMap((id) =>
-      nextUserIds.has(id) ? [] : [
-        () => deleteBlob(privateContainer, `users/${id}.json`),
-        () => deleteBlob(privateContainer, `auth/${id}.json`),
-      ]
-    ),
-    ...[...clubIds].filter((id) => !nextClubIds.has(id)).map((id) => () => deleteBlob(privateContainer, `clubs/${id}.json`)),
-    ...[...teamIds].filter((id) => !nextTeamIds.has(id)).map((id) => () => deleteBlob(privateContainer, `club-teams/${id}.json`)),
-    ...[...siteIds].filter((id) => !nextSiteIds.has(id)).map((id) => () => deleteBlob(privateContainer, `sites/${id}.json`)),
-  ];
-
-  await inChunks(deleteJobs, (job) => job());
-
-  const userIndex = (await readJson(privateContainer, "user-index.json")) ?? {};
-  for (const [email, userId] of Object.entries(userIndex)) {
-    if (userIds.has(userId)) delete userIndex[email];
-  }
-  await writeJson(privateContainer, "user-index.json", userIndex);
-
-  const pilotEmailIndex = (await readJson(privateContainer, "pilot-email-index.json")) ?? {};
-  for (const [email, pilotId] of Object.entries(pilotEmailIndex)) {
-    if (pilotIds.has(pilotId)) delete pilotEmailIndex[email];
-  }
-  await writeJson(privateContainer, "pilot-email-index.json", pilotEmailIndex);
-
-  const publicFilters = [
-    ["pilots.json", pilotIds],
-    ["clubs.json", clubIds],
-    ["club-teams.json", teamIds],
-    ["sites.json", siteIds],
-    ["rounds.json", roundIds],
-  ];
-  for (const [path, ids] of publicFilters) {
-    const arr = asArray(await readJson(publicContainer, path));
-    await writeJson(publicContainer, path, arr.filter((item) => !ids.has(item?.id)));
-  }
-
-  const seasons = asArray(await readJson(publicContainer, "seasons.json"));
-  await writeJson(
-    publicContainer,
-    "seasons.json",
-    seasons.filter((season) => season?.year !== manifest.seasonYear)
-  );
-  if (manifest.seasonYear) {
-    await deleteBlob(publicContainer, `seasons/${manifest.seasonYear}.json`);
-  }
+  const ownership = parseFixtureOwnership(manifest);
+  const retainedOwnership = parseFixtureOwnership(nextManifest);
+  await cleanupFixtureOwnership(publicContainer, privateContainer, {
+    ownership,
+    retainedOwnership,
+  });
 
   if (existsSync(PREPARED_ROUND_PATH)) unlinkSync(PREPARED_ROUND_PATH);
   unlinkSync(FIXTURE_MANIFEST_PATH);
@@ -157,14 +96,6 @@ async function patchConfig(privateContainer) {
     maxPilotsInTeam: 10,
     maxScoringPilotsInTeam: 5, // dev override (legacy default 6)
     flightDateValidationEnabled: false, // dev: accept past-/mis-dated fixture flights
-    // Fixture-only runtime flag — NOT part of Config/ConfigSchema. The
-    // registration flow reads config.json via roundRegistration.ts's
-    // RegistrationConfigSchema (ConfigSchema.extend), which preserves this key
-    // un-stripped. Lets the load-test's 500 pilots (round-robin-assigned to 50
-    // different clubs) auto-allocate to the load-test round's organising club at
-    // first register-self. Production default is missing (≈ false), which
-    // enforces strict pilot→club seasonal binding.
-    autoAllocatePilotsToRoundClub: true,
   };
   await writeJson(privateContainer, "config.json", config);
   return config;
@@ -197,40 +128,32 @@ async function main() {
   );
 
   const seasonSummary = { id: String(SEASON_YEAR), year: SEASON_YEAR, active: true };
+  const existingSeason = await readJson(publicContainer, `seasons/${SEASON_YEAR}.json`);
   const season = {
     ...seasonSummary,
     name: `BCC ${SEASON_YEAR}`,
     startDate: `${SEASON_YEAR}-04-01`,
     endDate: `${SEASON_YEAR}-10-31`,
-    rounds: [],
-    leagueTable: [],
+    rounds: asArray(existingSeason?.rounds),
+    leagueTable: asArray(existingSeason?.leagueTable),
   };
 
   await patchConfig(privateContainer);
 
-  const clubs = Array.from({ length: CLUB_COUNT }, (_, i) => {
-    const clubN = i + 1;
-    return {
-      id: manifest.clubIds[i],
-      name: FIXTURE_CLUB_NAME(clubN),
+  const clubs = manifest.clubs.map(({ id, name }) => ({
+      id,
+      name,
       sites: [manifest.siteIds[0]],
       teams: [],
       createdAt: now,
       updatedAt: now,
-    };
-  });
+    }));
   await inChunks(clubs, (club) => writeJson(privateContainer, `clubs/${club.id}.json`, club));
 
-  const clubTeams = clubs.flatMap((club, clubIndex) =>
-    Array.from({ length: TEAMS_PER_CLUB }, (_, teamIndex) => ({
-      id: manifest.teamIds[clubIndex * TEAMS_PER_CLUB + teamIndex],
-      clubId: club.id,
-      clubName: club.name,
-      seasonYear: SEASON_YEAR,
-      teamName: FIXTURE_TEAM_NAME(clubIndex + 1, teamIndex + 1),
+  const clubTeams = manifest.teams.map((team) => ({
+      ...team,
       createdAt: now,
-    }))
-  );
+    }));
   await inChunks(clubTeams, (team) => writeJson(privateContainer, `club-teams/${team.id}.json`, team));
 
   const { pilots, userIndexEntries, pilotEmailIndexEntries } =
@@ -257,16 +180,25 @@ async function main() {
     ...pilotEmailIndexEntries,
   });
 
+  const [existingPilots, existingClubs, existingTeams, existingSites, existingSeasons] =
+    await Promise.all([
+      readJson(publicContainer, "pilots.json"),
+      readJson(publicContainer, "clubs.json"),
+      readJson(publicContainer, "club-teams.json"),
+      readJson(publicContainer, "sites.json"),
+      readJson(publicContainer, "seasons.json"),
+    ]);
+
   await Promise.all([
-    writeJson(publicContainer, "pilots.json", sortedByNameThenId(pilots.map((p) => p.summary))),
-    writeJson(publicContainer, "clubs.json", sortedByNameThenId(clubs.map(({ id, name }) => ({ id, name })))),
-    writeJson(publicContainer, "club-teams.json", clubTeams.map(({ id, clubId, clubName, seasonYear, teamName }) => ({ id, clubId, clubName, seasonYear, teamName })).sort((a, b) => {
+    writeJson(publicContainer, "pilots.json", sortedByNameThenId([...asArray(existingPilots), ...pilots.map((p) => p.summary)])),
+    writeJson(publicContainer, "clubs.json", sortedByNameThenId([...asArray(existingClubs), ...clubs.map(({ id, name }) => ({ id, name }))])),
+    writeJson(publicContainer, "club-teams.json", [...asArray(existingTeams), ...clubTeams.map(({ id, clubId, clubName, seasonYear, teamName }) => ({ id, clubId, clubName, seasonYear, teamName }))].sort((a, b) => {
       if (b.seasonYear !== a.seasonYear) return b.seasonYear - a.seasonYear;
       if (a.clubName !== b.clubName) return a.clubName.localeCompare(b.clubName);
       return a.teamName.localeCompare(b.teamName);
     })),
-    writeJson(publicContainer, "sites.json", sortedByNameThenId(siteSummaries)),
-    writeJson(publicContainer, "seasons.json", [seasonSummary]),
+    writeJson(publicContainer, "sites.json", sortedByNameThenId([...asArray(existingSites), ...siteSummaries])),
+    writeJson(publicContainer, "seasons.json", [...asArray(existingSeasons).filter(({ year }) => year !== SEASON_YEAR), seasonSummary]),
     writeJson(publicContainer, `seasons/${SEASON_YEAR}.json`, season),
   ]);
 

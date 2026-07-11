@@ -10,7 +10,7 @@ The load test verifies that the API's blob-lease orchestration correctly handles
 
 - **k6**: Installed and on PATH (`brew install k6` or equivalent).
 - **Admin Access**: For local dev, this is seeded automatically. For Azure, the operator must have the `ADMIN_PASSWORD` or a valid `.dev-credentials` file.
-- **Fixture State**: The environment must be seeded with 500 pilots and 50 clubs before running the load test.
+- **Fixture State**: The environment must be seeded with 500 pilots, 25 clubs, and 50 canonical teams before running the load test.
 
 ## 3. Standard run (local)
 
@@ -111,8 +111,8 @@ Load test fixtures contain synthetic data only (`pilotXXX@bcc.local`). The `scri
 - **Remediation**: Verify the deployed commit includes the `confirmRound` auto-brief block.
 
 ### register-self returns 409 NOT_IN_CLUB_FOR_SEASON "Round has no organising club"
-- **Cause**: The load-test round was created without an organising club, or pilots are not members of that club.
-- **Remediation**: This was the Wave-4 bug. The fix is ensuring `prepare-loadtest.mjs` passes `organisingClubId`, all 50 teams share that clubId, and `config.json` has `autoAllocatePilotsToRoundClub: true`.
+- **Cause**: The load-test round was created without an organising club, or its teams do not match the pilots' canonical fixture clubs.
+- **Remediation**: Re-run fixture seeding and preparation. Fixtures bind each pilot to one of 50 canonical teams across 25 clubs; no fixture-only club auto-allocation flag is used.
 
 ### bcrypt slow on cold start
 - **Cause**: First login involves high CPU cost for bcrypt.

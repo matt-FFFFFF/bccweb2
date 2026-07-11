@@ -54,7 +54,7 @@ own lockfile (pulls `mssql`, kept out of the deployed tree); root `npm ci` skips
 | `make test-heavy`| The 3 excluded heavy API tests (see Testing).                            |
 | `make dev`       | Full stack via Docker Compose (Azurite + API + Web/Caddy).                |
 | `make dev-api` / `dev-web` | Functions host `:7071` (needs Azurite) / Vite dev `:5173`.      |
-| `make seed`      | Dev fixtures (500 pilots / 50 clubs / teams / seasons). `seed-rounds` too.|
+| `make seed`      | Dev fixtures (500 pilots / 25 clubs / 50 teams / season).                  |
 | `make clean`     | Removes `dist/` AND `*.tsbuildinfo`.                                      |
 | `npm run e2e`    | Playwright (`tests/e2e/playwright.config.ts`, base URL `:5173`).          |
 | `npm run lint`   | eslint all workspaces + `tests/e2e` + `scripts`; each workspace has its own `lint` (`eslint src --max-warnings 0`), then the SPDX header check (`license:check`). |
