@@ -8,6 +8,7 @@ import { spawnSync } from "node:child_process";
 import { after, before, test } from "node:test";
 
 import { BlobServiceClient } from "@azure/storage-blob";
+import { ActiveWordingPointerSchema, SignToFlyWordingSchema } from "@bccweb/schemas";
 
 import { deterministicUuid } from "../lib/blobSeed.mjs";
 import {
@@ -177,6 +178,24 @@ test("seed twice removes stale legacy ownership and preserves nonfixture entries
   assert.equal(manifest.clubIds.length, 25);
   assert.equal(manifest.teamIds.length, 50);
   assert.equal(new Set(manifest.teamIds).size, 50);
+});
+
+test("fresh seed publishes schema-valid private sign wording", async () => {
+  // Given / When
+  const result = runScript(SEED_SCRIPT);
+
+  // Then
+  assert.equal(result.status, 0, result.stderr);
+  const wording = SignToFlyWordingSchema.parse(
+    await readJson(privateContainer, "sign-to-fly/wording/1.json"),
+  );
+  const active = ActiveWordingPointerSchema.parse(
+    await readJson(privateContainer, "sign-to-fly/wording/active.json"),
+  );
+  assert.equal(wording.version, 1);
+  assert.equal(wording.markdown.includes("@bcc.local"), false);
+  assert.deepEqual(active, { activeVersion: 1 });
+  assert.equal(await publicContainer.getBlobClient("sign-to-fly/wording/1.json").exists(), false);
 });
 
 test("malformed duplicate manifest is rejected before owned blob deletion", async () => {

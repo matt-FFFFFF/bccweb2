@@ -9,6 +9,7 @@ import { signaturePath } from "../../lib/signTofly/ledger.js";
 import { computeBriefHash } from "../../lib/signTofly/briefVersion.js";
 import { reflectRoundSignToFly } from "../../lib/signTofly/reflect.js";
 import { enqueueSignToFlyReflect } from "../../lib/queue.js";
+import { getPrivateBlockBlobClient } from "../../lib/blob.js";
 
 vi.mock("../../lib/queue.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/queue.js")>()),
@@ -34,6 +35,16 @@ describe("signature endpoints", () => {
     await reflectRoundSignToFly(ctx.roundId);
     const round = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
     expect(round?.teams[0].pilots[0].signToFly).toBe(true);
+  });
+
+  it("missing active wording pointer fails explicitly with 503 WORDING_NOT_SEEDED", async () => {
+    const ctx = await seedSignableRound();
+    await getPrivateBlockBlobClient("sign-to-fly/wording/active.json").deleteIfExists();
+
+    const res = await sign(ctx);
+
+    expect(res.status).toBe(503);
+    expect((res.jsonBody as { code: string }).code).toBe("WORDING_NOT_SEEDED");
   });
 
   it("pilot tries to sign another pilot's slot -> 403 NOT_YOUR_SLOT", async () => {
