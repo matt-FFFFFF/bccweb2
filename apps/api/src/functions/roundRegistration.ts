@@ -18,6 +18,7 @@ import {
   getBlobClient,
   getPrivateBlobClient,
   withPrivateLease,
+  withPrivateLeaseRetry,
 } from "../lib/blob.js";
 import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
@@ -93,7 +94,7 @@ async function registerSelf(
   await ensureSeasonClubRecorded(pilot.id, seasonYear, pilotClubId, chosenTeam.club.name);
   const pilotSnapshot = buildPilotSnapshot(pilot);
 
-  const registration = await withPrivateLease(`rounds/${roundId}.json`, async (leaseId) => {
+  const registration = await withPrivateLeaseRetry(`rounds/${roundId}.json`, async (leaseId) => {
     const lockedRound = await readRound(roundId);
     ensureRegistrationOpen(lockedRound, "REGISTRATION_CLOSED");
     if (isPilotInRound(lockedRound, pilot.id)) {
