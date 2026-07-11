@@ -57,6 +57,21 @@ function sortedByNameThenId(items) {
   );
 }
 
+function replaceOwnedRows(existing, fixtureRows, ownedIds) {
+  const ownership = new Set(ownedIds);
+  return [...asArray(existing).filter(({ id }) => !ownership.has(id)), ...fixtureRows];
+}
+
+function replaceOwnedIndexEntries(existing, fixtureEntries, ownedIds) {
+  const ownership = new Set(ownedIds);
+  return {
+    ...Object.fromEntries(
+      Object.entries(existing ?? {}).filter(([, id]) => !ownership.has(id))
+    ),
+    ...fixtureEntries,
+  };
+}
+
 function buildManifest() {
   return buildLoadTestManifest({ seasonYear: SEASON_YEAR, siteNames: SITE_NAMES });
 }
@@ -169,16 +184,22 @@ async function main() {
   // Preserves admin (T7) and any non-fixture user entries across wipe→reseed cycles.
   // Fixture entries always win on collision.
   const existingUserIndex = (await readJson(privateContainer, "user-index.json")) ?? {};
-  await writeJson(privateContainer, "user-index.json", {
-    ...existingUserIndex,
-    ...userIndexEntries,
-  });
+  await writeJson(
+    privateContainer,
+    "user-index.json",
+    replaceOwnedIndexEntries(existingUserIndex, userIndexEntries, manifest.userIds)
+  );
 
   const existingPilotEmailIndex = (await readJson(privateContainer, "pilot-email-index.json")) ?? {};
-  await writeJson(privateContainer, "pilot-email-index.json", {
-    ...existingPilotEmailIndex,
-    ...pilotEmailIndexEntries,
-  });
+  await writeJson(
+    privateContainer,
+    "pilot-email-index.json",
+    replaceOwnedIndexEntries(
+      existingPilotEmailIndex,
+      pilotEmailIndexEntries,
+      manifest.pilotIds
+    )
+  );
 
   const [existingPilots, existingClubs, existingTeams, existingSites, existingSeasons] =
     await Promise.all([
@@ -190,14 +211,14 @@ async function main() {
     ]);
 
   await Promise.all([
-    writeJson(publicContainer, "pilots.json", sortedByNameThenId([...asArray(existingPilots), ...pilots.map((p) => p.summary)])),
-    writeJson(publicContainer, "clubs.json", sortedByNameThenId([...asArray(existingClubs), ...clubs.map(({ id, name }) => ({ id, name }))])),
-    writeJson(publicContainer, "club-teams.json", [...asArray(existingTeams), ...clubTeams.map(({ id, clubId, clubName, seasonYear, teamName }) => ({ id, clubId, clubName, seasonYear, teamName }))].sort((a, b) => {
+    writeJson(publicContainer, "pilots.json", sortedByNameThenId(replaceOwnedRows(existingPilots, pilots.map((p) => p.summary), manifest.pilotIds))),
+    writeJson(publicContainer, "clubs.json", sortedByNameThenId(replaceOwnedRows(existingClubs, clubs.map(({ id, name }) => ({ id, name })), manifest.clubIds))),
+    writeJson(publicContainer, "club-teams.json", replaceOwnedRows(existingTeams, clubTeams.map(({ id, clubId, clubName, seasonYear, teamName }) => ({ id, clubId, clubName, seasonYear, teamName })), manifest.teamIds).sort((a, b) => {
       if (b.seasonYear !== a.seasonYear) return b.seasonYear - a.seasonYear;
       if (a.clubName !== b.clubName) return a.clubName.localeCompare(b.clubName);
       return a.teamName.localeCompare(b.teamName);
     })),
-    writeJson(publicContainer, "sites.json", sortedByNameThenId([...asArray(existingSites), ...siteSummaries])),
+    writeJson(publicContainer, "sites.json", sortedByNameThenId(replaceOwnedRows(existingSites, siteSummaries, manifest.siteIds))),
     writeJson(publicContainer, "seasons.json", [...asArray(existingSeasons).filter(({ year }) => year !== SEASON_YEAR), seasonSummary]),
     writeJson(publicContainer, `seasons/${SEASON_YEAR}.json`, season),
   ]);

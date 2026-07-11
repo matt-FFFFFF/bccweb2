@@ -33,10 +33,37 @@ function isPublicIndexEntry(path, entry) {
   return true;
 }
 
+function requireUniqueIds(entries, path) {
+  const ids = entries.map(({ id }) => id);
+  if (new Set(ids).size !== ids.length) {
+    fail("INDEX_DUPLICATE", `${path} contains duplicate ids`);
+  }
+}
+
+function requireExactOwnedMembership(entries, expectedIds, path) {
+  const actualIds = new Set(entries.map(({ id }) => id));
+  const missingId = expectedIds.find((id) => !actualIds.has(id));
+  if (missingId) {
+    fail("INDEX_PARTIAL", `${path} is missing fixture ownership`);
+  }
+}
+
+function requireExactOwnedValues(index, expectedEntries, path) {
+  const values = Object.values(index);
+  if (new Set(values).size !== values.length) {
+    fail("INDEX_DUPLICATE", `${path} contains duplicate ids`);
+  }
+  for (const [key, expectedId] of Object.entries(expectedEntries)) {
+    if (index[key] !== expectedId) {
+      fail("INDEX_PARTIAL", `${path} has incomplete fixture ownership`);
+    }
+  }
+}
+
 export async function preflightFixtureStorage(
   publicContainer,
   privateContainer,
-  seasonYear
+  ownership
 ) {
   const privateIndexes = new Map();
   for (const path of ["user-index.json", "pilot-email-index.json"]) {
@@ -63,6 +90,7 @@ export async function preflightFixtureStorage(
     if (parsedIndex.some((entry) => !isPublicIndexEntry(path, entry))) {
       fail("PUBLIC_INDEX_ENTRY", `${path} contains an invalid entry`);
     }
+    requireUniqueIds(parsedIndex, path);
     publicIndexes.set(path, parsedIndex);
   }
 
@@ -79,7 +107,7 @@ export async function preflightFixtureStorage(
     fail("SEASON_INDEX_ENTRY", "seasons.json contains an invalid summary");
   }
 
-  const seasonPath = `seasons/${seasonYear}.json`;
+  const seasonPath = `seasons/${ownership.seasonYear}.json`;
   const season = await readOptionalJson(publicContainer, seasonPath, "SEASON_BLOB_NULL");
   if (season !== null && (typeof season !== "object" || Array.isArray(season))) {
     fail("SEASON_BLOB_TYPE", `${seasonPath} must contain an object`);
@@ -93,6 +121,26 @@ export async function preflightFixtureStorage(
   }
   if (season?.leagueTable !== undefined && !Array.isArray(season.leagueTable)) {
     fail("SEASON_BLOB_LEAGUE", `${seasonPath} leagueTable must be an array`);
+  }
+
+  requireExactOwnedValues(
+    privateIndexes.get("user-index.json"),
+    ownership.userIndexEntries,
+    "user-index.json"
+  );
+  requireExactOwnedValues(
+    privateIndexes.get("pilot-email-index.json"),
+    ownership.pilotEmailIndexEntries,
+    "pilot-email-index.json"
+  );
+  for (const [path, expectedIds] of [
+    ["pilots.json", ownership.pilotIds],
+    ["clubs.json", ownership.clubIds],
+    ["club-teams.json", ownership.teamIds],
+    ["sites.json", ownership.siteIds],
+    ["rounds.json", ownership.roundIds],
+  ]) {
+    requireExactOwnedMembership(publicIndexes.get(path), expectedIds, path);
   }
 
   return {
