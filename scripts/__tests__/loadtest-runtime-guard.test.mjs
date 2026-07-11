@@ -95,3 +95,25 @@ test("CLI rejects a production-looking target before creating runtime state", as
   assert.match(result.stderr, /production-looking/);
   assert.equal(existsSync(join(cwd, "logs")), false);
 });
+
+test("CLI redacts credential-bearing initialization errors", async (t) => {
+  // Given
+  const cwd = await mkdtemp(join(tmpdir(), "bcc-load-init-error-"));
+  const script = resolve("scripts/run-loadtest.mjs");
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+
+  // When
+  const result = spawnSync(process.execPath, [script], {
+    cwd,
+    env: {
+      ...process.env,
+      BCC_API_BASE_URL: "http://127.0.0.1:7071",
+      LOADTEST_STATUS_PATH: "status.json?sv=2024&sig=init-secret",
+    },
+    encoding: "utf8",
+  });
+
+  // Then
+  assert.notEqual(result.status, 0);
+  assert.doesNotMatch(result.stderr, /init-secret/u);
+});

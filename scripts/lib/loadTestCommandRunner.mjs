@@ -18,13 +18,14 @@ export function runCommand(specification) {
     env,
     timeoutMs,
     signal,
+    extraStdio = [],
   } = specification;
   return new Promise((resolve) => {
     const child = spawn(command, args, {
       cwd,
       env: { ...process.env, ...env },
       shell: false,
-      stdio: ["ignore", "pipe", "pipe"],
+      stdio: ["ignore", "pipe", "pipe", ...extraStdio],
     });
     let stdout = "";
     let stderr = "";

@@ -5,7 +5,7 @@ import { join } from "node:path";
 const MINUTE = 60_000;
 
 export function createLoadTestCommands(options) {
-  const { root, eventsPath, summaryPath } = options;
+  const { root, eventsPath, summaryPath, artifactStdio = [] } = options;
   const loadDirectory = join(root, "tests", "load");
   const node = process.execPath;
   return {
@@ -38,16 +38,17 @@ export function createLoadTestCommands(options) {
       cwd: loadDirectory,
       env: { SIGN_EVENTS_PATH: eventsPath, SIGN_SUMMARY_PATH: summaryPath },
       timeoutMs: 10 * MINUTE,
+      extraStdio: artifactStdio,
     },
     artifact: {
       command: node,
       args: [join(root, "scripts", "verify-loadtest-sign-artifacts.mjs"), eventsPath, summaryPath],
-      cwd: root, env: {}, timeoutMs: MINUTE,
+      cwd: root, env: {}, timeoutMs: MINUTE, extraStdio: artifactStdio,
     },
     verify: {
       command: node,
       args: [join(root, "scripts", "verify-loadtest-signtofly.mjs"), eventsPath, summaryPath],
-      cwd: root, env: {}, timeoutMs: 10 * MINUTE,
+      cwd: root, env: {}, timeoutMs: 10 * MINUTE, extraStdio: artifactStdio,
     },
     cleanup: {
       command: node, args: [join(root, "scripts", "cleanup-loadtest.mjs")],
