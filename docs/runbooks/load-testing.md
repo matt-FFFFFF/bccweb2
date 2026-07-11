@@ -7,7 +7,8 @@ before destructive cleanup. Never target production or a shared queue.
 ## Preconditions
 
 1. Install k6 and start a worker-owned local stack or dedicated Azure test stack.
-2. Seed canonical fixtures with `make seed`: 500 pilots, 25 clubs, 50 teams, 10
+2. Seed canonical fixtures with `make seed`: it creates/reuses an ignored mode-0600
+   `.dev-credentials` without logging the password, plus 500 pilots, 25 clubs, 50 teams, 10
    pilots/team, 25 `RoundsCoord` users, and 50 captain assignments. `make seed-rounds`
    is optional operator browsing data, not part of `make loadtest`.
 3. Export `LOADTEST_DEDICATED_STACK=1`. Queue counts are approximate and global;

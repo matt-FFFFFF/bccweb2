@@ -62,7 +62,7 @@ dev: docker-up ## Start full local dev stack (Docker Compose)
 
 .PHONY: dev-api
 dev-api: build-types build-scoring build-api ## Start Azure Functions host (requires Azurite)
-	@test -f .dev-credentials || { rm -rf .dev-credentials; touch .dev-credentials; }
+	@if [ ! -e .dev-credentials ]; then umask 077; : > .dev-credentials; fi
 	npm run start --workspace=apps/api
 
 .PHONY: dev-web
@@ -71,7 +71,7 @@ dev-web: ## Start Vite dev server on :5173
 
 .PHONY: docker-up
 docker-up: ## Start Azurite + API + Web via Docker Compose
-	@test -f .dev-credentials || { rm -rf .dev-credentials; touch .dev-credentials; }
+	@if [ ! -e .dev-credentials ]; then umask 077; : > .dev-credentials; fi
 	$(CONTAINER_RUNTIME) compose up --build
 
 .PHONY: docker-down
@@ -79,8 +79,10 @@ docker-down: ## Stop Docker Compose stack
 	$(CONTAINER_RUNTIME) compose down
 
 .PHONY: seed
-seed: ## Seed 500 pilots / 25 clubs / 50 club-teams + season fixtures
+seed: ## Seed admin credential + 500 pilots / 25 clubs / 50 club-teams + season fixtures
+	node scripts/seed-admin.mjs --prepare-credentials
 	node scripts/seed-fixtures.mjs
+	node scripts/seed-admin.mjs
 
 .PHONY: seed-rounds
 seed-rounds: ## Seed 4 dev-browsing rounds (Proposed/Confirmed/BriefComplete/Locked)

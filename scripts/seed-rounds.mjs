@@ -6,11 +6,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { cleanupOwnedRoundIds } from "./lib/loadTestRoundCleanup.mjs";
 import { createLoadTestApi, loginLoadTestUser } from "./lib/loadTestApi.mjs";
+import { resolveAdminPassword } from "./lib/devCredentials.mjs";
 import {
   ADMIN_EMAIL,
   ADMIN_PASSWORD_OVERRIDE,
   BCC_API_BASE_URL,
-  DEV_CREDENTIALS_PATH,
   FIXTURE_MANIFEST_PATH,
   FIXTURE_PILOT_PASSWORD,
   SEASON_YEAR,
@@ -31,15 +31,6 @@ const SETUP_DEADLINE_MS = 15 * 60 * 1_000;
 
 function fail(message) {
   throw new Error(`[seed-rounds] ${message}`);
-}
-
-function resolveAdminPassword() {
-  if (ADMIN_PASSWORD_OVERRIDE) return ADMIN_PASSWORD_OVERRIDE;
-  if (existsSync(DEV_CREDENTIALS_PATH)) {
-    const match = readFileSync(DEV_CREDENTIALS_PATH, "utf8").match(/^ADMIN_PASSWORD=(.+)$/m);
-    if (match?.[1]) return match[1].trim();
-  }
-  fail("missing admin password; set ADMIN_PASSWORD or create .dev-credentials");
 }
 
 function isoDate(offsetDays) {
@@ -141,7 +132,7 @@ async function main() {
   });
   const adminToken = await loginLoadTestUser(callApi, {
     email: ADMIN_EMAIL,
-    password: resolveAdminPassword(),
+    password: resolveAdminPassword(ADMIN_PASSWORD_OVERRIDE),
   });
   const pilotTokens = new Map();
   for (const [index, pilot] of selected.pilots.entries()) {
