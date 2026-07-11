@@ -49,6 +49,7 @@ iac/plan.binary
 # Load-testing fixtures and dev credentials (T1)
 .dev-credentials
 .fixture-manifest.json
+.loadtest-round-state.json
 tests/load/.prepared-round.json
 
 # Load-test runtime logs (k6 stdout per `make loadtest-register` / `loadtest-sign`)
