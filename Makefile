@@ -110,7 +110,16 @@ loadtest-transition: ## POST brief-complete on the prepared round
 .PHONY: loadtest-sign
 loadtest-sign: ## k6 sign phase
 	@mkdir -p $(CURDIR)/logs/load-test
-	cd tests/load && k6 run --env PHASE=sign sign-to-fly.js | tee $(CURDIR)/logs/load-test/sign-$$(date +%s).log
+	@run_id=$$(date +%s); \
+	events="$${SIGN_EVENTS_PATH:-$(CURDIR)/logs/load-test/sign-events-$$run_id.json}"; \
+	summary="$${SIGN_SUMMARY_PATH:-$(CURDIR)/logs/load-test/sign-summary-$$run_id.json}"; \
+	log="$(CURDIR)/logs/load-test/sign-$$run_id.log"; \
+	cd tests/load && SIGN_EVENTS_PATH="$$events" SIGN_SUMMARY_PATH="$$summary" \
+		k6 run --env SIGN_EVENTS_PATH="$$events" --env SIGN_SUMMARY_PATH="$$summary" \
+		--out json="$$events" --summary-trend-stats="p(95),p(99)" sign-phase.js >"$$log" 2>&1; \
+	result=$$?; cat "$$log"; \
+	if [ $$result -eq 0 ]; then node ../../scripts/verify-loadtest-sign-artifacts.mjs "$$events" "$$summary"; \
+	else exit $$result; fi
 
 .PHONY: loadtest-verify
 loadtest-verify: ## Verify signatures persisted and signToFly reflected

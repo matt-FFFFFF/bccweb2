@@ -7,7 +7,8 @@ import { resolve } from "node:path";
 
 const preparePath = resolve("scripts/prepare-loadtest.mjs");
 const transitionPath = resolve("scripts/transition-loadtest.mjs");
-const k6Path = resolve("tests/load/sign-to-fly.js");
+const registerK6Path = resolve("tests/load/sign-to-fly.js");
+const signK6Path = resolve("tests/load/sign-phase.js");
 const makefilePath = resolve("Makefile");
 
 test("prepare persists pilot identity and provisional place while round remains Confirmed", async () => {
@@ -35,11 +36,14 @@ test("transition consumes the prepared round id and advances it to BriefComplete
 
 test("k6 registration and signing address slots by prepared team and place", async () => {
   // Given
-  const source = await readFile(k6Path, "utf8");
+  const [registerSource, signSource] = await Promise.all([
+    readFile(registerK6Path, "utf8"),
+    readFile(signK6Path, "utf8"),
+  ]);
 
   // When / Then
-  assert.match(source, /teamId: slot\.teamId, preferredPlace: slot\.place/);
-  assert.match(source, /teams\/\$\{slot\.teamId\}\/pilots\/\$\{slot\.place\}\/sign/);
+  assert.match(registerSource, /teamId: slot\.teamId, preferredPlace: slot\.place/);
+  assert.match(signSource, /teams\/\$\{target\.teamId\}\/pilots\/\$\{target\.place\}\/sign/);
 });
 
 test("Make runs captain reconciliation between registration and transition", async () => {
