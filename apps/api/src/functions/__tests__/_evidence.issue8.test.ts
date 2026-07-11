@@ -356,7 +356,7 @@ const CASES: CallSiteCase[] = [
     return { forbidden: await crossClubCoord(), request: { method: "PUT", params: { id: round.id, teamId: team.id, place: "1" }, body: { accountedFor: true } } };
   } },
 
-  { file: "teamsCaptain.ts", handler: "setTeamCaptain", endpoint: "setTeamCaptain", tier: "standard", forbiddenKind: "coord-scope", setup: async () => ({ forbidden: await crossClubCoord(), request: { method: "PUT", params: { id: (await roundForOtherClub()).id, teamId: randomUUID() }, body: { pilotId: null } } }) },
+  { file: "teamsCaptain.ts", handler: "setTeamCaptain", endpoint: "setTeamCaptain", tier: "standard", forbiddenKind: "coord-scope", setup: async () => { const clubId = randomUUID(); const round = await makeRound({ organisingClubId: clubId, teams: [{ id: "t1", club: { id: clubId, name: "Other" }, teamName: "T", score: 0, captainPilotId: null, pilots: [] }] }); return { forbidden: await crossClubCoord(), request: { method: "PUT", params: { id: round.id, teamId: "t1" }, body: { pilotId: null } } }; } },
 ];
 
 async function sourceMutationCallSites(): Promise<Array<{ file: string; endpoint: string; tier: string }>> {
