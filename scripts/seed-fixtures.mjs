@@ -11,7 +11,6 @@
 import { ConfigSchema } from "@bccweb/schemas";
 import {
   deleteBlob,
-  deterministicUuid,
   getPrivateContainer,
   getPublicContainer,
   precomputeBcryptHash,
@@ -31,6 +30,10 @@ import {
   TEAMS_PER_CLUB,
   TS_CS_VERSION,
 } from "./lib/loadTestConsts.mjs";
+import {
+  buildLoadTestManifest,
+  validateLoadTestManifest,
+} from "./lib/loadTestTopology.mjs";
 import { existsSync, unlinkSync, writeFileSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
@@ -56,29 +59,7 @@ function sortedByNameThenId(items) {
 }
 
 function buildManifest() {
-  const siteIds = SITE_NAMES.map((name) => deterministicUuid("fixture-site", name));
-  const clubIds = Array.from({ length: CLUB_COUNT }, (_, i) =>
-    deterministicUuid("fixture-club", `club${i + 1}`)
-  );
-  const teamIds = clubIds.flatMap((clubId) =>
-    Array.from({ length: TEAMS_PER_CLUB }, (_, i) =>
-      deterministicUuid("fixture-club-team", `${clubId}-${i + 1}`)
-    )
-  );
-  const pilotEmails = Array.from({ length: PILOT_COUNT }, (_, i) =>
-    FIXTURE_PILOT_EMAIL_PATTERN(i + 1).toLowerCase()
-  );
-  const pilotIds = pilotEmails.map((email) => deterministicUuid("fixture-pilot", email));
-  const userIds = pilotEmails.map((email) => deterministicUuid("fixture-user", email));
-
-  return {
-    seasonYear: SEASON_YEAR,
-    siteIds,
-    clubIds,
-    teamIds,
-    pilotIds,
-    userIds,
-  };
+  return buildLoadTestManifest({ seasonYear: SEASON_YEAR, siteNames: SITE_NAMES });
 }
 
 async function wipePriorFixtures(publicContainer, privateContainer, nextManifest) {
@@ -192,6 +173,8 @@ async function patchConfig(privateContainer) {
 
 async function main() {
   const startedAt = performance.now();
+  const manifest = buildManifest();
+  validateLoadTestManifest(manifest, SEASON_YEAR);
   const publicContainer = getPublicContainer();
   const privateContainer = getPrivateContainer();
   await Promise.all([
@@ -199,7 +182,6 @@ async function main() {
     privateContainer.createIfNotExists(),
   ]);
 
-  const manifest = buildManifest();
   const pilotPasswordHash = await precomputeBcryptHash(FIXTURE_PILOT_PASSWORD);
   await wipePriorFixtures(publicContainer, privateContainer, manifest);
 
