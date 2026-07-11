@@ -17,7 +17,7 @@ High-contention performance tests for the Sign-to-Fly journey. These tests measu
 The load test is split into phases because k6 (based on Goja) cannot easily share state with the Node.js seeding scripts, and the API enforces strict status guards that require multiple HTTP phases.
 
 1.  **Prepare** (`make loadtest-prepare`): Creates a dedicated load-test round with 50 teams and 500 slots. It generates `tests/load/.prepared-round.json` which contains the metadata needed by k6.
-2.  **Register** (`make loadtest-register`): 500 virtual users (VUs) log in and call `/register-self` concurrently. This is the primary contention point for the round blob lease.
+2.  **Register** (`make loadtest-register`): Setup logs in all 500 pilots once in batches of 25, then 500 one-iteration virtual users (VUs) each call `/register-self` exactly once. This is the primary contention point for the round blob lease.
 3.  **Transition** (`make loadtest-transition`): A single administrative call to move the round to the "Brief Complete" status, enabling the signing phase.
 4.  **Sign** (`make loadtest-sign`): a `ramping-vus` executor drives 10 → 25 → 50 → 100 concurrent VUs calling the `/sign` endpoint on the same round to find the contention knee. A hard `sign_5xx: count==0` threshold fails the run on any sign-phase 5xx.
 5.  **Verify** (`make loadtest-verify`): Logs in as admin, checks that all expected signatures persisted, waits up to 30 seconds for `slot.signToFly` to be materialized by the async `signtofly-reflect` queue consumer, and re-signs one slot to prove idempotency returns the same signature id.
@@ -95,13 +95,13 @@ k6 produces a summary at the end of each phase. Look for these key metrics:
 - `http_req_failed`: The percentage of failed requests.
 - `checks`: The success rate of the "login 200", "register ok", and "sign ok" assertions.
 
-The register phase remains the primary lease-contention measurement and retries transient lease conflicts. The sign phase is a hard gate: server-side 5xx responses fail the k6 run. After k6 exits, `make loadtest-verify` is the correctness gate for persisted state: it fails non-zero if the signature ledger count is not the expected 500, if `signToFly` remains false after the bounded async drain window, or if re-signing an already signed slot creates a different signature id.
+The register phase is the primary lease-contention measurement. It never retries: exactly 500 attempts, 500 successes, zero failures, and zero 5xx are hard thresholds. Its machine summary separates the 500 setup login requests/tokens from register attempts and register-only latency. The sign phase is a hard gate: server-side 5xx responses fail the k6 run. After k6 exits, `make loadtest-verify` is the correctness gate for persisted state: it fails non-zero if the signature ledger count is not the expected 500, if `signToFly` remains false after the bounded async drain window, or if re-signing an already signed slot creates a different signature id.
 
 `signToFly` is not asserted instantaneously because signing now enqueues a `{ roundId }` job for the `signtofly-reflect` queue consumer. The verifier polls `GET /api/rounds/{roundId}` for about 30 seconds so the queue can drain while still preventing a hung or misleading-success load test.
 
 ### Baseline Metrics (Local)
 
-> **These are illustrative observations, not SLO gates.** The register phase runs in advisory mode (no thresholds); the sign phase is hard-gated on 5xx (see [§Interpreting output](#interpreting-output)). Numbers vary by hardware, contention, Azurite version. Don't compare local to Azure.
+> **These are illustrative observations, not latency SLO gates.** The register phase has exact count/error thresholds, and the sign phase is hard-gated on 5xx (see [§Interpreting output](#interpreting-output)). Numbers vary by hardware, contention, Azurite version. Don't compare local to Azure.
 
 As a reference, these metrics were observed on a standard local dev stack:
 - **Register phase**: 500 VUs finished in ~7m 40s.
@@ -112,6 +112,7 @@ As a reference, these metrics were observed on a standard local dev stack:
 - **Cold Starts**: Azure Functions may experience cold starts on the first few requests.
 - **Auto-scale**: Azure will attempt to scale out the Function App instances under load, whereas local execution is limited to your machine's CPU/RAM.
 - **Lease Semantics**: Azure Storage lease timing and consistency may differ slightly from Azurite's emulation.
+- **Register authentication**: Login is limited to 10 requests/minute per trusted client IP. One Azure load generator therefore cannot perform the required 500 setup logins. The script's unique `X-Forwarded-For` values only partition local Functions traffic; Azure uses its trusted `client-ip` value. Remote execution requires an approved partitioned-generator or token-provisioning design, which this load test does not supply.
 - **Cost**: Running 500 VUs against Azure consumes execution units and storage transactions. Use dedicated test instances only.
 
 ## Design Choices & Safety
@@ -130,7 +131,7 @@ Fixture seeding creates 500 pilots, 25 clubs, and 50 canonical teams, with 10 pi
 
 - **Missing .prepared-round.json**: Run `make loadtest-prepare` first.
 - **Wrong Round Status**: If you skip `make loadtest-transition`, the sign phase will fail because the round is not in "Brief Complete" status.
-- **HTTP 429 (Too Many Requests)**: Each pilot has a 10/min rate limit on registration. If you restart the register phase too quickly, you may hit this.
-- **HTTP 500 (Internal Server Error)**: Register-phase 500s often indicate lease contention; if retries are exhausted, k6 will report a failure. Sign-phase 500s are not advisory and fail the run.
+- **HTTP 429 (Too Many Requests)**: Setup authentication is limited to 10/min per trusted client IP. A local run uses unique XFF fallbacks; an Azure run from one generator IP is unsupported without an approved partitioned/token design.
+- **HTTP 500 (Internal Server Error)**: Register and sign 500s are never retried and fail their runs.
 - **Verify timeout**: `make loadtest-verify` timed out waiting for `signToFly=true`; inspect the Functions host logs for the `signtofly-reflect` queue consumer before cleanup.
 - **Cold-start Latency**: In Azure, the first few iterations might show significantly higher latency.

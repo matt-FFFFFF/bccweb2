@@ -115,8 +115,8 @@ Load test fixtures contain synthetic data only (`pilotXXX@bcc.local`). The `scri
 - **Remediation**: Inspect the prepared round and fixture manifest before retrying. The end-to-end preparation workflow is documented when its orchestration ships.
 
 ### bcrypt slow on cold start
-- **Cause**: First login involves high CPU cost for bcrypt.
-- **Remediation**: Expected on first run; subsequent logins are faster due to token reuse in the script or warm host.
+- **Cause**: Setup authenticates every prepared pilot once, and bcrypt verification is CPU intensive.
+- **Remediation**: Expected on first run; register VU latency excludes setup authentication.
 
 ### Azurite OOM (local)
 - **Cause**: Azurite memory leak during long high-concurrency runs.
@@ -124,7 +124,7 @@ Load test fixtures contain synthetic data only (`pilotXXX@bcc.local`). The `scri
 
 ### p95 latency outliers
 - **Cause**: Blob lease contention. Multiple VUs attempting to write to the same round blob simultaneously.
-- **Remediation**: This is expected. The k6 script includes retries to handle these 500/409 errors.
+- **Remediation**: Inspect the exact failure counters. The k6 script deliberately does not retry 409 or 5xx responses.
 
 ### Surprise emails/PureTrack groups
 - **Cause**: `ROUND_BRIEF_EMAILS` or `PURETRACK_ENABLED` not configured correctly.
