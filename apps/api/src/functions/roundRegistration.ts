@@ -2,55 +2,45 @@
 // SPDX-License-Identifier: MPL-2.0
 import {
   app,
-  HttpRequest,
-  HttpResponseInit,
-  InvocationContext,
+  type HttpRequest,
+  type HttpResponseInit,
+  type InvocationContext,
 } from "@azure/functions";
-import type { Config, Pilot, PilotSnapshot, PilotSlot, Round, RoundSummary, Team } from "@bccweb/types";
-import {
-  ConfigSchema,
-  PilotSchema,
-  RoundSchema,
-  RoundSummarySchema,
-} from "@bccweb/schemas";
-import * as z from "zod/v4";
-import {
-  getBlobClient,
-  getPrivateBlobClient,
-  withPrivateLease,
-  withPrivateLeaseRetry,
-} from "../lib/blob.js";
-import { readJson, writePrivateJson } from "../lib/blobJson.js";
+import { RoundSchema } from "@bccweb/schemas";
 import { getCallerIdentity, unauthorizedResponse } from "../lib/auth.js";
-import { HttpError, BlobShapeError, withErrorHandler } from "../lib/http.js";
-import { rateLimit } from "../lib/rateLimit.js";
+import { withPrivateLeaseRetry } from "../lib/blob.js";
+import { writePrivateJson } from "../lib/blobJson.js";
 import { trustedClientIp } from "../lib/clientIp.js";
-import { getLatestSignature } from "../lib/signTofly/ledger.js";
+import { HttpError, withErrorHandler } from "../lib/http.js";
 import { pilotClubIdForSeason, ensureSeasonClubRecorded } from "../lib/pilotClub.js";
+import { rateLimit } from "../lib/rateLimit.js";
+import {
+  ensureNotDoubleBooked,
+  readRegistrationConfig,
+  readRegistrationPilot,
+  readRegistrationRound,
+} from "./roundRegistrationData.js";
+import {
+  buildPilotSnapshot,
+  choosePlace,
+  ensureProfileComplete,
+  ensureRegistrationOpen,
+  fillRegistrationSlot,
+  getOrCreateRegistrationSlot,
+  isPilotInRound,
+  pickRegistrationTeam,
+} from "./roundRegistrationRoster.js";
+import { unregisterSelf } from "./roundUnregistration.js";
 
-// RegistrationConfig widens ConfigSchema with autoAllocatePilotsToRoundClub —
-// a runtime-only field that the registration flow reads but Config (and
-// ConfigSchema's .strip()) would otherwise drop on read.
-const RegistrationConfigSchema = ConfigSchema.extend({
-  autoAllocatePilotsToRoundClub: z.boolean().optional(),
-}).strip();
-type RegistrationConfig = Config & { autoAllocatePilotsToRoundClub?: boolean };
+export { choosePlace } from "./roundRegistrationRoster.js";
 
-const RoundSummariesSchema = z.array(RoundSummarySchema);
-
-interface RegisterSelfBody {
-  teamId?: unknown;
-}
-
-const OPEN_STATUSES = new Set<Round["status"]>(["Proposed", "Confirmed"]);
-
-function ipFallback(req: HttpRequest): string {
-  return trustedClientIp(req) ?? "unknown";
-}
+type RegisterSelfBody = {
+  readonly teamId?: unknown;
+};
 
 async function registerSelf(
   req: HttpRequest,
-  _ctx: InvocationContext,
+  _ctx: InvocationContext
 ): Promise<HttpResponseInit> {
   const caller = await getCallerIdentity(req);
   if (!caller) return unauthorizedResponse();
@@ -62,330 +52,116 @@ async function registerSelf(
     endpoint: "round-register",
     capacity: 10,
     refillPerMin: 10,
-    identityKey: caller.pilotId ?? `anon:${ipFallback(req)}`,
+    identityKey:
+      caller.pilotId ?? `anon:${trustedClientIp(req) ?? "unknown"}`,
   });
 
   const roundId = req.params["roundId"];
-  if (!roundId) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
+  if (!roundId) {
+    throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
+  }
 
   const body = await parseRegisterBody(req);
-  const [round, config] = await Promise.all([readRound(roundId), readConfig()]);
+  const [round, config] = await Promise.all([
+    readRegistrationRound(roundId),
+    readRegistrationConfig(),
+  ]);
   ensureRegistrationOpen(round, "REGISTRATION_CLOSED");
 
-  const pilot = await readPilot(caller.pilotId);
+  const pilot = await readRegistrationPilot(caller.pilotId);
   ensureProfileComplete(pilot);
 
   const seasonYear = round.season.year;
   const pilotClubId = pilotClubIdForSeason(pilot, seasonYear);
   if (!pilotClubId) {
-    throw new HttpError(409, "NO_CLUB_FOR_SEASON", "Set your club in your profile before registering.");
+    throw new HttpError(
+      409,
+      "NO_CLUB_FOR_SEASON",
+      "Set your club in your profile before registering."
+    );
   }
-  const candidateTeams = round.teams.filter((t) => t.club.id === pilotClubId);
+  const candidateTeams = round.teams.filter(
+    (team) => team.club.id === pilotClubId
+  );
   if (candidateTeams.length === 0) {
     throw new HttpError(
       409,
       "NO_TEAM_FOR_CLUB",
-      "Your club has no team in this round yet. Ask your club coordinator to register one.",
+      "Your club has no team in this round yet. Ask your club coordinator to register one."
     );
   }
-  const chosenTeam = pickTeam(candidateTeams, body.teamId);
+  const chosenTeam = pickRegistrationTeam(candidateTeams, body.teamId);
 
   await ensureNotDoubleBooked(pilot.id, round);
-  await ensureSeasonClubRecorded(pilot.id, seasonYear, pilotClubId, chosenTeam.club.name);
+  await ensureSeasonClubRecorded(
+    pilot.id,
+    seasonYear,
+    pilotClubId,
+    chosenTeam.club.name
+  );
   const pilotSnapshot = buildPilotSnapshot(pilot);
 
-  const registration = await withPrivateLeaseRetry(`rounds/${roundId}.json`, async (leaseId) => {
-    const lockedRound = await readRound(roundId);
-    ensureRegistrationOpen(lockedRound, "REGISTRATION_CLOSED");
-    if (isPilotInRound(lockedRound, pilot.id)) {
-      throw new HttpError(409, "DOUBLE_BOOKING", `Pilot is already registered in this round ${lockedRound.id}`);
-    }
-    const lockedTeam = lockedRound.teams.find((t) => t.id === chosenTeam.id);
-    if (!lockedTeam) throw new HttpError(404, "TEAM_NOT_FOUND", "Team not found");
-    const place = choosePlace(lockedTeam, undefined, config.maxPilotsInTeam);
-    const slot = getOrCreateSlot(lockedTeam, place, config.maxScoringPilotsInTeam);
-    fillSlot(slot, pilot.id, pilotSnapshot);
-    await writePrivateJson(`rounds/${roundId}.json`, RoundSchema, lockedRound, leaseId);
-    return { teamId: lockedTeam.id, place };
-  });
-
-  return {
-    status: 200,
-    jsonBody: { roundId, teamId: registration.teamId, place: registration.place, pilotSnapshot },
-  };
-}
-
-async function unregisterSelf(
-  req: HttpRequest,
-  _ctx: InvocationContext,
-): Promise<HttpResponseInit> {
-  const caller = await getCallerIdentity(req);
-  if (!caller) return unauthorizedResponse();
-  if (!caller.roles.includes("Pilot") || !caller.pilotId) {
-    throw new HttpError(403, "NOT_A_PILOT");
-  }
-
-  rateLimit(req, {
-    endpoint: "round-register",
-    capacity: 10,
-    refillPerMin: 10,
-    identityKey: caller.pilotId ?? `anon:${ipFallback(req)}`,
-  });
-
-  const roundId = req.params["roundId"];
-  if (!roundId) throw new HttpError(400, "MISSING_ROUND_ID", "Missing round id");
-
-  const round = await readRound(roundId);
-  ensureRegistrationOpen(round, "UNREGISTRATION_CLOSED");
-  const existing = findPilotSlot(round, caller.pilotId);
-  if (!existing) throw new HttpError(404, "NOT_REGISTERED", "You are not registered in this round");
-
-  const signature = await getLatestSignature(roundId, existing.team.id, existing.slot.placeInTeam);
-  if (signature) {
-    throw new HttpError(
-      409,
-      "SIGNED_CONTACT_COORD",
-      "You have already signed to fly; ask a coordinator to remove you.",
-    );
-  }
-
-  await withPrivateLease(`rounds/${roundId}.json`, async (leaseId) => {
-    const lockedRound = await readRound(roundId);
-    ensureRegistrationOpen(lockedRound, "UNREGISTRATION_CLOSED");
-    const lockedSlot = findPilotSlot(lockedRound, caller.pilotId!);
-    if (!lockedSlot) throw new HttpError(404, "NOT_REGISTERED", "You are not registered in this round");
-
-    const lockedSignature = await getLatestSignature(roundId, lockedSlot.team.id, lockedSlot.slot.placeInTeam);
-    if (lockedSignature) {
-      throw new HttpError(
-        409,
-        "SIGNED_CONTACT_COORD",
-        "You have already signed to fly; ask a coordinator to remove you.",
+  const registration = await withPrivateLeaseRetry(
+    `rounds/${roundId}.json`,
+    async (leaseId) => {
+      const lockedRound = await readRegistrationRound(roundId);
+      ensureRegistrationOpen(lockedRound, "REGISTRATION_CLOSED");
+      if (isPilotInRound(lockedRound, pilot.id)) {
+        throw new HttpError(
+          409,
+          "DOUBLE_BOOKING",
+          `Pilot is already registered in this round ${lockedRound.id}`
+        );
+      }
+      const lockedTeam = lockedRound.teams.find(
+        (team) => team.id === chosenTeam.id
       );
+      if (!lockedTeam) {
+        throw new HttpError(404, "TEAM_NOT_FOUND", "Team not found");
+      }
+      const place = choosePlace(
+        lockedTeam,
+        undefined,
+        config.maxPilotsInTeam
+      );
+      const slot = getOrCreateRegistrationSlot(
+        lockedTeam,
+        place,
+        config.maxScoringPilotsInTeam
+      );
+      fillRegistrationSlot(slot, pilot.id, pilotSnapshot);
+      await writePrivateJson(
+        `rounds/${roundId}.json`,
+        RoundSchema,
+        lockedRound,
+        leaseId
+      );
+      return { teamId: lockedTeam.id, place };
     }
-
-    clearSlot(lockedSlot.slot);
-    await writePrivateJson(`rounds/${roundId}.json`, RoundSchema, lockedRound, leaseId);
-  });
+  );
 
   return {
     status: 200,
     jsonBody: {
       roundId,
-      removedFromTeamId: existing.team.id,
-      removedFromPlace: existing.slot.placeInTeam,
+      teamId: registration.teamId,
+      place: registration.place,
+      pilotSnapshot,
     },
   };
 }
 
-async function parseRegisterBody(req: HttpRequest): Promise<{ teamId?: string }> {
+async function parseRegisterBody(
+  req: HttpRequest
+): Promise<{ readonly teamId?: string }> {
   let body: RegisterSelfBody;
   try {
-    body = await req.json() as RegisterSelfBody;
+    body = (await req.json()) as RegisterSelfBody;
   } catch {
     throw new HttpError(400, "INVALID_JSON", "Invalid JSON");
   }
   const teamId = typeof body.teamId === "string" ? body.teamId.trim() : "";
   return teamId ? { teamId } : {};
-}
-
-async function readRound(roundId: string): Promise<Round> {
-  const path = `rounds/${roundId}.json`;
-  try {
-    return await readJson(getPrivateBlobClient(path), RoundSchema, path);
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(404, "NOT_FOUND", "Round not found");
-    }
-    throw err;
-  }
-}
-
-async function readPilot(pilotId: string): Promise<Pilot> {
-  const path = `pilots/${pilotId}.json`;
-  try {
-    return await readJson(getPrivateBlobClient(path), PilotSchema, path);
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      throw new HttpError(422, "PROFILE_INCOMPLETE", "Complete your profile first");
-    }
-    // A pilot blob whose required schema fields are blank/missing is the
-    // observable form of an incomplete profile (e.g. firstName === ""), so
-    // surface the same 422 the runtime check below would have raised.
-    if (err instanceof BlobShapeError) {
-      throw new HttpError(422, "PROFILE_INCOMPLETE", "Complete your profile first");
-    }
-    throw err;
-  }
-}
-
-async function readConfig(): Promise<RegistrationConfig> {
-  try {
-    return await readJson(
-      getPrivateBlobClient("config.json"),
-      RegistrationConfigSchema,
-      "config.json",
-    );
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      // Virgin store: ConfigSchema.parse({}) yields the canonical legacy
-      // defaults (maxPilotsInTeam 9, maxScoringPilotsInTeam 6, the factor
-      // tables, …) from the single schema source of truth, so this fallback can
-      // never drift from the real Config shape — the same DRY virgin fallback
-      // roundsMutate.ts and recompute.ts use.
-      return ConfigSchema.parse({});
-    }
-    throw err;
-  }
-}
-
-function ensureRegistrationOpen(round: Round, code: "REGISTRATION_CLOSED" | "UNREGISTRATION_CLOSED"): void {
-  if (!OPEN_STATUSES.has(round.status)) {
-    throw new HttpError(409, code, `Round status is ${round.status}`);
-  }
-}
-
-function ensureProfileComplete(pilot: Pilot): void {
-  if (!pilot.person.firstName?.trim() || !pilot.person.lastName?.trim()) {
-    throw new HttpError(422, "PROFILE_INCOMPLETE", "Complete your profile first");
-  }
-}
-
-function pickTeam(candidates: Team[], teamId: string | undefined): Team {
-  if (teamId) {
-    const team = candidates.find((c) => c.id === teamId);
-    if (!team) {
-      throw new HttpError(422, "TEAM_CLUB_MISMATCH", "That team does not belong to your club for this round.");
-    }
-    return team;
-  }
-  if (candidates.length === 1) return candidates[0];
-  throw new HttpError(400, "TEAM_REQUIRED", "Choose which of your club's teams to join.");
-}
-
-async function ensureNotDoubleBooked(pilotId: string, targetRound: Round): Promise<void> {
-  let summaries: RoundSummary[] = [];
-  try {
-    summaries = await readJson(
-      getBlobClient("rounds.json"),
-      RoundSummariesSchema,
-      "rounds.json",
-    );
-  } catch (err: unknown) {
-    if ((err as { statusCode?: number }).statusCode !== 404) throw err;
-  }
-
-  const candidates = summaries.filter((summary) =>
-    summary.id !== targetRound.id &&
-    summary.seasonYear === targetRound.season.year &&
-    summary.status !== "Cancelled" &&
-    isWithinOneLocalDate(summary.date, targetRound.date)
-  );
-
-  for (const candidate of candidates) {
-    const round = await readRound(candidate.id);
-    if (round.status === "Cancelled") continue;
-    if (isPilotInRound(round, pilotId)) {
-      throw new HttpError(409, "DOUBLE_BOOKING", `Conflicting round ${round.id} on ${round.date}`);
-    }
-  }
-}
-
-function isWithinOneLocalDate(dateA: string, dateB: string): boolean {
-  return Math.abs(localDateNumber(dateA) - localDateNumber(dateB)) <= 1;
-}
-
-function localDateNumber(value: string): number {
-  const [year, month, day] = value.slice(0, 10).split("-").map(Number);
-  return Date.UTC(year, month - 1, day) / 86_400_000;
-}
-
-function isPilotInRound(round: Round, pilotId: string): boolean {
-  return round.teams.some((team) =>
-    team.pilots.some((slot) => slot.status === "Filled" && slot.pilotId === pilotId),
-  );
-}
-
-// Exported so teams.ts addPilot reuses this exact first-free-place algorithm —
-// coordinator and self-registration paths must agree (D11 positional slots).
-export function choosePlace(team: Team, preferredPlace: number | undefined, maxPilotsInTeam: number): number {
-  if (preferredPlace !== undefined) {
-    if (preferredPlace > maxPilotsInTeam) throw new HttpError(409, "TEAM_FULL", `Team is full (max ${maxPilotsInTeam})`);
-    if (!isSlotAvailable(team, preferredPlace)) throw new HttpError(409, "SLOT_TAKEN", `Place ${preferredPlace} is already taken`);
-    return preferredPlace;
-  }
-
-  for (let place = 1; place <= maxPilotsInTeam; place += 1) {
-    if (isSlotAvailable(team, place)) return place;
-  }
-  throw new HttpError(409, "TEAM_FULL", `Team is full (max ${maxPilotsInTeam})`);
-}
-
-function isSlotAvailable(team: Team, place: number): boolean {
-  const slot = team.pilots.find((candidate) => candidate.placeInTeam === place);
-  return !slot || slot.status === "Empty" || !slot.pilotId;
-}
-
-function getOrCreateSlot(team: Team, place: number, maxScoringPilotsInTeam: number): PilotSlot {
-  let slot = team.pilots.find((candidate) => candidate.placeInTeam === place);
-  if (!slot) {
-    slot = {
-      placeInTeam: place,
-      isScoring: place <= maxScoringPilotsInTeam,
-      status: "Empty",
-      accountedFor: false,
-      signToFly: false,
-      noScore: false,
-      pilotPoints: 0,
-      pilotId: null,
-      snapshot: null,
-      flight: null,
-    };
-    team.pilots.push(slot);
-    team.pilots.sort((a, b) => a.placeInTeam - b.placeInTeam);
-  }
-  return slot;
-}
-
-function fillSlot(slot: PilotSlot, pilotId: string, snapshot: PilotSnapshot): void {
-  slot.status = "Filled";
-  slot.pilotId = pilotId;
-  slot.snapshot = snapshot;
-  slot.signToFly = false;
-  slot.accountedFor = false;
-}
-
-function clearSlot(slot: PilotSlot): void {
-  slot.status = "Empty";
-  slot.pilotId = null;
-  slot.snapshot = null;
-  slot.signToFly = false;
-  slot.accountedFor = false;
-}
-
-function buildPilotSnapshot(pilot: Pilot): PilotSnapshot {
-  return {
-    wingClass: pilot.wingClass ?? "EN B",
-    pilotRating: pilot.pilotRating,
-    phoneNumber: pilot.person.phoneNumber,
-    helmetColour: pilot.helmetColour,
-    harnessType: pilot.harnessType,
-    harnessColour: pilot.harnessColour,
-    wingManufacturer: pilot.wingManufacturer?.name,
-    wingModel: pilot.wingModel,
-    wingColours: pilot.wingColours,
-    emergencyContactName: pilot.emergencyContactName,
-    emergencyPhoneNumber: pilot.emergencyPhoneNumber,
-    medicalInfo: pilot.medicalInfo,
-  };
-}
-
-function findPilotSlot(round: Round, pilotId: string): { team: Team; slot: PilotSlot } | null {
-  for (const team of round.teams) {
-    const slot = team.pilots.find((candidate) => candidate.status === "Filled" && candidate.pilotId === pilotId);
-    if (slot) return { team, slot };
-  }
-  return null;
 }
 
 app.http("registerSelfForRound", {
