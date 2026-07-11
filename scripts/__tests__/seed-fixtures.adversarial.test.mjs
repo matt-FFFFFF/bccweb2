@@ -9,8 +9,8 @@ import test from "node:test";
 
 import { BlobServiceClient } from "@azure/storage-blob";
 
-import { deterministicUuid } from "../lib/blobSeed.mjs";
 import { FIXTURE_MANIFEST_PATH, SEASON_YEAR } from "../lib/loadTestConsts.mjs";
+import { buildLegacyFixtureManifest } from "./helpers/legacyFixtureManifest.mjs";
 
 const CONNECTION_STRING = process.env.FIXTURE_TEST_CONNECTION_STRING ??
   "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
@@ -20,27 +20,6 @@ const REPO_ROOT = resolve(import.meta.dirname, "../..");
 const SEED_SCRIPT = join(REPO_ROOT, "scripts/seed-fixtures.mjs");
 const WIPE_SCRIPT = join(REPO_ROOT, "scripts/wipe-fixtures.mjs");
 const AUDIT_SCRIPT = join(REPO_ROOT, "scripts/audit-fixtures.mjs");
-
-function legacyManifest() {
-  const clubIds = Array.from({ length: 50 }, (_, index) =>
-    deterministicUuid("fixture-club", `club${index + 1}`)
-  );
-  const emails = Array.from({ length: 500 }, (_, index) =>
-    `pilot${String(index + 1).padStart(3, "0")}@bcc.local`
-  );
-  return {
-    seasonYear: SEASON_YEAR,
-    siteIds: ["Site Alpha", "Site Bravo", "Site Charlie"]
-      .map((name) => deterministicUuid("fixture-site", name)),
-    clubIds,
-    teamIds: clubIds.flatMap((clubId) => [1, 2].map((teamNumber) =>
-      deterministicUuid("fixture-club-team", `${clubId}-${teamNumber}`)
-    )),
-    pilotIds: emails.map((email) => deterministicUuid("fixture-pilot", email)),
-    userIds: emails.map((email) => deterministicUuid("fixture-user", email)),
-    roundIds: ["00000000-0000-4000-8000-000000000101"],
-  };
-}
 
 async function writeJson(container, path, value) {
   const body = JSON.stringify(value);
@@ -83,7 +62,9 @@ async function withEnvironment(run) {
 }
 
 async function seedCompleteLegacyState(environment, mutate) {
-  const manifest = legacyManifest();
+  const manifest = buildLegacyFixtureManifest({
+    roundIds: ["00000000-0000-4000-8000-000000000101"],
+  });
   const emails = Array.from({ length: 500 }, (_, index) =>
     `pilot${String(index + 1).padStart(3, "0")}@bcc.local`
   );
@@ -223,7 +204,9 @@ test("missing manifest after storage writes converges on repeated rerun", async 
 
 test("missing manifest removes deterministic legacy remainder without touching sentinels", async () => {
   await withEnvironment(async (environment) => {
-    const legacy = legacyManifest();
+    const legacy = buildLegacyFixtureManifest({
+      roundIds: ["00000000-0000-4000-8000-000000000101"],
+    });
     const staleClubId = legacy.clubIds[49];
     const staleTeamId = legacy.teamIds[99];
     await Promise.all([
