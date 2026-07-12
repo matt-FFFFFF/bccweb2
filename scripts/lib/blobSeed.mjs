@@ -176,6 +176,10 @@ export async function precomputeBcryptHash(plaintext) {
   return bcrypt.hash(plaintext, BCRYPT_COST);
 }
 
+export function compareBcryptPassword(plaintext, passwordHash) {
+  return bcrypt.compare(plaintext, passwordHash);
+}
+
 // ─── Public index upsert / remove ────────────────────────────────────────────
 
 function sortIndex(arr, keyField) {

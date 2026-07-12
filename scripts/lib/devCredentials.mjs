@@ -141,3 +141,22 @@ export function writeDevCredentials(credentials, path = devCredentialsPath()) {
     if (descriptor !== undefined) closeSync(descriptor);
   }
 }
+
+export function prepareDevCredentialsFile(path = devCredentialsPath()) {
+  let descriptor;
+  try {
+    descriptor = openSync(
+      path,
+      constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | constants.O_NOFOLLOW,
+      CREDENTIAL_MODE,
+    );
+    fsyncSync(descriptor);
+  } catch (cause) {
+    if (!(cause instanceof Error && "code" in cause && cause.code === "EEXIST")) {
+      throw new DevCredentialError(`could not create private admin credential file at ${path}`, { cause });
+    }
+    descriptor = openCredential(path);
+  } finally {
+    if (descriptor !== undefined) closeSync(descriptor);
+  }
+}
