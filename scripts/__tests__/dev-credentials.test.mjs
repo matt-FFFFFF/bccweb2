@@ -236,4 +236,14 @@ test("prepare-credentials succeeds before storage is available", async (t) => {
   // Then
   assert.equal(result.status, 0, result.stderr);
   assert.equal((await lstat(join(cwd, ".dev-credentials"))).mode & 0o777, 0o600);
+  assert.equal((await lstat(join(cwd, ".dev-credentials"))).size, 0);
+});
+
+test("existing admin rejects an unverified replacement credential", async () => {
+  // Given / When
+  const source = await readFile(SEED_ADMIN_SCRIPT, "utf8");
+
+  // Then
+  assert.match(source, /compareBcryptPassword/u);
+  assert.match(source, /credential does not match existing admin/u);
 });

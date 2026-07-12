@@ -39,6 +39,7 @@ import {
   readJson,
   writeJson,
   precomputeBcryptHash,
+  compareBcryptPassword,
   deterministicUuid,
 } from "./lib/blobSeed.mjs";
 import {
@@ -48,6 +49,7 @@ import {
 import {
   devCredentialsPath,
   readInitializedDevCredentials,
+  prepareDevCredentialsFile,
   writeDevCredentials,
 } from "./lib/devCredentials.mjs";
 import { randomBytes } from "node:crypto";
@@ -64,12 +66,8 @@ async function main() {
   if (existingCredentials && existingCredentials.email !== ADMIN_EMAIL) {
     throw new Error(`seed-admin: admin credential email must be ${ADMIN_EMAIL}`);
   }
-  const password = override ?? existingCredentials?.password ?? randomBytes(12).toString("base64url").slice(0, 16);
-
-  if (!override && !existingCredentials) {
-    writeDevCredentials({ email: ADMIN_EMAIL, password }, credentialPath);
-  }
   if (prepareOnly) {
+    if (!override) prepareDevCredentialsFile(credentialPath);
     process.stderr.write(`[seed-admin] private admin credential is ready at ${credentialPath}.\n`);
     return;
   }
@@ -80,13 +78,23 @@ async function main() {
     (await readJson(privateContainer, "user-index.json")) ?? {};
 
   if (existingIndex[ADMIN_EMAIL]) {
-    if (!override && !existingCredentials) {
+    const password = override ?? existingCredentials?.password;
+    if (!password) {
       throw new Error("seed-admin: existing admin requires ADMIN_PASSWORD or an initialized .dev-credentials file");
+    }
+    const credential = await readJson(privateContainer, `auth/${existingIndex[ADMIN_EMAIL]}.json`);
+    if (typeof credential?.passwordHash !== "string" || !(await compareBcryptPassword(password, credential.passwordHash))) {
+      throw new Error("seed-admin: credential does not match existing admin");
     }
     process.stderr.write(
       `[seed-admin] ${ADMIN_EMAIL} already exists; admin credential source is available.\n`
     );
     return;
+  }
+
+  const password = override ?? existingCredentials?.password ?? randomBytes(12).toString("base64url").slice(0, 16);
+  if (!override && !existingCredentials) {
+    writeDevCredentials({ email: ADMIN_EMAIL, password }, credentialPath);
   }
 
   // Cold-run path — create the admin.
