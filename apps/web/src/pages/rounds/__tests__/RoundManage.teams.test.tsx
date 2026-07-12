@@ -86,6 +86,7 @@ describe("RoundManage teams permissions", () => {
 
     // There should NOT be a club selector at all!
     const clubSelect = within(addTeamForm).queryByRole("combobox", { name: /club/i });
+    expect(clubSelect).toBeNull();
     // And actually there is NO label 'Club' or an option '— club —'
     const hasClubOption = within(addTeamForm).queryByRole("option", { name: "— club —" });
     expect(hasClubOption).toBeNull();
