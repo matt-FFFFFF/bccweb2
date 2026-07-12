@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import { createHash } from "node:crypto";
+import { resolveReflectQueueConnection } from "./loadTestReflectQueues.mjs";
 
 const LOCAL_BLOB_IDENTITY = {
   accountName: "devstoreaccount1",
@@ -30,7 +31,7 @@ export function loadTestTargetIdentity(baseUrl, environment = process.env) {
   const target = {
     apiOrigin: new URL(baseUrl).origin.toLowerCase(),
     blob: connectionIdentity(environment.BLOB_CONNECTION_STRING, LOCAL_BLOB_IDENTITY),
-    queues: connectionIdentity(environment.AzureWebJobsStorage),
+    queues: connectionIdentity(resolveReflectQueueConnection(baseUrl, environment)),
   };
   return createHash("sha256").update(JSON.stringify(target)).digest("hex");
 }
