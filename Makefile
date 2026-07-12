@@ -62,7 +62,7 @@ dev: docker-up ## Start full local dev stack (Docker Compose)
 
 .PHONY: dev-api
 dev-api: build-types build-scoring build-api ## Start Azure Functions host (requires Azurite)
-	@if [ ! -e .dev-credentials ]; then umask 077; : > .dev-credentials; fi
+	node scripts/seed-admin.mjs --prepare-credentials
 	npm run start --workspace=apps/api
 
 .PHONY: dev-web
@@ -71,7 +71,7 @@ dev-web: ## Start Vite dev server on :5173
 
 .PHONY: docker-up
 docker-up: ## Start Azurite + API + Web via Docker Compose
-	@if [ ! -e .dev-credentials ]; then umask 077; : > .dev-credentials; fi
+	node scripts/seed-admin.mjs --prepare-credentials
 	$(CONTAINER_RUNTIME) compose up --build
 
 .PHONY: docker-down

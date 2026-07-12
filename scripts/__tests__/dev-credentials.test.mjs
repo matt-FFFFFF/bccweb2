@@ -209,3 +209,12 @@ test("make seed bootstraps credentials before mutating fixture storage", async (
   assert.ok(seedRecipe.lastIndexOf("seed-admin.mjs") > seedRecipe.indexOf("seed-fixtures.mjs"));
   assert.doesNotMatch(seedRecipe, /ADMIN_PASSWORD\s*=/u);
 });
+
+test("dev and docker startup prepare credentials without shell redirection", async () => {
+  // Given / When
+  const makefile = await readFile(MAKEFILE, "utf8");
+
+  // Then
+  assert.doesNotMatch(makefile, /: > \.dev-credentials/u);
+  assert.equal((makefile.match(/seed-admin\.mjs --prepare-credentials/gu) ?? []).length >= 3, true);
+});
