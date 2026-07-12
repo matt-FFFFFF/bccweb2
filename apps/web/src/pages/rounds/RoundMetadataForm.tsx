@@ -58,12 +58,12 @@ export function MetadataForm({
         }}
       >
         <div>
-          <label style={{ fontSize: "0.8rem", color: "#555", display: "block" }}>Max Teams</label>
-          <input type="number" min={1} style={fi} value={form.maxTeams} onChange={(e) => setF("maxTeams", e.target.value)} />
+          <label htmlFor="round-max-teams" style={{ fontSize: "0.8rem", color: "#555", display: "block" }}>Max Teams</label>
+          <input id="round-max-teams" type="number" min={1} style={fi} value={form.maxTeams} onChange={(e) => setF("maxTeams", e.target.value)} />
         </div>
         <div>
-          <label style={{ fontSize: "0.8rem", color: "#555", display: "block" }}>Min Score</label>
-          <input type="number" min={0} step={0.1} style={fi} value={form.minimumScore} onChange={(e) => setF("minimumScore", e.target.value)} />
+          <label htmlFor="round-minimum-score" style={{ fontSize: "0.8rem", color: "#555", display: "block" }}>Min Score</label>
+          <input id="round-minimum-score" type="number" min={0} step={0.1} style={fi} value={form.minimumScore} onChange={(e) => setF("minimumScore", e.target.value)} />
         </div>
 
       </div>

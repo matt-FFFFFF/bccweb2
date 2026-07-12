@@ -98,10 +98,11 @@ describe("RoundManage override sign", () => {
     const submit = within(dialog).getByRole("button", { name: "Submit Override" });
     expect(submit).toBeDisabled();
 
-    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "too short" } });
+    const reason = within(dialog).getByRole("textbox", { name: "Reason (minimum 20 characters)" });
+    fireEvent.change(reason, { target: { value: "too short" } });
     expect(submit).toBeDisabled();
 
-    fireEvent.change(within(dialog).getByRole("textbox"), {
+    fireEvent.change(reason, {
       target: { value: "Pilot signed the paper form" },
     });
     expect(submit).not.toBeDisabled();

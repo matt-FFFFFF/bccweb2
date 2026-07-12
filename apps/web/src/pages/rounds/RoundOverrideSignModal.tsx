@@ -67,10 +67,11 @@ export function OverrideSignModal({
         {team.teamName}, place {slot.placeInTeam}. This will record a coord-override signature on the immutable ledger. The pilot's own sign-to-fly remains preferred; this is for documented exceptions only.
       </p>
       <form onSubmit={(e) => { void submitOverride(e); }}>
-        <label style={{ display: "block", fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>
+        <label htmlFor={`override-reason-${team.id}-${slot.placeInTeam}`} style={{ display: "block", fontSize: "0.8rem", color: "#555", marginBottom: "0.25rem" }}>
           Reason (minimum 20 characters)
         </label>
         <textarea
+          id={`override-reason-${team.id}-${slot.placeInTeam}`}
           required
           minLength={20}
           rows={4}
