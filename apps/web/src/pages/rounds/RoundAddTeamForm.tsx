@@ -70,6 +70,7 @@ export function AddTeamForm({
       {!lockedClubId && (
         <div>
           <select
+            aria-label="Club"
             required
             style={{ ...inputStyle, minWidth: 160 }}
             value={clubIdState}
@@ -89,6 +90,7 @@ export function AddTeamForm({
       )}
       <div>
         <select
+          aria-label="Team"
           required
           style={{ ...inputStyle, minWidth: 160 }}
           value={teamName}

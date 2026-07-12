@@ -70,6 +70,7 @@ export function RoundTeamsList({
                 <AddPilotForm
                   roundId={r.id}
                   teamId={team.id}
+                  teamName={team.teamName}
                   teamClubId={team.club.id}
                   teamClubName={team.club.name}
                   pilots={pilotsIndex ?? []}
