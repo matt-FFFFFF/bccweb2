@@ -29,6 +29,7 @@ test("target guard rejects production-looking and unclassified remote hosts", ()
   assert.throws(() => assertLoadTestTarget("https://prodloadtest.example.test", true), /production-looking/);
   assert.throws(() => assertLoadTestTarget("https://loadtest-prodfoo.example.test", true), /production-looking/);
   assert.throws(() => assertLoadTestTarget("not a url"), /valid URL/);
+  assert.throws(() => assertLoadTestTarget("ftp://bcc-loadtest.example.test", true), /http or https/);
 });
 
 test("artifact paths are confined beneath the private load log directory", () => {

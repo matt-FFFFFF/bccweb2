@@ -11,6 +11,9 @@ export function assertLoadTestTarget(baseUrl, dedicatedStack = false) {
   } catch (error) {
     throw new Error("BCC_API_BASE_URL must be a valid URL", { cause: error });
   }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("BCC_API_BASE_URL protocol must be http or https");
+  }
   const host = url.hostname.toLowerCase();
   if (url.username || url.password) throw new Error("BCC_API_BASE_URL must not contain credentials");
   const tokens = host.split(/[.-]/u).filter(Boolean);
