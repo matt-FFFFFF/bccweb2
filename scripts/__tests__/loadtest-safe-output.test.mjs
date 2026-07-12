@@ -213,7 +213,10 @@ test("CLI spawn failure publishes exact private status and logs", async (t) => {
     command: process.execPath,
     args: [resolve("scripts/run-loadtest.mjs")],
     cwd: root,
-    env: { BCC_API_BASE_URL: "http://127.0.0.1:7071" },
+    env: {
+      BCC_API_BASE_URL: "http://127.0.0.1:7071",
+      LOADTEST_DEDICATED_STACK: "1",
+    },
     timeoutMs: 10_000,
   });
 

@@ -21,8 +21,8 @@ export function assertLoadTestTarget(baseUrl, dedicatedStack = false) {
   if (!loopback && !tokens.some((token) => token === "loadtest" || token === "staging")) {
     throw new Error("remote BCC_API_BASE_URL hostname must contain loadtest or staging");
   }
-  if (!loopback && dedicatedStack !== true) {
-    throw new Error("remote load test requires dedicated stack confirmation LOADTEST_DEDICATED_STACK=1");
+  if (dedicatedStack !== true) {
+    throw new Error("load test requires dedicated stack confirmation LOADTEST_DEDICATED_STACK=1");
   }
 }
 
