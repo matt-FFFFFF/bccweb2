@@ -22,9 +22,10 @@ export function MarkdownBriefField({
   disabled: boolean;
   onChange: (v: string) => void;
 }) {
+  const labelId = `brief-markdown-${label.toLowerCase().replace(/[^a-z0-9]+/gu, "-")}`;
   return (
-    <div>
-      <label style={{ fontSize: "0.8rem", color: "#555", display: "block" }}>{label}</label>
+    <div role="group" aria-labelledby={labelId}>
+      <span id={labelId} style={{ fontSize: "0.8rem", color: "#555", display: "block" }}>{label}</span>
       <div style={{ border: "1px solid #ccc", padding: "0.5rem" }}>
         {disabled ? (
           <div style={{ opacity: 0.6 }}>
@@ -162,41 +163,42 @@ export function BriefForm({ round, onSaved }: { round: Round; onSaved: () => voi
 
   const fi = { ...inputStyle, width: "100%", opacity: disabled ? 0.6 : 1 };
   const labelStyle = { fontSize: "0.8rem", color: "#555", display: "block" };
+  const fieldId = (name: string) => `brief-${round.id}-${name}`;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "1rem" }}>
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem" }}>
-        <div><label style={labelStyle}>Briefing Time</label><input type="time" disabled={disabled} style={fi} value={brief?.briefingTime || ""} onChange={e => handleChange("briefingTime", e.target.value)} /></div>
-        <div><label style={labelStyle}>Check-in By</label><input type="time" disabled={disabled} style={fi} value={brief?.checkInByTime || ""} onChange={e => handleChange("checkInByTime", e.target.value)} /></div>
-        <div><label style={labelStyle}>Land By</label><input type="time" disabled={disabled} style={fi} value={brief?.landByTime || ""} onChange={e => handleChange("landByTime", e.target.value)} /></div>
-        <div><label style={labelStyle}>Takeoff W3W</label><input disabled={disabled} style={fi} value={brief?.takeOffW3W || ""} onChange={e => handleChange("takeOffW3W", e.target.value)} /></div>
-        <div><label style={labelStyle}>Briefing W3W</label><input disabled={disabled} style={fi} value={brief?.briefingW3W || ""} onChange={e => handleChange("briefingW3W", e.target.value)} /></div>
-        <div><label style={labelStyle}>Parking W3W</label><input disabled={disabled} style={fi} value={brief?.parkingW3W || ""} onChange={e => handleChange("parkingW3W", e.target.value)} /></div>
+        <div><label htmlFor={fieldId("briefing-time")} style={labelStyle}>Briefing Time</label><input id={fieldId("briefing-time")} type="time" disabled={disabled} style={fi} value={brief?.briefingTime || ""} onChange={e => handleChange("briefingTime", e.target.value)} /></div>
+        <div><label htmlFor={fieldId("check-in-by")} style={labelStyle}>Check-in By</label><input id={fieldId("check-in-by")} type="time" disabled={disabled} style={fi} value={brief?.checkInByTime || ""} onChange={e => handleChange("checkInByTime", e.target.value)} /></div>
+        <div><label htmlFor={fieldId("land-by")} style={labelStyle}>Land By</label><input id={fieldId("land-by")} type="time" disabled={disabled} style={fi} value={brief?.landByTime || ""} onChange={e => handleChange("landByTime", e.target.value)} /></div>
+        <div><label htmlFor={fieldId("takeoff-w3w")} style={labelStyle}>Takeoff W3W</label><input id={fieldId("takeoff-w3w")} disabled={disabled} style={fi} value={brief?.takeOffW3W || ""} onChange={e => handleChange("takeOffW3W", e.target.value)} /></div>
+        <div><label htmlFor={fieldId("briefing-w3w")} style={labelStyle}>Briefing W3W</label><input id={fieldId("briefing-w3w")} disabled={disabled} style={fi} value={brief?.briefingW3W || ""} onChange={e => handleChange("briefingW3W", e.target.value)} /></div>
+        <div><label htmlFor={fieldId("parking-w3w")} style={labelStyle}>Parking W3W</label><input id={fieldId("parking-w3w")} disabled={disabled} style={fi} value={brief?.parkingW3W || ""} onChange={e => handleChange("parkingW3W", e.target.value)} /></div>
       </div>
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0.75rem" }}>
-        <div><label style={labelStyle}>Wind Speed/Dir</label><input disabled={disabled} style={fi} value={brief?.windSpeedDirection || ""} onChange={e => handleChange("windSpeedDirection", e.target.value)} /></div>
-        <div><label style={labelStyle}>Direction of Flight</label><input disabled={disabled} style={fi} value={brief?.directionOfFlight || ""} onChange={e => handleChange("directionOfFlight", e.target.value)} /></div>
-        <div><label style={labelStyle}>Frequency (MHz)</label><input type="number" step="0.025" disabled={disabled} style={fi} value={brief?.frequencyMhz || ""} onChange={e => handleChange("frequencyMhz", e.target.value ? Number(e.target.value) : undefined)} /></div>
+        <div><label htmlFor={fieldId("wind")} style={labelStyle}>Wind Speed/Dir</label><input id={fieldId("wind")} disabled={disabled} style={fi} value={brief?.windSpeedDirection || ""} onChange={e => handleChange("windSpeedDirection", e.target.value)} /></div>
+        <div><label htmlFor={fieldId("flight-direction")} style={labelStyle}>Direction of Flight</label><input id={fieldId("flight-direction")} disabled={disabled} style={fi} value={brief?.directionOfFlight || ""} onChange={e => handleChange("directionOfFlight", e.target.value)} /></div>
+        <div><label htmlFor={fieldId("frequency")} style={labelStyle}>Frequency (MHz)</label><input id={fieldId("frequency")} type="number" step="0.025" disabled={disabled} style={fi} value={brief?.frequencyMhz || ""} onChange={e => handleChange("frequencyMhz", e.target.value ? Number(e.target.value) : undefined)} /></div>
       </div>
 
-      <div><label style={labelStyle}>NOTAMs</label><textarea disabled={disabled} style={{...fi, resize: "vertical"}} value={brief?.NOTAMs || ""} onChange={e => handleChange("NOTAMs", e.target.value)} /></div>
-      <div><label style={labelStyle}>BENO Line Description</label><textarea disabled={disabled} style={{...fi, resize: "vertical"}} value={brief?.BENO_LineDescription || ""} onChange={e => handleChange("BENO_LineDescription", e.target.value)} /></div>
+      <div><label htmlFor={fieldId("notams")} style={labelStyle}>NOTAMs</label><textarea id={fieldId("notams")} disabled={disabled} style={{...fi, resize: "vertical"}} value={brief?.NOTAMs || ""} onChange={e => handleChange("NOTAMs", e.target.value)} /></div>
+      <div><label htmlFor={fieldId("beno-line")} style={labelStyle}>BENO Line Description</label><textarea id={fieldId("beno-line")} disabled={disabled} style={{...fi, resize: "vertical"}} value={brief?.BENO_LineDescription || ""} onChange={e => handleChange("BENO_LineDescription", e.target.value)} /></div>
 
       <MarkdownBriefField label="Expected Landing Area" value={brief?.expectedLandingArea || ""} disabled={disabled} onChange={v => handleChange("expectedLandingArea", v)} />
       <MarkdownBriefField label="Airspace & Hazards" value={brief?.airspaceAndHazards || ""} disabled={disabled} onChange={v => handleChange("airspaceAndHazards", v)} />
       <MarkdownBriefField label="Briefer's Notes" value={brief?.briefersNotes || ""} disabled={disabled} onChange={v => handleChange("briefersNotes", v)} />
 
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0.75rem" }}>
-        <div><label style={labelStyle}>Briefer Name</label><input disabled={disabled} style={fi} value={brief?.briefer?.name || ""} onChange={e => handleBrieferChange("name", e.target.value)} /></div>
-        <div><label style={labelStyle}>BHPA Level</label><select disabled={disabled} style={fi} value={brief?.briefer?.bhpaCoachLevel && brief.briefer.bhpaCoachLevel !== "None" ? brief.briefer.bhpaCoachLevel : ""} onChange={e => handleBrieferChange("bhpaCoachLevel", e.target.value || undefined)}><option value="">—</option>{COACH_TYPES.filter(c => c !== "None").map(c => <option key={c} value={c}>{coachLabel[c]}</option>)}</select></div>
-        <div><label style={labelStyle}>BHPA Number</label><input disabled={disabled} style={fi} value={brief?.briefer?.bhpaNumber || ""} onChange={e => handleBrieferChange("bhpaNumber", e.target.value)} /></div>
-        <div><label style={labelStyle}>Phone</label><input disabled={disabled} style={fi} value={brief?.briefer?.phoneNumber || ""} onChange={e => handleBrieferChange("phoneNumber", e.target.value)} /></div>
-        <div><label style={labelStyle}>Email</label><input disabled={disabled} style={fi} value={brief?.briefer?.emailAddress || ""} onChange={e => handleBrieferChange("emailAddress", e.target.value)} /></div>
+        <div><label htmlFor={fieldId("briefer-name")} style={labelStyle}>Briefer Name</label><input id={fieldId("briefer-name")} disabled={disabled} style={fi} value={brief?.briefer?.name || ""} onChange={e => handleBrieferChange("name", e.target.value)} /></div>
+        <div><label htmlFor={fieldId("bhpa-level")} style={labelStyle}>BHPA Level</label><select id={fieldId("bhpa-level")} disabled={disabled} style={fi} value={brief?.briefer?.bhpaCoachLevel && brief.briefer.bhpaCoachLevel !== "None" ? brief.briefer.bhpaCoachLevel : ""} onChange={e => handleBrieferChange("bhpaCoachLevel", e.target.value || undefined)}><option value="">—</option>{COACH_TYPES.filter(c => c !== "None").map(c => <option key={c} value={c}>{coachLabel[c]}</option>)}</select></div>
+        <div><label htmlFor={fieldId("bhpa-number")} style={labelStyle}>BHPA Number</label><input id={fieldId("bhpa-number")} disabled={disabled} style={fi} value={brief?.briefer?.bhpaNumber || ""} onChange={e => handleBrieferChange("bhpaNumber", e.target.value)} /></div>
+        <div><label htmlFor={fieldId("briefer-phone")} style={labelStyle}>Phone</label><input id={fieldId("briefer-phone")} disabled={disabled} style={fi} value={brief?.briefer?.phoneNumber || ""} onChange={e => handleBrieferChange("phoneNumber", e.target.value)} /></div>
+        <div><label htmlFor={fieldId("briefer-email")} style={labelStyle}>Email</label><input id={fieldId("briefer-email")} disabled={disabled} style={fi} value={brief?.briefer?.emailAddress || ""} onChange={e => handleBrieferChange("emailAddress", e.target.value)} /></div>
       </div>
 
       <div>
-        <label style={labelStyle}>Images</label>
+        <label htmlFor={fieldId("images")} style={labelStyle}>Images</label>
         <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap", marginBottom: "0.5rem" }}>
           {brief?.imagePaths?.map((p, i) => (
             <div key={i} style={{ position: "relative", border: "1px solid #ccc", padding: "0.25rem" }}>
@@ -207,7 +209,7 @@ export function BriefForm({ round, onSaved }: { round: Round; onSaved: () => voi
             </div>
           ))}
         </div>
-        {!disabled && <input type="file" onChange={uploadImage} />}
+        {!disabled && <input id={fieldId("images")} type="file" onChange={uploadImage} />}
       </div>
 
       {!disabled && (

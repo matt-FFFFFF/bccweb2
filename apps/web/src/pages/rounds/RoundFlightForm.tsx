@@ -80,6 +80,7 @@ export function FlightForm({
   }
 
   const fi = { ...inputStyle, width: "100%" };
+  const fieldId = (name: string) => `flight-${teamId}-${place}-${name}`;
 
   return (
     <form
@@ -100,8 +101,9 @@ export function FlightForm({
         }}
       >
         <div>
-          <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Distance (km) *</label>
+          <label htmlFor={fieldId("distance")} style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Distance (km) *</label>
           <input
+            id={fieldId("distance")}
             type="number"
             required
             min={0}
@@ -112,8 +114,9 @@ export function FlightForm({
           />
         </div>
         <div>
-          <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Duration (min)</label>
+          <label htmlFor={fieldId("duration")} style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Duration (min)</label>
           <input
+            id={fieldId("duration")}
             type="number"
             min={0}
             style={fi}
@@ -122,8 +125,9 @@ export function FlightForm({
           />
         </div>
         <div>
-          <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Scoring type</label>
+          <label htmlFor={fieldId("scoring-type")} style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Scoring type</label>
           <select
+            id={fieldId("scoring-type")}
             style={fi}
             value={form.scoringType}
             onChange={(e) => setF("scoringType", e.target.value as ScoringType)}
@@ -133,8 +137,9 @@ export function FlightForm({
           </select>
         </div>
         <div>
-          <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Date/time</label>
+          <label htmlFor={fieldId("date-time")} style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Date/time</label>
           <input
+            id={fieldId("date-time")}
             type="datetime-local"
             style={fi}
             value={form.dateTime}
@@ -142,8 +147,9 @@ export function FlightForm({
           />
         </div>
         <div style={{ gridColumn: "1 / -1" }}>
-          <label style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Flight URL</label>
+          <label htmlFor={fieldId("url")} style={{ fontSize: "0.75rem", color: "#555", display: "block" }}>Flight URL</label>
           <input
+            id={fieldId("url")}
             type="url"
             style={fi}
             placeholder="https://…"
@@ -153,16 +159,18 @@ export function FlightForm({
         </div>
       </div>
       <div style={{ display: "flex", gap: "1rem", fontSize: "0.8rem", marginBottom: "0.5rem" }}>
-        <label style={{ display: "flex", gap: "0.3rem", alignItems: "center" }}>
+        <label htmlFor={fieldId("first-xc")} style={{ display: "flex", gap: "0.3rem", alignItems: "center" }}>
           <input
+            id={fieldId("first-xc")}
             type="checkbox"
             checked={form.isFirstXC}
             onChange={(e) => setF("isFirstXC", e.target.checked)}
           />
           First XC
         </label>
-        <label style={{ display: "flex", gap: "0.3rem", alignItems: "center" }}>
+        <label htmlFor={fieldId("first-uk-xc")} style={{ display: "flex", gap: "0.3rem", alignItems: "center" }}>
           <input
+            id={fieldId("first-uk-xc")}
             type="checkbox"
             checked={form.isFirstUKXC}
             onChange={(e) => setF("isFirstUKXC", e.target.checked)}
