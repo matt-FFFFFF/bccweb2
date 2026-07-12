@@ -15,7 +15,11 @@ import {
   assertLoadTestTarget,
   resolveLoadTestArtifactPath,
 } from "./lib/loadTestRuntimeGuard.mjs";
-import { readLoadTestRoundState } from "./lib/loadTestRoundState.mjs";
+import {
+  assertLoadRoundTarget,
+  readLoadTestRoundState,
+} from "./lib/loadTestRoundState.mjs";
+import { loadTestTargetIdentity } from "./lib/loadTestTargetIdentity.mjs";
 
 function safeMessage(error) {
   return redactLoadTestOutput(error instanceof Error ? error.message : "unknown error");
@@ -25,6 +29,7 @@ async function main() {
   const root = resolve(".");
   const logDirectory = resolve("logs/load-test");
   const runId = `${Date.now()}-${process.pid}`;
+  const loadTarget = loadTestTargetIdentity(BCC_API_BASE_URL);
   assertLoadTestTarget(BCC_API_BASE_URL, process.env.LOADTEST_DEDICATED_STACK === "1");
   const eventsPath = resolveLoadTestArtifactPath(logDirectory, process.env.SIGN_EVENTS_PATH, `sign-events-${runId}.json`);
   const summaryPath = resolveLoadTestArtifactPath(logDirectory, process.env.SIGN_SUMMARY_PATH, `sign-summary-${runId}.json`);
@@ -118,7 +123,11 @@ async function main() {
     try {
       const report = await runLoadTestOrchestration({
         runPhase,
-        inspectCheckpoint: async () => (await readLoadTestRoundState()).loadRoundId !== null,
+        inspectCheckpoint: async () => {
+          const state = await readLoadTestRoundState();
+          assertLoadRoundTarget(state, loadTarget);
+          return state.loadRoundId !== null;
+        },
         record: (value) => statusOutput.replace(`${JSON.stringify(value, null, 2)}\n`),
         now: Date.now,
       });

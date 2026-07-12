@@ -27,7 +27,7 @@ export class LoadTestRoundStateError extends Error {
 }
 
 function emptyState() {
-  return { version: 1, seedRoundIds: [], loadRoundId: null };
+  return { version: 2, seedRoundIds: [], loadRoundId: null, loadTarget: null };
 }
 
 function isRoundId(value) {
@@ -38,13 +38,19 @@ export function parseLoadTestRoundState(value) {
   if (value === null || typeof value !== "object" || Array.isArray(value)) {
     throw new LoadTestRoundStateError("load-test round state must be an object");
   }
+  if (value.version === 1) {
+    if (value.loadRoundId !== null) {
+      throw new LoadTestRoundStateError("legacy owned load-test state has no target identity");
+    }
+    value = { ...value, version: 2, loadTarget: null };
+  }
   const keys = Object.keys(value).sort();
-  const expectedKeys = ["loadRoundId", "seedRoundIds", "version"];
+  const expectedKeys = ["loadRoundId", "loadTarget", "seedRoundIds", "version"];
   if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
     throw new LoadTestRoundStateError("load-test round state has unexpected keys");
   }
-  if (value.version !== 1) {
-    throw new LoadTestRoundStateError("load-test round state version must be 1");
+  if (value.version !== 2) {
+    throw new LoadTestRoundStateError("load-test round state version must be 2");
   }
   if (!Array.isArray(value.seedRoundIds) || !value.seedRoundIds.every(isRoundId)) {
     throw new LoadTestRoundStateError("seedRoundIds must contain only non-empty strings");
@@ -55,10 +61,15 @@ export function parseLoadTestRoundState(value) {
   if (value.loadRoundId !== null && !isRoundId(value.loadRoundId)) {
     throw new LoadTestRoundStateError("loadRoundId must be null or a non-empty string");
   }
+  const validTarget = typeof value.loadTarget === "string" && /^[a-f0-9]{64}$/u.test(value.loadTarget);
+  if ((value.loadRoundId === null) !== (value.loadTarget === null) || (value.loadTarget !== null && !validTarget)) {
+    throw new LoadTestRoundStateError("loadTarget must be a SHA-256 identity paired with loadRoundId");
+  }
   return {
-    version: 1,
+    version: 2,
     seedRoundIds: [...value.seedRoundIds],
     loadRoundId: value.loadRoundId,
+    loadTarget: value.loadTarget,
   };
 }
 
@@ -132,6 +143,16 @@ export function appendSeedRoundId(seedRoundId, options = {}) {
   }), options);
 }
 
-export function setLoadRoundId(loadRoundId, options = {}) {
-  return updateState((state) => ({ ...state, loadRoundId }), options);
+export function setLoadRoundId(loadRoundId, loadTarget, options = {}) {
+  return updateState((state) => ({
+    ...state,
+    loadRoundId,
+    loadTarget: loadRoundId === null ? null : loadTarget,
+  }), options);
+}
+
+export function assertLoadRoundTarget(state, expectedTarget) {
+  if (state.loadRoundId !== null && state.loadTarget !== expectedTarget) {
+    throw new LoadTestRoundStateError("checkpointed load round belongs to a different target stack");
+  }
 }
