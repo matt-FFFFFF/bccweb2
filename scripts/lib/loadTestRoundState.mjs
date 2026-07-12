@@ -9,6 +9,10 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
+import {
+  withFixtureOperationLock,
+  writeJsonDurably,
+} from "./fixtureOperation.mjs";
 
 export const LOADTEST_ROUND_STATE_PATH = ".loadtest-round-state.json";
 const PRIVATE_FILE_MODE = 0o600;
@@ -77,6 +81,10 @@ export async function readLoadTestRoundState(options = {}) {
 
 export async function writeJsonAtomically(path, value, options = {}) {
   const { files = DEFAULT_FILES, mode = PRIVATE_FILE_MODE } = options;
+  if (files === DEFAULT_FILES && mode === PRIVATE_FILE_MODE) {
+    await writeJsonDurably(path, value);
+    return;
+  }
   const tempPath = join(
     dirname(path),
     `.${basename(path)}.${process.pid}.${randomUUID()}.tmp`,
@@ -102,10 +110,13 @@ export async function writeJsonAtomically(path, value, options = {}) {
 }
 
 async function updateState(update, options) {
-  const state = await readLoadTestRoundState(options);
-  const next = parseLoadTestRoundState(update(state));
-  await writeJsonAtomically(options?.path ?? LOADTEST_ROUND_STATE_PATH, next, options);
-  return next;
+  const path = options?.path ?? LOADTEST_ROUND_STATE_PATH;
+  return withFixtureOperationLock(async () => {
+    const state = await readLoadTestRoundState(options);
+    const next = parseLoadTestRoundState(update(state));
+    await writeJsonAtomically(path, next, options);
+    return next;
+  }, { path: `${path}.lock` });
 }
 
 export function replaceSeedRoundIds(seedRoundIds, options = {}) {

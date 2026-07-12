@@ -110,3 +110,21 @@ test("invalid JSON state fails without being replaced", async (t) => {
   await assert.rejects(setLoadRoundId("round", { path }), LoadTestRoundStateError);
   assert.equal(await readFile(path, "utf8"), "not-json");
 });
+
+test("concurrent seed and load updates preserve both ownership namespaces", async (t) => {
+  // Given
+  const path = await statePath(t);
+
+  // When
+  await Promise.all([
+    appendSeedRoundId("seed-concurrent", { path }),
+    setLoadRoundId("load-concurrent", { path }),
+  ]);
+
+  // Then
+  assert.deepEqual(await readLoadTestRoundState({ path }), {
+    version: 1,
+    seedRoundIds: ["seed-concurrent"],
+    loadRoundId: "load-concurrent",
+  });
+});
