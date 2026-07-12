@@ -76,15 +76,15 @@ test("redaction removes URL credentials and colon or encoded SAS assignments", (
   assert.doesNotMatch(redacted, /safe=count/u);
 });
 
-test("redaction removes unquoted generic token assignments", () => {
+test("redaction removes unquoted generic token and password assignments", () => {
   // Given
-  const output = "token=equals-secret token: colon-secret accessToken = camel-secret";
+  const output = "token=equals-secret token: colon-secret accessToken = camel-secret password=plain-secret password: colon-password";
 
   // When
   const redacted = redactLoadTestOutput(output);
 
   // Then
-  assert.doesNotMatch(redacted, /equals-secret|colon-secret|camel-secret/u);
+  assert.doesNotMatch(redacted, /equals-secret|colon-secret|camel-secret|plain-secret|colon-password/u);
 });
 
 test("redaction removes Authorization Bearer with colon or equals separators", () => {
