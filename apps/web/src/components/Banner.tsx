@@ -3,6 +3,7 @@
 export function Banner({ msg, ok }: { msg: string; ok?: boolean }) {
   return (
     <div
+      role={ok ? "status" : "alert"}
       style={{
         padding: "0.5rem 0.75rem",
         borderRadius: "0.35rem",
