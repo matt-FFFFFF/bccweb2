@@ -12,7 +12,7 @@ const PATTERNS = [
   [/(\bBearer\s+)(["']?)(?!\[REDACTED\])[^\s"']+(["']?)/giu, `$1$2${REDACTED}$3`],
   [/((?:AccountKey|SharedAccessKey|SharedAccessSignature)\s*[:=]\s*)[^;\s]+/giu, `$1${REDACTED}`],
   [/((?:SAS_?TOKEN|ADMIN_PASSWORD|JWT_SECRET|ACCESS_?TOKEN)\s*[:=]\s*)[^\s]+/giu, `$1${REDACTED}`],
-  [/(\b(?:access_?token|refresh_?token|id_?token|token)\s*[:=]\s*)(?!["'])[^\s,;}]+/giu, `$1${REDACTED}`],
+  [/(\b(?:access_?token|refresh_?token|id_?token|token|password|password_?hash)\s*[:=]\s*)(?!["'])[^\s,;}]+/giu, `$1${REDACTED}`],
   [/(BCC ADMIN PASSWORD:\s*)[^\s]+/giu, `$1${REDACTED}`],
   [/([?&](?:sig|se|sp|sv|st|spr|sr|skoid|sktid|skt|ske|sks|skv)=)[^&;\s]+/giu, `$1${REDACTED}`],
   [/(\b(?:sig|se|sp|sv|st|spr|sr|skoid|sktid|skt|ske|sks|skv)\s*[:=]\s*)[^&;\s]+/giu, `$1${REDACTED}`],
