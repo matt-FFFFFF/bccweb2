@@ -30,7 +30,9 @@ The status artifact always contains these rows in this exact order:
 1. **Prepare** (`loadtest-prepare`) replaces any prior checkpointed load round,
    creates a +35-day Confirmed round with 50 teams/500 slots, and atomically writes
    `tests/load/.prepared-round.json`. The exact created round ID is checkpointed in
-   `.loadtest-round-state.json` before team creation.
+   `.loadtest-round-state.json` before team creation, paired with a non-secret digest
+   of the current API/storage target. A target mismatch fails before cleanup or
+   ownership clearing.
 2. **Register** (`loadtest-register`) logs in 500 pilots in batches of 25, then runs
    twenty 25-VU one-shot cohorts five seconds apart. Each pilot sends one
    `/register-self`; the client never retries registration.
