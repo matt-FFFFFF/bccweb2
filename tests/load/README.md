@@ -61,6 +61,10 @@ The production server owns lease-conflict retry through `withPrivateLeaseRetry`.
 The register and sign clients deliberately do not retry failed operations, so every
 response remains visible in the result.
 
+The host verifier defaults to the queue-capable local Azurite endpoint for loopback
+runs. Dedicated remote runs must export `AzureWebJobsStorage`; blob-only
+`BLOB_CONNECTION_STRING` is never a queue fallback.
+
 ## Running
 
 ```sh
