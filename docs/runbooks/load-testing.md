@@ -48,7 +48,8 @@ The status artifact always contains these rows in this exact order:
    signature for the same ID, then require `signtofly-reflect` and poison approximate
    counts zero in two observations at least two seconds apart.
 8. **Cleanup** — remove only the durable `loadRoundId` ownership set and its exact
-   artifacts/references.
+   artifacts/references after its non-secret target-stack digest matches the current
+   API/storage target.
 
 Register and sign do not retry failed operations. Bounded setup may wait only for a
 valid HTTP 429 `Retry-After`; permanent errors remain one attempt. Server lease
@@ -101,6 +102,11 @@ Ignored private artifacts live under `logs/load-test/`:
 - sign event and summary JSON — count/key/status evidence, no credentials;
 - `.loadtest-round-state.json` and `tests/load/.prepared-round.json` — mode-0600
   ownership and synthetic credential state.
+
+The ownership checkpoint stores a SHA-256 digest of non-secret API/storage target
+identifiers beside `loadRoundId`. Changing stacks with owned state fails before cleanup
+or ownership clearing; restore the original target to recover it. Legacy owned
+checkpoints without a target digest also fail closed rather than guessing ownership.
 
 Phase status rows link to their private log paths. Artifact/status path overrides are
 relative to, and confined beneath, `logs/load-test/`; absolute and parent paths fail
