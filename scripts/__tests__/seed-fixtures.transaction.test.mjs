@@ -102,9 +102,10 @@ for (const phase of [1, 2, 3, 4, 5, 6]) {
     manifest.roundIds = [roundId];
     await writeFile(manifestPath, JSON.stringify(manifest));
     await writeFile(join(context.cwd, ".loadtest-round-state.json"), JSON.stringify({
-      version: 1,
+      version: 2,
       seedRoundIds: [roundId],
       loadRoundId: "load-preserved",
+      loadTarget: "a".repeat(64),
     }));
     await mkdir(join(context.cwd, "tests/load"), { recursive: true });
     await writeFile(join(context.cwd, "tests/load/.prepared-round.json"), JSON.stringify({ roundId }));
@@ -122,7 +123,7 @@ for (const phase of [1, 2, 3, 4, 5, 6]) {
     const resumed = run(WIPE_SCRIPT, context);
     assert.equal(resumed.status, 0, resumed.stderr);
     const state = JSON.parse(await readFile(join(context.cwd, ".loadtest-round-state.json"), "utf8"));
-    assert.deepEqual(state, { version: 1, seedRoundIds: [], loadRoundId: "load-preserved" });
+    assert.deepEqual(state, { version: 2, seedRoundIds: [], loadRoundId: "load-preserved", loadTarget: "a".repeat(64) });
     await assert.rejects(readFile(join(context.cwd, "tests/load/.prepared-round.json")), { code: "ENOENT" });
   });
 }
@@ -182,9 +183,10 @@ for (const [label, stateField, removed] of [
     await mkdir(join(context.cwd, "tests/load"), { recursive: true });
     await writeFile(join(context.cwd, "tests/load/.prepared-round.json"), JSON.stringify({ roundId }));
     await writeFile(join(context.cwd, ".loadtest-round-state.json"), JSON.stringify({
-      version: 1,
+      version: 2,
       seedRoundIds: stateField === "seedRoundIds" ? [roundId] : [],
       loadRoundId: stateField === "loadRoundId" ? roundId : null,
+      loadTarget: stateField === "loadRoundId" ? "a".repeat(64) : null,
     }));
     assert.equal(run(SEED_SCRIPT, context).status, 0);
     const preparedExists = await readFile(join(context.cwd, "tests/load/.prepared-round.json"))
