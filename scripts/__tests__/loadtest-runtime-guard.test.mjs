@@ -13,10 +13,10 @@ import {
   resolveLoadTestArtifactPath,
 } from "../lib/loadTestRuntimeGuard.mjs";
 
-test("target guard accepts loopback and explicit dedicated remote hosts", () => {
+test("target guard accepts only explicitly dedicated loopback and remote hosts", () => {
   // Given / When / Then
-  assert.doesNotThrow(() => assertLoadTestTarget("http://127.0.0.1:7071"));
-  assert.doesNotThrow(() => assertLoadTestTarget("http://localhost:7071"));
+  assert.doesNotThrow(() => assertLoadTestTarget("http://127.0.0.1:7071", true));
+  assert.doesNotThrow(() => assertLoadTestTarget("http://localhost:7071", true));
   assert.doesNotThrow(() => assertLoadTestTarget("https://bcc-loadtest.example.test", true));
   assert.doesNotThrow(() => assertLoadTestTarget("https://bcc-staging.example.test", true));
 });
@@ -24,6 +24,7 @@ test("target guard accepts loopback and explicit dedicated remote hosts", () => 
 test("target guard rejects production-looking and unclassified remote hosts", () => {
   // Given / When / Then
   assert.throws(() => assertLoadTestTarget("https://api.example.test"), /loadtest or staging/);
+  assert.throws(() => assertLoadTestTarget("http://127.0.0.1:7071"), /dedicated stack/);
   assert.throws(() => assertLoadTestTarget("https://bcc-loadtest.example.test", false), /dedicated stack/);
   assert.throws(() => assertLoadTestTarget("https://prodloadtest.example.test", true), /production-looking/);
   assert.throws(() => assertLoadTestTarget("https://loadtest-prodfoo.example.test", true), /production-looking/);
@@ -108,6 +109,7 @@ test("CLI redacts credential-bearing initialization errors", async (t) => {
     env: {
       ...process.env,
       BCC_API_BASE_URL: "http://127.0.0.1:7071",
+      LOADTEST_DEDICATED_STACK: "1",
       LOADTEST_STATUS_PATH: "status.json?sv=2024&sig=init-secret",
     },
     encoding: "utf8",
