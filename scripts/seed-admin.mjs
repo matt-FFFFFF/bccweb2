@@ -66,6 +66,14 @@ async function main() {
   }
   const password = override ?? existingCredentials?.password ?? randomBytes(12).toString("base64url").slice(0, 16);
 
+  if (!override && !existingCredentials) {
+    writeDevCredentials({ email: ADMIN_EMAIL, password }, credentialPath);
+  }
+  if (prepareOnly) {
+    process.stderr.write(`[seed-admin] private admin credential is ready at ${credentialPath}.\n`);
+    return;
+  }
+
   const privateContainer = getPrivateContainer();
 
   const existingIndex =
@@ -78,14 +86,6 @@ async function main() {
     process.stderr.write(
       `[seed-admin] ${ADMIN_EMAIL} already exists; admin credential source is available.\n`
     );
-    return;
-  }
-
-  if (!override && !existingCredentials) {
-    writeDevCredentials({ email: ADMIN_EMAIL, password }, credentialPath);
-  }
-  if (prepareOnly) {
-    process.stderr.write(`[seed-admin] private admin credential is ready at ${credentialPath}.\n`);
     return;
   }
 

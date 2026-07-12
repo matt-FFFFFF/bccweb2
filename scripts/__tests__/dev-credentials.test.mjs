@@ -14,6 +14,7 @@ import {
 import { buildLoadTestManifest } from "../lib/loadTestTopology.mjs";
 
 const SEED_ROUNDS_SCRIPT = resolve("scripts/seed-rounds.mjs");
+const SEED_ADMIN_SCRIPT = resolve("scripts/seed-admin.mjs");
 const MAKEFILE = resolve("Makefile");
 const TEST_PASSWORD = "fixture-admin-password";
 
@@ -217,4 +218,22 @@ test("dev and docker startup prepare credentials without shell redirection", asy
   // Then
   assert.doesNotMatch(makefile, /: > \.dev-credentials/u);
   assert.equal((makefile.match(/seed-admin\.mjs --prepare-credentials/gu) ?? []).length >= 3, true);
+});
+
+test("prepare-credentials succeeds before storage is available", async (t) => {
+  // Given
+  const cwd = await fixtureDir(t);
+
+  // When
+  const result = spawnSync(process.execPath, [SEED_ADMIN_SCRIPT, "--prepare-credentials"], {
+    cwd,
+    env: cleanEnvironment({
+      BLOB_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=unavailable;AccountKey=unused;BlobEndpoint=http://127.0.0.1:1/unavailable;",
+    }),
+    encoding: "utf8",
+  });
+
+  // Then
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal((await lstat(join(cwd, ".dev-credentials"))).mode & 0o777, 0o600);
 });
