@@ -69,9 +69,14 @@ export function RoundWorkflowActions({
       )}
       {actionErr && <Banner msg={actionErr} />}
       {confirmModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}>
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="round-workflow-confirm-title"
+          style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9999 }}
+        >
           <div style={{ background: "#fff", padding: "1.5rem", borderRadius: "0.5rem", maxWidth: "400px", width: "100%" }}>
-            <h3 style={{ marginTop: 0 }}>Confirm {confirmModal.label}</h3>
+            <h3 id="round-workflow-confirm-title" style={{ marginTop: 0 }}>Confirm {confirmModal.label}</h3>
             <p>This will reset <strong>{confirmModal.count}</strong> pilot signature(s) (their 'Sign To Fly' flags will be reset).</p>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: "0.5rem", marginTop: "1.5rem" }}>
               <button onClick={() => setConfirmModal(null)} style={btnStyle("#333", "#e9ecef")}>Cancel</button>
