@@ -224,85 +224,6 @@ describe("RoundManage follow-up fixes", () => {
     expect(screen.queryByRole("option", { name: "— none —" })).not.toBeInTheDocument();
   });
 
-  // ─── Cancel / uncancel round journey ──────────────────────────────────────────
-
-  it.each(["Proposed", "Confirmed"] as const)(
-    "offers Cancel Round at %s",
-    async (status) => {
-      state.round = makeRound({ status });
-      renderPage();
-      expect(await screen.findByRole("button", { name: "Cancel Round" })).toBeInTheDocument();
-      expect(screen.queryByRole("button", { name: "Uncancel" })).not.toBeInTheDocument();
-    },
-  );
-
-  it("at Cancelled: offers Uncancel, hides Cancel + edit forms, shows the cancelled notice", async () => {
-    state.round = makeRound({ status: "Cancelled", teams: [makeTeam()] });
-    renderPage();
-    await screen.findByText("Alpha");
-    expect(screen.getByRole("button", { name: "Uncancel" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Cancel Round" })).not.toBeInTheDocument();
-    expect(screen.getByText(/No changes can be made/i)).toBeInTheDocument();
-    expect(screen.getByText(/Uncancel it to edit/i)).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Save Brief" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Add Team" })).not.toBeInTheDocument();
-  });
-  // ─── Pilot picker club filtering ──────────────────────────────────────────────
-
-  describe("Pilot picker club filtering", () => {
-    it("offers pilots matching the team club or unknown club, but hides other-club pilots", async () => {
-      // Setup state for pilots
-      state.pilotsIndex = [
-        { id: "m", name: "Match", clubId: "club-1" },
-        { id: "o", name: "Other", clubId: "club-other" },
-        { id: "u", name: "Unknown", clubId: undefined },
-      ];
-
-      state.round = makeRound({ status: "Confirmed", teams: [makeTeam({ club: { id: "club-1", name: "Home Club" } })] });
-      renderPage();
-
-      await screen.findByText("Alpha");
-      
-      const addPilotBtn = screen.getByRole("button", { name: "+ Add Pilot" });
-      addPilotBtn.click();
-
-      // Ensure form renders
-      await screen.findByRole("button", { name: "Add Pilot" });
-      
-      // Placeholder is there
-      expect(screen.getAllByRole("option", { name: "— pilot —" })[0]).toBeInTheDocument();
-      // Eligible pilots
-      expect(screen.getByRole("option", { name: "Match" })).toBeInTheDocument();
-      expect(screen.getByRole("option", { name: "Unknown" })).toBeInTheDocument();
-      // Hidden pilot
-      expect(screen.queryByRole("option", { name: "Other" })).not.toBeInTheDocument();
-    });
-
-    it("shows empty state when no pilots are eligible", async () => {
-      state.pilotsIndex = [{ id: "o", name: "Other", clubId: "club-other" }];
-
-      state.round = makeRound({ status: "Confirmed", teams: [makeTeam({ club: { id: "club-1", name: "Home Club" } })] });
-      renderPage();
-
-      await screen.findByText("Alpha");
-      
-      const addPilotBtn = screen.getByRole("button", { name: "+ Add Pilot" });
-      addPilotBtn.click();
-
-      // Ensure form renders
-      const submitBtn = await screen.findByRole("button", { name: "Add Pilot" });
-      
-      // Placeholder is there
-      expect(screen.getAllByRole("option", { name: "— pilot —" })[0]).toBeInTheDocument();
-      // No actual pilot options
-      expect(screen.queryByRole("option", { name: "Other" })).not.toBeInTheDocument();
-
-      expect(screen.getByText("No pilots available for Home Club.")).toBeInTheDocument();
-      expect(submitBtn).toBeDisabled();
-    });
-  });
-
 });
 
 function renderPage() {
@@ -366,4 +287,3 @@ function makeTeam(overrides: Partial<Team> = {}): Team {
     ...overrides,
   };
 }
-

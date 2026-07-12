@@ -9,6 +9,7 @@ import { Banner } from "../../components/Banner.js";
 export function AddPilotForm({
   roundId,
   teamId,
+  teamName,
   teamClubId,
   teamClubName,
   pilots,
@@ -16,6 +17,7 @@ export function AddPilotForm({
 }: {
   roundId: string;
   teamId: string;
+  teamName: string;
   teamClubId: string;
   teamClubName: string;
   pilots: PilotSummary[];
@@ -61,6 +63,7 @@ export function AddPilotForm({
     >
       <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", flexShrink: 1 }}>
         <select
+          aria-label={`Pilot for ${teamName}`}
           required
           style={{ ...inputStyle, minWidth: 180 }}
           value={pilotId}

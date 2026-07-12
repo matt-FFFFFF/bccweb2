@@ -47,6 +47,7 @@ export function ChangeCaptainSelect({
         Captain:
       </label>
       <select
+        aria-label={`Captain for ${team.teamName}`}
         style={{ ...inputStyle, fontSize: "0.78rem", padding: "0.2rem 0.35rem" }}
         value={team.captainPilotId ?? ""}
         disabled={busy}
