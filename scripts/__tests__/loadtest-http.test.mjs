@@ -11,6 +11,7 @@ import {
   RETRY_AFTER_SAFETY_MARGIN_MS,
   loadTestFetch,
 } from "../lib/loadTestHttp.mjs";
+import { createLoadTestApi } from "../lib/loadTestApi.mjs";
 
 const transitionScript = resolve("scripts/transition-loadtest.mjs");
 
@@ -245,4 +246,35 @@ test("a new invocation has fresh retry state after deadline failure", async () =
   assert.equal(failed.attempts(), 1);
   assert.equal(fresh.attempts(), 1);
   assert.deepEqual(fresh.waits, []);
+});
+
+test("API creates a fresh timeout signal for every 429 retry attempt", async () => {
+  // Given
+  let now = 1_000;
+  const signals = [];
+  const createdSignals = [];
+  const responses = [response(429, "first", "0"), response(429, "second", "0"), response(200, "{}")];
+  const callApi = createLoadTestApi({
+    baseUrl: "https://loadtest.invalid",
+    deadlineMs: 10_000,
+    now: () => now,
+    sleep: async (ms) => { now += ms; },
+    abortSignalFactory: (timeoutMs) => {
+      const signal = { timeoutMs, attempt: createdSignals.length + 1 };
+      createdSignals.push(signal);
+      return signal;
+    },
+    fetch: async (_url, init) => {
+      signals.push(init.signal);
+      return responses.shift();
+    },
+  });
+
+  // When
+  await callApi("POST", "/api/setup", { body: {} });
+
+  // Then
+  assert.equal(signals.length, 3);
+  assert.equal(new Set(signals).size, 3);
+  assert.deepEqual(signals, createdSignals);
 });

@@ -18,6 +18,7 @@ export function createLoadTestApi(options) {
     now = Date.now,
     requestTimeoutMs = 30_000,
     sleep,
+    abortSignalFactory = AbortSignal.timeout,
   } = options;
   if (!Number.isFinite(requestTimeoutMs) || requestTimeoutMs <= 0) {
     throw new TypeError("requestTimeoutMs must be a positive finite number");
@@ -26,15 +27,12 @@ export function createLoadTestApi(options) {
   return async function callApi(method, path, request = {}) {
     const headers = { "Content-Type": "application/json", ...request.headers };
     if (request.token) headers.Authorization = `Bearer ${request.token}`;
-    const remainingMs = deadlineMs - now();
-    const timeoutMs = Math.max(1, Math.min(requestTimeoutMs, remainingMs));
     const response = await loadTestFetch(
       `${baseUrl}${path}`,
       {
         method,
         headers,
         body: request.body === undefined ? undefined : JSON.stringify(request.body),
-        signal: AbortSignal.timeout(timeoutMs),
       },
       {
         deadlineMs,
@@ -42,6 +40,11 @@ export function createLoadTestApi(options) {
         fetch,
         log,
         now,
+        beforeAttempt: (init) => {
+          const remainingMs = deadlineMs - now();
+          const timeoutMs = Math.max(1, Math.min(requestTimeoutMs, remainingMs));
+          return { ...init, signal: abortSignalFactory(timeoutMs) };
+        },
         ...(sleep === undefined ? {} : { sleep }),
       },
     );
