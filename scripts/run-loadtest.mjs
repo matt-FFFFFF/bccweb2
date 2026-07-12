@@ -29,8 +29,8 @@ async function main() {
   const root = resolve(".");
   const logDirectory = resolve("logs/load-test");
   const runId = `${Date.now()}-${process.pid}`;
-  const loadTarget = loadTestTargetIdentity(BCC_API_BASE_URL);
   assertLoadTestTarget(BCC_API_BASE_URL, process.env.LOADTEST_DEDICATED_STACK === "1");
+  const loadTarget = loadTestTargetIdentity(BCC_API_BASE_URL);
   const eventsPath = resolveLoadTestArtifactPath(logDirectory, process.env.SIGN_EVENTS_PATH, `sign-events-${runId}.json`);
   const summaryPath = resolveLoadTestArtifactPath(logDirectory, process.env.SIGN_SUMMARY_PATH, `sign-summary-${runId}.json`);
   const statusPath = resolveLoadTestArtifactPath(logDirectory, process.env.LOADTEST_STATUS_PATH, `orchestration-${runId}.json`);

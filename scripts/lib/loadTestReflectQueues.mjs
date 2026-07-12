@@ -4,20 +4,30 @@ import { QueueClient } from "@azure/storage-queue";
 
 const MAIN_QUEUE = "signtofly-reflect";
 const POISON_QUEUE = "signtofly-reflect-poison";
+export const LOCAL_AZURITE_QUEUE_CONNECTION =
+  "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;";
+
+export function resolveReflectQueueConnection(baseUrl, environment = process.env) {
+  const configured = environment.AzureWebJobsStorage;
+  if (typeof configured === "string" && configured.length > 0) return configured;
+  const host = new URL(baseUrl).hostname.toLowerCase();
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1") {
+    return LOCAL_AZURITE_QUEUE_CONNECTION;
+  }
+  fail("AzureWebJobsStorage is required for reflect queue verification");
+}
 
 function fail(message) {
   throw new Error(`[verify-loadtest-signtofly] ${message}`);
 }
 
 export function createReflectQueueReader(options) {
-  const { environment = process.env, queueClientFactory = (secret, name) => (
+  const { baseUrl = process.env.BCC_API_BASE_URL ?? "http://localhost:7071",
+    environment = process.env, queueClientFactory = (secret, name) => (
     new QueueClient(secret, name)
   ), requestTimeoutMs = 15_000,
   abortSignalFactory = (timeoutMs) => AbortSignal.timeout(timeoutMs) } = options;
-  const connectionString = environment.AzureWebJobsStorage;
-  if (typeof connectionString !== "string" || connectionString.length === 0) {
-    fail("AzureWebJobsStorage is required for reflect queue verification");
-  }
+  const connectionString = resolveReflectQueueConnection(baseUrl, environment);
   const main = queueClientFactory(connectionString, MAIN_QUEUE);
   const poison = queueClientFactory(connectionString, POISON_QUEUE);
   return async () => {

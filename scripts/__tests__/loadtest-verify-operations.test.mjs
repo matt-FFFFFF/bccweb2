@@ -58,7 +58,39 @@ test("queue reader sanitizes SDK timeout without exposing the connection string"
 test("queue reader does not fall back to BLOB_CONNECTION_STRING", () => {
   // Given / When / Then
   assert.throws(
-    () => createReflectQueueReader({ environment: { BLOB_CONNECTION_STRING: "wrong-secret" } }),
+    () => createReflectQueueReader({
+      baseUrl: "https://bcc-loadtest.example.test",
+      environment: { BLOB_CONNECTION_STRING: "wrong-secret" },
+    }),
+    /AzureWebJobsStorage is required/,
+  );
+});
+
+test("queue reader uses the queue-capable Azurite default only for loopback", () => {
+  // Given
+  const connections = [];
+  const factory = (connectionString) => {
+    connections.push(connectionString);
+    return { getProperties: async () => ({ approximateMessagesCount: 0 }) };
+  };
+
+  // When
+  createReflectQueueReader({
+    baseUrl: "http://127.0.0.1:7071",
+    environment: { BLOB_CONNECTION_STRING: "wrong-secret" },
+    queueClientFactory: factory,
+  });
+
+  // Then
+  assert.equal(connections.length, 2);
+  assert.ok(connections.every((value) => value.includes("QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1")));
+  assert.ok(connections.every((value) => !value.includes("wrong-secret")));
+  assert.throws(
+    () => createReflectQueueReader({
+      baseUrl: "https://bcc-loadtest.example.test",
+      environment: {},
+      queueClientFactory: factory,
+    }),
     /AzureWebJobsStorage is required/,
   );
 });
