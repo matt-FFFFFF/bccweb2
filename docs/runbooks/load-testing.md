@@ -67,6 +67,11 @@ k6 retry/sleep or a production bypass.
   error key is preferred; otherwise output explicitly says `replay=fallback`.
 - Queue: main=0 and poison=0, stable twice after replay on a dedicated stack.
 
+For a loopback target, the host verifier uses the repository's queue-capable Azurite
+default (`127.0.0.1:10001`) when `AzureWebJobsStorage` is not exported in the shell.
+Remote targets must provide `AzureWebJobsStorage`; `BLOB_CONNECTION_STRING` remains
+blob-only and is never used for queue verification.
+
 These gates are user-approved release criteria. Do not downgrade them to advisory
 metrics to make a run pass.
 
