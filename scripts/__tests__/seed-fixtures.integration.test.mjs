@@ -57,9 +57,10 @@ function runScript(script) {
 async function proveRoundOwnership(roundIds) {
   await rm(join(workDir, ".fixture-cleanup-state.json"), { force: true });
   await writeFile(join(workDir, ".loadtest-round-state.json"), JSON.stringify({
-    version: 1,
+    version: 2,
     seedRoundIds: roundIds,
     loadRoundId: "load-preserved",
+    loadTarget: "a".repeat(64),
   }));
 }
 

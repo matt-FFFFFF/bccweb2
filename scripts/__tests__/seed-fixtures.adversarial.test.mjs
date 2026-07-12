@@ -86,9 +86,10 @@ async function seedCompleteLegacyState(environment, mutate) {
   mutate({ manifest, userIndex, pilotIndex, publicIndexes });
   await writeFile(join(environment.workDir, FIXTURE_MANIFEST_PATH), `${JSON.stringify(manifest)}\n`);
   await writeFile(join(environment.workDir, ".loadtest-round-state.json"), JSON.stringify({
-    version: 1,
+    version: 2,
     seedRoundIds: manifest.roundIds,
     loadRoundId: "load-preserved",
+    loadTarget: "a".repeat(64),
   }));
   await Promise.all([
     writeJson(environment.privateContainer, "user-index.json", userIndex),
