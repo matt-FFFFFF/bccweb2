@@ -97,6 +97,7 @@ export function RoundTeamsList({
             seasonYear={r.season.year}
             existingTeams={r.teams}
             onAdded={() => { loadRound(); }}
+            lockedClubId={!canManage ? myClubId : null}
           />
         </div>
       )}
