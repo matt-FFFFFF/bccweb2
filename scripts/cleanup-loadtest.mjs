@@ -6,18 +6,25 @@ import { existsSync, unlinkSync } from "node:fs";
 import { pathToFileURL } from "node:url";
 import { cleanupOwnedRoundIds } from "./lib/loadTestRoundCleanup.mjs";
 import { BCC_API_BASE_URL, PREPARED_ROUND_PATH } from "./lib/loadTestConsts.mjs";
-import { readLoadTestRoundState, setLoadRoundId } from "./lib/loadTestRoundState.mjs";
+import {
+  assertLoadRoundTarget,
+  readLoadTestRoundState,
+  setLoadRoundId,
+} from "./lib/loadTestRoundState.mjs";
+import { loadTestTargetIdentity } from "./lib/loadTestTargetIdentity.mjs";
 
 export async function cleanupLoadRound(options = {}) {
   const {
     cleanup = cleanupOwnedRoundIds,
     clearLoadRoundId = () => setLoadRoundId(null),
     readState = readLoadTestRoundState,
+    targetIdentity = loadTestTargetIdentity(BCC_API_BASE_URL),
     removePrepared = () => {
       if (existsSync(PREPARED_ROUND_PATH)) unlinkSync(PREPARED_ROUND_PATH);
     },
   } = options;
   const state = await readState();
+  assertLoadRoundTarget(state, targetIdentity);
   if (state.loadRoundId === null) {
     removePrepared();
     return { roundId: null, roundCount: 0, signatureCount: 0 };

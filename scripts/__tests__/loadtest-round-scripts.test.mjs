@@ -150,6 +150,14 @@ globalThis.fetch = async () => {
   await assert.rejects(readFile(callsPath, "utf8"), { code: "ENOENT" });
 });
 
+test("prepare resolves credentials before prior-round cleanup", async () => {
+  // Given / When
+  const source = await readFile(prepareScript, "utf8");
+
+  // Then
+  assert.ok(source.indexOf("const adminPassword = resolveAdminPassword") < source.indexOf("await replacePriorLoadRound"));
+});
+
 test("prepare checkpoints a created round before the first team failure", async (t) => {
   // Given
   const manifest = buildLoadTestManifest({ seasonYear: 2026, siteNames: ["Site Alpha"] });
@@ -237,9 +245,10 @@ test("seed checkpoints the created ID in state and manifest before team mutation
   const manifest = buildLoadTestManifest({ seasonYear: 2026, siteNames: ["Site Alpha"] });
   const cwd = await fixtureDir(t, manifest);
   await writeFile(join(cwd, ".loadtest-round-state.json"), JSON.stringify({
-    version: 1,
+    version: 2,
     seedRoundIds: [],
     loadRoundId: "load-preserved",
+    loadTarget: "a".repeat(64),
   }));
   const hookPath = join(cwd, "fetch-hook.mjs");
   await writeFile(

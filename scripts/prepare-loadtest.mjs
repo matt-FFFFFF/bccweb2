@@ -20,14 +20,17 @@ import {
   SEASON_YEAR,
 } from "./lib/loadTestConsts.mjs";
 import {
+  assertLoadRoundTarget,
   readLoadTestRoundState,
   setLoadRoundId,
   writeJsonAtomically,
 } from "./lib/loadTestRoundState.mjs";
+import { loadTestTargetIdentity } from "./lib/loadTestTargetIdentity.mjs";
 import { validateLoadTestManifest } from "./lib/loadTestTopology.mjs";
 
 const SETUP_DEADLINE_MS = 15 * 60 * 1_000;
 const LOAD_ROUND_OFFSET_DAYS = 35;
+const LOAD_TARGET = loadTestTargetIdentity(BCC_API_BASE_URL);
 
 function fail(message) {
   throw new Error(`[prepare-loadtest] ${message}`);
@@ -41,6 +44,7 @@ function isoDatePlusDays(days) {
 
 async function replacePriorLoadRound(manifest) {
   const state = await readLoadTestRoundState();
+  assertLoadRoundTarget(state, LOAD_TARGET);
   if (state.loadRoundId === null) return;
   await cleanupOwnedRoundIds([state.loadRoundId], { seasonYears: [manifest.seasonYear] });
   await setLoadRoundId(null);
@@ -68,6 +72,7 @@ async function main() {
   if (!Array.isArray(manifest.siteIds) || manifest.siteIds.length === 0) {
     fail("canonical manifest has no siteIds");
   }
+  const adminPassword = resolveAdminPassword(ADMIN_PASSWORD_OVERRIDE);
 
   await replacePriorLoadRound(manifest);
   const callApi = createLoadTestApi({
@@ -76,7 +81,7 @@ async function main() {
   });
   const token = await loginLoadTestUser(callApi, {
     email: ADMIN_EMAIL,
-    password: resolveAdminPassword(ADMIN_PASSWORD_OVERRIDE),
+    password: adminPassword,
   });
   const siteId = manifest.siteIds[0];
   const created = await callApi("POST", "/api/rounds", {
@@ -93,7 +98,7 @@ async function main() {
     fail("createRound response missing id");
   }
   const roundId = created.id;
-  await setLoadRoundId(roundId);
+  await setLoadRoundId(roundId, LOAD_TARGET);
 
   const startedAt = performance.now();
   const roundTeamIds = new Map();

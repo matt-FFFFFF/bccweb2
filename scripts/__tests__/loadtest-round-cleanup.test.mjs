@@ -5,6 +5,8 @@ import test from "node:test";
 import { cleanupLoadRound } from "../cleanup-loadtest.mjs";
 import { cleanupOwnedRoundIds } from "../lib/loadTestRoundCleanup.mjs";
 
+const TARGET = "a".repeat(64);
+
 test("cleanup removes only explicit round IDs and their exact references", async () => {
   // Given
   const deleted = [];
@@ -77,7 +79,8 @@ test("load cleanup consumes checkpoint ownership without prepared metadata", asy
 
   // When
   const result = await cleanupLoadRound({
-    readState: async () => ({ version: 1, seedRoundIds: ["seed-preserved"], loadRoundId: "load-orphan" }),
+    readState: async () => ({ version: 2, seedRoundIds: ["seed-preserved"], loadRoundId: "load-orphan", loadTarget: TARGET }),
+    targetIdentity: TARGET,
     cleanup: async (roundIds) => {
       calls.push({ kind: "cleanup", roundIds });
       return { roundCount: roundIds.length, signatureCount: 0 };
@@ -101,7 +104,8 @@ test("load cleanup removes stale prepared metadata without guessing a round", as
 
   // When
   const result = await cleanupLoadRound({
-    readState: async () => ({ version: 1, seedRoundIds: ["seed-preserved"], loadRoundId: null }),
+    readState: async () => ({ version: 2, seedRoundIds: ["seed-preserved"], loadRoundId: null, loadTarget: null }),
+    targetIdentity: TARGET,
     cleanup: async () => calls.push({ kind: "unexpected-cleanup" }),
     clearLoadRoundId: async () => calls.push({ kind: "unexpected-clear" }),
     removePrepared: () => calls.push({ kind: "prepared" }),
@@ -110,4 +114,22 @@ test("load cleanup removes stale prepared metadata without guessing a round", as
   // Then
   assert.deepEqual(result, { roundId: null, roundCount: 0, signatureCount: 0 });
   assert.deepEqual(calls, [{ kind: "prepared" }]);
+});
+
+test("load cleanup rejects a different target before deleting or clearing ownership", async () => {
+  // Given
+  const calls = [];
+
+  // When / Then
+  await assert.rejects(
+    cleanupLoadRound({
+      readState: async () => ({ version: 2, seedRoundIds: [], loadRoundId: "stack-a-round", loadTarget: TARGET }),
+      targetIdentity: "b".repeat(64),
+      cleanup: async () => calls.push("cleanup"),
+      clearLoadRoundId: async () => calls.push("clear"),
+      removePrepared: () => calls.push("prepared"),
+    }),
+    /different target stack/,
+  );
+  assert.deepEqual(calls, []);
 });
