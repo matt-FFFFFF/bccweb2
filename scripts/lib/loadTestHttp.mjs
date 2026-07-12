@@ -41,6 +41,7 @@ export async function loadTestFetch(url, init, options) {
     sleep = defaultSleep,
     now = Date.now,
     log = console.error,
+    beforeAttempt = (requestInit) => requestInit,
   } = options ?? {};
 
   if (!Number.isFinite(deadlineMs)) {
@@ -55,7 +56,7 @@ export async function loadTestFetch(url, init, options) {
     }
 
     attempt += 1;
-    const response = await fetchFn(url, init);
+    const response = await fetchFn(url, beforeAttempt(init, attempt));
     if (response.ok) return response;
 
     if (response.status !== 429 || !retry429) {
