@@ -2,6 +2,7 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import { existsSync, readFileSync } from "node:fs";
+import { resolveAdminPassword } from "./lib/devCredentials.mjs";
 import { assertLoadTestTarget } from "./lib/loadTestRuntimeGuard.mjs";
 
 const VERIFY_DEADLINE_MS = 5 * 60 * 1_000;
@@ -29,16 +30,6 @@ function readText(path, label) {
   } catch (cause) {
     fail(`${label} could not be read; state preserved`, { cause });
   }
-}
-
-function adminPassword(path) {
-  const override = process.env.ADMIN_PASSWORD;
-  if (override) return override;
-  if (existsSync(path)) {
-    const match = readFileSync(path, "utf8").match(/^ADMIN_PASSWORD=(.+)$/m);
-    if (match?.[1]) return match[1].trim();
-  }
-  fail("missing admin password; set ADMIN_PASSWORD or create .dev-credentials; state preserved");
 }
 
 function artifactPaths() {
@@ -98,7 +89,10 @@ async function main() {
     }
     return json.accessToken;
   };
-  const adminToken = await login(ADMIN_EMAIL, adminPassword(DEV_CREDENTIALS_PATH));
+  const adminToken = await login(
+    ADMIN_EMAIL,
+    resolveAdminPassword(process.env.ADMIN_PASSWORD, DEV_CREDENTIALS_PATH),
+  );
   const readCounts = createReflectQueueReader({ environment: process.env });
   const report = await runSignVerification({
     prepared,

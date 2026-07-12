@@ -104,7 +104,7 @@ test("CLI parses artifacts before HTTP login or queue client construction", asyn
   const parseAt = source.indexOf("parseRawVerificationArtifacts(prepared, jsonLines, summary)");
   assert.ok(parseAt >= 0);
   assert.ok(parseAt < source.indexOf("createVerifierApi("));
-  assert.ok(parseAt < source.indexOf("login(ADMIN_EMAIL"));
+  assert.ok(parseAt < source.indexOf("const adminToken"));
   assert.ok(parseAt < source.indexOf("createReflectQueueReader("));
 });
 
@@ -162,6 +162,17 @@ test("standalone verifier requires dedicated confirmation before login or queue 
   assert.match(result.stderr, /dedicated stack confirmation/);
   assert.equal(requests, 0);
   assert.doesNotMatch(result.stderr, /connection string|AzureWebJobsStorage/iu);
+});
+
+test("standalone verifier delegates credential reads to the strict shared boundary", async () => {
+  // Given / When
+  const source = await import("node:fs/promises").then(({ readFile }) => (
+    readFile(new URL("../verify-loadtest-signtofly.mjs", import.meta.url), "utf8")
+  ));
+
+  // Then
+  assert.match(source, /resolveAdminPassword/u);
+  assert.doesNotMatch(source, /ADMIN_PASSWORD=\(\.\+\)/u);
 });
 
 test("verifier API uses one bounded fetch attempt and preserves status", async () => {
