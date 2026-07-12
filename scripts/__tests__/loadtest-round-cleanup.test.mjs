@@ -48,6 +48,29 @@ test("cleanup removes only explicit round IDs and their exact references", async
   assert.deepEqual(writes.find(({ path }) => path === "seasons/2026.json")?.value.rounds, ["unrelated"]);
 });
 
+test("cleanup removes season references before deleting recovery metadata", async () => {
+  // Given
+  const operations = [];
+  const blobs = {
+    readJson: async (container, path) => {
+      if (container === "private" && path === "rounds/owned.json") return { season: { year: 2026 } };
+      if (path === "rounds.json") return [{ id: "owned", seasonYear: 2026 }];
+      if (path === "seasons/2026.json") return { year: 2026, rounds: ["owned"] };
+      return null;
+    },
+    writeJson: async (_container, path) => operations.push(`write:${path}`),
+    deleteBlob: async (_container, path) => operations.push(`delete:${path}`),
+    listBlobs: async function* () {},
+  };
+
+  // When
+  await cleanupOwnedRoundIds(["owned"], { blobs, privateContainer: "private", publicContainer: "public" });
+
+  // Then
+  assert.ok(operations.indexOf("write:seasons/2026.json") < operations.indexOf("write:rounds.json"));
+  assert.ok(operations.indexOf("write:seasons/2026.json") < operations.indexOf("delete:rounds/owned.json"));
+});
+
 test("load cleanup consumes checkpoint ownership without prepared metadata", async () => {
   // Given
   const calls = [];

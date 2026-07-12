@@ -52,23 +52,6 @@ export async function cleanupOwnedRoundIds(roundIds, options = {}) {
     if (Number.isInteger(round?.season?.year)) knownSeasonYears.add(round.season.year);
   }
 
-  let signatureCount = 0;
-  for (const roundId of ids) {
-    signatureCount += await deletePrefix(privateContainer, `signatures/${roundId}/`, blobs);
-    signatureCount += await deletePrefix(privateContainer, `sign-to-fly/${roundId}/`, blobs);
-    await deletePrefix(privateContainer, `round-briefs/${roundId}/`, blobs);
-    await blobs.deleteBlob(privateContainer, `rounds/${roundId}.json`);
-    await blobs.deleteBlob(privateContainer, `round-briefs/${roundId}.json`);
-    await blobs.deleteBlob(privateContainer, `round-briefs/${roundId}.pdf`);
-  }
-
-  if (Array.isArray(rounds)) {
-    await blobs.writeJson(
-      publicContainer,
-      "rounds.json",
-      rounds.filter((round) => !ownedIds.has(round?.id)),
-    );
-  }
   for (const seasonYear of knownSeasonYears) {
     const path = `seasons/${seasonYear}.json`;
     const season = await blobs.readJson(publicContainer, path);
@@ -78,6 +61,23 @@ export async function cleanupOwnedRoundIds(roundIds, options = {}) {
         rounds: season.rounds.filter((roundId) => !ownedIds.has(roundId)),
       });
     }
+  }
+  if (Array.isArray(rounds)) {
+    await blobs.writeJson(
+      publicContainer,
+      "rounds.json",
+      rounds.filter((round) => !ownedIds.has(round?.id)),
+    );
+  }
+
+  let signatureCount = 0;
+  for (const roundId of ids) {
+    signatureCount += await deletePrefix(privateContainer, `signatures/${roundId}/`, blobs);
+    signatureCount += await deletePrefix(privateContainer, `sign-to-fly/${roundId}/`, blobs);
+    await deletePrefix(privateContainer, `round-briefs/${roundId}/`, blobs);
+    await blobs.deleteBlob(privateContainer, `rounds/${roundId}.json`);
+    await blobs.deleteBlob(privateContainer, `round-briefs/${roundId}.json`);
+    await blobs.deleteBlob(privateContainer, `round-briefs/${roundId}.pdf`);
   }
 
   return { roundCount: ids.length, signatureCount };
