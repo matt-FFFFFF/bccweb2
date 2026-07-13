@@ -54,6 +54,9 @@ vi.mock("../../../lib/api.js", () => ({
       super(message);
       this.name = "ApiError";
     }
+    static [Symbol.hasInstance](instance: unknown) {
+      return instance && typeof instance === "object" && (instance as Error).name === "ApiError";
+    }
   },
   api: {
     get: state.apiGet,
@@ -139,7 +142,7 @@ describe("RoundManage override sign", () => {
     await waitFor(() => {
       expect(state.apiPost).toHaveBeenCalledWith("rounds/round-1/reflect-sign-to-fly");
     });
-    
+
     await waitFor(() => {
       expect(state.apiGet.mock.calls.length).toBeGreaterThan(initialGets);
     });
@@ -161,6 +164,24 @@ describe("RoundManage override sign", () => {
 
     await screen.findByText("Pat Pilot");
     expect(screen.queryByRole("button", { name: "Re-sync Sign-to-Fly" })).not.toBeInTheDocument();
+  });
+
+  it("runAction surfaces ApiError.detail when an action fails", async () => {
+    import("../../../lib/api.js").then((mod) => {
+      state.apiPost.mockRejectedValueOnce(
+        new mod.ApiError(409, "Conflict", "Conflict", undefined, "Wait 12 minutes before recreating")
+      );
+    });
+
+    renderPage();
+
+    // Trigger "Re-sync Sign-to-Fly" (an action using runAction)
+    const btn = await screen.findByRole("button", { name: "Re-sync Sign-to-Fly" });
+    fireEvent.click(btn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Wait 12 minutes before recreating")).toBeInTheDocument();
+    });
   });
 });
 

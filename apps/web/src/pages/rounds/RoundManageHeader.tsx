@@ -134,7 +134,7 @@ export function RoundManageHeader({
                 )}
                 {ptPollTimeout !== null && (r.pureTrack?.status === "pending" || r.pureTrack?.status === "processing") && (
                   <span style={{ fontSize: "0.82rem", color: "#842029" }}>
-                    PureTrack taking longer than expected — Refresh/Recreate
+                    PureTrack taking longer than expected — Refresh
                   </span>
                 )}
                 {r.pureTrack?.status === "ready" && r.pureTrackGroupId && (
@@ -148,14 +148,22 @@ export function RoundManageHeader({
                   </span>
                 )}
 
-                {r.pureTrack?.status === "failed" || (ptPollTimeout !== null && (r.pureTrack?.status === "pending" || r.pureTrack?.status === "processing")) ? (
+                {r.pureTrack?.status === "failed" && (
                   <button
                     onClick={() => { recreatePureTrack(); }}
                     style={{ ...btnStyle("#58151c", "#f8d7da"), fontSize: "0.82rem" }}
                   >
                     Recreate Groups
                   </button>
-                ) : null}
+                )}
+                {ptPollTimeout !== null && (r.pureTrack?.status === "pending" || r.pureTrack?.status === "processing") && (
+                  <button
+                    onClick={() => { window.location.reload(); }}
+                    style={{ ...btnStyle("#052c65", "#cfe2ff"), fontSize: "0.82rem", borderColor: "#9ec5fe" }}
+                  >
+                    Refresh
+                  </button>
+                )}
               </div>
             )}
           </div>

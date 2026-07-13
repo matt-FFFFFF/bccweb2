@@ -153,7 +153,7 @@ export default function RoundManage() {
       await fn();
       await loadRound();
     } catch (ex) {
-      setActionErr(ex instanceof Error ? ex.message : "Action failed");
+      setActionErr(ex instanceof ApiError ? (ex.detail ?? ex.message) : ex instanceof Error ? ex.message : "Action failed");
     } finally {
       setActionBusy(null);
     }

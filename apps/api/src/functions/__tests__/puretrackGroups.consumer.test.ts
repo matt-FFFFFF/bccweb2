@@ -6,6 +6,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const queueMock = vi.hoisted(() => ({ enqueue: vi.fn(), reflect: vi.fn() }));
 const rescoreMock = vi.hoisted(() => ({ enqueue: vi.fn() }));
+const telemetryMock = vi.hoisted(() => {
+  const trackEvent = vi.fn();
+  return { trackEvent, client: { trackEvent } };
+});
 vi.mock("../../lib/queue.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/queue.js")>();
   return {
@@ -18,6 +22,11 @@ vi.mock("../../lib/rescoreJob.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/rescoreJob.js")>();
   return { ...actual, enqueueRescore: rescoreMock.enqueue };
 });
+vi.mock("../../lib/telemetry.js", () => ({
+  getTelemetryClient: () => telemetryMock.client,
+  setup: vi.fn(),
+  resetForTests: vi.fn(),
+}));
 
 import { invokeQueue } from "../../__tests__/helpers/api.js";
 import {
@@ -32,6 +41,7 @@ import {
   releasePureTrackGuard,
 } from "../../lib/puretrackGuard.js";
 import * as blob from "../../lib/blob.js";
+import * as blobJson from "../../lib/blobJson.js";
 import "../puretrackGroups.js";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -387,5 +397,32 @@ describe("pureTrackGroups queue consumer", () => {
     const round = await readPrivateJson<Round>(`rounds/${job.roundId}.json`);
     expect(round?.pureTrack).toMatchObject({ status: "failed", attemptId: job.attemptId, error: "poison" });
     expect(getRegisteredQueueHandler("pureTrackGroupsPoison").queueName).toBe("round-puretrack-group-poison");
+  });
+
+  it("rethrows a poison status-write failure for host retry", async () => {
+    // Given
+    const job = await seedJob();
+    vi.spyOn(blobJson, "writePrivateJson").mockRejectedValueOnce(
+      new Error("injected poison status write failure"),
+    );
+
+    // When / Then
+    await expect(invokeQueue("pureTrackGroupsPoison", job)).rejects.toThrow(
+      "injected poison status write failure",
+    );
+    expect(telemetryMock.trackEvent).not.toHaveBeenCalledWith(
+      expect.objectContaining({ name: "puretrack.poisonUnparseable" }),
+    );
+  });
+
+  it("acknowledges malformed poison messages and emits unparseable telemetry", async () => {
+    // Given / When
+    const operation = invokeQueue("pureTrackGroupsPoison", "{bad");
+
+    // Then
+    await expect(operation).resolves.toBeUndefined();
+    expect(telemetryMock.trackEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ name: "puretrack.poisonUnparseable" }),
+    );
   });
 });

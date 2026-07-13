@@ -64,4 +64,39 @@ describe("RoundManageHeader", () => {
     expect(screen.getByText("PureTrack: no groups (none created)")).toBeInTheDocument();
     expect(screen.queryByText("PureTrack Groups Ready")).not.toBeInTheDocument();
   });
+
+  it("renders 'Refresh' when pending and timed out (does not show Recreate)", () => {
+    render(
+      <MemoryRouter>
+        <RoundManageHeader
+          r={makeRound("pending")}
+          canManage={true}
+          pollTimeout={null}
+          ptPollTimeout={Date.now()}
+          regeneratePdf={vi.fn()}
+          recreatePureTrack={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("Refresh")).toBeInTheDocument();
+    expect(screen.queryByText("Recreate Groups")).not.toBeInTheDocument();
+  });
+
+  it("renders 'Recreate Groups' when failed", () => {
+    render(
+      <MemoryRouter>
+        <RoundManageHeader
+          r={makeRound("failed")}
+          canManage={true}
+          pollTimeout={null}
+          ptPollTimeout={null}
+          regeneratePdf={vi.fn()}
+          recreatePureTrack={vi.fn()}
+        />
+      </MemoryRouter>
+    );
+
+    expect(screen.getByText("Recreate Groups")).toBeInTheDocument();
+  });
 });

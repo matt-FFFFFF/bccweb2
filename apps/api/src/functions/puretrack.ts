@@ -48,7 +48,8 @@ import { mutatePureTrackEchoes, setPureTrackStatus } from "../lib/puretrackStatu
 import { enqueuePureTrackGroupJob } from "../lib/queue.js";
 
 const DeletePureTrackGroupsBodySchema = z.object({
-  ids: z.array(z.number().int().positive()).min(1).max(200).refine(
+  // Eight 60s DELETE timeouts consume 8m, leaving 2m of the 10m host limit for reconciliation.
+  ids: z.array(z.number().int().positive()).min(1).max(8).refine(
     (ids) => new Set(ids).size === ids.length,
     "ids must be unique",
   ),
@@ -338,7 +339,7 @@ async function deletePureTrackGroupsHandler(
   }
   const parsed = DeletePureTrackGroupsBodySchema.safeParse(raw);
   if (!parsed.success) {
-    throw new HttpError(400, "INVALID_IDS", "ids must contain 1 to 200 unique positive integers");
+    throw new HttpError(400, "INVALID_IDS", "ids must contain 1 to 8 unique positive integers");
   }
 
   await mutationRateLimit(req, caller, "deletePureTrackGroups", "heavy");

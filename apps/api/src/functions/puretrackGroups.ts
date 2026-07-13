@@ -245,19 +245,18 @@ export async function handlePureTrackGroupJob(message: QueueMessage, ctx: Invoca
 }
 
 export async function handlePureTrackGroupPoison(message: QueueMessage): Promise<void> {
+  let job: PureTrackGroupJob;
   try {
-    const { roundId, attemptId } = parseQueueMessage(message);
-    await setPureTrackStatus(roundId, "failed", {
-      error: "poison",
-      expectAttemptId: attemptId,
-      fromStatuses: FINAL_FAILURE_STATUSES,
-    });
+    job = parseQueueMessage(message);
   } catch (error: unknown) { // no-excuse-ok: catch — malformed poison must be acknowledged.
-    getTelemetryClient()?.trackEvent({
-      name: "puretrack.poisonUnparseable",
-      properties: redactObject({ error: errorCode(error) }) as Record<string, unknown>,
-    });
+    getTelemetryClient()?.trackEvent({ name: "puretrack.poisonUnparseable", properties: redactObject({ error: errorCode(error) }) as Record<string, unknown> });
+    return;
   }
+  await setPureTrackStatus(job.roundId, "failed", {
+    error: "poison",
+    expectAttemptId: job.attemptId,
+    fromStatuses: FINAL_FAILURE_STATUSES,
+  });
 }
 
 function errorCode(error: unknown): string {
