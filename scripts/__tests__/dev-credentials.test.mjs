@@ -115,6 +115,29 @@ test("seed-rounds rejects a hard-linked credential before HTTP", async (t) => {
   }, /single link/u);
 });
 
+test("seed-rounds preserves ownership state when credentials are malformed", async (t) => {
+  // Given
+  const cwd = await fixtureDir(t);
+  const statePath = join(cwd, ".loadtest-round-state.json");
+  const state = `${JSON.stringify({
+    version: 2,
+    seedRoundIds: [],
+    loadRoundId: "load-preserved",
+    loadTarget: "a".repeat(64),
+  })}\n`;
+  await writeFile(statePath, state, { mode: 0o600 });
+  await writeFile(join(cwd, ".dev-credentials"), "not-a-credential\n", { mode: 0o600 });
+  const { hookPath } = await noHttpHook(cwd);
+
+  // When
+  const result = runSeedRounds(cwd, hookPath);
+
+  // Then
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /malformed admin credential/u);
+  assert.equal(await readFile(statePath, "utf8"), state);
+});
+
 test("ADMIN_PASSWORD takes precedence without reading a malformed credential", async (t) => {
   // Given
   const cwd = await fixtureDir(t);
