@@ -99,6 +99,8 @@ services:
         condition: service_healthy
     environment:
       BLOB_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
+      BCC_HOST_UID: "${BCC_HOST_UID:-0}"
+      BCC_HOST_GID: "${BCC_HOST_GID:-0}"
     volumes:
       # Source /scripts is read-only; copied into writable /workspace/scripts
       # at runtime so node can resolve relative imports (./lib/blobSeed.mjs etc.)
