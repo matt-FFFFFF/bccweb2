@@ -18,11 +18,12 @@ import {
   HttpResponseInit,
   InvocationContext,
 } from "@azure/functions";
+import { randomUUID } from "node:crypto";
 import { BlobServiceClient } from "@azure/storage-blob";
 import type { Round, PureTrackGroup } from "@bccweb/types";
-import { PilotSchema, RoundSchema } from "@bccweb/schemas";
-import { getPrivateBlobClient, withPrivateLease } from "../lib/blob.js";
-import { readJson, writePrivateJson } from "../lib/blobJson.js";
+import { RoundSchema } from "@bccweb/schemas";
+import { getPrivateBlobClient } from "../lib/blob.js";
+import { readJson } from "../lib/blobJson.js";
 import {
   getCallerIdentity,
   unauthorizedResponse,
@@ -30,10 +31,8 @@ import {
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
-import {
-  createPureTrackGroups,
-  PureTrackRoundResult,
-} from "../lib/puretrack.js";
+import { setPureTrackStatus } from "../lib/puretrackStatus.js";
+import { enqueuePureTrackGroupJob } from "../lib/queue.js";
 
 function isCoord(roles: string[]): boolean {
   return roles.includes("RoundsCoord") || roles.includes("Admin");
@@ -108,77 +107,39 @@ async function createPureTrackGroupsHandler(
 
   await mutationRateLimit(req, caller, "createPureTrackGroups", "heavy");
 
-  if (round.status !== "Locked" && round.status !== "Complete") {
-    return {
-      status: 409,
-      jsonBody: {
-        error: `PureTrack groups can only be created for Locked or Complete rounds (currently ${round.status})`,
-      },
-    };
+  const attemptId = randomUUID();
+  const { updated, previousStatus } = await setPureTrackStatus(id, "pending", {
+    newAttemptId: attemptId,
+    requireRoundStatuses: ["Locked", "Complete"],
+    rejectStatuses: ["pending", "processing"],
+  });
+  if (!updated) {
+    if (previousStatus === "pending" || previousStatus === "processing") {
+      throw new HttpError(
+        409,
+        "PURETRACK_IN_PROGRESS",
+        "PureTrack group creation is already in progress",
+      );
+    }
+    throw new HttpError(
+      409,
+      "CONFLICT",
+      "PureTrack groups can only be created for Locked or Complete rounds",
+    );
   }
 
-  const pilotIds = round.teams.flatMap((t) =>
-    t.pilots
-      .filter((s) => s.status === "Filled" && s.pilotId)
-      .map((s) => s.pilotId!)
-  );
-  const uniquePilotIds = [...new Set(pilotIds)];
-
-  const pilotPureTrackIds = new Map<string, number>();
-  await Promise.all(
-    uniquePilotIds.map(async (pilotId) => {
-      try {
-        const pilotPath = `pilots/${pilotId}.json`;
-        const pilot = await readJson(
-          getPrivateBlobClient(pilotPath),
-          PilotSchema,
-          pilotPath,
-        );
-        if (pilot.pureTrackId != null) {
-          pilotPureTrackIds.set(pilotId, pilot.pureTrackId);
-        }
-      } catch {
-        // pilot not found — skip
-      }
-    })
-  );
-
-  let result: PureTrackRoundResult | null;
   try {
-    result = await createPureTrackGroups(round, pilotPureTrackIds, {
-      callerUserId: caller.userId,
-    });
-  } catch (err: unknown) {
-    const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[puretrack] createPureTrackGroups failed for round ${id}:`, err);
-    throw new HttpError(502, "PURETRACK_UPSTREAM_ERROR", msg);
+    await enqueuePureTrackGroupJob({ roundId: id, attemptId });
+  } catch (error: unknown) {
+    await setPureTrackStatus(id, "failed", {
+      error: "enqueue_failed",
+      expectAttemptId: attemptId,
+      fromStatuses: ["pending", "processing"],
+    }).catch(() => {});
+    throw error;
   }
 
-  const path = `rounds/${id}.json`;
-  if (!result) {
-    return { status: 200, jsonBody: null };
-  }
-  try {
-    await withPrivateLease(path, async (leaseId) => {
-      const r = await readJson(getPrivateBlobClient(path), RoundSchema, path);
-      r.pureTrackGroupId = result.roundGroupId;
-      r.pureTrackGroupName = result.roundGroupName;
-      r.pureTrackGroupSlug = result.roundGroupSlug;
-      for (const team of r.teams) {
-        const teamResult = result.teams.find((t) => t.teamId === team.id);
-        if (teamResult) {
-          team.pureTrackGroupId = teamResult.groupId;
-          team.pureTrackGroupSlug = teamResult.groupSlug;
-        }
-      }
-      await writePrivateJson(path, RoundSchema, r, leaseId);
-    });
-  } catch (err) {
-    // Not fatal — groups were created, IDs just didn't persist; log and continue
-    console.error(`[puretrack] Failed to persist group IDs for round ${id}:`, err);
-  }
-
-  return { status: 200, jsonBody: result };
+  return { status: 202, jsonBody: { status: "pending" } };
 }
 
 // ─── GET /api/manage/puretrack/groups ─────────────────────────────────────────
