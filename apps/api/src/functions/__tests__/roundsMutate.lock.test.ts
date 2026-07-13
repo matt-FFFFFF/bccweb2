@@ -14,13 +14,6 @@ import {
 } from "../../__tests__/helpers/seed.js";
 import { computeBriefHash } from "../../lib/signTofly/briefVersion.js";
 
-const pureTrackMock = vi.hoisted(() => ({
-  createPureTrackGroups: vi.fn(),
-}));
-vi.mock("../../lib/puretrack.js", () => ({
-  createPureTrackGroups: pureTrackMock.createPureTrackGroups,
-}));
-
 const pdfMock = vi.hoisted(() => ({
   generateBriefPdf: vi.fn(),
 }));
@@ -31,6 +24,7 @@ vi.mock("../../lib/pdf.js", () => ({
 vi.mock("../../lib/queue.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/queue.js")>()),
   enqueueBriefPdf: vi.fn(),
+  enqueuePureTrackGroupJob: vi.fn(),
 }));
 
 const briefPdfMock = vi.hoisted(() => ({
@@ -44,8 +38,9 @@ vi.mock("../../lib/briefPdf.js", async (importOriginal) => {
   return { ...actual, setBriefPdfStatus: briefPdfMock.setBriefPdfStatus };
 });
 
-import { enqueueBriefPdf } from "../../lib/queue.js";
+import { enqueueBriefPdf, enqueuePureTrackGroupJob } from "../../lib/queue.js";
 import { setBriefPdfStatus } from "../../lib/briefPdf.js";
+import { setPureTrackStatus } from "../../lib/puretrackStatus.js";
 import "../roundsMutate.js";
 
 interface Ctx {
@@ -75,6 +70,9 @@ async function seedBriefCompleteRound(): Promise<Ctx> {
     isLocked: false,
     maxTeams: 8,
     minimumScore: 0,
+    pureTrackGroupId: 100,
+    pureTrackGroupName: "Stale round group",
+    pureTrackGroupSlug: "stale-round-group",
     site: {
       id: randomUUID(),
       name: "Milk Hill",
@@ -90,6 +88,8 @@ async function seedBriefCompleteRound(): Promise<Ctx> {
         teamName: "Alpha",
         club: { id: clubId, name: "Test Club" },
         score: 0,
+        pureTrackGroupId: 101,
+        pureTrackGroupSlug: "stale-team-group",
         pilots: [
           {
             placeInTeam: 1,
@@ -148,8 +148,18 @@ function makeBrief(ctx: Ctx, overrides: Partial<RoundBrief> = {}): RoundBrief {
     briefingW3W: "brief.count.soap",
     takeOffW3W: "takeoff.count.soap",
     windSpeedDirection: "NW 15kt",
+    pureTrackGroupName: "Stale round group",
+    pureTrackGroupSlug: "stale-round-group",
     version: 1,
-    teams: [],
+    teams: [
+      {
+        teamName: "Alpha",
+        clubName: "Test Club",
+        pureTrackGroupId: 101,
+        pureTrackGroupSlug: "stale-team-group",
+        pilots: [],
+      },
+    ],
     ...overrides,
   };
 }
@@ -188,12 +198,12 @@ async function readRequiredRound(roundId: string): Promise<Round> {
 describe("lockRound async brief PDF queue", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    pureTrackMock.createPureTrackGroups.mockResolvedValue(null);
     vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
+    vi.mocked(enqueuePureTrackGroupJob).mockResolvedValue(undefined);
     vi.mocked(setBriefPdfStatus).mockImplementation(briefPdfMock.realSetBriefPdfStatus);
   });
 
-  it("enqueues a pending PDF job on lock and clears PDF state on unlock", async () => {
+  it("enqueues pending jobs, clears stale PureTrack echoes, and guards unlock while PureTrack runs", async () => {
     const ctx = await seedBriefCompleteRound();
     await writePrivateJson(`round-briefs/${ctx.roundId}.json`, frozenBrief(ctx));
 
@@ -205,21 +215,60 @@ describe("lockRound async brief PDF queue", () => {
     expect(lockedRound.brief?.pdfStatus).toBe("pending");
     expect(lockedRound.brief?.pdfAttemptId).toMatch(UUID_RE);
     expect(lockedRound.brief?.pdfUpdatedAt).toBeTruthy();
+    expect(lockedRound.pureTrack?.status).toBe("pending");
+    expect(lockedRound.pureTrack?.attemptId).toMatch(UUID_RE);
+    expect(lockedRound.pureTrackGroupId).toBeUndefined();
+    expect(lockedRound.pureTrackGroupName).toBeUndefined();
+    expect(lockedRound.pureTrackGroupSlug).toBeUndefined();
+    expect(lockedRound.teams[0]?.pureTrackGroupId).toBeUndefined();
+    expect(lockedRound.teams[0]?.pureTrackGroupSlug).toBeUndefined();
     expect(enqueueBriefPdf).toHaveBeenCalledTimes(1);
     expect(enqueueBriefPdf).toHaveBeenCalledWith({
       roundId: ctx.roundId,
       briefVersion: lockedRound.brief?.version,
       pdfAttemptId: lockedRound.brief?.pdfAttemptId,
     });
+    expect(enqueuePureTrackGroupJob).toHaveBeenCalledWith({
+      roundId: ctx.roundId,
+      attemptId: lockedRound.pureTrack?.attemptId,
+    });
+    const lockedBrief = await readPrivateJson<RoundBrief>(`round-briefs/${ctx.roundId}.json`);
+    expect(lockedBrief?.pureTrackGroupName).toBeUndefined();
+    expect(lockedBrief?.pureTrackGroupSlug).toBeUndefined();
+    expect(lockedBrief?.teams[0]?.pureTrackGroupId).toBeUndefined();
+    expect(lockedBrief?.teams[0]?.pureTrackGroupSlug).toBeUndefined();
     expect(pdfMock.generateBriefPdf).not.toHaveBeenCalled();
 
+    const guardedUnlockRes = await unlock(ctx);
+
+    expect(guardedUnlockRes.status).toBe(409);
+    expect(guardedUnlockRes.jsonBody).toMatchObject({ code: "PURETRACK_IN_PROGRESS" });
+    await setPureTrackStatus(ctx.roundId, "ready", {
+      expectAttemptId: lockedRound.pureTrack?.attemptId,
+      fromStatuses: ["pending"],
+    });
     const unlockRes = await unlock(ctx);
 
     expect(unlockRes.status).toBe(200);
     const unlockedRound = await readRequiredRound(ctx.roundId);
     expect(unlockedRound.status).toBe("Confirmed");
+    expect(unlockedRound.pureTrack).toBeUndefined();
     expect(unlockedRound.brief?.pdfStatus).toBeUndefined();
     expect(unlockedRound.brief?.pdfAttemptId).toBeUndefined();
+  });
+
+  it("keeps the lock and marks PureTrack failed when its enqueue fails", async () => {
+    const ctx = await seedBriefCompleteRound();
+    await writePrivateJson(`round-briefs/${ctx.roundId}.json`, frozenBrief(ctx));
+    vi.mocked(enqueuePureTrackGroupJob).mockRejectedValueOnce(new Error("queue unavailable"));
+
+    const res = await lock(ctx);
+
+    expect(res.status).toBe(200);
+    const round = await readRequiredRound(ctx.roundId);
+    expect(round.status).toBe("Locked");
+    expect(round.pureTrack?.status).toBe("failed");
+    expect(round.pureTrack?.error).toBe("enqueue_failed");
   });
 
   it("keeps the lock and marks the PDF failed when enqueue fails", async () => {

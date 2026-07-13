@@ -48,6 +48,7 @@ import * as z from "zod/v4";
 import {
   getBlobClient,
   getPrivateBlobClient,
+  getPrivateBlockBlobClient,
   withLease,
   withPrivateLease,
   withPrivateLeaseRenewing,
@@ -63,9 +64,9 @@ import { HttpError, withErrorHandler } from "../lib/http.js";
 import { assertCanManageRound } from "../lib/roundAuth.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
 import { updateRoundsIndex, recomputeSeason } from "../lib/recompute.js";
-import { createPureTrackGroups, type PureTrackRoundResult } from "../lib/puretrack.js";
 import { setBriefPdfStatus } from "../lib/briefPdf.js";
-import { enqueueBriefPdf } from "../lib/queue.js";
+import { enqueueBriefPdf, enqueuePureTrackGroupJob } from "../lib/queue.js";
+import { mutatePureTrackEchoes, setPureTrackStatus } from "../lib/puretrackStatus.js";
 import { getTelemetryClient } from "../lib/telemetry.js";
 import { listSignaturesForRound } from "../lib/signTofly/ledger.js";
 import { invalidatePriorSignToFlyFlags } from "../lib/signTofly/invalidate.js";
@@ -780,49 +781,6 @@ async function reopenBrief(
 
 // ─── POST /api/rounds/{id}/lock ───────────────────────────────────────────────
 
-async function loadPilotPureTrackIds(round: Round): Promise<Map<string, number>> {
-  const pilotIds = round.teams.flatMap((t) =>
-    t.pilots
-      .filter((s) => s.status === "Filled" && s.pilotId)
-      .map((s) => s.pilotId!)
-  );
-  const uniquePilotIds = [...new Set(pilotIds)];
-  const pilotPureTrackIds = new Map<string, number>();
-
-  await Promise.all(
-    uniquePilotIds.map(async (pilotId) => {
-      try {
-        const pilotPath = `pilots/${pilotId}.json`;
-        const pilot = await readJson(
-          getPrivateBlobClient(pilotPath),
-          PilotSchema,
-          pilotPath,
-        );
-        if (pilot.pureTrackId != null) pilotPureTrackIds.set(pilotId, pilot.pureTrackId);
-      } catch {
-        return;
-      }
-    })
-  );
-
-  return pilotPureTrackIds;
-}
-
-function applyPureTrackResult(round: Round, ptResult: PureTrackRoundResult): Round {
-  const updated = structuredClone(round);
-  updated.pureTrackGroupId = ptResult.roundGroupId;
-  updated.pureTrackGroupName = ptResult.roundGroupName;
-  updated.pureTrackGroupSlug = ptResult.roundGroupSlug;
-  for (const team of updated.teams) {
-    const tr = ptResult.teams.find((t) => t.teamId === team.id);
-    if (tr) {
-      team.pureTrackGroupId = tr.groupId;
-      team.pureTrackGroupSlug = tr.groupSlug;
-    }
-  }
-  return updated;
-}
-
 /**
  * The single brief "seed" source. Shared by every create path — eager create
  * (createRound), lazy-create on first edit (T6) and on first image (T9) — so all
@@ -966,7 +924,7 @@ async function mergeBriefForLock(
  * BriefComplete → Locked.
  * Takes a snapshot of each registered pilot's safety/scoring data from
  * their pilot document. Resets accountedFor and signToFly for all slots.
- * After the lock is confirmed, fires async: PureTrack groups → PDF queue.
+ * After the lock is confirmed, enqueues PureTrack-group and PDF jobs.
  */
 async function lockRound(
   req: HttpRequest,
@@ -1040,7 +998,14 @@ async function lockRound(
     })
   );
 
-  let candidateRound = structuredClone(round);
+  const candidateRound = structuredClone(round);
+  candidateRound.pureTrackGroupId = undefined;
+  candidateRound.pureTrackGroupName = undefined;
+  candidateRound.pureTrackGroupSlug = undefined;
+  for (const team of candidateRound.teams) {
+    team.pureTrackGroupId = undefined;
+    team.pureTrackGroupSlug = undefined;
+  }
   candidateRound.status = "Locked";
   candidateRound.isLocked = true;
   for (const team of candidateRound.teams) {
@@ -1051,22 +1016,6 @@ async function lockRound(
       slot.accountedFor = false;
       slot.signToFly = false;
     }
-  }
-
-  let ptResult: PureTrackRoundResult | null = null;
-  try {
-    const pilotPureTrackIds = await loadPilotPureTrackIds(candidateRound);
-    ptResult = await createPureTrackGroups(candidateRound, pilotPureTrackIds);
-    if (ptResult) {
-      candidateRound = applyPureTrackResult(candidateRound, ptResult);
-    }
-    console.log(
-      ptResult
-        ? `[lockRound:${id}] PureTrack groups created: round=${ptResult.roundGroupId}, teams=${ptResult.teams.length}`
-        : `[lockRound:${id}] PureTrack skipped: no pilots with pureTrackId`
-    );
-  } catch (ptErr) {
-    console.error(`[lockRound:${id}] PureTrack group creation failed:`, ptErr);
   }
 
   // B3: the brief is its own blob, so the round lease does NOT cover it. Read
@@ -1089,6 +1038,7 @@ async function lockRound(
 
   let updated: Round;
   const pdfAttemptId = randomUUID();
+  const pureTrackAttemptId = randomUUID();
   try {
     const result = await withRoundAndBriefLease(id, async (roundLeaseId, briefLeaseId) => {
       const r: Round = await readJson(
@@ -1103,6 +1053,8 @@ async function lockRound(
 
       const briefPath = `round-briefs/${id}.json`;
       const existing = await readJson(getPrivateBlobClient(briefPath), BriefSchema, briefPath);
+      const briefClient = getPrivateBlockBlobClient(briefPath);
+      const originalBriefBytes = await briefClient.downloadToBuffer();
       const brief = await mergeBriefForLock(candidateRound, existing);
 
       // The frozen material hash MUST still match — otherwise the persisted brief
@@ -1128,21 +1080,18 @@ async function lockRound(
 
       r.status = "Locked";
       r.isLocked = true;
-
-      if (ptResult) {
-        r.pureTrackGroupId = ptResult.roundGroupId;
-        r.pureTrackGroupName = ptResult.roundGroupName;
-        r.pureTrackGroupSlug = ptResult.roundGroupSlug;
-      }
+      r.pureTrack = {
+        status: "pending",
+        attemptId: pureTrackAttemptId,
+        updatedAt: new Date().toISOString(),
+      };
+      r.pureTrackGroupId = undefined;
+      r.pureTrackGroupName = undefined;
+      r.pureTrackGroupSlug = undefined;
 
       for (const team of r.teams) {
-        if (ptResult) {
-          const tr = ptResult.teams.find((t) => t.teamId === team.id);
-          if (tr) {
-            team.pureTrackGroupId = tr.groupId;
-            team.pureTrackGroupSlug = tr.groupSlug;
-          }
-        }
+        team.pureTrackGroupId = undefined;
+        team.pureTrackGroupSlug = undefined;
         for (const slot of team.pilots) {
           if (slot.pilotId && snapshotMap.has(slot.pilotId)) {
             slot.snapshot = snapshotMap.get(slot.pilotId)!;
@@ -1163,7 +1112,27 @@ async function lockRound(
         pdfAttemptId,
       };
 
-      await writePrivateJson(path, RoundSchema, r, roundLeaseId);
+      try {
+        await writePrivateJson(path, RoundSchema, r, roundLeaseId);
+      } catch (roundWriteError: unknown) {
+        await briefClient.upload(originalBriefBytes, originalBriefBytes.length, {
+          blobHTTPHeaders: { blobContentType: "application/json" },
+          conditions: { leaseId: briefLeaseId },
+        }).catch((rollbackError: unknown) => {
+          getTelemetryClient()?.trackEvent({
+            name: "puretrack.crossBlobReconcileRequired",
+            properties: {
+              roundId: id,
+              operation: "lock",
+              roundWriteError:
+                roundWriteError instanceof Error ? roundWriteError.name : "unknown",
+              rollbackError:
+                rollbackError instanceof Error ? rollbackError.name : "unknown",
+            },
+          });
+        });
+        throw roundWriteError;
+      }
       return { round: r, brief };
     });
     updated = result.round;
@@ -1183,6 +1152,19 @@ async function lockRound(
   } catch {
     // Recovery is best-effort: a failure here must NOT fail the lock or skip updateRoundsIndex.
     await setBriefPdfStatus(id, "failed", { error: "enqueue_failed", expectAttemptId: pdfAttemptId, fromStatuses: ["pending", "processing"] }).catch(() => {});
+  }
+
+  try {
+    await enqueuePureTrackGroupJob({
+      roundId: id,
+      attemptId: pureTrackAttemptId,
+    });
+  } catch {
+    await setPureTrackStatus(id, "failed", {
+      error: "enqueue_failed",
+      expectAttemptId: pureTrackAttemptId,
+      fromStatuses: ["pending", "processing"],
+    }).catch(() => {});
   }
 
   await updateRoundsIndex(updated);
@@ -1205,6 +1187,14 @@ async function unlockRound(
 
   // eslint-disable-next-line @typescript-eslint/require-await -- transition()'s `extra` slot is typed (round: Round) => Promise<void>; this mutator is synchronous but the Promise-returning shape is required by that signature.
   const result = await transition(req, id, ["Locked"], "Confirmed", async (r) => {
+    if (r.pureTrack?.status === "pending" || r.pureTrack?.status === "processing") {
+      throw new HttpError(
+        409,
+        "PURETRACK_IN_PROGRESS",
+        "PureTrack group creation must finish before unlocking the round",
+      );
+    }
+    r.pureTrack = undefined;
     r.isLocked = false;
     if (r.brief) {
       r.brief.pdfStatus = undefined;
@@ -1220,8 +1210,27 @@ async function unlockRound(
   });
 
   if ("status" in result && "jsonBody" in result) return result;
-  await updateRoundsIndex(result as Round);
-  return { status: 200, jsonBody: result };
+  const updated = result as Round;
+  await mutatePureTrackEchoes(id, ({ round, brief }) => {
+    for (const targetRound of [round, updated]) {
+      targetRound.pureTrackGroupId = undefined;
+      targetRound.pureTrackGroupName = undefined;
+      targetRound.pureTrackGroupSlug = undefined;
+      for (const team of targetRound.teams) {
+        team.pureTrackGroupId = undefined;
+        team.pureTrackGroupSlug = undefined;
+      }
+    }
+    brief.pureTrackGroupName = undefined;
+    brief.pureTrackGroupSlug = undefined;
+    for (const team of brief.teams) {
+      team.pureTrackGroupId = undefined;
+      team.pureTrackGroupSlug = undefined;
+    }
+    return true;
+  });
+  await updateRoundsIndex(updated);
+  return { status: 200, jsonBody: updated };
 }
 
 // ─── POST /api/rounds/{id}/cancel ─────────────────────────────────────────────

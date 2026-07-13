@@ -18,7 +18,8 @@
  *    the lock byte-identical (proves the preserve-list cannot diverge).
  *  - tampered material (computeBriefHash !== hash) ABORTS the lock (round stays
  *    BriefComplete) AND emits the `brief.lockHashMismatch` diagnostic.
- *  - a hard failure of the brief-JSON write leaves the round BriefComplete + non-2xx.
+ *  - hard brief/round write failures leave the round BriefComplete; a round-write
+ *    failure also restores the exact pre-lock brief.
  *  - a PDF-generation failure is best-effort: the round still reaches Locked.
  */
 
@@ -39,13 +40,6 @@ import {
 import { computeBriefHash, MATERIAL_BRIEF_FIELDS } from "../../lib/signTofly/briefVersion.js";
 
 // ─── External-service mocks (deterministic + no real I/O) ─────────────────────
-const pureTrackMock = vi.hoisted(() => ({
-  createPureTrackGroups: vi.fn(),
-}));
-vi.mock("../../lib/puretrack.js", () => ({
-  createPureTrackGroups: pureTrackMock.createPureTrackGroups,
-}));
-
 const pdfMock = vi.hoisted(() => ({
   generateBriefPdf: vi.fn(),
 }));
@@ -69,9 +63,10 @@ vi.mock("../../lib/email.js", () => ({
 vi.mock("../../lib/queue.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/queue.js")>()),
   enqueueBriefPdf: vi.fn(),
+  enqueuePureTrackGroupJob: vi.fn(),
 }));
 
-import { enqueueBriefPdf } from "../../lib/queue.js";
+import { enqueueBriefPdf, enqueuePureTrackGroupJob } from "../../lib/queue.js";
 
 // Telemetry spy. setup.ts does NOT mock telemetry; getTelemetryClient() returns
 // undefined in tests. The stub client is a Proxy so any method (e.g. trackEvent
@@ -98,7 +93,10 @@ vi.mock("../../lib/telemetry.js", () => ({
 // Force a HARD failure of the brief-JSON write to prove lock does not advance to
 // Locked without it. Gated by a flag so seeding (which never touches round-briefs
 // through blobJson.writePrivateJson) is unaffected; only flipped around lock().
-const blobJsonControl = vi.hoisted(() => ({ failBriefWrite: false }));
+const blobJsonControl = vi.hoisted(() => ({
+  failBriefWrite: false,
+  failRoundWrite: false,
+}));
 vi.mock("../../lib/blobJson.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/blobJson.js")>();
   return {
@@ -107,6 +105,9 @@ vi.mock("../../lib/blobJson.js", async (importOriginal) => {
       (path: string, schema: unknown, data: unknown, leaseId?: string, opts?: unknown) => {
         if (blobJsonControl.failBriefWrite && path.startsWith("round-briefs/")) {
           return Promise.reject(new Error("simulated brief JSON write failure"));
+        }
+        if (blobJsonControl.failRoundWrite && path.startsWith("rounds/")) {
+          return Promise.reject(new Error("simulated round JSON write failure"));
         }
         return (
           actual.writePrivateJson as unknown as (...args: unknown[]) => Promise<void>
@@ -293,15 +294,17 @@ describe("lockRound preserves the frozen material hash while refreshing teams (T
   beforeEach(() => {
     vi.clearAllMocks();
     blobJsonControl.failBriefWrite = false;
-    pureTrackMock.createPureTrackGroups.mockResolvedValue(null);
+    blobJsonControl.failRoundWrite = false;
     pdfMock.generateBriefPdf.mockResolvedValue(Buffer.from("%PDF-1.4 lock-test"));
     vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
+    vi.mocked(enqueuePureTrackGroupJob).mockResolvedValue(undefined);
     emailMock.getBriefRecipients.mockReturnValue([]);
     telemetryMock.trackTrace.mockClear();
   });
 
   afterEach(() => {
     blobJsonControl.failBriefWrite = false;
+    blobJsonControl.failRoundWrite = false;
     vi.restoreAllMocks();
   });
 
@@ -410,6 +413,23 @@ describe("lockRound preserves the frozen material hash while refreshing teams (T
     const round = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
     expect(round.status).toBe("BriefComplete");
     expect(round.isLocked).toBe(false);
+  });
+
+  it("restores the pre-lock brief when the Locked round write throws", async () => {
+    const ctx = await seedBriefCompleteRound();
+    const before = frozen(buildBrief(ctx, { briefersNotes: "original notes" }));
+    await seedBrief(ctx, before);
+
+    blobJsonControl.failRoundWrite = true;
+    const res = await lock(ctx);
+    blobJsonControl.failRoundWrite = false;
+
+    expect(res.status).toBeGreaterThanOrEqual(500);
+    const round = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
+    expect(round.status).toBe("BriefComplete");
+    expect(round.isLocked).toBe(false);
+    const brief = (await readPrivateJson<RoundBrief>(`round-briefs/${ctx.roundId}.json`))!;
+    expect(brief).toEqual(before);
   });
 
   it("is best-effort on PDF queue failure: enqueue failure still reaches Locked", async () => {
