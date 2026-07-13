@@ -6,7 +6,7 @@ import { z } from "zod/v4";
 import { getPrivateBlockBlobClient } from "./blob.js";
 
 const GLOBAL_GUARD_PATH = "puretrack-jobs/active/global.json";
-const STALE_GUARD_MS = 12 * 60 * 1000;
+export const PURETRACK_STALE_GUARD_MS = 12 * 60 * 1000;
 
 const PureTrackMutationGuardRecordSchema = z.object({
   ownerToken: z.string().min(1),
@@ -68,7 +68,7 @@ export async function acquirePureTrackMutationGuard(
 
   const lastModified = properties.lastModified?.getTime();
   const ageMs = lastModified === undefined ? 0 : Date.now() - lastModified;
-  if (!Number.isFinite(ageMs) || ageMs < STALE_GUARD_MS || properties.etag === undefined) {
+  if (!Number.isFinite(ageMs) || ageMs < PURETRACK_STALE_GUARD_MS || properties.etag === undefined) {
     return null;
   }
 
@@ -80,6 +80,36 @@ export async function acquirePureTrackMutationGuard(
     return handleFrom(scope, ownerToken, response.etag);
   } catch (error: unknown) {
     if (isConflict(error)) return null;
+    throw error;
+  }
+}
+
+export async function renewPureTrackGuard(
+  handle: PureTrackMutationGuardHandle,
+): Promise<PureTrackMutationGuardHandle> {
+  const client = getPrivateBlockBlobClient(guardPath(handle.scope));
+  try {
+    const record = PureTrackMutationGuardRecordSchema.parse(
+      JSON.parse((await client.downloadToBuffer(
+        0,
+        undefined,
+        { conditions: { ifMatch: handle.etag } },
+      )).toString("utf8")),
+    );
+    if (record.ownerToken !== handle.ownerToken) {
+      throw new PureTrackGuardOwnershipError(handle.scope);
+    }
+    const body = JSON.stringify(record, null, 2);
+    const response = await client.upload(body, Buffer.byteLength(body), {
+      blobHTTPHeaders: { blobContentType: "application/json" },
+      conditions: { ifMatch: handle.etag },
+    });
+    return handleFrom(handle.scope, handle.ownerToken, response.etag);
+  } catch (error: unknown) {
+    if (error instanceof PureTrackGuardOwnershipError) throw error;
+    if (statusCodeOf(error) === 404 || statusCodeOf(error) === 412) {
+      throw new PureTrackGuardOwnershipError(handle.scope);
+    }
     throw error;
   }
 }

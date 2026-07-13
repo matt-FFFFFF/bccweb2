@@ -4,8 +4,9 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { randomUUID } from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { HttpResponseInit } from "@azure/functions";
+import type { Round } from "@bccweb/types";
 import { makeAuthRequest, invoke } from "../../__tests__/helpers/api.js";
-import { makeRound, makeUser, writePrivateJson } from "../../__tests__/helpers/seed.js";
+import { makeRound, makeUser, readPrivateJson, writePrivateJson } from "../../__tests__/helpers/seed.js";
 import { resetAllBuckets } from "../../lib/rateLimit.js";
 
 function randomIp(): string {
@@ -101,6 +102,42 @@ describe("POST /api/rounds/{id}/puretrack/create-groups scoping", () => {
     expect(res.status).toBe(409);
     expect(res.jsonBody).toMatchObject({ code: "PURETRACK_IN_PROGRESS" });
     expect(enqueuePureTrackGroupJob).toHaveBeenCalledTimes(1);
+  });
+
+  it("supersedes and enqueues a stale pending attempt with a fresh attempt id", async () => {
+    // Given
+    const clubId = randomUUID();
+    const roundId = randomUUID();
+    const staleAttemptId = randomUUID();
+    await makeIdleLockedRound(roundId, clubId);
+    const round = await readPrivateJson<Round>(`rounds/${roundId}.json`);
+    if (round === null) throw new Error("Seeded round disappeared");
+    await writePrivateJson(`rounds/${roundId}.json`, {
+      ...round,
+      pureTrack: {
+        status: "pending",
+        attemptId: staleAttemptId,
+        ownerToken: randomUUID(),
+        updatedAt: new Date(Date.now() - 12 * 60 * 1000 - 1).toISOString(),
+      },
+    });
+    const { user } = await makeUser({ roles: ["RoundsCoord"], clubId });
+
+    // When
+    const res = await invoke(
+      "createPureTrackGroups",
+      makeAuthRequest(user.id, user.email, { method: "POST", params: { id: roundId } }),
+    );
+
+    // Then
+    expect(res.status).toBe(202);
+    const updated = await readPrivateJson<Round>(`rounds/${roundId}.json`);
+    expect(updated?.pureTrack?.attemptId).not.toBe(staleAttemptId);
+    expect(updated?.pureTrack).not.toHaveProperty("ownerToken");
+    expect(enqueuePureTrackGroupJob).toHaveBeenCalledWith({
+      roundId,
+      attemptId: updated?.pureTrack?.attemptId,
+    });
   });
 
   it("RoundsCoord blocked cross-club 403", async () => {

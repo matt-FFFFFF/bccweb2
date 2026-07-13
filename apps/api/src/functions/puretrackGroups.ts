@@ -7,7 +7,7 @@ import * as z from "zod/v4";
 
 import { getPrivateBlobClient } from "../lib/blob.js";
 import { readJson } from "../lib/blobJson.js";
-import { acquirePureTrackMutationGuard, assertPureTrackGuardOwned, releasePureTrackGuard, type PureTrackMutationGuardHandle } from "../lib/puretrackGuard.js";
+import { acquirePureTrackMutationGuard, assertPureTrackGuardOwned, releasePureTrackGuard, renewPureTrackGuard, type PureTrackMutationGuardHandle } from "../lib/puretrackGuard.js";
 import { authenticate, createPureTrackGroups, deleteGroups, isPureTrackEnabled, listMyGroups, loadPilotPureTrackIds, PureTrackCreateResponseError, PureTrackDeleteError, PureTrackGroupOperationError, type BeforePureTrackOutbound, type PureTrackRoundResult, type PureTrackSession } from "../lib/puretrack.js";
 import { commitPureTrackReady, mutatePureTrackEchoes, setPureTrackStatus } from "../lib/puretrackStatus.js";
 import { enqueuePureTrackGroupJob, PureTrackGroupJobSchema, type PureTrackGroupJob } from "../lib/queue.js";
@@ -29,6 +29,7 @@ type ActiveJob = {
   readonly beforeOutbound: BeforePureTrackOutbound;
   readonly beforeCleanup: BeforePureTrackOutbound;
 };
+type RenewableGuard = { handle: PureTrackMutationGuardHandle };
 
 class PureTrackGuardContendedError extends Error {
   readonly name = "PureTrackGuardContendedError";
@@ -154,17 +155,18 @@ async function cleanupInvocationGroups(active: ActiveJob, ids: readonly number[]
   }
 }
 
-async function processEnabledJob(job: PureTrackGroupJob, handle: PureTrackMutationGuardHandle): Promise<void> {
+async function processEnabledJob(job: PureTrackGroupJob, guard: RenewableGuard): Promise<void> {
   const beforeOutbound: BeforePureTrackOutbound = async () => {
-    await assertPureTrackGuardOwned(handle);
+    await assertPureTrackGuardOwned(guard.handle);
     if ((await readRound(job.roundId)).pureTrack?.attemptId !== job.attemptId) {
       throw new PureTrackAttemptSupersededError();
     }
   };
   const session = await authenticate(beforeOutbound);
-  const beforeCleanup: BeforePureTrackOutbound = () => assertPureTrackGuardOwned(handle);
+  const beforeCleanup: BeforePureTrackOutbound = () => assertPureTrackGuardOwned(guard.handle);
   const active = { job, session, beforeOutbound, beforeCleanup } satisfies ActiveJob;
   await deleteAuthoritativeGroups(active);
+  guard.handle = await renewPureTrackGuard(guard.handle);
   const round = await readRound(job.roundId);
   const pilotIds = await loadPilotPureTrackIds(round);
   let result: PureTrackRoundResult | null;
@@ -179,7 +181,8 @@ async function processEnabledJob(job: PureTrackGroupJob, handle: PureTrackMutati
     await cleanupInvocationGroups(active, ids);
     throw error;
   }
-  const { committed } = await commitPureTrackReady(job.roundId, job.attemptId, handle.ownerToken, result);
+  guard.handle = await renewPureTrackGuard(guard.handle);
+  const { committed } = await commitPureTrackReady(job.roundId, job.attemptId, guard.handle.ownerToken, result);
   if (!committed && result !== null) {
     await cleanupInvocationGroups(active, [
       result.roundGroupId,
@@ -201,6 +204,7 @@ export async function handlePureTrackGroupJob(message: QueueMessage, ctx: Invoca
     await enqueuePureTrackGroupJob(job, { visibilityTimeoutSeconds: 30 });
     return;
   }
+  const guard: RenewableGuard = { handle };
 
   try {
     const currentRound = await readRound(job.roundId);
@@ -208,23 +212,23 @@ export async function handlePureTrackGroupJob(message: QueueMessage, ctx: Invoca
     const { updated } = await setPureTrackStatus(job.roundId, "processing", {
       expectAttemptId: job.attemptId,
       fromStatuses: ["pending", "processing"],
-      newOwnerToken: handle.ownerToken,
+      newOwnerToken: guard.handle.ownerToken,
     });
     if (!updated) return;
     if (!isPureTrackEnabled()) {
       await setPureTrackStatus(job.roundId, "ready", {
         expectAttemptId: job.attemptId,
-        expectOwnerToken: handle.ownerToken,
+        expectOwnerToken: guard.handle.ownerToken,
         fromStatuses: ["processing"],
       });
       return;
     }
-    await processEnabledJob(job, handle);
+    await processEnabledJob(job, guard);
   } catch (error: unknown) {
     if (dequeueCount < MAX_DEQUEUE) {
       await setPureTrackStatus(job.roundId, "pending", {
         expectAttemptId: job.attemptId,
-        expectOwnerToken: handle.ownerToken,
+        expectOwnerToken: guard.handle.ownerToken,
         fromStatuses: ["processing"],
       });
       throw error;
@@ -232,11 +236,11 @@ export async function handlePureTrackGroupJob(message: QueueMessage, ctx: Invoca
     await setPureTrackStatus(job.roundId, "failed", {
       error: errorCode(error),
       expectAttemptId: job.attemptId,
-      expectOwnerToken: handle.ownerToken,
+      expectOwnerToken: guard.handle.ownerToken,
       fromStatuses: FINAL_FAILURE_STATUSES,
     });
   } finally {
-    await releasePureTrackGuard(handle);
+    await releasePureTrackGuard(guard.handle);
   }
 }
 

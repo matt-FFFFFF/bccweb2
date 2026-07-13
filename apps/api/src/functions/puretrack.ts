@@ -41,6 +41,7 @@ import {
 import {
   acquirePureTrackMutationGuard,
   assertPureTrackGuardOwned,
+  PURETRACK_STALE_GUARD_MS,
   releasePureTrackGuard,
 } from "../lib/puretrackGuard.js";
 import { mutatePureTrackEchoes, setPureTrackStatus } from "../lib/puretrackStatus.js";
@@ -230,6 +231,7 @@ async function createPureTrackGroupsHandler(
     newAttemptId: attemptId,
     requireRoundStatuses: ["Locked", "Complete"],
     rejectStatuses: ["pending", "processing"],
+    supersedeRejectedAfterMs: PURETRACK_STALE_GUARD_MS,
   });
   if (!updated) {
     if (previousStatus === "pending" || previousStatus === "processing") {
@@ -352,7 +354,22 @@ async function deletePureTrackGroupsHandler(
     const idsToDelete = parsed.data.ids.filter((id) => liveIds.has(id));
     const alreadyGoneIds = parsed.data.ids.filter((id) => !liveIds.has(id));
     try {
-      await deleteGroups(session, idsToDelete, beforeOutbound);
+      const deleteResult = await deleteGroups(session, idsToDelete, beforeOutbound);
+      const actualAlreadyGoneIds = [...new Set([
+        ...alreadyGoneIds,
+        ...deleteResult.alreadyGoneIds,
+      ])];
+      await clearDeletedPureTrackState([
+        ...deleteResult.deletedIds,
+        ...actualAlreadyGoneIds,
+      ]);
+      return {
+        status: 200,
+        jsonBody: {
+          deleted: deleteResult.deletedIds.length,
+          alreadyGone: actualAlreadyGoneIds.length,
+        },
+      };
     } catch (error: unknown) {
       if (error instanceof PureTrackDeleteError) {
         await clearDeletedPureTrackState([
@@ -363,11 +380,6 @@ async function deletePureTrackGroupsHandler(
       }
       throw error;
     }
-    await clearDeletedPureTrackState(parsed.data.ids);
-    return {
-      status: 200,
-      jsonBody: { deleted: idsToDelete.length, alreadyGone: alreadyGoneIds.length },
-    };
   } finally {
     await releasePureTrackGuard(handle);
   }

@@ -7,6 +7,7 @@ import {
   acquirePureTrackMutationGuard,
   assertPureTrackGuardOwned,
   releasePureTrackGuard,
+  renewPureTrackGuard,
 } from "../puretrackGuard.js";
 
 const GUARD_PATH = "puretrack-jobs/active/global.json";
@@ -86,5 +87,28 @@ describe("PureTrack global mutation guard", () => {
     await expect(assertPureTrackGuardOwned(current)).resolves.toBeUndefined();
     await releasePureTrackGuard(current);
     expect(await getPrivateContainer().getBlobClient(GUARD_PATH).exists()).toBe(false);
+  });
+
+  test("renews the owned ETag and prevents takeover during the renewed stale interval", async () => {
+    // Given
+    const acquired = await acquirePureTrackMutationGuard("global", "attempt-A");
+    if (acquired === null) throw new Error("initial guard acquisition unexpectedly contended");
+    const client = getPrivateContainer().getBlobClient(GUARD_PATH);
+    const before = await client.getProperties();
+
+    // When
+    const renewed = await renewPureTrackGuard(acquired);
+    const after = await client.getProperties();
+
+    // Then
+    expect(renewed.etag).not.toBe(acquired.etag);
+    expect(after.etag).toBe(renewed.etag);
+    expect(after.lastModified?.getTime()).toBeGreaterThanOrEqual(before.lastModified?.getTime() ?? 0);
+    const renewedAt = after.lastModified?.getTime();
+    if (renewedAt === undefined) throw new Error("Azurite omitted renewed guard lastModified");
+    vi.useFakeTimers();
+    vi.setSystemTime(renewedAt + STALE_MS - 1);
+    expect(await acquirePureTrackMutationGuard("global", "attempt-B")).toBeNull();
+    await expect(assertPureTrackGuardOwned(renewed)).resolves.toBeUndefined();
   });
 });

@@ -322,6 +322,31 @@ describe("POST /api/manage/puretrack/groups/delete", () => {
     expect(await readPrivateJson(`signatures/${roundId}/proof.json`)).toEqual({ signed: true });
   });
 
+  it("reports a group that disappears at DELETE time as already gone", async () => {
+    // Given
+    mockPureTrack([{ id: 10, name: "Vanishing group", slug: "vanishing-group" }]);
+    const baseImplementation = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/api/groups/10") && init?.method === "DELETE") {
+        return new Response(null, { status: 404 });
+      }
+      if (baseImplementation === undefined) throw new Error("missing PureTrack mock");
+      return baseImplementation(input, init);
+    });
+    const { user } = await makeUser({ roles: ["Admin"] });
+
+    // When
+    const res = await invoke(
+      "deletePureTrackGroups",
+      makeAuthRequest(user.id, user.email, { method: "POST", body: { ids: [10] } }),
+    );
+
+    // Then
+    expect(res.status).toBe(200);
+    expect(res.jsonBody).toEqual({ deleted: 0, alreadyGone: 1 });
+  });
+
   it("clears successful ids before propagating a mid-batch failure", async () => {
     const roundId = randomUUID();
     await makeRound({ id: roundId });

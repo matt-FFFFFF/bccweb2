@@ -340,6 +340,21 @@ describe("pureTrackGroups queue consumer", () => {
     expect((await readPrivateJson<Round>(`rounds/${job.roundId}.json`))?.pureTrack?.status).toBe("pending");
   });
 
+  it("returns a timed-out outbound request to pending for retry", async () => {
+    // Given
+    const job = await seedJob();
+    fetchMock.mockRejectedValueOnce(
+      new DOMException("PureTrack request timed out", "TimeoutError"),
+    );
+
+    // When
+    const operation = invokeQueue("pureTrackGroups", job, { dequeueCount: 1 });
+
+    // Then
+    await expect(operation).rejects.toMatchObject({ name: "TimeoutError" });
+    expect((await readPrivateJson<Round>(`rounds/${job.roundId}.json`))?.pureTrack?.status).toBe("pending");
+  });
+
   it("throws on live guard contention before the final dequeue", async () => {
     const job = await seedJob();
     const owner = await acquirePureTrackMutationGuard("global", "other-attempt");

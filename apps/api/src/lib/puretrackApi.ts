@@ -4,6 +4,7 @@ import * as z from "zod/v4";
 import { getTelemetryClient } from "./telemetry.js";
 
 const BASE_URL = "https://puretrack.io";
+export const PURETRACK_REQUEST_TIMEOUT_MS = 60_000;
 
 export const PureTrackLoginResponseSchema = z.object({
   access_token: z.string().min(1),
@@ -66,7 +67,7 @@ export async function authenticate(
   }
 
   await beforeOutbound();
-  const loginRes = await fetch(`${BASE_URL}/api/login`, {
+  const loginRes = await fetchPureTrack(`${BASE_URL}/api/login`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ key: apiKey, email, password }),
@@ -82,7 +83,7 @@ export async function authenticate(
   const rawCookies = loginRes.headers.getSetCookie?.() ?? [];
   const loginCookieHeader = rawCookies.map((cookie) => cookie.split(";")[0]).join("; ");
   await beforeOutbound();
-  const csrfRes = await fetch(`${BASE_URL}/login`, {
+  const csrfRes = await fetchPureTrack(`${BASE_URL}/login`, {
     headers: { Cookie: loginCookieHeader },
   });
   const csrfHtml = await csrfRes.text();
@@ -130,7 +131,7 @@ export async function createGroup(
 ): Promise<PureTrackApiGroup> {
   const session = sharedSession ?? await authenticate(beforeOutbound);
   await beforeOutbound();
-  const res = await fetch(`${BASE_URL}/api/groups`, {
+  const res = await fetchPureTrack(`${BASE_URL}/api/groups`, {
     method: "POST",
     headers: authHeaders(session),
     body: JSON.stringify({
@@ -185,7 +186,7 @@ export async function importPilots(
   if (pureTrackIds.length === 0) return;
   const session = sharedSession ?? await authenticate(beforeOutbound);
   await beforeOutbound();
-  const res = await fetch(`${BASE_URL}/api/groups/${groupId}/import-ids`, {
+  const res = await fetchPureTrack(`${BASE_URL}/api/groups/${groupId}/import-ids`, {
     method: "POST",
     headers: authHeaders(session),
     body: JSON.stringify({ ids: pureTrackIds.join(",") }),
@@ -202,7 +203,7 @@ export async function listMyGroups(
   beforeOutbound: BeforePureTrackOutbound,
 ): Promise<PureTrackApiGroup[]> {
   await beforeOutbound();
-  const res = await fetch(`${BASE_URL}/api/groups?mine=1`, {
+  const res = await fetchPureTrack(`${BASE_URL}/api/groups?mine=1`, {
     headers: authHeaders(session),
   });
   if (!res.ok) {
@@ -215,15 +216,15 @@ export async function listMyGroups(
 
 export async function deleteGroups(
   session: PureTrackSession,
-  ids: number[],
+  ids: readonly number[],
   beforeOutbound: BeforePureTrackOutbound,
-): Promise<void> {
+): Promise<{ readonly deletedIds: readonly number[]; readonly alreadyGoneIds: readonly number[] }> {
   const deletedIds: number[] = [];
   const alreadyGoneIds: number[] = [];
   for (const id of ids) {
     try {
       await beforeOutbound();
-      const res = await fetch(`${BASE_URL}/api/groups/${id}`, {
+      const res = await fetchPureTrack(`${BASE_URL}/api/groups/${id}`, {
         method: "DELETE",
         headers: authHeaders(session),
       });
@@ -241,5 +242,21 @@ export async function deleteGroups(
     } catch (cause: unknown) {
       throw new PureTrackDeleteError(deletedIds, alreadyGoneIds, id, cause);
     }
+  }
+  return { deletedIds, alreadyGoneIds };
+}
+
+async function fetchPureTrack(
+  input: string,
+  init: RequestInit,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => {
+    controller.abort(new DOMException("PureTrack request timed out", "TimeoutError"));
+  }, PURETRACK_REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timeout);
   }
 }

@@ -373,8 +373,10 @@ export default function RoundDetail() {
                 >
                   {round.pureTrackGroupName}
                 </a>
-              ) : (
+              ) : round.pureTrackGroupName ? (
                 round.pureTrackGroupName
+              ) : (
+                <span style={{ color: "#888" }}>No groups (none created)</span>
               )}
             </dd>
           </div>

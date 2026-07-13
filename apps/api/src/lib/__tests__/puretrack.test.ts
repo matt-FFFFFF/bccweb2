@@ -70,6 +70,7 @@ describe("PureTrack API contracts", () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
     delete process.env["PURETRACK_API_KEY"];
@@ -229,6 +230,39 @@ describe("PureTrack API contracts", () => {
       "https://puretrack.io/api/groups/13",
       "https://puretrack.io/api/groups/14",
     ]);
+  });
+
+  it("returns the actual deleted and already-gone ids after a successful delete batch", async () => {
+    // Given
+    const { deleteGroups } = await import("../puretrack.js");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(null, { status: 410 }));
+
+    // When
+    const result = await deleteGroups(session, [21, 22, 23], beforeOutbound);
+
+    // Then
+    expect(result).toEqual({ deletedIds: [21], alreadyGoneIds: [22, 23] });
+  });
+
+  it("aborts a PureTrack request at the request timeout", async () => {
+    // Given
+    vi.useFakeTimers();
+    const { listMyGroups, PURETRACK_REQUEST_TIMEOUT_MS } = await import("../puretrack.js");
+    fetchMock.mockImplementationOnce((_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    }));
+
+    // When
+    const request = listMyGroups(session, vi.fn().mockResolvedValue(undefined));
+    const rejection = expect(request).rejects.toMatchObject({ name: "TimeoutError" });
+    await vi.advanceTimersByTimeAsync(PURETRACK_REQUEST_TIMEOUT_MS);
+
+    // Then
+    await rejection;
   });
 });
 

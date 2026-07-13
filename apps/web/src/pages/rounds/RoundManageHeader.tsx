@@ -137,9 +137,14 @@ export function RoundManageHeader({
                     PureTrack taking longer than expected — Refresh/Recreate
                   </span>
                 )}
-                {r.pureTrack?.status === "ready" && (
+                {r.pureTrack?.status === "ready" && r.pureTrackGroupId && (
                   <span style={{ fontSize: "0.82rem", color: "#0f5132" }}>
                     PureTrack Groups Ready
+                  </span>
+                )}
+                {r.pureTrack?.status === "ready" && !r.pureTrackGroupId && (
+                  <span style={{ fontSize: "0.82rem", color: "#6c757d" }}>
+                    PureTrack: no groups (none created)
                   </span>
                 )}
 

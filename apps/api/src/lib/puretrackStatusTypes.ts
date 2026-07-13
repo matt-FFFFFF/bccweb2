@@ -11,4 +11,5 @@ export interface SetPureTrackStatusOptions {
   readonly newOwnerToken?: string;
   readonly requireRoundStatuses?: readonly RoundStatus[];
   readonly rejectStatuses?: readonly PureTrackStatus[];
+  readonly supersedeRejectedAfterMs?: number;
 }

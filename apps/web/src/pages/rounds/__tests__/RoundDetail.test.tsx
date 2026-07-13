@@ -182,7 +182,47 @@ describe("RoundDetail — accounted-for management outside the manage page", () 
   });
 });
 
+describe("RoundDetail — PureTrack rendering", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+  afterEach(() => {
+    cleanup();
+    mockIdentity = null;
+  });
+
+  it("renders group link when ready and group exists", async () => {
+    mockIdentity = { userId: "u", email: "m@x", roles: ["Pilot"], pilotId: "mem", clubId: "cA" };
+    const r = makeRound("Locked");
+    r.pureTrack = { status: "ready", attemptId: "1" };
+    r.pureTrackGroupId = 123;
+    r.pureTrackGroupName = "Group 1";
+    r.pureTrackGroupSlug = "group-1";
+    mockLoad(r);
+
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Milk Hill" });
+    const link = screen.getByRole("link", { name: "Group 1" });
+    expect(link).toHaveAttribute("href", "https://puretrack.io/group/group-1");
+  });
+
+  it("renders 'No groups (none created)' when ready but no group exists", async () => {
+    mockIdentity = { userId: "u", email: "m@x", roles: ["Pilot"], pilotId: "mem", clubId: "cA" };
+    const r = makeRound("Locked");
+    r.pureTrack = { status: "ready", attemptId: "1" };
+    mockLoad(r);
+
+    renderPage();
+
+    await screen.findByRole("heading", { name: "Milk Hill" });
+    expect(screen.getByText("No groups (none created)")).toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /group/i })).not.toBeInTheDocument();
+  });
+});
+
 describe("RoundDetail — rescore success modal survives the post-mutation reload", () => {
+
   const COUNTS: RescoreJobCounts = {
     rescoredCount: 3,
     skippedManualCount: 1,

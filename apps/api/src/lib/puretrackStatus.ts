@@ -58,7 +58,8 @@ export async function setPureTrackStatus(
       }
       if (
         previousStatus !== undefined &&
-        opts.rejectStatuses?.includes(previousStatus) === true
+        opts.rejectStatuses?.includes(previousStatus) === true &&
+        !isStalePureTrackAttempt(round.pureTrack?.updatedAt, opts.supersedeRejectedAfterMs)
       ) {
         return statusResult(false, previousStatus);
       }
@@ -254,6 +255,15 @@ function statusResult(
   previousStatus: PureTrackStatus | undefined,
 ): { updated: boolean; previousStatus?: PureTrackStatus } {
   return previousStatus === undefined ? { updated } : { updated, previousStatus };
+}
+
+function isStalePureTrackAttempt(
+  updatedAt: string | undefined,
+  staleAfterMs: number | undefined,
+): boolean {
+  if (updatedAt === undefined || staleAfterMs === undefined) return false;
+  const updatedAtMs = Date.parse(updatedAt);
+  return Number.isFinite(updatedAtMs) && Date.now() - updatedAtMs > staleAfterMs;
 }
 
 function sanitizePureTrackError(error: string | undefined): string | undefined {
