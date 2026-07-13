@@ -154,10 +154,7 @@ async function cleanupInvocationGroups(active: ActiveJob, ids: readonly number[]
   }
 }
 
-async function processEnabledJob(
-  job: PureTrackGroupJob,
-  handle: PureTrackMutationGuardHandle,
-): Promise<void> {
+async function processEnabledJob(job: PureTrackGroupJob, handle: PureTrackMutationGuardHandle): Promise<void> {
   const beforeOutbound: BeforePureTrackOutbound = async () => {
     await assertPureTrackGuardOwned(handle);
     if ((await readRound(job.roundId)).pureTrack?.attemptId !== job.attemptId) {
@@ -182,7 +179,7 @@ async function processEnabledJob(
     await cleanupInvocationGroups(active, ids);
     throw error;
   }
-  const { committed } = await commitPureTrackReady(job.roundId, job.attemptId, result);
+  const { committed } = await commitPureTrackReady(job.roundId, job.attemptId, handle.ownerToken, result);
   if (!committed && result !== null) {
     await cleanupInvocationGroups(active, [
       result.roundGroupId,
@@ -211,11 +208,13 @@ export async function handlePureTrackGroupJob(message: QueueMessage, ctx: Invoca
     const { updated } = await setPureTrackStatus(job.roundId, "processing", {
       expectAttemptId: job.attemptId,
       fromStatuses: ["pending", "processing"],
+      newOwnerToken: handle.ownerToken,
     });
     if (!updated) return;
     if (!isPureTrackEnabled()) {
       await setPureTrackStatus(job.roundId, "ready", {
         expectAttemptId: job.attemptId,
+        expectOwnerToken: handle.ownerToken,
         fromStatuses: ["processing"],
       });
       return;
@@ -225,6 +224,7 @@ export async function handlePureTrackGroupJob(message: QueueMessage, ctx: Invoca
     if (dequeueCount < MAX_DEQUEUE) {
       await setPureTrackStatus(job.roundId, "pending", {
         expectAttemptId: job.attemptId,
+        expectOwnerToken: handle.ownerToken,
         fromStatuses: ["processing"],
       });
       throw error;
@@ -232,6 +232,7 @@ export async function handlePureTrackGroupJob(message: QueueMessage, ctx: Invoca
     await setPureTrackStatus(job.roundId, "failed", {
       error: errorCode(error),
       expectAttemptId: job.attemptId,
+      expectOwnerToken: handle.ownerToken,
       fromStatuses: FINAL_FAILURE_STATUSES,
     });
   } finally {
@@ -265,9 +266,5 @@ function statusCodeOf(error: unknown): number | undefined {
   return typeof error.statusCode === "number" ? error.statusCode : undefined;
 }
 
-app.storageQueue("pureTrackGroups", {
-  queueName: "round-puretrack-group", connection: "AzureWebJobsStorage", handler: handlePureTrackGroupJob,
-});
-app.storageQueue("pureTrackGroupsPoison", {
-  queueName: "round-puretrack-group-poison", connection: "AzureWebJobsStorage", handler: handlePureTrackGroupPoison,
-});
+app.storageQueue("pureTrackGroups", { queueName: "round-puretrack-group", connection: "AzureWebJobsStorage", handler: handlePureTrackGroupJob });
+app.storageQueue("pureTrackGroupsPoison", { queueName: "round-puretrack-group-poison", connection: "AzureWebJobsStorage", handler: handlePureTrackGroupPoison });

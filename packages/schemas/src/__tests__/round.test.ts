@@ -273,7 +273,7 @@ describe("RoundSchema", () => {
   });
 
   test("preserves valid PureTrack status metadata", () => {
-    const pureTrack = { status: "pending", attemptId: "x" } as const;
+    const pureTrack = { status: "processing", attemptId: "x", ownerToken: "worker-a" } as const;
 
     expect(RoundSchema.parse({ ...validRound, pureTrack }).pureTrack).toEqual(pureTrack);
   });

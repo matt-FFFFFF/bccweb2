@@ -30,7 +30,12 @@ export function roundFixture(): Round {
     minimumScore: 5,
     site: { id: "site-1", name: "Test Site" },
     season: { year: 2026 },
-    pureTrack: { status: "processing", attemptId: "attempt-A", updatedAt: "before" },
+    pureTrack: {
+      status: "processing",
+      attemptId: "attempt-A",
+      ownerToken: "owner-A",
+      updatedAt: "before",
+    },
     scoring: {
       taskMaxPoints: 1000,
       clubsAttendingCount: 2,

@@ -246,6 +246,7 @@ export const RoundSchema = z
         .object({
           status: lenientOptional(z.enum(["pending", "processing", "ready", "failed"])),
           attemptId: lenientOptional(z.string()),
+          ownerToken: lenientOptional(z.string()),
           error: lenientOptional(z.string()),
           updatedAt: lenientOptional(z.string()),
         })

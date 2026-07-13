@@ -248,12 +248,12 @@ describe("enqueuePureTrackGroupJob", () => {
     ]);
   });
 
-  test("rejects an extra key at PureTrackGroupJobSchema.parse before sending", async () => {
+  test("rejects ownerToken at PureTrackGroupJobSchema.parse before sending", async () => {
     const { enqueuePureTrackGroupJob } = await import("../queue.js");
     const withExtraKey = {
       roundId: "r",
       attemptId: "a",
-      pii: "secret",
+      ownerToken: "worker-secret",
     } as unknown as PureTrackGroupJob;
 
     await expect(enqueuePureTrackGroupJob(withExtraKey)).rejects.toThrow();

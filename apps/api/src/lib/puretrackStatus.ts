@@ -4,7 +4,6 @@ import type {
   PureTrackStatus,
   Round,
   RoundBrief,
-  RoundStatus,
 } from "@bccweb/types";
 import { BriefSchema, RoundSchema } from "@bccweb/schemas";
 
@@ -17,20 +16,14 @@ import {
 } from "./blob.js";
 import { readJson, writePrivateJson } from "./blobJson.js";
 import type { PureTrackRoundResult } from "./puretrack.js";
+import type { SetPureTrackStatusOptions } from "./puretrackStatusTypes.js";
 import { getTelemetryClient } from "./telemetry.js";
+
+export type { SetPureTrackStatusOptions } from "./puretrackStatusTypes.js";
 
 const MAX_PURETRACK_ERROR_LENGTH = 200;
 const REDACTED_ERROR_TEXT = "PureTrack group operation failed";
 const SAFE_PURETRACK_ERROR_CODE = /^[A-Za-z0-9_-]+$/;
-
-export interface SetPureTrackStatusOptions {
-  readonly error?: string;
-  readonly expectAttemptId?: string;
-  readonly fromStatuses?: readonly PureTrackStatus[];
-  readonly newAttemptId?: string;
-  readonly requireRoundStatuses?: readonly RoundStatus[];
-  readonly rejectStatuses?: readonly PureTrackStatus[];
-}
 
 export interface PureTrackEchoMutationContext {
   readonly round: Round;
@@ -86,6 +79,12 @@ export async function setPureTrackStatus(
       return statusResult(false, previousStatus);
     }
     if (
+      opts.expectOwnerToken !== undefined &&
+      opts.expectOwnerToken !== round.pureTrack?.ownerToken
+    ) {
+      return statusResult(false, previousStatus);
+    }
+    if (
       opts.fromStatuses !== undefined &&
       (previousStatus === undefined || !opts.fromStatuses.includes(previousStatus))
     ) {
@@ -97,6 +96,9 @@ export async function setPureTrackStatus(
       status,
       updatedAt: new Date().toISOString(),
     };
+    if (opts.newOwnerToken !== undefined) {
+      round.pureTrack.ownerToken = opts.newOwnerToken;
+    }
     const pureTrackError = sanitizePureTrackError(opts.error);
     if (pureTrackError === undefined) {
       delete round.pureTrack.error;
@@ -111,6 +113,7 @@ export async function setPureTrackStatus(
 export async function commitPureTrackReady(
   roundId: string,
   attemptId: string,
+  ownerToken: string,
   result: PureTrackRoundResult | null,
 ): Promise<{ committed: boolean }> {
   const roundPath = `rounds/${roundId}.json`;
@@ -122,6 +125,7 @@ export async function commitPureTrackReady(
     );
     if (
       round.pureTrack?.attemptId !== attemptId ||
+      round.pureTrack.ownerToken !== ownerToken ||
       round.pureTrack.status !== "processing"
     ) {
       return false;

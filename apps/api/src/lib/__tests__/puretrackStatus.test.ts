@@ -45,7 +45,7 @@ describe("PureTrack status and echo commits", () => {
     await writePrivateBlob(signaturePath, { immutable: "signature-ledger-entry" });
     const signatureBefore = await bytes(signaturePath);
 
-    const result = await commitPureTrackReady(round.id, "attempt-A", RESULT);
+    const result = await commitPureTrackReady(round.id, "attempt-A", "owner-A", RESULT);
 
     const updatedRound = await readRound(round.id);
     const updatedBrief = await readBrief(round.id);
@@ -68,7 +68,7 @@ describe("PureTrack status and echo commits", () => {
     const round = roundFixture();
     await seed(round, briefFixture(round));
 
-    await commitPureTrackReady(round.id, "attempt-A", RESULT);
+    await commitPureTrackReady(round.id, "attempt-A", "owner-A", RESULT);
 
     const updatedRound = await readRound(round.id);
     const updatedBrief = await readBrief(round.id);
@@ -85,7 +85,7 @@ describe("PureTrack status and echo commits", () => {
     const round = roundFixture();
     await seedRound(round);
 
-    const result = await commitPureTrackReady(round.id, "attempt-A", null);
+    const result = await commitPureTrackReady(round.id, "attempt-A", "owner-A", null);
 
     expect(result).toEqual({ committed: true });
     await expect(bytes(`round-briefs/${round.id}.json`)).rejects.toMatchObject({ statusCode: 404 });
@@ -123,7 +123,7 @@ describe("PureTrack status and echo commits", () => {
       },
     );
 
-    await expect(commitPureTrackReady(round.id, "attempt-A", RESULT)).rejects.toThrow(
+    await expect(commitPureTrackReady(round.id, "attempt-A", "owner-A", RESULT)).rejects.toThrow(
       "injected round write failure",
     );
 
@@ -181,7 +181,7 @@ describe("PureTrack status and echo commits", () => {
     const beforeRound = await bytes(roundPath);
     const beforeBrief = await bytes(briefPath);
 
-    const result = await commitPureTrackReady(round.id, "attempt-B", RESULT);
+    const result = await commitPureTrackReady(round.id, "attempt-B", "owner-A", RESULT);
 
     expect(result).toEqual({ committed: false });
     expect(await bytes(roundPath)).toEqual(beforeRound);
@@ -201,7 +201,7 @@ describe("PureTrack status and echo commits", () => {
       const beforeBrief = await bytes(briefPath);
 
       // When
-      const result = await commitPureTrackReady(round.id, "attempt-A", RESULT);
+      const result = await commitPureTrackReady(round.id, "attempt-A", "owner-A", RESULT);
 
       // Then
       expect(result).toEqual({ committed: false });

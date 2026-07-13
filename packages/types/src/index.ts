@@ -532,6 +532,7 @@ export interface Round {
   pureTrack?: {
     status?: PureTrackStatus;
     attemptId?: string;
+    ownerToken?: string;
     error?: string;
     updatedAt?: string;
   };
