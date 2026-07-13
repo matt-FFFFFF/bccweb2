@@ -445,6 +445,7 @@ export interface Team {
 }
 
 export type BriefPdfStatus = "pending" | "processing" | "ready" | "failed";
+export type PureTrackStatus = "pending" | "processing" | "ready" | "failed";
 
 /**
  * Everything `scoreRound` derives while scoring a round — enough to re-derive
@@ -527,6 +528,12 @@ export interface Round {
     pdfError?: string;
     pdfUpdatedAt?: string;
     pdfAttemptId?: string;
+  };
+  pureTrack?: {
+    status?: PureTrackStatus;
+    attemptId?: string;
+    error?: string;
+    updatedAt?: string;
   };
   /** Private round-blob audit snapshot of the scoring derivation (denominators
    * `maxPilotScoreInRound`, `maxTeamScore`, `maxPointsForRound` — legacy
