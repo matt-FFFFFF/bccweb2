@@ -265,3 +265,105 @@ describe("RoundDetail — rescore success modal survives the post-mutation reloa
     expect(roundFetches.length).toBeGreaterThanOrEqual(2);
   });
 });
+
+describe("RoundDetail — PureTrack rendering and polling", () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+  afterEach(() => {
+    cleanup();
+    vi.useRealTimers();
+    mockIdentity = null;
+  });
+
+  it("renders pending/processing loaders and fails, then success link", async () => {
+    mockIdentity = { userId: "u", email: "a@x", roles: ["Admin"], pilotId: null, clubId: null };
+    const baseRound = makeRound("Locked");
+    baseRound.pureTrackGroupName = "Round 1 puretrack";
+    baseRound.pureTrackGroupSlug = "round-1-puretrack";
+    
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === "rounds/r1") return Promise.resolve(baseRound) as Promise<unknown>;
+      if (path === "rounds/r1/brief") return Promise.reject(new ApiError(404, "NOT_FOUND", "no brief"));
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+
+    // 1. Pending
+    baseRound.pureTrack = { status: "pending" };
+    const { unmount } = renderPage();
+    await screen.findByText("Queued…");
+
+    // 2. Processing
+    baseRound.pureTrack = { status: "processing" };
+    unmount();
+    renderPage();
+    await screen.findByText("Creating…");
+
+    // 3. Failed
+    baseRound.pureTrack = { status: "failed" };
+    unmount();
+    renderPage();
+    await screen.findByText("Creation failed");
+
+    // 4. Ready with link
+    baseRound.pureTrack = { status: "ready" };
+    unmount();
+    renderPage();
+    const link = await screen.findByRole("link", { name: "Round 1 puretrack" });
+    expect(link).toHaveAttribute("href", "https://puretrack.io/group/round-1-puretrack");
+  });
+
+  it("polls silently while PureTrack is pending/processing", async () => {
+    vi.useFakeTimers();
+    mockIdentity = { userId: "u", email: "a@x", roles: ["Admin"], pilotId: null, clubId: null };
+    const baseRound = makeRound("Locked");
+    baseRound.pureTrackGroupName = "Round 1 puretrack";
+    baseRound.pureTrackGroupSlug = "round-1-puretrack";
+    baseRound.pureTrack = { status: "pending" };
+
+    let roundFetchCount = 0;
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === "rounds/r1") {
+        roundFetchCount += 1;
+        // After 2 polls, return processing, then ready
+        if (roundFetchCount === 3) baseRound.pureTrack = { status: "processing" };
+        if (roundFetchCount === 5) baseRound.pureTrack = { status: "ready" };
+        // Return a NEW object so React definitely re-renders!
+        return Promise.resolve({ ...baseRound, pureTrack: { ...baseRound.pureTrack } }) as Promise<unknown>;
+      }
+      if (path === "rounds/r1/brief") return Promise.reject(new ApiError(404, "NOT_FOUND", "no brief"));
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+
+    renderPage();
+    
+    // Let the initial fetch resolve
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    // Initial fetch
+    expect(screen.getByText("Queued…")).toBeInTheDocument();
+    expect(roundFetchCount).toBe(1);
+
+    // Advance 3s -> poll 1
+    await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
+    expect(roundFetchCount).toBe(2);
+
+    // Advance 4.5s -> poll 2 (now processing)
+    await act(async () => { await vi.advanceTimersByTimeAsync(4600); });
+    expect(roundFetchCount).toBe(3);
+    expect(screen.getByText("Creating…")).toBeInTheDocument();
+
+    // The component isn't unmounted and it should not show a full page spinner (silent = true)
+    expect(screen.queryByText(/Loading round/i)).toBeNull();
+
+    // Continue until ready
+    await act(async () => { await vi.advanceTimersByTimeAsync(7000); });
+    await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
+    expect(screen.getByText("Round 1 puretrack")).toBeInTheDocument();
+  });
+});

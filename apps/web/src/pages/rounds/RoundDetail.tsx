@@ -56,6 +56,9 @@ export default function RoundDetail() {
   const [notFound, setNotFound] = useState(false);
   const [accountBusy, setAccountBusy] = useState<string | null>(null);
 
+  const [ptPollCount, setPtPollCount] = useState(0);
+  const [ptPollTimeout, setPtPollTimeout] = useState<number | null>(null);
+
   const loadRound = useCallback((opts?: { silent?: boolean }) => {
     if (!id) {
       setLoading(false);
@@ -109,6 +112,30 @@ export default function RoundDetail() {
   useEffect(() => {
     return loadRound();
   }, [loadRound]);
+
+  useEffect(() => {
+    const ptActive = round?.pureTrack?.status === "pending" || round?.pureTrack?.status === "processing";
+
+    let doPoll = false;
+    if (ptActive) {
+      if (ptPollCount >= 15 && ptPollTimeout === null) setPtPollTimeout(Date.now());
+      else if (ptPollCount < 15) doPoll = true;
+    } else {
+      if (ptPollCount > 0) {
+        setPtPollCount(0);
+        setPtPollTimeout(null);
+      }
+    }
+
+    if (!doPoll) return;
+
+    const delay = Math.min(3000 * Math.pow(1.5, ptPollCount), 15000);
+    const timer = setTimeout(() => {
+      loadRound({ silent: true });
+      setPtPollCount((c) => c + 1);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [round?.pureTrack?.status, ptPollCount, ptPollTimeout, loadRound]);
 
   const { data: pilotsIndex } = useBlob<PilotSummary[]>("pilots.json");
 
@@ -309,11 +336,23 @@ export default function RoundDetail() {
             </dd>
           </div>
         )}
-        {round.pureTrackGroupName && round.pureTrackGroupName !== "Not set yet..." && (
+        {(round.pureTrack?.status || (round.pureTrackGroupName && round.pureTrackGroupName !== "Not set yet...")) && (
           <div>
             <dt style={{ fontSize: "0.75rem", color: "#888", fontWeight: 600 }}>PureTrack Group</dt>
-            <dd style={{ margin: 0, fontSize: "0.85em" }}>
-              {round.pureTrackGroupSlug ? (
+            <dd style={{ margin: 0, fontSize: "0.85em", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              {round.pureTrack?.status === "pending" ? (
+                <>
+                  <span style={{ display: "inline-block", width: "12px", height: "12px", border: "2px solid #dee2e6", borderTopColor: "currentColor", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                  <span style={{ color: "#666" }}>Queued…</span>
+                </>
+              ) : round.pureTrack?.status === "processing" ? (
+                <>
+                  <span style={{ display: "inline-block", width: "12px", height: "12px", border: "2px solid #dee2e6", borderTopColor: "currentColor", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                  <span style={{ color: "#666" }}>Creating…</span>
+                </>
+              ) : round.pureTrack?.status === "failed" ? (
+                <span style={{ color: "#d32f2f" }}>Creation failed</span>
+              ) : round.pureTrackGroupSlug ? (
                 <a
                   href={`https://puretrack.io/group/${round.pureTrackGroupSlug}`}
                   target="_blank"

@@ -35,6 +35,9 @@ export default function RoundManage() {
   const [pollCount, setPollCount] = useState(0);
   const [pollTimeout, setPollTimeout] = useState<number | null>(null);
 
+  const [ptPollCount, setPtPollCount] = useState(0);
+  const [ptPollTimeout, setPtPollTimeout] = useState<number | null>(null);
+
   const loadRound = useCallback(async () => {
     if (!id) return;
     try {
@@ -81,31 +84,66 @@ export default function RoundManage() {
   }, [id]);
 
   useEffect(() => {
-    const st = round?.brief?.pdfStatus;
-    if (st === "pending" || st === "processing") {
-      if (pollCount >= 15) {
-        setPollTimeout(Date.now());
-        return;
+    const pdfActive = round?.brief?.pdfStatus === "pending" || round?.brief?.pdfStatus === "processing";
+    const ptActive = round?.pureTrack?.status === "pending" || round?.pureTrack?.status === "processing";
+
+    if (!pdfActive && !ptActive) {
+      if (pollCount > 0) {
+        setPollCount(0);
+        setPollTimeout(null);
       }
-      const delay = Math.min(3000 * Math.pow(1.5, pollCount), 15000);
-      const timer = setTimeout(() => {
-        void loadRound();
-        setPollCount((c) => c + 1);
-      }, delay);
-      return () => clearTimeout(timer);
+      if (ptPollCount > 0) {
+        setPtPollCount(0);
+        setPtPollTimeout(null);
+      }
+      return;
+    }
+
+    let doPoll = false;
+    if (pdfActive) {
+      if (pollCount >= 15 && pollTimeout === null) setPollTimeout(Date.now());
+      else if (pollCount < 15) doPoll = true;
     } else {
       if (pollCount > 0) {
         setPollCount(0);
         setPollTimeout(null);
       }
     }
-  }, [round?.brief?.pdfStatus, pollCount, loadRound]);
+
+    if (ptActive) {
+      if (ptPollCount >= 15 && ptPollTimeout === null) setPtPollTimeout(Date.now());
+      else if (ptPollCount < 15) doPoll = true;
+    } else {
+      if (ptPollCount > 0) {
+        setPtPollCount(0);
+        setPtPollTimeout(null);
+      }
+    }
+
+    if (!doPoll) return;
+
+    const maxCount = Math.max(pdfActive ? pollCount : 0, ptActive ? ptPollCount : 0);
+    const delay = Math.min(3000 * Math.pow(1.5, maxCount), 15000);
+    const timer = setTimeout(() => {
+      void loadRound();
+      if (pdfActive) setPollCount((c) => c + 1);
+      if (ptActive) setPtPollCount((c) => c + 1);
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [round?.brief?.pdfStatus, round?.pureTrack?.status, pollCount, pollTimeout, ptPollCount, ptPollTimeout, loadRound]);
 
   async function regeneratePdf() {
     if (!round) return;
     await runAction("Regenerate PDF", () => api.post(`rounds/${round.id}/brief/regenerate`));
     setPollCount(0);
     setPollTimeout(null);
+  }
+
+  async function recreatePureTrack() {
+    if (!round) return;
+    await runAction("Recreate PureTrack Groups", () => api.post(`rounds/${round.id}/puretrack/create-groups`));
+    setPtPollCount(0);
+    setPtPollTimeout(null);
   }
 
   async function runAction(label: string, fn: () => Promise<unknown>) {
@@ -163,7 +201,14 @@ export default function RoundManage() {
       </nav>
 
       {/* Header */}
-      <RoundManageHeader r={r} canManage={canManage} pollTimeout={pollTimeout} regeneratePdf={() => void regeneratePdf()} />
+      <RoundManageHeader
+        r={r}
+        canManage={canManage}
+        pollTimeout={pollTimeout}
+        ptPollTimeout={ptPollTimeout}
+        regeneratePdf={() => void regeneratePdf()}
+        recreatePureTrack={() => void recreatePureTrack()}
+      />
       {r.status === "Cancelled" && (
         <div style={{ ...sectionStyle, background: "#f8d7da", color: "#58151c", border: "1px solid #f5c2c7" }}>
           <strong>This round is cancelled.</strong> No changes can be made while it is cancelled. Use <strong>Uncancel</strong> to reopen it as Proposed.
@@ -183,6 +228,7 @@ export default function RoundManage() {
         setActionBusy={setActionBusy}
         setConfirmModal={setConfirmModal}
         runAction={runAction}
+        pureTrackStatus={r.pureTrack?.status}
       />
       {/* Metadata */}
       {canManage && (
