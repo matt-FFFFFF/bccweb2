@@ -405,6 +405,136 @@ to the project owner — this may indicate a systematic schema mismatch or a bro
 
 ---
 
+---
+
+## PureTrack group pipeline (status / guard / queue / partial failure)
+
+**Severity**: 2 (investigate-async) unless noted otherwise below.
+
+### What it means
+
+Round locking triggers an async PureTrack group-creation pipeline: the lock endpoint sets
+`round.pureTrack = {status:"pending", attemptId}` and enqueues `{roundId, attemptId}` onto
+`round-puretrack-group`; the `puretrackGroups` queue-trigger consumer
+(`apps/api/src/functions/puretrackGroups.ts`) acquires a GLOBAL owner-token + ETag mutation
+guard (`apps/api/src/lib/puretrackGuard.ts`, 12-minute staleness), deletes any existing groups
+for the round, creates fresh ones, and commits via `commitPureTrackReady`
+(`apps/api/src/lib/puretrackStatus.ts`) keyed on `attemptId`. This section covers the four
+things that go wrong in that pipeline: a round stuck in `pending`/`processing`, guard
+contention, a poisoned queue message, and a partial upstream failure that leaves orphaned
+PureTrack groups.
+
+### PureTrack status stuck (`pending` / `processing` / `failed`)
+
+1. Inspect the round blob's `pureTrack` field to confirm the stuck status and `attemptId`:
+   ```bash
+   az storage blob download \
+     --container data-private \
+     --name "rounds/<roundId>.json" \
+     --account-name "$(terraform -chdir=iac/service output -raw storage_account_name)" \
+     --file /tmp/round.json
+   cat /tmp/round.json | jq .pureTrack
+   ```
+2. Check whether the job is still in the main queue or already dead-lettered:
+   ```bash
+   az storage message peek --queue-name round-puretrack-group --num-messages 32 \
+     --account-name "$(terraform -chdir=iac/service output -raw storage_account_name)"
+   az storage message peek --queue-name round-puretrack-group-poison --num-messages 32 \
+     --account-name "$(terraform -chdir=iac/service output -raw storage_account_name)"
+   ```
+3. If `failed` and the queue is empty (poison consumer already ran), use the round's
+   `Recreate Groups` action in the Admin UI (`POST /api/rounds/{id}/puretrack/create-groups`)
+   to re-enqueue — this returns `202 {status:"pending"}` and is safe to retry.
+4. If `pending`/`processing` for longer than ~15 minutes with no queue activity, the guard is
+   likely held by a crashed invocation past its 12-minute staleness window; wait for staleness
+   to expire, then retry the Admin UI action. Do not manually clear `round.pureTrack` in blob
+   storage — that bypasses the CAS and can race a still-running worker.
+
+### Global mutation guard contention
+
+The guard scope is `"global"` (one PureTrack mutation — lock-triggered creation, manual
+recreation, or Admin bulk-delete — at a time across the whole app). Contention surfaces as a
+`409` from the manual/admin endpoints, or as a job that stays `pending` without visibly
+progressing.
+
+1. Confirm only one PureTrack operation should be in flight; check App Insights for concurrent
+   `puretrackGroups` invocations or concurrent Admin bulk-delete calls:
+   ```kql
+   requests
+   | where timestamp > ago(30m)
+   | where operation_Name in ("puretrackGroups", "manage/puretrack/groups/delete")
+   | order by timestamp desc
+   ```
+2. If a single invocation is holding the guard past 12 minutes, it has likely crashed without
+   releasing; the guard is staleness-based and self-heals — the next attempt after 12 minutes
+   from acquisition succeeds without operator action.
+
+### `round-puretrack-group-poison` (dead-lettered job)
+
+A job exhausted `maxDequeueCount=5` (per `host.json`, same policy as the other three families)
+and moved to `round-puretrack-group-poison`. Its consumer (`handlePureTrackGroupPoison`) marks
+the round's `pureTrack.status` as `failed` — this is terminal; there is **no automatic reap or
+retry** for poisoned PureTrack jobs.
+
+1. Correlate with App Insights exceptions around the job's last dequeue time:
+   ```kql
+   exceptions
+   | where timestamp > ago(2h)
+   | where operation_Name == "puretrackGroups"
+   | summarize n = count(), sample_stack = any(details) by type, problemId
+   | order by n desc
+   ```
+2. Common causes: PureTrack upstream (`puretrack.io`) returning persistent errors, an expired
+   PureTrack session/credential (`PURETRACK_*` env), or a malformed `attemptId` mismatch caused
+   by a relock racing the worker.
+3. Once the root cause is resolved, use the round's `Recreate Groups` action in the Admin UI to
+   re-run — the old poison message can be discarded.
+
+### Upstream partial failure / orphaned groups
+
+If group creation succeeds for some pilots/teams but fails partway through (e.g. PureTrack
+returns an error mid-batch), the worker attempts best-effort cleanup of the groups it created
+in that attempt before surfacing the failure. Two telemetry events flag cases where cleanup
+itself could not be fully verified:
+
+- `puretrack.crossBlobReconcileRequired` — a round/brief cross-blob write rolled back
+  (e.g. during lock) but the compensating write may not have fully reconciled; emitted from
+  `apps/api/src/lib/puretrackStatus.ts` and `apps/api/src/functions/roundsMutate.ts`.
+- `puretrack.orphanRecoveryRequired` — a PureTrack group was created upstream but the local
+  record of it could not be confirmed/cleaned up (e.g. the delete-then-create replace step
+  partially succeeded); emitted from `apps/api/src/lib/puretrackApi.ts`.
+
+1. Query for either event:
+   ```kql
+   customEvents
+   | where name in ("puretrack.crossBlobReconcileRequired", "puretrack.orphanRecoveryRequired")
+   | where timestamp > ago(2h)
+   | project timestamp, name, customDimensions
+   | order by timestamp desc
+   ```
+2. For `orphanRecoveryRequired`, use the Admin PureTrack groups page
+   (`/admin/puretrack-groups`, `GET manage/puretrack/groups/live?mine=1`) to list live upstream
+   groups and cross-check against the round's expected group names; bulk-delete any orphans via
+   `POST manage/puretrack/groups/delete`.
+3. For `crossBlobReconcileRequired`, inspect the round and brief blobs directly for
+   consistency (`round.pureTrack` vs `brief` echo fields) and use the `Recreate Groups` action
+   to force a fresh, consistent attempt.
+
+### Page vs investigate-async
+
+Investigate-async by default — pilots can still register and view rounds; only PureTrack group
+visibility for coordinators is degraded. Page only if `puretrack.orphanRecoveryRequired` fires
+repeatedly (indicates a systematic upstream/session issue that could leak stale groups at
+scale).
+
+### Escalation
+
+If poisoned jobs or orphan-recovery events accumulate across multiple rounds within a short
+window: escalate to the project owner — this may indicate a broken PureTrack credential or a
+systematic bug in the replace-then-create step.
+
+---
+
 ## How to add a new alert
 
 1. Add the resource to `iac/modules/stamp/alerts.tf` referencing `module.stamp.azapi_resource.ops.id`.

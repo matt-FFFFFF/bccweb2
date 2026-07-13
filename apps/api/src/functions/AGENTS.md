@@ -36,6 +36,7 @@ See root [AGENTS.md](../../../../AGENTS.md) for the module list, roles, and env.
 | File | Why it's big / special |
 |------|------------------------|
 | `roundsMutate.ts` (~1000) | 6 endpoints: create/update/transition/lock/unlock/complete + brief/PureTrack/PDF/email helpers; state machine ~L351-390 |
+| `puretrackGroups.ts` | queue-trigger consumer for `round-puretrack-group` (+ `-poison`); replaces-then-creates a round's PureTrack groups under a global mutation guard, commits via `commitPureTrackReady` |
 | `teams.ts` | team + pilot slot management; `addPilot` hard-blocks wrong/absent season club (`422 TEAM_CLUB_MISMATCH` / `422 NO_CLUB_FOR_SEASON`) — no Admin override; see `docs/runbooks/round-club-pilot-decision.md` |
 | `authFunctions.ts` (~629) | register/verify/resend/login/refresh/forgot/reset + "silent OK" anti-enumeration responses |
 | `admin.ts` | config/user admin; `runConfigRmw(...)` + lease-conflict translation |

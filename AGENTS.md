@@ -143,12 +143,13 @@ give atomic read-modify-write (30s lease).
 
 ### Storage Queues
 
-Six queues (created by `scripts/init-storage.mjs`, same storage account as blobs):
-`round-brief-pdf` (main) and `round-brief-pdf-poison` (dead-letter after
+Eight queues (created by `scripts/init-storage.mjs`, same storage account as blobs), across
+four families: `round-brief-pdf` (main) and `round-brief-pdf-poison` (dead-letter after
 `maxDequeueCount=5` per `host.json`), plus `signtofly-reflect` (main) and
 `signtofly-reflect-poison` (dead-letter, same `maxDequeueCount=5` policy), plus
-`rescore-jobs` (main) and `rescore-jobs-poison` (dead-letter, same policy).
-`init-storage.mjs` creates all six queues uniformly fatally (consistent with
+`rescore-jobs` (main) and `rescore-jobs-poison` (dead-letter, same policy), plus
+`round-puretrack-group` (main) and `round-puretrack-group-poison` (dead-letter, same policy).
+`init-storage.mjs` creates all eight queues uniformly fatally (consistent with
 `round-brief-pdf`/`signtofly-reflect`) — if the Queue service is unreachable the
 script throws and exits non-zero. Blob containers are created earlier in the same
 run, so a queue-service outage still surfaces as a hard failure.
@@ -195,8 +196,10 @@ break queueing.
 **Queue privacy**: `privacy-scan.mjs` does NOT cover Storage Queues. The compensating
 control is strict job schemas in `apps/api/src/lib/queue.ts`: `BriefPdfJobSchema`
 (`z.object().strict()`) rejects any key beyond `{roundId, briefVersion, pdfAttemptId}`,
-and `SignToFlyReflectJobSchema` (`z.object({roundId}).strict()`) rejects any key beyond
-`{roundId}` — so PII can never enter either queue message at serialisation time.
+`SignToFlyReflectJobSchema` (`z.object({roundId}).strict()`) rejects any key beyond
+`{roundId}`, and `PureTrackGroupJobSchema` (`z.object({roundId, attemptId}).strict()`)
+rejects any key beyond `{roundId, attemptId}` — so PII can never enter any of these queue
+messages at serialisation time.
 
 A PR-gated [privacy scanner](file:///Volumes/code/bccweb2/scripts/privacy-scan.mjs)
 fails CI if PII leaks into the public container. **Never put PII fields in `data/` blobs.**
@@ -237,6 +240,11 @@ main `rescore-jobs` queue only; unlike `briefPdf`/`signaturesReflect` it does NO
 register a `rescore-jobs-poison` consumer, because job failures are recorded on the job
 status blob rather than dead-lettered; re-scores a round via the IGC path and writes
 status to `rescore-jobs/{jobId}.json`; the third non-HTTP trigger — not a pair)**,
+`puretrackGroups` **(queue-trigger — registers `app.storageQueue(...)` for BOTH
+`round-puretrack-group` and `round-puretrack-group-poison`, like `briefPdf`/`signaturesReflect`,
+NOT like `rescoreWorker`'s single-queue registration; replaces-then-creates a round's PureTrack
+groups under a global mutation guard and commits via `commitPureTrackReady`; the fourth
+non-HTTP trigger pair)**,
 `puretrack`, `authFunctions`, `signatures`, `roundRegistration`, `clubTeams`,
 `seasonClubs`, `pilotSeasonClubs`, `teamsCaptain`.
 
