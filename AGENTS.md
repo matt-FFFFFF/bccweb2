@@ -71,7 +71,9 @@ orchestrator recipe, so `make -j` cannot reorder phases; individual `loadtest-*`
 targets remain diagnostic tools. Persisted status rows are exactly
 `prepare/register/captains/transition/sign/artifact/verify/cleanup`; queue quiescence
 is part of `verify`. Preparation checkpoints exact `loadRoundId` ownership plus a
-non-secret target-stack digest before team creation; cleanup fails closed if the
+non-secret target-stack digest before team creation; optional browsing-round seeds pair
+their owned IDs with the same digest. The identity includes the API origin, storage/queue
+endpoints, and effective public/private container names, and cleanup fails closed if the
 current target differs. Register and sign never retry; production
 `withPrivateLeaseRetry` owns lease contention. Sign selects 185 slots in disjoint
 10/25/50/100 cohorts (315 remain false), with hard per-cohort 201-only,

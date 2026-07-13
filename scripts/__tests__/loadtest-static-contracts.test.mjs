@@ -61,6 +61,7 @@ test("evergreen docs state the final topology, gates, ownership, and failure pol
     /two observations at least two seconds apart/isu,
     /10\/min.*trusted.*client-ip/isu,
     /verifier\/queue failure.*preserves\s+all\s+state\s+and\s+forbids\s+cleanup/isu,
+    /seedRoundIds.*public\/private.*container/isu,
   ]) {
     assert.match(docs, claim);
   }
