@@ -1,9 +1,38 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Round } from "@bccweb/types";
 
-const fetchMock = vi.fn();
+const fetchMock = vi.fn<typeof fetch>();
+const trackEventSpy = vi.hoisted(() => vi.fn());
+const writePrivateBlobSpy = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+
+vi.mock("../blob.js", () => ({
+  getPrivateBlobClient: vi.fn(),
+  writePrivateBlob: writePrivateBlobSpy,
+}));
+vi.mock("../telemetry.js", () => ({
+  getTelemetryClient: () => ({ trackEvent: trackEventSpy }),
+}));
+
+const session = { accessToken: "token", csrfToken: "csrf", cookieHeader: "session=cookie" } as const;
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function requestUrl(input: string | URL | Request): string {
+  return typeof input === "string"
+    ? input
+    : input instanceof URL
+      ? input.href
+      : input.url;
+}
+
+function requestBody(init: RequestInit | undefined): string {
+  if (typeof init?.body !== "string") throw new Error("Expected a string request body");
+  return init.body;
+}
 
 function makeRound(): Round {
   return {
@@ -15,101 +44,251 @@ function makeRound(): Round {
     minimumScore: 0,
     site: { id: "site-1", name: "Milk Hill" },
     season: { year: 2026 },
-    teams: [
-      {
-        id: "team-1",
-        teamName: "Alpha",
-        club: { id: "club-1", name: "Club" },
-        score: 0,
-        pilots: [
-          { placeInTeam: 1, isScoring: true, status: "Filled", accountedFor: false, signToFly: false, noScore: false, pilotPoints: 0, pilotId: "pilot-1", snapshot: null, flight: null },
-          { placeInTeam: 2, isScoring: true, status: "Filled", accountedFor: false, signToFly: false, noScore: false, pilotPoints: 0, pilotId: "pilot-2", snapshot: null, flight: null },
-        ],
-      },
-    ],
+    teams: [{
+      id: "team-1",
+      teamName: "Alpha",
+      club: { id: "club-1", name: "Club" },
+      score: 0,
+      pilots: [
+        { placeInTeam: 1, isScoring: true, status: "Filled", accountedFor: false, signToFly: false, noScore: false, pilotPoints: 0, pilotId: "pilot-1", snapshot: null, flight: null },
+        { placeInTeam: 2, isScoring: true, status: "Filled", accountedFor: false, signToFly: false, noScore: false, pilotPoints: 0, pilotId: "pilot-2", snapshot: null, flight: null },
+      ],
+    }],
   };
 }
 
-describe("createPureTrackGroups", () => {
+describe("PureTrack API contracts", () => {
   beforeEach(() => {
     fetchMock.mockReset();
+    trackEventSpy.mockReset();
+    writePrivateBlobSpy.mockReset();
+    writePrivateBlobSpy.mockResolvedValue(undefined);
     vi.stubGlobal("fetch", fetchMock);
-    process.env.PURETRACK_API_KEY = "key";
-    process.env.PURETRACK_EMAIL = "pilot@example.com";
-    process.env.PURETRACK_PASSWORD = "secret";
+    process.env["PURETRACK_API_KEY"] = "key";
+    process.env["PURETRACK_EMAIL"] = "pilot@example.com";
+    process.env["PURETRACK_PASSWORD"] = "secret";
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-    delete process.env.PURETRACK_API_KEY;
-    delete process.env.PURETRACK_EMAIL;
-    delete process.env.PURETRACK_PASSWORD;
+    delete process.env["PURETRACK_API_KEY"];
+    delete process.env["PURETRACK_EMAIL"];
+    delete process.env["PURETRACK_PASSWORD"];
   });
 
-  it("PureTrack group creation skips pilots with null pureTrackId; group created with N-1 members; warning emitted", async () => {
-    const { createPureTrackGroups } = await import("../puretrack.js");
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(globalThis, "setTimeout").mockImplementation((cb: any) => {
-      if (typeof cb === "function") cb();
-      return 0 as never;
+  it.each([
+    { access_token: "" },
+    { access_token: "token", extra: true },
+  ])("strict-parses the login token before requesting CSRF: %s", async (body) => {
+    const { authenticate } = await import("../puretrack.js");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    fetchMock.mockResolvedValueOnce(jsonResponse(body));
+
+    await expect(authenticate(beforeOutbound)).rejects.toThrow();
+
+    expect(beforeOutbound).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reuses one authenticated session for list and create calls", async () => {
+    const { createGroup, listMyGroups } = await import("../puretrack.js");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: 7, name: "Round", slug: "round" }] }))
+      .mockResolvedValueOnce(jsonResponse({ id: 8, name: "Team", slug: "team" }));
+
+    const groups = await listMyGroups(session);
+    const created = await createGroup("Team", beforeOutbound, session);
+
+    expect(groups).toEqual([{ id: 7, name: "Round", slug: "round" }]);
+    expect(created).toEqual({ id: 8, name: "Team", slug: "team" });
+    expect(fetchMock.mock.calls.map(([url]) => requestUrl(url))).toEqual([
+      "https://puretrack.io/api/groups?mine=1",
+      "https://puretrack.io/api/groups",
+    ]);
+    expect(beforeOutbound).toHaveBeenCalledTimes(1);
+  });
+
+  it.each<readonly [unknown, string]>([
+    [{ data: [{ id: 1, name: "Name", slug: "slug", extra: true }] }, "extra group field"],
+    [{ data: [{ id: 1, name: "Name" }] }, "missing group field"],
+    [{ data: [{ id: 0, name: "Name", slug: "slug" }] }, "non-positive group id"],
+    [{ groups: [] }, "missing data"],
+    [{ data: [], extra: true }, "extra response field"],
+  ])("rejects a malformed list response: %s (%s)", async (body) => {
+    const { listMyGroups } = await import("../puretrack.js");
+    fetchMock.mockResolvedValueOnce(jsonResponse(body));
+
+    await expect(listMyGroups(session)).rejects.toThrow();
+  });
+
+  it.each([
+    { id: 41, name: "Name", slug: "slug", extra: true },
+    { id: 41, name: "Name" },
+  ])("preserves a valid cleanupId when the full create response is malformed: %s", async (body) => {
+    const { createGroup, PureTrackCreateResponseError } = await import("../puretrack.js");
+    fetchMock.mockResolvedValueOnce(jsonResponse(body));
+
+    const error = await createGroup("Name", vi.fn().mockResolvedValue(undefined), session).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(PureTrackCreateResponseError);
+    expect(error).toMatchObject({ cleanupId: 41 });
+    expect(trackEventSpy).not.toHaveBeenCalled();
+  });
+
+  it("emits orphan telemetry when malformed create JSON has no safe cleanup id", async () => {
+    const { createGroup, PureTrackCreateResponseError } = await import("../puretrack.js");
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: "41", name: "Name", slug: "slug" }));
+
+    const error = await createGroup("Name", vi.fn().mockResolvedValue(undefined), session).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(PureTrackCreateResponseError);
+    expect(error).toMatchObject({ cleanupId: undefined });
+    expect(trackEventSpy).toHaveBeenCalledWith({
+      name: "puretrack.orphanRecoveryRequired",
+      properties: { operation: "createGroup" },
+    });
+  });
+
+  it("sends the unchanged group body after the outbound fence", async () => {
+    const { createGroup } = await import("../puretrack.js");
+    const order: string[] = [];
+    const beforeOutbound = vi.fn(async () => { order.push("fence"); });
+    fetchMock.mockImplementationOnce(async (_url, init) => {
+      order.push("post");
+      expect(JSON.parse(requestBody(init))).toEqual({
+        id: null,
+        name: "BCC Team",
+        public: true,
+        event: false,
+        protected: false,
+        password: "oshi",
+        timezone: "Europe/London",
+        slug: "BCC Team",
+        start: null,
+        end: null,
+      });
+      return jsonResponse({ id: 5, name: "BCC Team", slug: "bcc-team" });
     });
 
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "tok" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response("<meta name=\"csrf-token\" content=\"csrf\">", { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 1, name: "BCC Milk Hill Sat 09 Jun 26", slug: "round" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 2, name: "BCC 09 Jun 26 Alpha", slug: "team" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response("ok", { status: 200 }))
-      .mockResolvedValueOnce(new Response("ok", { status: 200 }));
+    await createGroup("BCC Team", beforeOutbound, session);
 
-    const result = await createPureTrackGroups(makeRound(), new Map([
-      ["pilot-1", 123],
-      ["pilot-2", undefined as never],
-    ]));
-
-    expect(result?.teams).toHaveLength(1);
-    expect(warnSpy).toHaveBeenCalledWith(
-      "[METRIC] puretrack.skip pilot lacks pureTrackId",
-      { pilotId: "pilot-2" },
-    );
+    expect(order).toEqual(["fence", "post"]);
   });
 
-  it("PureTrack group creation skips pilots with pureTrackId === 0", async () => {
-    const { createPureTrackGroups } = await import("../puretrack.js");
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(globalThis, "setTimeout").mockImplementation((cb: any) => {
-      if (typeof cb === "function") cb();
+  it("reports sequential mid-batch delete progress and tolerates already-gone groups", async () => {
+    const { deleteGroups, PureTrackDeleteError } = await import("../puretrack.js");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(null, { status: 410 }))
+      .mockResolvedValueOnce(new Response("upstream failed", { status: 500 }));
+
+    const error = await deleteGroups(session, [11, 12, 13, 14, 15], beforeOutbound).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(PureTrackDeleteError);
+    expect(error).toMatchObject({
+      deletedIds: [11],
+      alreadyGoneIds: [12, 13],
+      failedId: 14,
+    });
+    expect(error).toHaveProperty("cause");
+    expect(beforeOutbound).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.map(([url]) => requestUrl(url))).toEqual([
+      "https://puretrack.io/api/groups/11",
+      "https://puretrack.io/api/groups/12",
+      "https://puretrack.io/api/groups/13",
+      "https://puretrack.io/api/groups/14",
+    ]);
+  });
+});
+
+describe("createPureTrackGroups guarded orchestration", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    writePrivateBlobSpy.mockReset();
+    writePrivateBlobSpy.mockResolvedValue(undefined);
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(globalThis, "setTimeout").mockImplementation((callback: () => void) => {
+      callback();
       return 0 as never;
     });
-
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "tok" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response("<meta name=\"csrf-token\" content=\"csrf\">", { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 1, name: "BCC Milk Hill Sat 09 Jun 26", slug: "round" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 2, name: "BCC 09 Jun 26 Alpha", slug: "team" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response("ok", { status: 200 }))
-      .mockResolvedValueOnce(new Response("ok", { status: 200 }));
-
-    const result = await createPureTrackGroups(makeRound(), new Map([
-      ["pilot-1", 0],
-      ["pilot-2", 456],
-    ]));
-
-    expect(result?.teams).toHaveLength(1);
-    expect(warnSpy).toHaveBeenCalledWith(
-      "[METRIC] puretrack.skip pilot lacks pureTrackId",
-      { pilotId: "pilot-1" },
-    );
   });
 
-  it("PureTrack group does NOT throw when ALL pilots lack pureTrackId (logs warning, returns null/empty group result)", async () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it("reuses a supplied session and fences every group create and import", async () => {
     const { createPureTrackGroups } = await import("../puretrack.js");
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ id: 1, name: "Round", slug: "round" }))
+      .mockResolvedValueOnce(jsonResponse({ id: 2, name: "Team", slug: "team" }))
+      .mockResolvedValueOnce(new Response("ok"))
+      .mockResolvedValueOnce(new Response("ok"));
+
+    const result = await createPureTrackGroups(makeRound(), new Map([["pilot-1", 101]]), {
+      beforeOutbound,
+      session,
+    });
+
+    expect(result?.roundGroupId).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.some(([url]) => requestUrl(url).endsWith("/api/login"))).toBe(false);
+    expect(beforeOutbound).toHaveBeenCalledTimes(4);
+    expect(writePrivateBlobSpy).toHaveBeenCalledTimes(2);
+  });
+
+  it("compensates the exact created group when its blob record write fails", async () => {
+    const { createPureTrackGroups } = await import("../puretrack.js");
+    const recordError = new Error("record write failed");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    writePrivateBlobSpy.mockRejectedValueOnce(recordError);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ id: 31, name: "Round", slug: "round" }))
+      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+
+    await expect(createPureTrackGroups(makeRound(), new Map([["pilot-1", 101]]), {
+      beforeOutbound,
+      session,
+    })).rejects.toBe(recordError);
+
+    expect(fetchMock.mock.calls.map(([url]) => requestUrl(url))).toEqual([
+      "https://puretrack.io/api/groups",
+      "https://puretrack.io/api/groups/31",
+    ]);
+    expect(beforeOutbound).toHaveBeenCalledTimes(2);
+  });
+
+  it("carries every exact cleanup id after a partial import failure", async () => {
+    const { createPureTrackGroups, PureTrackGroupOperationError } = await import("../puretrack.js");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ id: 51, name: "Round", slug: "round" }))
+      .mockResolvedValueOnce(jsonResponse({ id: 52, name: "Team", slug: "team" }))
+      .mockResolvedValueOnce(new Response("import failed", { status: 500 }));
+
+    const error = await createPureTrackGroups(makeRound(), new Map([["pilot-1", 101]]), {
+      beforeOutbound,
+      session,
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(PureTrackGroupOperationError);
+    expect(error).toMatchObject({ cleanupIds: [51, 52] });
+  });
+
+  it("preserves team and round skip semantics when pilots lack PureTrack ids", async () => {
+    const { createPureTrackGroups } = await import("../puretrack.js");
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     const result = await createPureTrackGroups(makeRound(), new Map());
 
     expect(result).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalled();
   });
 });
