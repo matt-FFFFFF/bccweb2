@@ -90,6 +90,12 @@ Subsequent seed/load control scripts consume that file automatically. `ADMIN_PAS
 remains the explicit override. Malformed, linked, foreign-owned, or non-0600 files fail
 before API/storage mutation.
 
+For `make docker-up`, prepare writes the override (when present) into that same private
+bind-mounted file, never into Compose environment. Make passes only the host UID/GID to
+the root `api-init` container; credential reads accept that exact host owner across the
+Linux bind boundary while retaining the regular-file, no-follow, single-link, and 0600
+checks. Docker Desktop root-owned mounts continue to satisfy the normal current-owner path.
+
 ## License headers (SPDX)
 
 Every comment-capable, git-tracked source file carries a two-line MPL-2.0 SPDX header (copyright line above licence line). The `//` form for TypeScript/JavaScript/MJS:
