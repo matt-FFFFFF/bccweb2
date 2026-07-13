@@ -72,7 +72,7 @@ dev-web: ## Start Vite dev server on :5173
 .PHONY: docker-up
 docker-up: ## Start Azurite + API + Web via Docker Compose
 	node scripts/seed-admin.mjs --prepare-credentials
-	$(CONTAINER_RUNTIME) compose up --build
+	BCC_HOST_UID=$$(id -u) BCC_HOST_GID=$$(id -g) $(CONTAINER_RUNTIME) compose up --build
 
 .PHONY: docker-down
 docker-down: ## Stop Docker Compose stack
