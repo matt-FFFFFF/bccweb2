@@ -27,7 +27,7 @@ export class LoadTestRoundStateError extends Error {
 }
 
 function emptyState() {
-  return { version: 2, seedRoundIds: [], loadRoundId: null, loadTarget: null };
+  return { version: 3, seedRoundIds: [], seedTarget: null, loadRoundId: null, loadTarget: null };
 }
 
 function isRoundId(value) {
@@ -44,19 +44,29 @@ export function parseLoadTestRoundState(value) {
     }
     value = { ...value, version: 2, loadTarget: null };
   }
+  if (value.version === 2) {
+    if (Array.isArray(value.seedRoundIds) && value.seedRoundIds.length > 0) {
+      throw new LoadTestRoundStateError("legacy owned seed-round state has no target identity");
+    }
+    value = { ...value, version: 3, seedTarget: null };
+  }
   const keys = Object.keys(value).sort();
-  const expectedKeys = ["loadRoundId", "loadTarget", "seedRoundIds", "version"];
+  const expectedKeys = ["loadRoundId", "loadTarget", "seedRoundIds", "seedTarget", "version"];
   if (keys.length !== expectedKeys.length || keys.some((key, index) => key !== expectedKeys[index])) {
     throw new LoadTestRoundStateError("load-test round state has unexpected keys");
   }
-  if (value.version !== 2) {
-    throw new LoadTestRoundStateError("load-test round state version must be 2");
+  if (value.version !== 3) {
+    throw new LoadTestRoundStateError("load-test round state version must be 3");
   }
   if (!Array.isArray(value.seedRoundIds) || !value.seedRoundIds.every(isRoundId)) {
     throw new LoadTestRoundStateError("seedRoundIds must contain only non-empty strings");
   }
   if (new Set(value.seedRoundIds).size !== value.seedRoundIds.length) {
     throw new LoadTestRoundStateError("seedRoundIds must be unique");
+  }
+  const validSeedTarget = typeof value.seedTarget === "string" && /^[a-f0-9]{64}$/u.test(value.seedTarget);
+  if ((value.seedRoundIds.length === 0) !== (value.seedTarget === null) || (value.seedTarget !== null && !validSeedTarget)) {
+    throw new LoadTestRoundStateError("seedTarget must be a SHA-256 identity paired with seedRoundIds");
   }
   if (value.loadRoundId !== null && !isRoundId(value.loadRoundId)) {
     throw new LoadTestRoundStateError("loadRoundId must be null or a non-empty string");
@@ -66,8 +76,9 @@ export function parseLoadTestRoundState(value) {
     throw new LoadTestRoundStateError("loadTarget must be a SHA-256 identity paired with loadRoundId");
   }
   return {
-    version: 2,
+    version: 3,
     seedRoundIds: [...value.seedRoundIds],
+    seedTarget: value.seedTarget,
     loadRoundId: value.loadRoundId,
     loadTarget: value.loadTarget,
   };
@@ -130,17 +141,28 @@ async function updateState(update, options) {
   }, { path: `${path}.lock` });
 }
 
-export function replaceSeedRoundIds(seedRoundIds, options = {}) {
-  return updateState((state) => ({ ...state, seedRoundIds: [...seedRoundIds] }), options);
+export function replaceSeedRoundIds(seedRoundIds, seedTarget, options = {}) {
+  return updateState((state) => {
+    assertSeedRoundTarget(state, seedTarget);
+    return {
+      ...state,
+      seedRoundIds: [...seedRoundIds],
+      seedTarget: seedRoundIds.length === 0 ? null : seedTarget,
+    };
+  }, options);
 }
 
-export function appendSeedRoundId(seedRoundId, options = {}) {
-  return updateState((state) => ({
-    ...state,
-    seedRoundIds: state.seedRoundIds.includes(seedRoundId)
-      ? state.seedRoundIds
-      : [...state.seedRoundIds, seedRoundId],
-  }), options);
+export function appendSeedRoundId(seedRoundId, seedTarget, options = {}) {
+  return updateState((state) => {
+    assertSeedRoundTarget(state, seedTarget);
+    return {
+      ...state,
+      seedRoundIds: state.seedRoundIds.includes(seedRoundId)
+        ? state.seedRoundIds
+        : [...state.seedRoundIds, seedRoundId],
+      seedTarget,
+    };
+  }, options);
 }
 
 export function setLoadRoundId(loadRoundId, loadTarget, options = {}) {
@@ -154,5 +176,11 @@ export function setLoadRoundId(loadRoundId, loadTarget, options = {}) {
 export function assertLoadRoundTarget(state, expectedTarget) {
   if (state.loadRoundId !== null && state.loadTarget !== expectedTarget) {
     throw new LoadTestRoundStateError("checkpointed load round belongs to a different target stack");
+  }
+}
+
+export function assertSeedRoundTarget(state, expectedTarget) {
+  if (state.seedRoundIds.length > 0 && state.seedTarget !== expectedTarget) {
+    throw new LoadTestRoundStateError("checkpointed seed rounds belong to a different target stack");
   }
 }

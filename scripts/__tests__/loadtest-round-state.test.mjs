@@ -14,6 +14,7 @@ import {
   setLoadRoundId,
   writeJsonAtomically,
   assertLoadRoundTarget,
+  assertSeedRoundTarget,
 } from "../lib/loadTestRoundState.mjs";
 import { loadTestTargetIdentity } from "../lib/loadTestTargetIdentity.mjs";
 
@@ -25,7 +26,7 @@ async function statePath(t) {
   return join(directory, ".loadtest-round-state.json");
 }
 
-test("missing state reads as empty version one state", async (t) => {
+test("missing state reads as empty current state", async (t) => {
   // Given
   const path = await statePath(t);
 
@@ -33,7 +34,13 @@ test("missing state reads as empty version one state", async (t) => {
   const state = await readLoadTestRoundState({ path });
 
   // Then
-  assert.deepEqual(state, { version: 2, seedRoundIds: [], loadRoundId: null, loadTarget: null });
+  assert.deepEqual(state, {
+    version: 3,
+    seedRoundIds: [],
+    seedTarget: null,
+    loadRoundId: null,
+    loadTarget: null,
+  });
 });
 
 test("state parser rejects malformed and unexpected values", () => {
@@ -57,21 +64,23 @@ test("seed and load updates preserve the namespace they do not own", async (t) =
   // Given
   const path = await statePath(t);
   await writeFile(path, JSON.stringify({
-    version: 2,
+    version: 3,
     seedRoundIds: ["seed-old"],
+    seedTarget: TARGET,
     loadRoundId: "load-owned",
     loadTarget: TARGET,
   }));
 
   // When
-  await replaceSeedRoundIds([], { path });
-  await appendSeedRoundId("seed-new", { path });
+  await replaceSeedRoundIds([], TARGET, { path });
+  await appendSeedRoundId("seed-new", TARGET, { path });
   await setLoadRoundId(null, undefined, { path });
 
   // Then
   assert.deepEqual(await readLoadTestRoundState({ path }), {
-    version: 2,
+    version: 3,
     seedRoundIds: ["seed-new"],
+    seedTarget: TARGET,
     loadRoundId: null,
     loadTarget: null,
   });
@@ -125,14 +134,15 @@ test("concurrent seed and load updates preserve both ownership namespaces", asyn
 
   // When
   await Promise.all([
-    appendSeedRoundId("seed-concurrent", { path }),
+    appendSeedRoundId("seed-concurrent", TARGET, { path }),
     setLoadRoundId("load-concurrent", TARGET, { path }),
   ]);
 
   // Then
   assert.deepEqual(await readLoadTestRoundState({ path }), {
-    version: 2,
+    version: 3,
     seedRoundIds: ["seed-concurrent"],
+    seedTarget: TARGET,
     loadRoundId: "load-concurrent",
     loadTarget: TARGET,
   });
@@ -167,4 +177,64 @@ test("target identity is deterministic, non-secret, and stack-specific", () => {
   assert.equal(first, repeated);
   assert.notEqual(first, second);
   assert.doesNotMatch(first, /storage|secret|api/u);
+});
+
+test("target identity changes with either effective blob container", () => {
+  // Given
+  const environment = {
+    BLOB_CONNECTION_STRING: "AccountName=storage-a;AccountKey=secret-a;BlobEndpoint=https://storage-a.invalid/blob;",
+    AzureWebJobsStorage: "AccountName=storage-a;AccountKey=queue-secret;QueueEndpoint=https://storage-a.invalid/queue;",
+    BLOB_CONTAINER_NAME: "public-a",
+    BLOB_PRIVATE_CONTAINER_NAME: "private-a",
+  };
+
+  // When
+  const baseline = loadTestTargetIdentity("https://api.loadtest.invalid", environment);
+  const publicChanged = loadTestTargetIdentity("https://api.loadtest.invalid", {
+    ...environment,
+    BLOB_CONTAINER_NAME: "public-b",
+  });
+  const privateChanged = loadTestTargetIdentity("https://api.loadtest.invalid", {
+    ...environment,
+    BLOB_PRIVATE_CONTAINER_NAME: "private-b",
+  });
+
+  // Then
+  assert.notEqual(baseline, publicChanged);
+  assert.notEqual(baseline, privateChanged);
+});
+
+test("owned seed state rejects a different target before mutation", () => {
+  // Given
+  const state = {
+    version: 3,
+    seedRoundIds: ["seed-owned"],
+    seedTarget: TARGET,
+    loadRoundId: null,
+    loadTarget: null,
+  };
+
+  // When / Then
+  assert.throws(() => assertSeedRoundTarget(state, "b".repeat(64)), /different target stack/);
+  assert.doesNotThrow(() => assertSeedRoundTarget(state, TARGET));
+});
+
+test("seed updates reject a different target without rewriting ownership", async (t) => {
+  // Given
+  const path = await statePath(t);
+  const state = {
+    version: 3,
+    seedRoundIds: ["seed-owned"],
+    seedTarget: TARGET,
+    loadRoundId: null,
+    loadTarget: null,
+  };
+  await writeFile(path, `${JSON.stringify(state)}\n`);
+
+  // When / Then
+  await assert.rejects(
+    replaceSeedRoundIds([], "b".repeat(64), { path }),
+    /different target stack/,
+  );
+  assert.deepEqual(await readLoadTestRoundState({ path }), state);
 });
