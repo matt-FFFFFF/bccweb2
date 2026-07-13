@@ -11,9 +11,11 @@ import { BlobServiceClient } from "@azure/storage-blob";
 import { ActiveWordingPointerSchema, SignToFlyWordingSchema } from "@bccweb/schemas";
 
 import {
+  BCC_API_BASE_URL,
   FIXTURE_MANIFEST_PATH,
   SEASON_YEAR,
 } from "../lib/loadTestConsts.mjs";
+import { loadTestTargetIdentity } from "../lib/loadTestTargetIdentity.mjs";
 import { buildLegacyFixtureManifest } from "./helpers/legacyFixtureManifest.mjs";
 
 const AZURITE_CONNECTION_STRING = process.env.FIXTURE_TEST_CONNECTION_STRING ??
@@ -28,6 +30,13 @@ const privateName = `fixture-private-${runId}`;
 const blobService = BlobServiceClient.fromConnectionString(AZURITE_CONNECTION_STRING);
 const publicContainer = blobService.getContainerClient(publicName);
 const privateContainer = blobService.getContainerClient(privateName);
+const testEnvironment = {
+  ...process.env,
+  BLOB_CONNECTION_STRING: AZURITE_CONNECTION_STRING,
+  BLOB_CONTAINER_NAME: publicName,
+  BLOB_PRIVATE_CONTAINER_NAME: privateName,
+};
+const seedTarget = loadTestTargetIdentity(BCC_API_BASE_URL, testEnvironment);
 let workDir;
 
 async function writeJson(container, path, value) {
@@ -44,12 +53,7 @@ function runScript(script) {
   return spawnSync(process.execPath, [script, "--json"], {
     cwd: workDir,
     encoding: "utf8",
-    env: {
-      ...process.env,
-      BLOB_CONNECTION_STRING: AZURITE_CONNECTION_STRING,
-      BLOB_CONTAINER_NAME: publicName,
-      BLOB_PRIVATE_CONTAINER_NAME: privateName,
-    },
+    env: testEnvironment,
     timeout: 120_000,
   });
 }
@@ -57,8 +61,9 @@ function runScript(script) {
 async function proveRoundOwnership(roundIds) {
   await rm(join(workDir, ".fixture-cleanup-state.json"), { force: true });
   await writeFile(join(workDir, ".loadtest-round-state.json"), JSON.stringify({
-    version: 2,
+    version: 3,
     seedRoundIds: roundIds,
+    seedTarget,
     loadRoundId: "load-preserved",
     loadTarget: "a".repeat(64),
   }));

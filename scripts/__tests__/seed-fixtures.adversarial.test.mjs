@@ -9,7 +9,8 @@ import test from "node:test";
 
 import { BlobServiceClient } from "@azure/storage-blob";
 
-import { FIXTURE_MANIFEST_PATH, SEASON_YEAR } from "../lib/loadTestConsts.mjs";
+import { BCC_API_BASE_URL, FIXTURE_MANIFEST_PATH, SEASON_YEAR } from "../lib/loadTestConsts.mjs";
+import { loadTestTargetIdentity } from "../lib/loadTestTargetIdentity.mjs";
 import { buildLegacyFixtureManifest } from "./helpers/legacyFixtureManifest.mjs";
 
 const CONNECTION_STRING = process.env.FIXTURE_TEST_CONNECTION_STRING ??
@@ -42,19 +43,26 @@ async function withEnvironment(run) {
     publicContainer.createIfNotExists({ access: "blob" }),
     privateContainer.createIfNotExists(),
   ]);
+  const testEnvironment = {
+    ...process.env,
+    BLOB_CONNECTION_STRING: CONNECTION_STRING,
+    BLOB_CONTAINER_NAME: publicName,
+    BLOB_PRIVATE_CONTAINER_NAME: privateName,
+  };
   const runScript = (script) => spawnSync(process.execPath, [script, "--json"], {
     cwd: workDir,
     encoding: "utf8",
-    env: {
-      ...process.env,
-      BLOB_CONNECTION_STRING: CONNECTION_STRING,
-      BLOB_CONTAINER_NAME: publicName,
-      BLOB_PRIVATE_CONTAINER_NAME: privateName,
-    },
+    env: testEnvironment,
     timeout: 120_000,
   });
   try {
-    await run({ publicContainer, privateContainer, workDir, runScript });
+    await run({
+      publicContainer,
+      privateContainer,
+      workDir,
+      runScript,
+      seedTarget: loadTestTargetIdentity(BCC_API_BASE_URL, testEnvironment),
+    });
   } finally {
     await Promise.all([publicContainer.deleteIfExists(), privateContainer.deleteIfExists()]);
     await rm(workDir, { recursive: true, force: true });
@@ -86,8 +94,9 @@ async function seedCompleteLegacyState(environment, mutate) {
   mutate({ manifest, userIndex, pilotIndex, publicIndexes });
   await writeFile(join(environment.workDir, FIXTURE_MANIFEST_PATH), `${JSON.stringify(manifest)}\n`);
   await writeFile(join(environment.workDir, ".loadtest-round-state.json"), JSON.stringify({
-    version: 2,
+    version: 3,
     seedRoundIds: manifest.roundIds,
+    seedTarget: environment.seedTarget,
     loadRoundId: "load-preserved",
     loadTarget: "a".repeat(64),
   }));
