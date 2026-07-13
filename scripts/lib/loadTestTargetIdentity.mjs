@@ -31,6 +31,8 @@ export function loadTestTargetIdentity(baseUrl, environment = process.env) {
   const target = {
     apiOrigin: new URL(baseUrl).origin.toLowerCase(),
     blob: connectionIdentity(environment.BLOB_CONNECTION_STRING, LOCAL_BLOB_IDENTITY),
+    publicContainer: environment.BLOB_CONTAINER_NAME ?? "data",
+    privateContainer: environment.BLOB_PRIVATE_CONTAINER_NAME ?? "data-private",
     queues: connectionIdentity(resolveReflectQueueConnection(baseUrl, environment)),
   };
   return createHash("sha256").update(JSON.stringify(target)).digest("hex");
