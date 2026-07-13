@@ -109,9 +109,11 @@ Ignored private artifacts live under `logs/load-test/`:
   ownership and synthetic credential state.
 
 The ownership checkpoint stores a SHA-256 digest of non-secret API/storage target
-identifiers beside `loadRoundId`. Changing stacks with owned state fails before cleanup
-or ownership clearing; restore the original target to recover it. Legacy owned
-checkpoints without a target digest also fail closed rather than guessing ownership.
+identifiers beside `loadRoundId` and non-empty browsing `seedRoundIds`. The digest includes
+the API origin, storage and queue endpoints, and effective public/private blob container
+names. Changing any target component with owned state fails before cleanup or ownership
+clearing; restore the original target to recover it. Legacy owned checkpoints without a
+target digest also fail closed rather than guessing ownership.
 
 Phase status rows link to their private log paths. Artifact/status path overrides are
 relative to, and confined beneath, `logs/load-test/`; absolute and parent paths fail
