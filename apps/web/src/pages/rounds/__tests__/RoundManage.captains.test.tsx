@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import "../../../__tests__/setup.ts";
-import { cleanup, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CallerIdentity, Round } from "@bccweb/types";
 import { makeRound, makeIdentity, renderPage } from "./RoundManage.captains.helpers.js";
@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   round: null as Round | null,
   apiGet: vi.fn(),
   apiPost: vi.fn(),
+  apiPut: vi.fn(),
 }));
 
 vi.mock("../../../components/MarkdownEditor.js", () => ({
@@ -54,7 +55,7 @@ vi.mock("../../../lib/api.js", () => ({
   api: {
     get: state.apiGet,
     post: state.apiPost,
-    put: vi.fn(),
+    put: state.apiPut,
     delete: vi.fn(),
   },
 }));
@@ -65,6 +66,7 @@ describe("RoundManage captain permissions", () => {
     state.identity = makeIdentity({ roles: ["RoundsCoord"], clubId: "club-visit" });
     state.apiGet.mockReset().mockImplementation(async () => state.round);
     state.apiPost.mockReset().mockResolvedValue({});
+    state.apiPut.mockReset().mockResolvedValue({});
   });
 
   afterEach(() => {
@@ -113,5 +115,17 @@ describe("RoundManage captain permissions", () => {
 
     const orgTeamHeader = screen.getByText("Org A").parentElement!;
     expect(within(orgTeamHeader).queryByRole("option", { name: "— none —" })).toBeInTheDocument();
+  });
+
+  it("announces captain update failures", async () => {
+    state.apiPut.mockRejectedValueOnce(new Error("Captain update failed"));
+    renderPage();
+    const selector = await screen.findByRole("combobox", { name: "Captain for Visit A" });
+
+    fireEvent.change(selector, { target: { value: "pilot-2" } });
+
+    await waitFor(() => {
+      expect(screen.getByRole("alert")).toHaveTextContent("Captain update failed");
+    });
   });
 });

@@ -60,9 +60,7 @@ export function ChangeCaptainSelect({
           </option>
         ))}
       </select>
-      {err && (
-        <span style={{ fontSize: "0.75rem", color: "#721c24" }}>{err}</span>
-      )}
+      {err && <Banner msg={err} />}
     </div>
   );
 }
