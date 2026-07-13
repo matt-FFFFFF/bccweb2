@@ -30,10 +30,7 @@ import {
 } from "../../__tests__/helpers/seed.js";
 import { signaturePath } from "../../lib/signTofly/ledger.js";
 import { computeBriefHash } from "../../lib/signTofly/briefVersion.js";
-
-const pureTrackMock = vi.hoisted(() => ({
-  createPureTrackGroups: vi.fn(),
-}));
+import * as pureTrack from "../../lib/puretrack.js";
 
 // One-shot seam: run a racing write AFTER completeRound's pre-lease read but
 // BEFORE it acquires the completion lease, so a test can prove scoring runs on
@@ -66,10 +63,6 @@ vi.mock("../../lib/blob.js", async (importOriginal) => {
   };
 });
 
-vi.mock("../../lib/puretrack.js", () => ({
-  createPureTrackGroups: pureTrackMock.createPureTrackGroups,
-}));
-
 const pdfMock = vi.hoisted(() => ({
   generateBriefPdf: vi.fn(),
 }));
@@ -95,10 +88,11 @@ vi.mock("../../lib/email.js", () => ({
 vi.mock("../../lib/queue.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/queue.js")>()),
   enqueueBriefPdf: vi.fn(),
+  enqueuePureTrackGroupJob: vi.fn(),
 }));
 
 import { getBriefRecipients, sendEmail } from "../../lib/email.js";
-import { enqueueBriefPdf } from "../../lib/queue.js";
+import { enqueueBriefPdf, enqueuePureTrackGroupJob } from "../../lib/queue.js";
 import { recomputeSeason } from "../../lib/recompute.js";
 import "../roundsMutate.js";
 import "../teams.js";
@@ -111,14 +105,9 @@ describe("round lifecycle integration", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    pureTrackMock.createPureTrackGroups.mockResolvedValue({
-      roundGroupId: 701,
-      roundGroupName: "BCC Milk Hill Tue 09 Jun 26",
-      roundGroupSlug: "bcc-milk-hill",
-      teams: [],
-    });
     pdfMock.generateBriefPdf.mockResolvedValue(Buffer.from("%PDF-1.4 lifecycle"));
     vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
+    vi.mocked(enqueuePureTrackGroupJob).mockResolvedValue(undefined);
     vi.mocked(getBriefRecipients).mockReturnValue([]);
   });
 
@@ -130,6 +119,7 @@ describe("round lifecycle integration", () => {
 
   it("happy path create -> confirm -> brief-complete -> sign -> lock enqueues PDF job and freezes brief metadata", async () => {
     vi.mocked(getBriefRecipients).mockReturnValue(["ops@example.com"]);
+    const createPureTrackGroupsSpy = vi.spyOn(pureTrack, "createPureTrackGroups");
     const ctx = await seedCreatedRoundViaHandlers();
     await seedBrief(ctx, { windSpeedDirection: "W 10kt" });
 
@@ -142,10 +132,14 @@ describe("round lifecycle integration", () => {
     const signedBeforeLock = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
     expect(signedBeforeLock?.teams[0].pilots[0].signToFly).toBe(true);
 
+    vi.mocked(enqueuePureTrackGroupJob).mockImplementationOnce(async (job) => {
+      const committed = await readPrivateJson<Round>(`rounds/${job.roundId}.json`);
+      expect(committed?.status).toBe("Locked");
+      expect(committed?.pureTrack).toMatchObject({ status: "pending", attemptId: job.attemptId });
+    });
     const lockRes = await lockRound(ctx);
 
     expect(lockRes.status).toBe(200);
-    expect(pureTrackMock.createPureTrackGroups).toHaveBeenCalledTimes(1);
     expect(pdfMock.generateBriefPdf).toHaveBeenCalledTimes(0);
     expect(sendEmail).toHaveBeenCalledTimes(0);
     expect(await privateBlobExists(`round-briefs/${ctx.roundId}.pdf`)).toBe(false);
@@ -156,12 +150,20 @@ describe("round lifecycle integration", () => {
     expect(locked.brief?.pdfPath).toBe(`round-briefs/${ctx.roundId}.pdf`);
     expect(locked.brief?.pdfStatus).toBe("pending");
     expect(locked.brief?.pdfAttemptId).toBeTruthy();
+    expect(locked.pureTrack?.status).toBe("pending");
+    expect(locked.pureTrack?.attemptId).toBeTruthy();
     expect(enqueueBriefPdf).toHaveBeenCalledTimes(1);
     expect(enqueueBriefPdf).toHaveBeenCalledWith({
       roundId: ctx.roundId,
       briefVersion: 1,
       pdfAttemptId: locked.brief?.pdfAttemptId,
     });
+    expect(enqueuePureTrackGroupJob).toHaveBeenCalledTimes(1);
+    expect(enqueuePureTrackGroupJob).toHaveBeenCalledWith({
+      roundId: ctx.roundId,
+      attemptId: locked.pureTrack?.attemptId,
+    });
+    expect(createPureTrackGroupsSpy).not.toHaveBeenCalled();
     expect(await readPrivateJson<Signature>(signaturePath(ctx.roundId, ctx.teamId, 1, 1))).toMatchObject({
       pilotId: ctx.pilotId,
       source: "pilot-self",
@@ -461,8 +463,8 @@ describe("round lifecycle integration", () => {
     expect((res.jsonBody as { code: string }).code).toBe("INVALID_REASON");
   });
 
-  it("PureTrack failure during lock writes no group blob and lock still succeeds", async () => {
-    pureTrackMock.createPureTrackGroups.mockRejectedValueOnce(new Error("PureTrack unavailable"));
+  it("PureTrack enqueue failure during lock writes no group blob and lock still succeeds", async () => {
+    vi.mocked(enqueuePureTrackGroupJob).mockRejectedValueOnce(new Error("queue unavailable"));
     const ctx = await seedLifecycleRound({ status: "BriefComplete", pilotPureTrackId: 12345 });
     await seedBrief(ctx);
 
@@ -470,9 +472,12 @@ describe("round lifecycle integration", () => {
     const pureTrackBlobs = await listPrivateBlobNames("puretrack-groups/");
 
     expect(res.status).toBe(200);
-    expect(pureTrackMock.createPureTrackGroups).toHaveBeenCalledTimes(1);
+    expect(enqueuePureTrackGroupJob).toHaveBeenCalledTimes(1);
     expect(pureTrackBlobs).not.toEqual(expect.arrayContaining([expect.stringContaining(ctx.roundId)]));
-    expect((await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))?.status).toBe("Locked");
+    const locked = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
+    expect(locked?.status).toBe("Locked");
+    expect(locked?.pureTrack?.status).toBe("failed");
+    expect(locked?.pureTrack?.error).toBe("enqueue_failed");
   });
 });
 

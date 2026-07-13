@@ -38,6 +38,7 @@ import {
   writePublicJson,
 } from "../../__tests__/helpers/seed.js";
 import { computeBriefHash, MATERIAL_BRIEF_FIELDS } from "../../lib/signTofly/briefVersion.js";
+import * as pureTrack from "../../lib/puretrack.js";
 
 // ─── External-service mocks (deterministic + no real I/O) ─────────────────────
 const pdfMock = vi.hoisted(() => ({
@@ -310,6 +311,7 @@ describe("lockRound preserves the frozen material hash while refreshing teams (T
 
   it("keeps briefer-authored material + a byte-stable frozen hash, and repopulates team snapshots", async () => {
     const ctx = await seedBriefCompleteRound();
+    const createPureTrackGroupsSpy = vi.spyOn(pureTrack, "createPureTrackGroups");
     const brief = frozen(
       buildBrief(ctx, {
         briefersNotes: "Authored briefer notes",
@@ -320,6 +322,11 @@ describe("lockRound preserves the frozen material hash while refreshing teams (T
     const frozenHash = brief.hash!;
     await seedBrief(ctx, brief);
 
+    vi.mocked(enqueuePureTrackGroupJob).mockImplementationOnce(async (job) => {
+      const committed = await readPrivateJson<Round>(`rounds/${job.roundId}.json`);
+      expect(committed?.status).toBe("Locked");
+      expect(committed?.pureTrack).toMatchObject({ status: "pending", attemptId: job.attemptId });
+    });
     const res = await lock(ctx);
     expect(res.status).toBe(200);
 
@@ -339,6 +346,15 @@ describe("lockRound preserves the frozen material hash while refreshing teams (T
 
     const round = (await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))!;
     expect(round.status).toBe("Locked");
+    expect(round.pureTrack?.status).toBe("pending");
+    expect(round.pureTrack?.attemptId).toBeTruthy();
+    expect(enqueuePureTrackGroupJob).toHaveBeenCalledTimes(1);
+    expect(enqueuePureTrackGroupJob).toHaveBeenCalledWith({
+      roundId: ctx.roundId,
+      attemptId: round.pureTrack?.attemptId,
+    });
+    expect(enqueueBriefPdf).toHaveBeenCalledTimes(1);
+    expect(createPureTrackGroupsSpy).not.toHaveBeenCalled();
   });
 
   it("B5: EVERY field in the single MATERIAL_BRIEF_FIELDS declaration survives lock byte-identical", async () => {

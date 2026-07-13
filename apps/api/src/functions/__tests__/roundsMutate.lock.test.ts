@@ -5,6 +5,7 @@ import type { Round, RoundBrief, Season } from "@bccweb/types";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { invoke, makeAuthRequest } from "../../__tests__/helpers/api.js";
+import { getPrivateContainer } from "../../__tests__/helpers/azurite.js";
 import {
   makeUser,
   readPrivateJson,
@@ -13,6 +14,7 @@ import {
   writePublicJson,
 } from "../../__tests__/helpers/seed.js";
 import { computeBriefHash } from "../../lib/signTofly/briefVersion.js";
+import * as pureTrack from "../../lib/puretrack.js";
 
 const pdfMock = vi.hoisted(() => ({
   generateBriefPdf: vi.fn(),
@@ -195,6 +197,10 @@ async function readRequiredRound(roundId: string): Promise<Round> {
   return round;
 }
 
+function readPrivateBytes(path: string): Promise<Buffer> {
+  return getPrivateContainer().getBlobClient(path).downloadToBuffer();
+}
+
 describe("lockRound async brief PDF queue", () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -203,9 +209,15 @@ describe("lockRound async brief PDF queue", () => {
     vi.mocked(setBriefPdfStatus).mockImplementation(briefPdfMock.realSetBriefPdfStatus);
   });
 
-  it("enqueues pending jobs, clears stale PureTrack echoes, and guards unlock while PureTrack runs", async () => {
+  it("relock clears stale PureTrack echoes before building the brief and enqueues pending jobs", async () => {
     const ctx = await seedBriefCompleteRound();
+    const createPureTrackGroupsSpy = vi.spyOn(pureTrack, "createPureTrackGroups");
     await writePrivateJson(`round-briefs/${ctx.roundId}.json`, frozenBrief(ctx));
+    vi.mocked(enqueuePureTrackGroupJob).mockImplementationOnce(async (job) => {
+      const committed = await readPrivateJson<Round>(`rounds/${job.roundId}.json`);
+      expect(committed?.status).toBe("Locked");
+      expect(committed?.pureTrack).toMatchObject({ status: "pending", attemptId: job.attemptId });
+    });
 
     const lockRes = await lock(ctx);
 
@@ -232,6 +244,8 @@ describe("lockRound async brief PDF queue", () => {
       roundId: ctx.roundId,
       attemptId: lockedRound.pureTrack?.attemptId,
     });
+    expect(enqueuePureTrackGroupJob).toHaveBeenCalledTimes(1);
+    expect(createPureTrackGroupsSpy).not.toHaveBeenCalled();
     const lockedBrief = await readPrivateJson<RoundBrief>(`round-briefs/${ctx.roundId}.json`);
     expect(lockedBrief?.pureTrackGroupName).toBeUndefined();
     expect(lockedBrief?.pureTrackGroupSlug).toBeUndefined();
@@ -239,22 +253,111 @@ describe("lockRound async brief PDF queue", () => {
     expect(lockedBrief?.teams[0]?.pureTrackGroupSlug).toBeUndefined();
     expect(pdfMock.generateBriefPdf).not.toHaveBeenCalled();
 
-    const guardedUnlockRes = await unlock(ctx);
+  });
 
-    expect(guardedUnlockRes.status).toBe(409);
-    expect(guardedUnlockRes.jsonBody).toMatchObject({ code: "PURETRACK_IN_PROGRESS" });
+  it.each(["pending", "processing"] as const)(
+    "returns 409 and byte-preserves the round and brief while PureTrack is %s",
+    async (status) => {
+      const ctx = await seedBriefCompleteRound();
+      const briefPath = `round-briefs/${ctx.roundId}.json`;
+      const roundPath = `rounds/${ctx.roundId}.json`;
+      await writePrivateJson(briefPath, frozenBrief(ctx));
+      await lock(ctx);
+      const round = await readRequiredRound(ctx.roundId);
+      if (status === "processing") {
+        await setPureTrackStatus(ctx.roundId, "processing", {
+          expectAttemptId: round.pureTrack?.attemptId,
+          fromStatuses: ["pending"],
+        });
+      }
+      const roundBefore = await readPrivateBytes(roundPath);
+      const briefBefore = await readPrivateBytes(briefPath);
+
+      const res = await unlock(ctx);
+
+      expect(res.status).toBe(409);
+      expect(res.jsonBody).toMatchObject({ code: "PURETRACK_IN_PROGRESS" });
+      expect(await readPrivateBytes(roundPath)).toEqual(roundBefore);
+      expect(await readPrivateBytes(briefPath)).toEqual(briefBefore);
+    },
+  );
+
+  it("atomically clears round and brief echoes while preserving hash, signature, and scoring", async () => {
+    const ctx = await seedBriefCompleteRound();
+    const briefPath = `round-briefs/${ctx.roundId}.json`;
+    const roundPath = `rounds/${ctx.roundId}.json`;
+    const signaturePath = `signatures/${ctx.roundId}/preserved.json`;
+    await writePrivateJson(briefPath, frozenBrief(ctx));
+    await writePrivateJson(signaturePath, { signed: true, briefVersion: 1 });
+    await lock(ctx);
+    const locked = await readRequiredRound(ctx.roundId);
     await setPureTrackStatus(ctx.roundId, "ready", {
-      expectAttemptId: lockedRound.pureTrack?.attemptId,
+      expectAttemptId: locked.pureTrack?.attemptId,
       fromStatuses: ["pending"],
     });
-    const unlockRes = await unlock(ctx);
+    const readyRound = await readRequiredRound(ctx.roundId);
+    readyRound.pureTrackGroupId = 200;
+    readyRound.pureTrackGroupName = "Fresh round group";
+    readyRound.pureTrackGroupSlug = "fresh-round-group";
+    readyRound.teams[0].pureTrackGroupId = 201;
+    readyRound.teams[0].pureTrackGroupSlug = "fresh-team-group";
+    readyRound.scoring = {
+      taskMaxPoints: 1000,
+      clubsAttendingCount: 1,
+      clubsAttendingFactor: 0.5,
+      minDistanceFlightCount: 1,
+      minDistanceFactor: 0.5,
+      maxPointsForRound: 250,
+      maxPilotScoreInRound: 42,
+      maxTeamScore: 250,
+      maxPilotScoresCountedPerTeam: 4,
+      leagueRoundScoresCounted: 6,
+      pilotFactors: { "Club Pilot": 1, Pilot: 1, "Advanced Pilot": 1 },
+      wingFactors: {
+        "EN A": 1,
+        "EN B": 1,
+        "EN C": 1,
+        "EN C 2-liner": 1,
+        "EN D": 1,
+        "EN D 2-liner": 1,
+      },
+      teams: [{ teamId: ctx.teamId, workingTeamScore: 250 }],
+      scoredAt: "2026-07-13T00:00:00.000Z",
+    };
+    await writePrivateJson(roundPath, readyRound);
+    const readyBrief = await readPrivateJson<RoundBrief>(briefPath);
+    if (readyBrief === null) throw new Error("Locked brief was not written");
+    readyBrief.pureTrackGroupName = "Fresh round group";
+    readyBrief.pureTrackGroupSlug = "fresh-round-group";
+    readyBrief.teams[0].pureTrackGroupId = 201;
+    readyBrief.teams[0].pureTrackGroupSlug = "fresh-team-group";
+    await writePrivateJson(briefPath, readyBrief);
+    const frozenHash = readyBrief.hash;
+    const scoring = readyRound.scoring;
+    const signatureBefore = await readPrivateBytes(signaturePath);
 
-    expect(unlockRes.status).toBe(200);
+    const res = await unlock(ctx);
+
+    expect(res.status).toBe(200);
     const unlockedRound = await readRequiredRound(ctx.roundId);
+    const unlockedBrief = await readPrivateJson<RoundBrief>(briefPath);
     expect(unlockedRound.status).toBe("Confirmed");
     expect(unlockedRound.pureTrack).toBeUndefined();
+    expect(unlockedRound.pureTrackGroupId).toBeUndefined();
+    expect(unlockedRound.pureTrackGroupName).toBeUndefined();
+    expect(unlockedRound.pureTrackGroupSlug).toBeUndefined();
+    expect(unlockedRound.teams[0]?.pureTrackGroupId).toBeUndefined();
+    expect(unlockedRound.teams[0]?.pureTrackGroupSlug).toBeUndefined();
     expect(unlockedRound.brief?.pdfStatus).toBeUndefined();
     expect(unlockedRound.brief?.pdfAttemptId).toBeUndefined();
+    expect(unlockedRound.scoring).toEqual(scoring);
+    expect(unlockedBrief?.pureTrackGroupName).toBeUndefined();
+    expect(unlockedBrief?.pureTrackGroupSlug).toBeUndefined();
+    expect(unlockedBrief?.teams[0]?.pureTrackGroupId).toBeUndefined();
+    expect(unlockedBrief?.teams[0]?.pureTrackGroupSlug).toBeUndefined();
+    expect(unlockedBrief?.hash).toBe(frozenHash);
+    expect(unlockedBrief === null ? undefined : computeBriefHash(unlockedBrief)).toBe(frozenHash);
+    expect(await readPrivateBytes(signaturePath)).toEqual(signatureBefore);
   });
 
   it("keeps the lock and marks PureTrack failed when its enqueue fails", async () => {
