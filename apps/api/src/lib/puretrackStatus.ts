@@ -113,22 +113,29 @@ export async function commitPureTrackReady(
   attemptId: string,
   result: PureTrackRoundResult | null,
 ): Promise<{ committed: boolean }> {
-  const committed = await mutatePureTrackEchoes(roundId, ({ round, brief }) => {
+  const roundPath = `rounds/${roundId}.json`;
+  const committed = await withPrivateLease(roundPath, async (leaseId) => {
+    const round: Round = await readJson(
+      getPrivateBlobClient(roundPath),
+      RoundSchema,
+      roundPath,
+    );
     if (
       round.pureTrack?.attemptId !== attemptId ||
-      round.pureTrack.status === "ready"
+      round.pureTrack.status !== "processing"
     ) {
       return false;
     }
 
-    clearPureTrackEchoes(round, brief);
-    if (result !== null) applyPureTrackResult(round, brief, result);
+    clearRoundPureTrackEchoes(round);
+    if (result !== null) applyPureTrackResult(round, result);
     round.pureTrack = {
       ...round.pureTrack,
       status: "ready",
       updatedAt: new Date().toISOString(),
     };
     delete round.pureTrack.error;
+    await writePrivateJson(roundPath, RoundSchema, round, leaseId);
     return true;
   });
   return { committed };
@@ -182,17 +189,21 @@ export async function mutatePureTrackEchoes(
   });
 }
 
-function clearPureTrackEchoes(round: Round, brief: RoundBrief): void {
-  delete round.pureTrackGroupId;
-  delete round.pureTrackGroupName;
-  delete round.pureTrackGroupSlug;
+export function clearPureTrackEchoes(round: Round, brief: RoundBrief): void {
+  clearRoundPureTrackEchoes(round);
   delete brief.pureTrackGroupName;
   delete brief.pureTrackGroupSlug;
-  for (const team of round.teams) {
+  for (const team of brief.teams) {
     delete team.pureTrackGroupId;
     delete team.pureTrackGroupSlug;
   }
-  for (const team of brief.teams) {
+}
+
+function clearRoundPureTrackEchoes(round: Round): void {
+  delete round.pureTrackGroupId;
+  delete round.pureTrackGroupName;
+  delete round.pureTrackGroupSlug;
+  for (const team of round.teams) {
     delete team.pureTrackGroupId;
     delete team.pureTrackGroupSlug;
   }
@@ -200,28 +211,17 @@ function clearPureTrackEchoes(round: Round, brief: RoundBrief): void {
 
 function applyPureTrackResult(
   round: Round,
-  brief: RoundBrief,
   result: PureTrackRoundResult,
 ): void {
   round.pureTrackGroupId = result.roundGroupId;
   round.pureTrackGroupName = result.roundGroupName;
   round.pureTrackGroupSlug = result.roundGroupSlug;
-  brief.pureTrackGroupName = result.roundGroupName;
-  brief.pureTrackGroupSlug = result.roundGroupSlug;
 
   for (const teamResult of result.teams) {
     const roundTeam = round.teams.find((team) => team.id === teamResult.teamId);
     if (roundTeam === undefined) continue;
     roundTeam.pureTrackGroupId = teamResult.groupId;
     roundTeam.pureTrackGroupSlug = teamResult.groupSlug;
-    const briefTeam = brief.teams.find(
-      (team) =>
-        team.teamName === roundTeam.teamName &&
-        team.clubName === roundTeam.club.name,
-    );
-    if (briefTeam === undefined) continue;
-    briefTeam.pureTrackGroupId = teamResult.groupId;
-    briefTeam.pureTrackGroupSlug = teamResult.groupSlug;
   }
 }
 

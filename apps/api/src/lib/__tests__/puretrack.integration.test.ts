@@ -345,7 +345,7 @@ describe.skipIf(!hasCreds)("PureTrack live integration", () => {
     const headers = authHeaders(session);
     const roundState = await getGroupState(headers, createdResult.roundGroupId);
     const teamState = await getGroupState(headers, teamResult.groupId);
-    const myGroups = await listMyGroups(session);
+    const myGroups = await listMyGroups(session, async () => {});
     expect(myGroups).toEqual(expect.arrayContaining([
       {
         id: createdResult.roundGroupId,

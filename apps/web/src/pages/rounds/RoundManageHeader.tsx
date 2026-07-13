@@ -112,7 +112,7 @@ export function RoundManageHeader({
                 </span>
               )}
             </div>
-            
+
             {(r.pureTrack?.status || ptPollTimeout !== null) && (
               <div style={{ display: "flex", alignItems: "center", gap: "0.5rem" }}>
                 {r.pureTrack?.status === "pending" && ptPollTimeout === null && (

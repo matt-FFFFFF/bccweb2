@@ -281,7 +281,7 @@ describe("RoundDetail — PureTrack rendering and polling", () => {
     const baseRound = makeRound("Locked");
     baseRound.pureTrackGroupName = "Round 1 puretrack";
     baseRound.pureTrackGroupSlug = "round-1-puretrack";
-    
+
     vi.mocked(api.get).mockImplementation((path: string) => {
       if (path === "rounds/r1") return Promise.resolve(baseRound) as Promise<unknown>;
       if (path === "rounds/r1/brief") return Promise.reject(new ApiError(404, "NOT_FOUND", "no brief"));
@@ -336,7 +336,7 @@ describe("RoundDetail — PureTrack rendering and polling", () => {
     });
 
     renderPage();
-    
+
     // Let the initial fetch resolve
     await act(async () => {
       await Promise.resolve();

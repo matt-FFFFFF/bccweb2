@@ -120,7 +120,7 @@ async function deleteAuthoritativeGroups(active: ActiveJob): Promise<void> {
   const round = await readRound(active.job.roundId);
   const records = await listRecordedGroups(active.job.roundId);
   const authoritativeIds = [...new Set([...echoedGroupIds(round), ...records.map((record) => record.externalId)])];
-  const liveIds = new Set((await listMyGroups(active.session)).map((group) => group.id));
+  const liveIds = new Set((await listMyGroups(active.session, active.beforeOutbound)).map((group) => group.id));
   const idsToDelete = authoritativeIds.filter((id) => liveIds.has(id));
   const alreadyGoneIds = authoritativeIds.filter((id) => !liveIds.has(id));
   try {
@@ -210,7 +210,7 @@ export async function handlePureTrackGroupJob(message: QueueMessage, ctx: Invoca
     if (currentRound.pureTrack?.attemptId !== job.attemptId) return;
     const { updated } = await setPureTrackStatus(job.roundId, "processing", {
       expectAttemptId: job.attemptId,
-      fromStatuses: ["pending"],
+      fromStatuses: ["pending", "processing"],
     });
     if (!updated) return;
     if (!isPureTrackEnabled()) {

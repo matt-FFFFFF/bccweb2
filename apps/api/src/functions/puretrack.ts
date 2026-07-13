@@ -304,8 +304,17 @@ async function listLivePureTrackGroupsHandler(
   if (!caller) return unauthorizedResponse();
   if (!isAdmin(caller.roles)) return forbiddenResponse();
 
-  const session = await authenticate(async () => {});
-  return { status: 200, jsonBody: await listMyGroups(session) };
+  const handle = await acquirePureTrackMutationGuard("global", randomUUID());
+  if (handle === null) {
+    throw new HttpError(409, "PURETRACK_IN_PROGRESS", "A PureTrack mutation is already in progress");
+  }
+  const beforeOutbound = () => assertPureTrackGuardOwned(handle);
+  try {
+    const session = await authenticate(beforeOutbound);
+    return { status: 200, jsonBody: await listMyGroups(session, beforeOutbound) };
+  } finally {
+    await releasePureTrackGuard(handle);
+  }
 }
 
 // ─── POST /api/manage/puretrack/groups/delete ─────────────────────────────────
@@ -338,7 +347,7 @@ async function deletePureTrackGroupsHandler(
   const beforeOutbound = () => assertPureTrackGuardOwned(handle);
   try {
     const session = await authenticate(beforeOutbound);
-    const liveIds = new Set((await listMyGroups(session)).map((group) => group.id));
+    const liveIds = new Set((await listMyGroups(session, beforeOutbound)).map((group) => group.id));
     const idsToDelete = parsed.data.ids.filter((id) => liveIds.has(id));
     const alreadyGoneIds = parsed.data.ids.filter((id) => !liveIds.has(id));
     try {

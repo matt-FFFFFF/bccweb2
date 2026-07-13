@@ -16,6 +16,28 @@ import {
 import { computeBriefHash } from "../../lib/signTofly/briefVersion.js";
 import * as pureTrack from "../../lib/puretrack.js";
 
+const blobWriteControl = vi.hoisted(() => ({
+  failRoundAfterBriefWrite: false,
+  sawBriefWrite: false,
+}));
+vi.mock("../../lib/blobJson.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/blobJson.js")>();
+  return {
+    ...actual,
+    writePrivateJson: vi.fn(async (path, schema, data, leaseId, options) => {
+      if (path.startsWith("round-briefs/")) blobWriteControl.sawBriefWrite = true;
+      if (
+        path.startsWith("rounds/") &&
+        blobWriteControl.failRoundAfterBriefWrite &&
+        blobWriteControl.sawBriefWrite
+      ) {
+        throw new Error("injected atomic unlock round write failure");
+      }
+      return actual.writePrivateJson(path, schema, data, leaseId, options);
+    }),
+  };
+});
+
 const pdfMock = vi.hoisted(() => ({
   generateBriefPdf: vi.fn(),
 }));
@@ -204,6 +226,8 @@ function readPrivateBytes(path: string): Promise<Buffer> {
 describe("lockRound async brief PDF queue", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    blobWriteControl.failRoundAfterBriefWrite = false;
+    blobWriteControl.sawBriefWrite = false;
     vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
     vi.mocked(enqueuePureTrackGroupJob).mockResolvedValue(undefined);
     vi.mocked(setBriefPdfStatus).mockImplementation(briefPdfMock.realSetBriefPdfStatus);
@@ -358,6 +382,42 @@ describe("lockRound async brief PDF queue", () => {
     expect(unlockedBrief?.hash).toBe(frozenHash);
     expect(unlockedBrief === null ? undefined : computeBriefHash(unlockedBrief)).toBe(frozenHash);
     expect(await readPrivateBytes(signaturePath)).toEqual(signatureBefore);
+  });
+
+  it("restores both blobs when the atomic unlock round write fails", async () => {
+    // Given
+    const ctx = await seedBriefCompleteRound();
+    const briefPath = `round-briefs/${ctx.roundId}.json`;
+    const roundPath = `rounds/${ctx.roundId}.json`;
+    await writePrivateJson(briefPath, frozenBrief(ctx));
+    await lock(ctx);
+    const locked = await readRequiredRound(ctx.roundId);
+    await setPureTrackStatus(ctx.roundId, "ready", {
+      expectAttemptId: locked.pureTrack?.attemptId,
+      fromStatuses: ["pending"],
+    });
+    const readyRound = await readRequiredRound(ctx.roundId);
+    readyRound.pureTrackGroupId = 200;
+    readyRound.pureTrackGroupName = "Fresh round group";
+    readyRound.pureTrackGroupSlug = "fresh-round-group";
+    await writePrivateJson(roundPath, readyRound);
+    const readyBrief = await readPrivateJson<RoundBrief>(briefPath);
+    if (readyBrief === null) throw new Error("Locked brief was not written");
+    readyBrief.pureTrackGroupName = "Legacy brief group";
+    readyBrief.pureTrackGroupSlug = "legacy-brief-group";
+    await writePrivateJson(briefPath, readyBrief);
+    const beforeRound = await readPrivateBytes(roundPath);
+    const beforeBrief = await readPrivateBytes(briefPath);
+    blobWriteControl.sawBriefWrite = false;
+    blobWriteControl.failRoundAfterBriefWrite = true;
+
+    // When
+    const response = await unlock(ctx);
+
+    // Then
+    expect(response.status).toBe(500);
+    expect(await readPrivateBytes(roundPath)).toEqual(beforeRound);
+    expect(await readPrivateBytes(briefPath)).toEqual(beforeBrief);
   });
 
   it("keeps the lock and marks PureTrack failed when its enqueue fails", async () => {

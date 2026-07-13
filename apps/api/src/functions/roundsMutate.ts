@@ -66,7 +66,11 @@ import { mutationRateLimit } from "../lib/rateLimit.js";
 import { updateRoundsIndex, recomputeSeason } from "../lib/recompute.js";
 import { setBriefPdfStatus } from "../lib/briefPdf.js";
 import { enqueueBriefPdf, enqueuePureTrackGroupJob } from "../lib/queue.js";
-import { mutatePureTrackEchoes, setPureTrackStatus } from "../lib/puretrackStatus.js";
+import {
+  clearPureTrackEchoes,
+  mutatePureTrackEchoes,
+  setPureTrackStatus,
+} from "../lib/puretrackStatus.js";
 import { getTelemetryClient } from "../lib/telemetry.js";
 import { listSignaturesForRound } from "../lib/signTofly/ledger.js";
 import { invalidatePriorSignToFlyFlags } from "../lib/signTofly/invalidate.js";
@@ -1185,50 +1189,41 @@ async function unlockRound(
   await assertManageableRound(caller, id);
   await mutationRateLimit(req, caller, "unlockRound", "standard");
 
-  // eslint-disable-next-line @typescript-eslint/require-await -- transition()'s `extra` slot is typed (round: Round) => Promise<void>; this mutator is synchronous but the Promise-returning shape is required by that signature.
-  const result = await transition(req, id, ["Locked"], "Confirmed", async (r) => {
-    if (r.pureTrack?.status === "pending" || r.pureTrack?.status === "processing") {
+  let updated: Round | undefined;
+  await mutatePureTrackEchoes(id, ({ round, brief }) => {
+    if (round.status !== "Locked") {
+      throw new HttpError(
+        409,
+        "CONFLICT",
+        `Expected status Locked, got ${round.status}`,
+      );
+    }
+    if (round.pureTrack?.status === "pending" || round.pureTrack?.status === "processing") {
       throw new HttpError(
         409,
         "PURETRACK_IN_PROGRESS",
         "PureTrack group creation must finish before unlocking the round",
       );
     }
-    r.pureTrack = undefined;
-    r.isLocked = false;
-    if (r.brief) {
-      r.brief.pdfStatus = undefined;
-      r.brief.pdfError = undefined;
-      r.brief.pdfAttemptId = undefined;
+    round.status = "Confirmed";
+    round.pureTrack = undefined;
+    round.isLocked = false;
+    if (round.brief) {
+      round.brief.pdfStatus = undefined;
+      round.brief.pdfError = undefined;
+      round.brief.pdfAttemptId = undefined;
     }
     // Clear snapshots so they are re-taken at next lock
-    for (const team of r.teams) {
+    for (const team of round.teams) {
       for (const slot of team.pilots) {
         slot.snapshot = null;
       }
     }
-  });
-
-  if ("status" in result && "jsonBody" in result) return result;
-  const updated = result as Round;
-  await mutatePureTrackEchoes(id, ({ round, brief }) => {
-    for (const targetRound of [round, updated]) {
-      targetRound.pureTrackGroupId = undefined;
-      targetRound.pureTrackGroupName = undefined;
-      targetRound.pureTrackGroupSlug = undefined;
-      for (const team of targetRound.teams) {
-        team.pureTrackGroupId = undefined;
-        team.pureTrackGroupSlug = undefined;
-      }
-    }
-    brief.pureTrackGroupName = undefined;
-    brief.pureTrackGroupSlug = undefined;
-    for (const team of brief.teams) {
-      team.pureTrackGroupId = undefined;
-      team.pureTrackGroupSlug = undefined;
-    }
+    clearPureTrackEchoes(round, brief);
+    updated = round;
     return true;
   });
+  if (updated === undefined) throw new HttpError(500, "INTERNAL");
   await updateRoundsIndex(updated);
   return { status: 200, jsonBody: updated };
 }

@@ -10,6 +10,7 @@ import {
   mutatePureTrackEchoes,
   setPureTrackStatus,
 } from "../puretrackStatus.js";
+import { renderBriefPdfHtml } from "../pdf.js";
 import {
   briefFixture,
   bytes,
@@ -63,27 +64,31 @@ describe("PureTrack status and echo commits", () => {
     expect(await bytes(signaturePath)).toEqual(signatureBefore);
   });
 
-  test("maps duplicate team names by both team name and club", async () => {
+  test("commits PureTrack echoes to the round only so the PDF brief has no links", async () => {
     const round = roundFixture();
     await seed(round, briefFixture(round));
 
     await commitPureTrackReady(round.id, "attempt-A", RESULT);
 
+    const updatedRound = await readRound(round.id);
     const updatedBrief = await readBrief(round.id);
-    expect(updatedBrief.teams).toEqual([
-      expect.objectContaining({ clubName: "North Club", pureTrackGroupId: 101 }),
-      expect.objectContaining({ clubName: "South Club", pureTrackGroupId: 102 }),
-    ]);
+    expect(updatedRound.pureTrackGroupId).toBe(RESULT.roundGroupId);
+    expect(updatedRound.teams.map((team) => team.pureTrackGroupId)).toEqual([101, 102]);
+    expect(updatedBrief.pureTrackGroupName).toBeUndefined();
+    expect(updatedBrief.pureTrackGroupSlug).toBeUndefined();
+    expect(updatedBrief.teams.every((team) => team.pureTrackGroupId === undefined)).toBe(true);
+    expect(updatedBrief.teams.every((team) => team.pureTrackGroupSlug === undefined)).toBe(true);
+    expect(renderBriefPdfHtml(updatedBrief)).not.toContain("puretrack.io/group/");
   });
 
-  test("creates a missing brief before a null-result commit and leaves echoes clear", async () => {
+  test("commits a null result without creating or touching a brief", async () => {
     const round = roundFixture();
     await seedRound(round);
 
     const result = await commitPureTrackReady(round.id, "attempt-A", null);
 
     expect(result).toEqual({ committed: true });
-    expect(await readBrief(round.id)).toMatchObject({ roundId: round.id, teams: [] });
+    await expect(bytes(`round-briefs/${round.id}.json`)).rejects.toMatchObject({ statusCode: 404 });
     expect(await readRound(round.id)).not.toHaveProperty("pureTrackGroupId");
   });
 
@@ -105,7 +110,7 @@ describe("PureTrack status and echo commits", () => {
     expect(await readBrief(round.id)).not.toHaveProperty("pureTrackGroupName");
   });
 
-  test("restores the exact original brief when the round write fails", async () => {
+  test("leaves the brief unchanged when the round-only commit fails", async () => {
     const round = roundFixture();
     const brief = briefFixture(round);
     await seed(round, brief);
@@ -126,7 +131,7 @@ describe("PureTrack status and echo commits", () => {
     expect((await readRound(round.id)).pureTrack?.status).toBe("processing");
   });
 
-  test("emits reconcile telemetry and never commits when brief rollback also fails", async () => {
+  test("emits reconcile telemetry when a compensated echo mutation cannot restore the brief", async () => {
     const round = roundFixture();
     await seed(round, briefFixture(round));
     const originalWrite = blobJson.writePrivateJson;
@@ -154,7 +159,10 @@ describe("PureTrack status and echo commits", () => {
       return originalUpload.call(this, data, length, options);
     });
 
-    await expect(commitPureTrackReady(round.id, "attempt-A", RESULT)).rejects.toThrow(
+    await expect(mutatePureTrackEchoes(round.id, ({ round: current }) => {
+      delete current.pureTrackGroupId;
+      return true;
+    })).rejects.toThrow(
       "injected round write failure",
     );
 
@@ -179,6 +187,28 @@ describe("PureTrack status and echo commits", () => {
     expect(await bytes(roundPath)).toEqual(beforeRound);
     expect(await bytes(briefPath)).toEqual(beforeBrief);
   });
+
+  test.each(["pending", "failed"] as const)(
+    "rejects a ready commit when the matching attempt is %s",
+    async (status) => {
+      // Given
+      const round = roundFixture();
+      round.pureTrack = { ...round.pureTrack, status };
+      await seed(round, briefFixture(round));
+      const roundPath = `rounds/${round.id}.json`;
+      const briefPath = `round-briefs/${round.id}.json`;
+      const beforeRound = await bytes(roundPath);
+      const beforeBrief = await bytes(briefPath);
+
+      // When
+      const result = await commitPureTrackReady(round.id, "attempt-A", RESULT);
+
+      // Then
+      expect(result).toEqual({ committed: false });
+      expect(await bytes(roundPath)).toEqual(beforeRound);
+      expect(await bytes(briefPath)).toEqual(beforeBrief);
+    },
+  );
 
   test("status CAS enforces round, active-status, attempt, and source-status guards", async () => {
     const round = roundFixture();

@@ -238,6 +238,46 @@ describe("pureTrackGroups queue consumer", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it("re-drives an owned processing attempt after redelivery", async () => {
+    // Given
+    const job = await seedJob();
+    const round = await readPrivateJson<Round>(`rounds/${job.roundId}.json`);
+    if (round === null) throw new Error("Seeded round disappeared");
+    await writePrivateJson(`rounds/${job.roundId}.json`, {
+      ...round,
+      pureTrack: { ...round.pureTrack, status: "processing" },
+    });
+    mockSuccessfulUpstream();
+
+    // When
+    await invokeQueue("pureTrackGroups", job, { dequeueCount: 2 });
+
+    // Then
+    const updated = await readPrivateJson<Round>(`rounds/${job.roundId}.json`);
+    expect(updated?.pureTrack).toMatchObject({ status: "ready", attemptId: job.attemptId });
+    expect(updated?.pureTrackGroupId).toBe(20);
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it("reclaims an owned processing attempt when PureTrack is disabled", async () => {
+    // Given
+    const job = await seedJob();
+    const round = await readPrivateJson<Round>(`rounds/${job.roundId}.json`);
+    if (round === null) throw new Error("Seeded round disappeared");
+    await writePrivateJson(`rounds/${job.roundId}.json`, {
+      ...round,
+      pureTrack: { ...round.pureTrack, status: "processing" },
+    });
+    process.env["PURETRACK_ENABLED"] = "false";
+
+    // When
+    await invokeQueue("pureTrackGroups", job, { dequeueCount: 2 });
+
+    // Then
+    expect((await readPrivateJson<Round>(`rounds/${job.roundId}.json`))?.pureTrack?.status).toBe("ready");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("deletes only invocation-owned groups when the attempt is superseded before commit", async () => {
     const job = await seedJob();
     let importCount = 0;

@@ -21,7 +21,9 @@ vi.mock("../../../hooks/useAuth.js", () => ({
   useAuth: vi.fn(),
 }));
 
-function mockAuth(roles: string[] = ["Admin"]) {
+import type { UserRole } from "@bccweb/types";
+
+function mockAuth(roles: UserRole[] = ["Admin"]) {
   vi.mocked(useAuthModule.useAuth).mockReturnValue({
     identity: {
       userId: "admin-user",
@@ -57,7 +59,7 @@ describe("AdminPureTrackGroups", () => {
     expect(screen.getByText("test-group")).toBeVisible();
     expect(screen.getByText("Other Group")).toBeVisible();
     expect(screen.getByText("other-group")).toBeVisible();
-    
+
     const links = screen.getAllByRole("link");
     expect(links[0]).toHaveAttribute("href", "https://puretrack.io/group/test-group");
     expect(links[1]).toHaveAttribute("href", "https://puretrack.io/group/other-group");
@@ -76,7 +78,7 @@ describe("AdminPureTrackGroups", () => {
     fireEvent.click(checkbox);
 
     vi.mocked(api.post).mockResolvedValueOnce({ deleted: 1, alreadyGone: 0 });
-    
+
     // The second get after delete
     vi.mocked(api.get).mockResolvedValueOnce([]);
 

@@ -98,7 +98,7 @@ describe("PureTrack API contracts", () => {
       .mockResolvedValueOnce(jsonResponse({ data: [{ id: 7, name: "Round", slug: "round" }] }))
       .mockResolvedValueOnce(jsonResponse({ id: 8, name: "Team", slug: "team" }));
 
-    const groups = await listMyGroups(session);
+    const groups = await listMyGroups(session, beforeOutbound);
     const created = await createGroup("Team", beforeOutbound, session);
 
     expect(groups).toEqual([{ id: 7, name: "Round", slug: "round" }]);
@@ -107,7 +107,34 @@ describe("PureTrack API contracts", () => {
       "https://puretrack.io/api/groups?mine=1",
       "https://puretrack.io/api/groups",
     ]);
+    expect(beforeOutbound).toHaveBeenCalledTimes(2);
+  });
+
+  it("checks the fence again before the CSRF request", async () => {
+    // Given
+    const { authenticate } = await import("../puretrack.js");
+    const guardLost = new Error("guard lost");
+    const beforeOutbound = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(guardLost);
+    fetchMock.mockResolvedValueOnce(jsonResponse({ access_token: "token" }));
+
+    // When / Then
+    await expect(authenticate(beforeOutbound)).rejects.toBe(guardLost);
+    expect(beforeOutbound).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks listing when the outbound fence is lost", async () => {
+    // Given
+    const { listMyGroups } = await import("../puretrack.js");
+    const guardLost = new Error("guard lost");
+    const beforeOutbound = vi.fn().mockRejectedValueOnce(guardLost);
+
+    // When / Then
+    await expect(listMyGroups(session, beforeOutbound)).rejects.toBe(guardLost);
     expect(beforeOutbound).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each<readonly [unknown, string]>([
@@ -120,7 +147,7 @@ describe("PureTrack API contracts", () => {
     const { listMyGroups } = await import("../puretrack.js");
     fetchMock.mockResolvedValueOnce(jsonResponse(body));
 
-    await expect(listMyGroups(session)).rejects.toThrow();
+    await expect(listMyGroups(session, vi.fn().mockResolvedValue(undefined))).rejects.toThrow();
   });
 
   it.each([

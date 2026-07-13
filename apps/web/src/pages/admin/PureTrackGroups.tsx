@@ -113,7 +113,7 @@ export default function AdminPureTrackGroups() {
       <div style={{ border: "1px solid #dee2e6", borderRadius: "0.5rem", padding: "1rem", marginBottom: "1.5rem" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
           <h2 style={{ fontSize: "1rem", margin: "0" }}>Live Groups</h2>
-          <button 
+          <button
             onClick={handleDelete}
             disabled={busy || selectedIds.size === 0}
             style={btnStyle("#fff", busy || selectedIds.size === 0 ? "#6c757d" : "#dc3545")}
@@ -138,8 +138,8 @@ export default function AdminPureTrackGroups() {
               {groups.map(g => (
                 <tr key={g.id} style={{ borderBottom: "1px solid #eee" }}>
                   <td style={{ padding: "0.35rem 0.25rem" }}>
-                    <input 
-                      type="checkbox" 
+                    <input
+                      type="checkbox"
                       checked={selectedIds.has(g.id)}
                       onChange={() => toggleSelect(g.id)}
                       data-testid={`select-${g.id}`}
@@ -148,9 +148,9 @@ export default function AdminPureTrackGroups() {
                   <td style={{ padding: "0.35rem 0.25rem" }}>{g.name}</td>
                   <td style={{ padding: "0.35rem 0.25rem" }}>{g.slug}</td>
                   <td style={{ padding: "0.35rem 0.25rem" }}>
-                    <a 
-                      href={`https://puretrack.io/group/${g.slug}`} 
-                      target="_blank" 
+                    <a
+                      href={`https://puretrack.io/group/${g.slug}`}
+                      target="_blank"
                       rel="noreferrer"
                       style={{ color: "#0066cc", textDecoration: "none" }}
                     >

@@ -81,6 +81,7 @@ export async function authenticate(
   );
   const rawCookies = loginRes.headers.getSetCookie?.() ?? [];
   const loginCookieHeader = rawCookies.map((cookie) => cookie.split(";")[0]).join("; ");
+  await beforeOutbound();
   const csrfRes = await fetch(`${BASE_URL}/login`, {
     headers: { Cookie: loginCookieHeader },
   });
@@ -198,7 +199,9 @@ export async function importPilots(
 
 export async function listMyGroups(
   session: PureTrackSession,
+  beforeOutbound: BeforePureTrackOutbound,
 ): Promise<PureTrackApiGroup[]> {
+  await beforeOutbound();
   const res = await fetch(`${BASE_URL}/api/groups?mine=1`, {
     headers: authHeaders(session),
   });
