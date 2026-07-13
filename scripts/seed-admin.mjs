@@ -60,14 +60,19 @@ async function main() {
   const prepareOnly = process.argv.includes("--prepare-credentials");
   const credentialPath = devCredentialsPath();
   const override = process.env.ADMIN_PASSWORD;
-  const existingCredentials = override
-    ? null
-    : readInitializedDevCredentials(credentialPath);
+  const existingCredentials = readInitializedDevCredentials(credentialPath);
   if (existingCredentials && existingCredentials.email !== ADMIN_EMAIL) {
     throw new Error(`seed-admin: admin credential email must be ${ADMIN_EMAIL}`);
   }
   if (prepareOnly) {
-    if (!override) prepareDevCredentialsFile(credentialPath);
+    if (override && existingCredentials && existingCredentials.password !== override) {
+      throw new Error("seed-admin: ADMIN_PASSWORD conflicts with initialized .dev-credentials");
+    }
+    if (override && !existingCredentials) {
+      writeDevCredentials({ email: ADMIN_EMAIL, password: override }, credentialPath);
+    } else if (!override) {
+      prepareDevCredentialsFile(credentialPath);
+    }
     process.stderr.write(`[seed-admin] private admin credential is ready at ${credentialPath}.\n`);
     return;
   }

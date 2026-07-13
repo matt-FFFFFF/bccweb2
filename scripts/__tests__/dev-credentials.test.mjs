@@ -239,6 +239,28 @@ test("prepare-credentials succeeds before storage is available", async (t) => {
   assert.equal((await lstat(join(cwd, ".dev-credentials"))).size, 0);
 });
 
+test("prepare-credentials writes ADMIN_PASSWORD override to the safe bind file", async (t) => {
+  // Given
+  const cwd = await fixtureDir(t);
+  const credentialPath = join(cwd, ".dev-credentials");
+
+  // When
+  const result = spawnSync(process.execPath, [SEED_ADMIN_SCRIPT, "--prepare-credentials"], {
+    cwd,
+    env: cleanEnvironment({ ADMIN_PASSWORD: TEST_PASSWORD }),
+    encoding: "utf8",
+  });
+
+  // Then
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(readDevCredentials(credentialPath), {
+    email: "admin@bcc.local",
+    password: TEST_PASSWORD,
+  });
+  assert.equal((await lstat(credentialPath)).mode & 0o777, 0o600);
+  assert.doesNotMatch(result.stderr, new RegExp(TEST_PASSWORD, "u"));
+});
+
 test("existing admin rejects an unverified replacement credential", async () => {
   // Given / When
   const source = await readFile(SEED_ADMIN_SCRIPT, "utf8");
