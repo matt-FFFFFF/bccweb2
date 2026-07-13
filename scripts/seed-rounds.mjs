@@ -17,10 +17,12 @@ import {
 } from "./lib/loadTestConsts.mjs";
 import {
   appendSeedRoundId,
+  assertSeedRoundTarget,
   readLoadTestRoundState,
   replaceSeedRoundIds,
   writeJsonAtomically,
 } from "./lib/loadTestRoundState.mjs";
+import { loadTestTargetIdentity } from "./lib/loadTestTargetIdentity.mjs";
 import { validateLoadTestManifest } from "./lib/loadTestTopology.mjs";
 
 const TARGET_STATUSES = ["Proposed", "Confirmed", "BriefComplete", "Locked"];
@@ -28,6 +30,7 @@ const DATE_OFFSETS_DAYS = [7, 14, 21, 28];
 const CLUBS_PER_ROUND = 4;
 const PILOTS_PER_TEAM = 3;
 const SETUP_DEADLINE_MS = 15 * 60 * 1_000;
+const SEED_TARGET = loadTestTargetIdentity(BCC_API_BASE_URL);
 
 function fail(message) {
   throw new Error(`[seed-rounds] ${message}`);
@@ -56,7 +59,7 @@ function selectedTeamsAndPilots(manifest) {
 }
 
 async function persistSeedOwnership(manifest, roundId) {
-  await appendSeedRoundId(roundId);
+  await appendSeedRoundId(roundId, SEED_TARGET);
   const roundIds = Array.isArray(manifest.roundIds) ? manifest.roundIds : [];
   if (!roundIds.includes(roundId)) roundIds.push(roundId);
   manifest.roundIds = roundIds;
@@ -65,10 +68,13 @@ async function persistSeedOwnership(manifest, roundId) {
 
 async function replacePriorRounds(manifest) {
   const state = await readLoadTestRoundState();
+  assertSeedRoundTarget(state, SEED_TARGET);
   const manifestIds = Array.isArray(manifest.roundIds) ? manifest.roundIds : [];
+  const unprovenManifestId = manifestIds.find((roundId) => !state.seedRoundIds.includes(roundId));
+  if (unprovenManifestId) fail("manifest round is not present in target-bound seed ownership");
   const priorIds = [...new Set([...state.seedRoundIds, ...manifestIds])];
   await cleanupOwnedRoundIds(priorIds, { seasonYears: [manifest.seasonYear] });
-  await replaceSeedRoundIds([]);
+  await replaceSeedRoundIds([], SEED_TARGET);
   manifest.roundIds = [];
   await writeJsonAtomically(FIXTURE_MANIFEST_PATH, manifest);
 }
@@ -124,6 +130,7 @@ async function main() {
   validateLoadTestManifest(manifest, SEASON_YEAR);
   if (!Array.isArray(manifest.siteIds) || manifest.siteIds.length === 0) fail("canonical manifest has no siteIds");
   const selected = selectedTeamsAndPilots(manifest);
+  const adminPassword = resolveAdminPassword(ADMIN_PASSWORD_OVERRIDE);
   await replacePriorRounds(manifest);
 
   const callApi = createLoadTestApi({
@@ -132,7 +139,7 @@ async function main() {
   });
   const adminToken = await loginLoadTestUser(callApi, {
     email: ADMIN_EMAIL,
-    password: resolveAdminPassword(ADMIN_PASSWORD_OVERRIDE),
+    password: adminPassword,
   });
   const pilotTokens = new Map();
   for (const [index, pilot] of selected.pilots.entries()) {
