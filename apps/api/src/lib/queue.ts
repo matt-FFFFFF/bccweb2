@@ -15,6 +15,11 @@ export interface SignToFlyReflectJob {
   roundId: string;
 }
 
+export interface PureTrackGroupJob {
+  roundId: string;
+  attemptId: string;
+}
+
 // STRICT on purpose. The storage queue is NOT covered by the public-container
 // privacy scanner (scripts/privacy-scan.mjs), so `.strict()` is the compensating
 // control: it rejects ANY extra key (e.g. a PII field) at parse time, before the
@@ -41,6 +46,15 @@ export const BriefPdfJobSchema = z
 export const SignToFlyReflectJobSchema = z
   .object({ roundId: z.string().min(1) })
   .strict();
+
+export const PureTrackGroupJobSchema = z
+  .object({
+    roundId: z.string().min(1),
+    attemptId: z.string().min(1),
+  })
+  .strict();
+
+export const PURETRACK_GROUP_QUEUE_NAME = "round-puretrack-group";
 
 // ─── Client singleton ─────────────────────────────────────────────────────────
 
@@ -101,4 +115,29 @@ export async function enqueueSignToFlyReflect(
   const parsed = SignToFlyReflectJobSchema.parse(job);
   const message = Buffer.from(JSON.stringify(parsed)).toString("base64");
   await getQueueClient("signtofly-reflect").sendMessage(message);
+}
+
+export async function enqueuePureTrackGroupJob(
+  job: PureTrackGroupJob,
+  options?: { visibilityTimeoutSeconds?: number },
+): Promise<void> {
+  const parsed = PureTrackGroupJobSchema.parse(job);
+  const visibilityTimeout = options?.visibilityTimeoutSeconds;
+  if (
+    visibilityTimeout !== undefined &&
+    (!Number.isInteger(visibilityTimeout) ||
+      visibilityTimeout < 0 ||
+      visibilityTimeout > 604_800)
+  ) {
+    throw new RangeError(
+      "visibilityTimeoutSeconds must be an integer between 0 and 604800",
+    );
+  }
+  const message = Buffer.from(JSON.stringify(parsed)).toString("base64");
+  const queueClient = getQueueClient(PURETRACK_GROUP_QUEUE_NAME);
+  if (visibilityTimeout === undefined) {
+    await queueClient.sendMessage(message);
+    return;
+  }
+  await queueClient.sendMessage(message, { visibilityTimeout });
 }

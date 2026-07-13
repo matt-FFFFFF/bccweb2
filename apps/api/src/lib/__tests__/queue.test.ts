@@ -1,7 +1,11 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import type { BriefPdfJob, SignToFlyReflectJob } from "../queue.js";
+import type {
+  BriefPdfJob,
+  PureTrackGroupJob,
+  SignToFlyReflectJob,
+} from "../queue.js";
 
 const { sendMessage, QueueClientMock } = vi.hoisted(() => ({
   sendMessage: vi.fn(async () => ({ messageId: "m1" })),
@@ -184,4 +188,106 @@ describe("enqueueSignToFlyReflect", () => {
     expect(QueueClientMock).not.toHaveBeenCalled();
     expect(sendMessage).not.toHaveBeenCalled();
   });
+});
+
+describe("enqueuePureTrackGroupJob", () => {
+  let savedEnv: { queue: string | undefined; blob: string | undefined };
+
+  beforeEach(async () => {
+    savedEnv = {
+      queue: process.env["AzureWebJobsStorage"],
+      blob: process.env["BLOB_CONNECTION_STRING"],
+    };
+    vi.resetModules();
+    sendMessage.mockClear();
+    QueueClientMock.mockClear();
+    process.env["AzureWebJobsStorage"] = QUEUE_CONN;
+
+    const { resetQueueSingletons } = await import("../queue.js");
+    resetQueueSingletons();
+  });
+
+  afterEach(() => {
+    const restore = (key: string, val: string | undefined) => {
+      if (val === undefined) delete process.env[key];
+      else process.env[key] = val;
+    };
+    restore("AzureWebJobsStorage", savedEnv.queue);
+    restore("BLOB_CONNECTION_STRING", savedEnv.blob);
+  });
+
+  test("sends exactly one base64-encoded job using the shared queue-name-keyed client", async () => {
+    const { enqueuePureTrackGroupJob, PURETRACK_GROUP_QUEUE_NAME } = await import(
+      "../queue.js"
+    );
+
+    await enqueuePureTrackGroupJob({ roundId: "r", attemptId: "a" });
+
+    const expected = Buffer.from('{"roundId":"r","attemptId":"a"}').toString(
+      "base64",
+    );
+    expect(QueueClientMock).toHaveBeenCalledTimes(1);
+    expect(QueueClientMock).toHaveBeenCalledWith(
+      QUEUE_CONN,
+      PURETRACK_GROUP_QUEUE_NAME,
+    );
+    expect(sendMessage).toHaveBeenCalledTimes(1);
+    expect(sendMessage).toHaveBeenCalledWith(expected);
+  });
+
+  test("rejects an extra key at PureTrackGroupJobSchema.parse before sending", async () => {
+    const { enqueuePureTrackGroupJob } = await import("../queue.js");
+    const withExtraKey = {
+      roundId: "r",
+      attemptId: "a",
+      pii: "secret",
+    } as unknown as PureTrackGroupJob;
+
+    await expect(enqueuePureTrackGroupJob(withExtraKey)).rejects.toThrow();
+
+    expect(QueueClientMock).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+  });
+
+  test("omits sendMessage options when visibility timeout is omitted", async () => {
+    const { enqueuePureTrackGroupJob } = await import("../queue.js");
+
+    await enqueuePureTrackGroupJob({ roundId: "r", attemptId: "a" });
+
+    const expected = Buffer.from('{"roundId":"r","attemptId":"a"}').toString(
+      "base64",
+    );
+    expect(sendMessage).toHaveBeenCalledWith(expected);
+  });
+
+  test("passes visibilityTimeoutSeconds through to sendMessage", async () => {
+    const { enqueuePureTrackGroupJob } = await import("../queue.js");
+
+    await enqueuePureTrackGroupJob(
+      { roundId: "r", attemptId: "a" },
+      { visibilityTimeoutSeconds: 30 },
+    );
+
+    const expected = Buffer.from('{"roundId":"r","attemptId":"a"}').toString(
+      "base64",
+    );
+    expect(sendMessage).toHaveBeenCalledWith(expected, { visibilityTimeout: 30 });
+  });
+
+  test.each([-1, 604_801, 1.5])(
+    "rejects invalid visibility timeout %s before sending",
+    async (visibilityTimeoutSeconds) => {
+      const { enqueuePureTrackGroupJob } = await import("../queue.js");
+
+      await expect(
+        enqueuePureTrackGroupJob(
+          { roundId: "r", attemptId: "a" },
+          { visibilityTimeoutSeconds },
+        ),
+      ).rejects.toThrow();
+
+      expect(QueueClientMock).not.toHaveBeenCalled();
+      expect(sendMessage).not.toHaveBeenCalled();
+    },
+  );
 });
