@@ -235,6 +235,19 @@ describe("enqueuePureTrackGroupJob", () => {
     expect(sendMessage).toHaveBeenCalledWith(expected);
   });
 
+  test("reuses the PureTrack client while keeping other shared queue clients distinct", async () => {
+    const { enqueueBriefPdf, enqueuePureTrackGroupJob } = await import("../queue.js");
+
+    await enqueueBriefPdf({ roundId: "r1", briefVersion: 1, pdfAttemptId: "pdf-a" });
+    await enqueuePureTrackGroupJob({ roundId: "r1", attemptId: "pt-a" });
+    await enqueuePureTrackGroupJob({ roundId: "r2", attemptId: "pt-b" });
+
+    expect(QueueClientMock.mock.calls).toEqual([
+      [QUEUE_CONN, "round-brief-pdf"],
+      [QUEUE_CONN, "round-puretrack-group"],
+    ]);
+  });
+
   test("rejects an extra key at PureTrackGroupJobSchema.parse before sending", async () => {
     const { enqueuePureTrackGroupJob } = await import("../queue.js");
     const withExtraKey = {

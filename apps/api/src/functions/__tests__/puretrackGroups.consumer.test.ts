@@ -4,10 +4,19 @@ import { randomUUID } from "node:crypto";
 import type { Round, RoundBrief } from "@bccweb/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const queueMock = vi.hoisted(() => ({ enqueue: vi.fn() }));
+const queueMock = vi.hoisted(() => ({ enqueue: vi.fn(), reflect: vi.fn() }));
+const rescoreMock = vi.hoisted(() => ({ enqueue: vi.fn() }));
 vi.mock("../../lib/queue.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/queue.js")>();
-  return { ...actual, enqueuePureTrackGroupJob: queueMock.enqueue };
+  return {
+    ...actual,
+    enqueuePureTrackGroupJob: queueMock.enqueue,
+    enqueueSignToFlyReflect: queueMock.reflect,
+  };
+});
+vi.mock("../../lib/rescoreJob.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/rescoreJob.js")>();
+  return { ...actual, enqueueRescore: rescoreMock.enqueue };
 });
 
 import { invokeQueue } from "../../__tests__/helpers/api.js";
@@ -35,7 +44,7 @@ function slot(pilotId: string): Round["teams"][number]["pilots"][number] {
     isScoring: true,
     status: "Filled",
     accountedFor: false,
-    signToFly: false,
+    signToFly: true,
     noScore: false,
     pilotPoints: 0,
     pilotId,
@@ -71,6 +80,29 @@ async function seedJob(): Promise<SeededJob> {
     pureTrackGroupId: 10,
     pureTrackGroupName: "Old round",
     pureTrackGroupSlug: "old-round",
+    scoring: {
+      taskMaxPoints: 1000,
+      clubsAttendingCount: 1,
+      clubsAttendingFactor: 0.5,
+      minDistanceFlightCount: 0,
+      minDistanceFactor: 0,
+      maxPointsForRound: 0,
+      maxPilotScoreInRound: 0,
+      maxTeamScore: 0,
+      maxPilotScoresCountedPerTeam: 4,
+      leagueRoundScoresCounted: 6,
+      pilotFactors: { "Club Pilot": 1, Pilot: 1, "Advanced Pilot": 1 },
+      wingFactors: {
+        "EN A": 1,
+        "EN B": 1,
+        "EN C": 1,
+        "EN C 2-liner": 1,
+        "EN D": 1,
+        "EN D 2-liner": 1,
+      },
+      teams: [],
+      scoredAt: "2026-07-13T00:00:00.000Z",
+    },
   };
   const brief: RoundBrief = {
     roundId,
@@ -109,6 +141,7 @@ async function seedJob(): Promise<SeededJob> {
     createdAt: new Date().toISOString(),
     externalId: "11",
   });
+  await writePrivateJson(`signatures/${roundId}/proof.json`, { signed: true });
   return { roundId, attemptId };
 }
 
@@ -174,6 +207,11 @@ describe("pureTrackGroups queue consumer", () => {
     expect(round?.pureTrack).toMatchObject({ status: "ready", attemptId: job.attemptId });
     expect(round?.pureTrackGroupId).toBe(20);
     expect(round?.teams[0]?.pureTrackGroupId).toBe(21);
+    expect(round?.teams[0]?.pilots[0]?.signToFly).toBe(true);
+    expect(round?.scoring?.scoredAt).toBe("2026-07-13T00:00:00.000Z");
+    expect(await readPrivateJson(`signatures/${job.roundId}/proof.json`)).toEqual({ signed: true });
+    expect(queueMock.reflect).not.toHaveBeenCalled();
+    expect(rescoreMock.enqueue).not.toHaveBeenCalled();
     expect(await privateBlobExists("puretrack-groups/old-round.json")).toBe(false);
     expect(await privateBlobExists("puretrack-groups/old-team.json")).toBe(false);
     expect(getRegisteredQueueHandler("pureTrackGroups").queueName).toBe("round-puretrack-group");

@@ -222,7 +222,7 @@ describe("createPureTrackGroups guarded orchestration", () => {
     vi.unstubAllGlobals();
   });
 
-  it("reuses a supplied session and fences every group create and import", async () => {
+  it("reuses a supplied session and sends comma-free generated group names", async () => {
     const { createPureTrackGroups } = await import("../puretrack.js");
     const beforeOutbound = vi.fn().mockResolvedValue(undefined);
     fetchMock
@@ -239,6 +239,19 @@ describe("createPureTrackGroups guarded orchestration", () => {
     expect(result?.roundGroupId).toBe(1);
     expect(fetchMock).toHaveBeenCalledTimes(4);
     expect(fetchMock.mock.calls.some(([url]) => requestUrl(url).endsWith("/api/login"))).toBe(false);
+    const createBodies = fetchMock.mock.calls
+      .filter(([url, init]) => requestUrl(url).endsWith("/api/groups") && init?.method === "POST")
+      .map(([, init]) => JSON.parse(requestBody(init)) as { name: string });
+    expect(createBodies.map(({ name }) => name)).toEqual([
+      "BCC Milk Hill Tue 09 Jun 26",
+      "BCC Tue 09 Jun 26 Alpha",
+    ]);
+    expect(createBodies.every(({ name }) => !name.includes(","))).toBe(true);
+    expect(fetchMock.mock.calls.every(([, init]) => {
+      const headers = new Headers(init?.headers);
+      return headers.get("Authorization") === "Bearer token" &&
+        headers.get("Cookie") === "session=cookie";
+    })).toBe(true);
     expect(beforeOutbound).toHaveBeenCalledTimes(4);
     expect(writePrivateBlobSpy).toHaveBeenCalledTimes(2);
   });

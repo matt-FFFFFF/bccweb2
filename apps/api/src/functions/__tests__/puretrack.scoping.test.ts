@@ -71,7 +71,7 @@ describe("POST /api/rounds/{id}/puretrack/create-groups scoping", () => {
       roundId,
       attemptId: expect.any(String),
     });
-    await captureEvidence(".omo/evidence/task-1-own-club-201.txt", res);
+    await captureEvidence(".omo/evidence/task-1-own-club-202.txt", res);
   });
 
   it("returns CONFLICT for a Proposed round", async () => {

@@ -168,6 +168,28 @@ describe("GET /api/manage/puretrack/groups/live", () => {
     })).toBe(true);
   });
 
+  it("returns a safe error when the upstream mine response omits data", async () => {
+    mockPureTrack([]);
+    const baseImplementation = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/api/groups?mine=1")) {
+        return new Response(JSON.stringify({}), { status: 200 });
+      }
+      if (baseImplementation === undefined) throw new Error("missing PureTrack mock");
+      return baseImplementation(input, init);
+    });
+    const { user } = await makeUser({ roles: ["Admin"] });
+
+    const res = await invoke(
+      "listLivePureTrackGroups",
+      makeAuthRequest(user.id, user.email, { method: "GET" }),
+    );
+
+    expect(res.status).toBe(500);
+    expect(res.jsonBody).toMatchObject({ code: "INTERNAL" });
+  });
+
   it("rejects non-Admin callers without outbound work", async () => {
     const { user } = await makeUser({ roles: ["RoundsCoord"] });
 
