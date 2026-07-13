@@ -22,6 +22,7 @@ import { randomUUID } from "node:crypto";
 import { BlobServiceClient } from "@azure/storage-blob";
 import type { Round, PureTrackGroup } from "@bccweb/types";
 import { RoundSchema } from "@bccweb/schemas";
+import * as z from "zod/v4";
 import { getPrivateBlobClient } from "../lib/blob.js";
 import { readJson } from "../lib/blobJson.js";
 import {
@@ -31,8 +32,31 @@ import {
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
-import { setPureTrackStatus } from "../lib/puretrackStatus.js";
+import {
+  authenticate,
+  deleteGroups,
+  listMyGroups,
+  PureTrackDeleteError,
+} from "../lib/puretrack.js";
+import {
+  acquirePureTrackMutationGuard,
+  assertPureTrackGuardOwned,
+  releasePureTrackGuard,
+} from "../lib/puretrackGuard.js";
+import { mutatePureTrackEchoes, setPureTrackStatus } from "../lib/puretrackStatus.js";
 import { enqueuePureTrackGroupJob } from "../lib/queue.js";
+
+const DeletePureTrackGroupsBodySchema = z.object({
+  ids: z.array(z.number().int().positive()).min(1).max(200).refine(
+    (ids) => new Set(ids).size === ids.length,
+    "ids must be unique",
+  ),
+}).strict();
+
+const PureTrackRecordRefSchema = z.looseObject({
+  roundId: z.string().min(1),
+  externalId: z.string().regex(/^\d+$/),
+});
 
 function isCoord(roles: string[]): boolean {
   return roles.includes("RoundsCoord") || roles.includes("Admin");
@@ -75,6 +99,99 @@ async function listPureTrackGroupsForRound(roundId: string): Promise<PureTrackGr
   }
 
   return groups;
+}
+
+type PureTrackRecordRef = {
+  readonly path: string;
+  readonly roundId: string;
+  readonly externalId: number;
+};
+
+async function listPureTrackRecordRefs(ids: ReadonlySet<number>): Promise<PureTrackRecordRef[]> {
+  const container = getPrivateContainerClient();
+  const records: PureTrackRecordRef[] = [];
+  for await (const item of container.listBlobsFlat({ prefix: "puretrack-groups/" })) {
+    if (!item.name.endsWith(".json")) continue;
+    try {
+      const raw: unknown = JSON.parse(
+        (await container.getBlockBlobClient(item.name).downloadToBuffer()).toString("utf8"),
+      );
+      const parsed = PureTrackRecordRefSchema.safeParse(raw);
+      if (!parsed.success) continue;
+      const externalId = Number(parsed.data.externalId);
+      if (Number.isSafeInteger(externalId) && ids.has(externalId)) {
+        records.push({ path: item.name, roundId: parsed.data.roundId, externalId });
+      }
+    } catch (error: unknown) {
+      if (!(error instanceof Object) || !("statusCode" in error) || error.statusCode !== 404) {
+        throw error;
+      }
+    }
+  }
+  return records;
+}
+
+async function listRoundsWithPureTrackEchoes(ids: ReadonlySet<number>): Promise<string[]> {
+  const container = getPrivateContainerClient();
+  const roundIds = new Set<string>();
+  for await (const item of container.listBlobsFlat({ prefix: "rounds/" })) {
+    if (!item.name.endsWith(".json")) continue;
+    try {
+      const round = await readJson(container.getBlobClient(item.name), RoundSchema, item.name);
+      if (
+        (round.pureTrackGroupId !== undefined && ids.has(round.pureTrackGroupId)) ||
+        round.teams.some(
+          (team) => team.pureTrackGroupId !== undefined && ids.has(team.pureTrackGroupId),
+        )
+      ) {
+        roundIds.add(round.id);
+      }
+    } catch (error: unknown) {
+      if (!(error instanceof Object) || !("statusCode" in error) || error.statusCode !== 404) {
+        throw error;
+      }
+    }
+  }
+  return [...roundIds];
+}
+
+async function clearDeletedPureTrackState(ids: readonly number[]): Promise<void> {
+  const deletedIds = new Set(ids);
+  if (deletedIds.size === 0) return;
+  const records = await listPureTrackRecordRefs(deletedIds);
+  const roundIds = new Set([
+    ...records.map((record) => record.roundId),
+    ...await listRoundsWithPureTrackEchoes(deletedIds),
+  ]);
+
+  for (const roundId of roundIds) {
+    await mutatePureTrackEchoes(roundId, ({ round, brief }) => {
+      let changed = false;
+      if (round.pureTrackGroupId !== undefined && deletedIds.has(round.pureTrackGroupId)) {
+        delete round.pureTrackGroupId;
+        delete round.pureTrackGroupName;
+        delete round.pureTrackGroupSlug;
+        delete brief.pureTrackGroupName;
+        delete brief.pureTrackGroupSlug;
+        changed = true;
+      }
+      for (const team of round.teams) {
+        if (team.pureTrackGroupId === undefined || !deletedIds.has(team.pureTrackGroupId)) continue;
+        const groupId = team.pureTrackGroupId;
+        delete team.pureTrackGroupId;
+        delete team.pureTrackGroupSlug;
+        for (const briefTeam of brief.teams) {
+          if (briefTeam.pureTrackGroupId !== groupId) continue;
+          delete briefTeam.pureTrackGroupId;
+          delete briefTeam.pureTrackGroupSlug;
+        }
+        changed = true;
+      }
+      return changed;
+    });
+  }
+  const container = getPrivateContainerClient();
+  await Promise.all(records.map((record) => container.getBlobClient(record.path).deleteIfExists()));
 }
 
 // ─── POST /api/rounds/{id}/puretrack/create-groups ───────────────────────────
@@ -177,6 +294,75 @@ async function listPureTrackGroupsHandler(
   return { status: 200, jsonBody: groups };
 }
 
+// ─── GET /api/manage/puretrack/groups/live ────────────────────────────────────
+
+async function listLivePureTrackGroupsHandler(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isAdmin(caller.roles)) return forbiddenResponse();
+
+  const session = await authenticate(async () => {});
+  return { status: 200, jsonBody: await listMyGroups(session) };
+}
+
+// ─── POST /api/manage/puretrack/groups/delete ─────────────────────────────────
+
+async function deletePureTrackGroupsHandler(
+  req: HttpRequest,
+  _ctx: InvocationContext
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!isAdmin(caller.roles)) return forbiddenResponse();
+
+  let raw: unknown;
+  try {
+    raw = await req.json();
+  } catch {
+    throw new HttpError(400, "INVALID_BODY", "Expected a JSON body");
+  }
+  const parsed = DeletePureTrackGroupsBodySchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new HttpError(400, "INVALID_IDS", "ids must contain 1 to 200 unique positive integers");
+  }
+
+  await mutationRateLimit(req, caller, "deletePureTrackGroups", "heavy");
+  const handle = await acquirePureTrackMutationGuard("global", randomUUID());
+  if (handle === null) {
+    throw new HttpError(409, "PURETRACK_IN_PROGRESS", "A PureTrack mutation is already in progress");
+  }
+
+  const beforeOutbound = () => assertPureTrackGuardOwned(handle);
+  try {
+    const session = await authenticate(beforeOutbound);
+    const liveIds = new Set((await listMyGroups(session)).map((group) => group.id));
+    const idsToDelete = parsed.data.ids.filter((id) => liveIds.has(id));
+    const alreadyGoneIds = parsed.data.ids.filter((id) => !liveIds.has(id));
+    try {
+      await deleteGroups(session, idsToDelete, beforeOutbound);
+    } catch (error: unknown) {
+      if (error instanceof PureTrackDeleteError) {
+        await clearDeletedPureTrackState([
+          ...alreadyGoneIds,
+          ...error.deletedIds,
+          ...error.alreadyGoneIds,
+        ]);
+      }
+      throw error;
+    }
+    await clearDeletedPureTrackState(parsed.data.ids);
+    return {
+      status: 200,
+      jsonBody: { deleted: idsToDelete.length, alreadyGone: alreadyGoneIds.length },
+    };
+  } finally {
+    await releasePureTrackGuard(handle);
+  }
+}
+
 // ─── Registration ─────────────────────────────────────────────────────────────
 
 app.http("createPureTrackGroups", {
@@ -191,4 +377,18 @@ app.http("listPureTrackGroups", {
   authLevel: "anonymous",
   route: "manage/puretrack/groups",
   handler: withErrorHandler(listPureTrackGroupsHandler),
+});
+
+app.http("listLivePureTrackGroups", {
+  methods: ["GET"],
+  authLevel: "anonymous",
+  route: "manage/puretrack/groups/live",
+  handler: withErrorHandler(listLivePureTrackGroupsHandler),
+});
+
+app.http("deletePureTrackGroups", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "manage/puretrack/groups/delete",
+  handler: withErrorHandler(deletePureTrackGroupsHandler),
 });
