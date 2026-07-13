@@ -31,6 +31,7 @@ import {
   acquirePureTrackMutationGuard,
   releasePureTrackGuard,
 } from "../../lib/puretrackGuard.js";
+import * as blob from "../../lib/blob.js";
 import "../puretrackGroups.js";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -304,6 +305,39 @@ describe("pureTrackGroups queue consumer", () => {
     const round = await readPrivateJson<Round>(`rounds/${job.roundId}.json`);
     expect(round?.pureTrack).toMatchObject({ status: "pending", attemptId: "replacement" });
     expect(round?.pureTrackGroupId).not.toBe(20);
+  });
+
+  it("retries cleanup for a created id after its record write and immediate delete fail", async () => {
+    // Given
+    const job = await seedJob();
+    const originalWrite = blob.writePrivateBlob;
+    vi.spyOn(blob, "writePrivateBlob").mockImplementation((path, data, leaseId, options) => (
+      path.startsWith("puretrack-groups/")
+        ? Promise.reject(new Error("injected record write failure"))
+        : originalWrite(path, data, leaseId, options)
+    ));
+    let newGroupDeleteCount = 0;
+    mockSuccessfulUpstream();
+    const baseImplementation = fetchMock.getMockImplementation();
+    fetchMock.mockImplementation(async (input, init) => {
+      const url = input instanceof Request ? input.url : String(input);
+      if (url.endsWith("/api/groups/20") && init?.method === "DELETE") {
+        newGroupDeleteCount += 1;
+        return newGroupDeleteCount === 1
+          ? new Response("delete failed", { status: 500 })
+          : new Response(null, { status: 204 });
+      }
+      if (baseImplementation === undefined) throw new Error("missing PureTrack mock");
+      return baseImplementation(input, init);
+    });
+
+    // When
+    const operation = invokeQueue("pureTrackGroups", job, { dequeueCount: 1 });
+
+    // Then
+    await expect(operation).rejects.toThrow("PureTrack group orchestration failed");
+    expect(newGroupDeleteCount).toBe(2);
+    expect((await readPrivateJson<Round>(`rounds/${job.roundId}.json`))?.pureTrack?.status).toBe("pending");
   });
 
   it("throws on live guard contention before the final dequeue", async () => {

@@ -187,6 +187,7 @@ async function clearDeletedPureTrackState(ids: readonly number[]): Promise<void>
         }
         changed = true;
       }
+      if (changed) delete round.pureTrack;
       return changed;
     });
   }

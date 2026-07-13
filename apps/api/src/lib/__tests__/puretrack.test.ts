@@ -283,25 +283,59 @@ describe("createPureTrackGroups guarded orchestration", () => {
     expect(writePrivateBlobSpy).toHaveBeenCalledTimes(2);
   });
 
-  it("compensates the exact created group when its blob record write fails", async () => {
-    const { createPureTrackGroups } = await import("../puretrack.js");
+  it("carries the round id when its record write and immediate delete both fail", async () => {
+    // Given
+    const { createPureTrackGroups, PureTrackGroupOperationError } = await import("../puretrack.js");
     const recordError = new Error("record write failed");
     const beforeOutbound = vi.fn().mockResolvedValue(undefined);
     writePrivateBlobSpy.mockRejectedValueOnce(recordError);
     fetchMock
       .mockResolvedValueOnce(jsonResponse({ id: 31, name: "Round", slug: "round" }))
-      .mockResolvedValueOnce(new Response(null, { status: 204 }));
+      .mockResolvedValueOnce(new Response("delete failed", { status: 500 }));
 
-    await expect(createPureTrackGroups(makeRound(), new Map([["pilot-1", 101]]), {
+    // When
+    const error = await createPureTrackGroups(makeRound(), new Map([["pilot-1", 101]]), {
       beforeOutbound,
       session,
-    })).rejects.toBe(recordError);
+    }).catch((cause: unknown) => cause);
 
+    // Then
+    expect(error).toBeInstanceOf(PureTrackGroupOperationError);
+    expect(error).toMatchObject({ cleanupIds: [31], cause: recordError });
     expect(fetchMock.mock.calls.map(([url]) => requestUrl(url))).toEqual([
       "https://puretrack.io/api/groups",
       "https://puretrack.io/api/groups/31",
     ]);
     expect(beforeOutbound).toHaveBeenCalledTimes(2);
+  });
+
+  it("carries round and team ids when a team record write and immediate delete both fail", async () => {
+    // Given
+    const { createPureTrackGroups, PureTrackGroupOperationError } = await import("../puretrack.js");
+    const recordError = new Error("team record write failed");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    writePrivateBlobSpy
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(recordError);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ id: 41, name: "Round", slug: "round" }))
+      .mockResolvedValueOnce(jsonResponse({ id: 42, name: "Team", slug: "team" }))
+      .mockResolvedValueOnce(new Response("delete failed", { status: 500 }));
+
+    // When
+    const error = await createPureTrackGroups(makeRound(), new Map([["pilot-1", 101]]), {
+      beforeOutbound,
+      session,
+    }).catch((cause: unknown) => cause);
+
+    // Then
+    expect(error).toBeInstanceOf(PureTrackGroupOperationError);
+    expect(error).toMatchObject({ cleanupIds: [41, 42], cause: recordError });
+    expect(fetchMock.mock.calls.map(([url]) => requestUrl(url))).toEqual([
+      "https://puretrack.io/api/groups",
+      "https://puretrack.io/api/groups",
+      "https://puretrack.io/api/groups/42",
+    ]);
   });
 
   it("carries every exact cleanup id after a partial import failure", async () => {

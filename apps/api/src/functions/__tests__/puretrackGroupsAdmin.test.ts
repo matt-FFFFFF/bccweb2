@@ -283,6 +283,11 @@ describe("POST /api/manage/puretrack/groups/delete", () => {
     round.pureTrackGroupId = 10;
     round.pureTrackGroupName = "Round group";
     round.pureTrackGroupSlug = "round-group";
+    round.pureTrack = {
+      status: "ready",
+      attemptId: randomUUID(),
+      updatedAt: "2026-07-13T00:00:00.000Z",
+    };
     await writePrivateJson(`rounds/${roundId}.json`, round);
     const brief: RoundBrief = {
       roundId,
@@ -311,6 +316,7 @@ describe("POST /api/manage/puretrack/groups/delete", () => {
     const updatedRound = await readPrivateJson<Round>(`rounds/${roundId}.json`);
     const updatedBrief = await readPrivateJson<RoundBrief>(`round-briefs/${roundId}.json`);
     expect(updatedRound).not.toHaveProperty("pureTrackGroupId");
+    expect(updatedRound).not.toHaveProperty("pureTrack");
     expect(updatedRound?.scoring).toEqual(round.scoring);
     expect(updatedBrief?.hash).toBe("frozen-hash");
     expect(await readPrivateJson(`signatures/${roundId}/proof.json`)).toEqual({ signed: true });
@@ -364,6 +370,44 @@ describe("POST /api/manage/puretrack/groups/delete", () => {
     );
   });
 
+  it("preserves ready state for rounds that do not reference the deleted id", async () => {
+    // Given
+    const affectedRoundId = randomUUID();
+    const unaffectedRoundId = randomUUID();
+    await makeRound({ id: affectedRoundId });
+    await makeRound({ id: unaffectedRoundId });
+    const affectedRound = await readPrivateJson<Round>(`rounds/${affectedRoundId}.json`);
+    const unaffectedRound = await readPrivateJson<Round>(`rounds/${unaffectedRoundId}.json`);
+    if (affectedRound === null || unaffectedRound === null) throw new Error("seeded round disappeared");
+    affectedRound.pureTrackGroupId = 10;
+    affectedRound.pureTrackGroupName = "Deleted group";
+    affectedRound.pureTrackGroupSlug = "deleted-group";
+    affectedRound.pureTrack = { status: "ready", attemptId: randomUUID(), updatedAt: new Date().toISOString() };
+    unaffectedRound.pureTrackGroupId = 20;
+    unaffectedRound.pureTrackGroupName = "Retained group";
+    unaffectedRound.pureTrackGroupSlug = "retained-group";
+    unaffectedRound.pureTrack = { status: "ready", attemptId: randomUUID(), updatedAt: new Date().toISOString() };
+    await writePrivateJson(`rounds/${affectedRoundId}.json`, affectedRound);
+    await writePrivateJson(`rounds/${unaffectedRoundId}.json`, unaffectedRound);
+    await seedPureTrackGroupBlob({ roundId: affectedRoundId, externalId: "10" });
+    mockPureTrack([{ id: 10, name: "Deleted group", slug: "deleted-group" }]);
+    const { user } = await makeUser({ roles: ["Admin"] });
+
+    // When
+    const res = await invoke(
+      "deletePureTrackGroups",
+      makeAuthRequest(user.id, user.email, { method: "POST", body: { ids: [10] } }),
+    );
+
+    // Then
+    expect(res.status).toBe(200);
+    expect(await readPrivateJson<Round>(`rounds/${affectedRoundId}.json`)).not.toHaveProperty("pureTrack");
+    expect(await readPrivateJson<Round>(`rounds/${unaffectedRoundId}.json`)).toMatchObject({
+      pureTrackGroupId: 20,
+      pureTrack: { status: "ready", attemptId: unaffectedRound.pureTrack.attemptId },
+    });
+  });
+
   it("serializes a consumer behind admin deletion so deleted echoes cannot become ready", async () => {
     const roundId = randomUUID();
     const attemptId = randomUUID();
@@ -411,7 +455,7 @@ describe("POST /api/manage/puretrack/groups/delete", () => {
 
     const updated = await readPrivateJson<Round>(`rounds/${roundId}.json`);
     expect(updated).not.toHaveProperty("pureTrackGroupId");
-    expect(updated?.pureTrack?.status).toBe("pending");
+    expect(updated).not.toHaveProperty("pureTrack");
   });
 
   it("restores the exact brief state when the compensated round write fails", async () => {

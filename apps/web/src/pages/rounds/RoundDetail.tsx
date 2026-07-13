@@ -340,16 +340,28 @@ export default function RoundDetail() {
           <div>
             <dt style={{ fontSize: "0.75rem", color: "#888", fontWeight: 600 }}>PureTrack Group</dt>
             <dd style={{ margin: 0, fontSize: "0.85em", display: "flex", alignItems: "center", gap: "0.5rem" }}>
-              {round.pureTrack?.status === "pending" ? (
-                <>
-                  <span style={{ display: "inline-block", width: "12px", height: "12px", border: "2px solid #dee2e6", borderTopColor: "currentColor", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
-                  <span style={{ color: "#666" }}>Queued…</span>
-                </>
-              ) : round.pureTrack?.status === "processing" ? (
-                <>
-                  <span style={{ display: "inline-block", width: "12px", height: "12px", border: "2px solid #dee2e6", borderTopColor: "currentColor", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
-                  <span style={{ color: "#666" }}>Creating…</span>
-                </>
+              {(round.pureTrack?.status === "pending" || round.pureTrack?.status === "processing") ? (
+                ptPollTimeout ? (
+                  <>
+                    <span style={{ color: "#666" }}>Still {round.pureTrack.status === "pending" ? "queued" : "creating"}…</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setPtPollCount(0);
+                        setPtPollTimeout(null);
+                        loadRound({ silent: true });
+                      }}
+                      style={{ padding: "0.2rem 0.5rem", fontSize: "0.7rem", background: "#f1f3f5", border: "1px solid #ccc", borderRadius: "0.2rem", cursor: "pointer" }}
+                    >
+                      Refresh
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ display: "inline-block", width: "12px", height: "12px", border: "2px solid #dee2e6", borderTopColor: "currentColor", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                    <span style={{ color: "#666" }}>{round.pureTrack.status === "pending" ? "Queued…" : "Creating…"}</span>
+                  </>
+                )
               ) : round.pureTrack?.status === "failed" ? (
                 <span style={{ color: "#d32f2f" }}>Creation failed</span>
               ) : round.pureTrackGroupSlug ? (

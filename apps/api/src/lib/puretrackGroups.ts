@@ -129,17 +129,17 @@ export async function createPureTrackGroups(
   }
   const session = await sessionFor(round.id, beforeOutbound, options.session);
   const roundGroup = await createRoundGroup(round, beforeOutbound, session);
+  const cleanupIds: number[] = [roundGroup.id];
   const now = new Date().toISOString();
   try {
     await writePureTrackGroupBlob(roundGroup, allBccPilotIds, round.id, now, {
       callerUserId: options.callerUserId,
     });
   } catch (cause: unknown) {
-    await deleteGroups(session, [roundGroup.id], beforeOutbound);
-    throw cause;
+    await Promise.allSettled([deleteGroups(session, [roundGroup.id], beforeOutbound)]);
+    throw new PureTrackGroupOperationError(cleanupIds, cause);
   }
 
-  const cleanupIds: number[] = [roundGroup.id];
   try {
     for (const item of teamImports) {
       await new Promise((resolve) => setTimeout(resolve, 100));
@@ -150,16 +150,16 @@ export async function createPureTrackGroups(
         session,
         cleanupIds,
       });
+      cleanupIds.push(teamGroup.id);
       try {
         await writePureTrackGroupBlob(teamGroup, item.bccPilotIds, round.id, now, {
           teamId: item.team.id,
           callerUserId: options.callerUserId,
         });
       } catch (cause: unknown) {
-        await deleteGroups(session, [teamGroup.id], beforeOutbound);
-        throw cause;
+        await Promise.allSettled([deleteGroups(session, [teamGroup.id], beforeOutbound)]);
+        throw new PureTrackGroupOperationError(cleanupIds, cause);
       }
-      cleanupIds.push(teamGroup.id);
       teamResults.push({
         teamId: item.team.id,
         groupId: teamGroup.id,
@@ -169,6 +169,7 @@ export async function createPureTrackGroups(
     }
     await importPilots(roundGroup.id, allPureTrackIds, beforeOutbound, session);
   } catch (cause: unknown) {
+    if (cause instanceof PureTrackGroupOperationError) throw cause;
     throw new PureTrackGroupOperationError(cleanupIds, cause);
   }
   return {

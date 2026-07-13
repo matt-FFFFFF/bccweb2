@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 import { useEffect, useState } from "react";
 import { useAuth } from "../../hooks/useAuth.js";
-import { api } from "../../lib/api.js";
+import { api, ApiError } from "../../lib/api.js";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
 
 const btnStyle = (color: string, bg: string): React.CSSProperties => ({
@@ -57,7 +57,7 @@ export default function AdminPureTrackGroups() {
       setGroups(data);
       setSelectedIds(new Set());
     } catch (ex) {
-      setLoadErr(ex instanceof Error ? ex.message : "Failed to load groups");
+      setLoadErr(ex instanceof ApiError ? (ex.detail ?? ex.message) : ex instanceof Error ? ex.message : "Failed to load groups");
     } finally {
       setLoading(false);
     }
@@ -83,7 +83,7 @@ export default function AdminPureTrackGroups() {
       setMsgOk(true);
       await load();
     } catch (ex) {
-      setMsg(ex instanceof Error ? ex.message : "Failed to delete");
+      setMsg(ex instanceof ApiError ? (ex.detail ?? ex.message) : ex instanceof Error ? ex.message : "Failed to delete");
       setMsgOk(false);
     } finally {
       setBusy(false);
@@ -140,6 +140,7 @@ export default function AdminPureTrackGroups() {
                   <td style={{ padding: "0.35rem 0.25rem" }}>
                     <input
                       type="checkbox"
+                      aria-label={`Select group ${g.name}`}
                       checked={selectedIds.has(g.id)}
                       onChange={() => toggleSelect(g.id)}
                       data-testid={`select-${g.id}`}

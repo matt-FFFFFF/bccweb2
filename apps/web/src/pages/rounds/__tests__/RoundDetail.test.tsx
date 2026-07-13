@@ -366,4 +366,55 @@ describe("RoundDetail — PureTrack rendering and polling", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(12000); });
     expect(screen.getByText("Round 1 puretrack")).toBeInTheDocument();
   });
+
+  it("surfaces retry affordance when poll timeout is reached", async () => {
+    vi.useFakeTimers();
+    mockIdentity = { userId: "u", email: "a@x", roles: ["Admin"], pilotId: null, clubId: null };
+    const baseRound = makeRound("Locked");
+    baseRound.pureTrackGroupName = "Round 1 puretrack";
+    baseRound.pureTrackGroupSlug = "round-1-puretrack";
+    baseRound.pureTrack = { status: "pending" };
+
+    let roundFetchCount = 0;
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === "rounds/r1") {
+        roundFetchCount += 1;
+        return Promise.resolve({ ...baseRound, pureTrack: { ...baseRound.pureTrack } }) as Promise<unknown>;
+      }
+      if (path === "rounds/r1/brief") return Promise.reject(new ApiError(404, "NOT_FOUND", "no brief"));
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+
+    renderPage();
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Queued…")).toBeInTheDocument();
+
+    // Fast-forward through 15 polls
+    for (let i = 0; i < 16; i++) {
+      await act(async () => {
+        vi.advanceTimersByTime(16000);
+      });
+    }
+
+    expect(screen.getByText("Still queued…")).toBeInTheDocument();
+    const refreshBtn = screen.getByRole("button", { name: "Refresh" });
+
+    // Clicking refresh should resume polling
+    const fetchCountBefore = roundFetchCount;
+    await act(async () => {
+      fireEvent.click(refreshBtn);
+      await Promise.resolve();
+    });
+
+    expect(roundFetchCount).toBe(fetchCountBefore + 1);
+    expect(screen.getByText("Queued…")).toBeInTheDocument();
+
+    vi.useRealTimers();
+  });
 });

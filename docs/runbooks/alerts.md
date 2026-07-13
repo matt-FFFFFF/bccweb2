@@ -469,12 +469,9 @@ progressing.
    releasing; the guard is staleness-based and self-heals — the next attempt after 12 minutes
    from acquisition succeeds without operator action.
 
-### `round-puretrack-group-poison` (dead-lettered job)
+### `round-puretrack-group-poison` (uncaught failures)
 
-A job exhausted `maxDequeueCount=5` (per `host.json`, same policy as the other three families)
-and moved to `round-puretrack-group-poison`. Its consumer (`handlePureTrackGroupPoison`) marks
-the round's `pureTrack.status` as `failed` — this is terminal; there is **no automatic reap or
-retry** for poisoned PureTrack jobs.
+Normal worker failures (e.g. `puretrack.io` API errors) are caught on dequeue 5, marked as `failed` on the round blob, and ACKed (NOT dead-lettered). Guard contention is caught and re-enqueued as a fresh delayed message. The `round-puretrack-group-poison` queue is retained ONLY as a safety net for catastrophic/uncaught host-level failures (dead-lettered after `maxDequeueCount=5`).
 
 1. Correlate with App Insights exceptions around the job's last dequeue time:
    ```kql

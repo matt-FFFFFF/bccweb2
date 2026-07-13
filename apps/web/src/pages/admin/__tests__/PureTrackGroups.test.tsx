@@ -3,7 +3,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import AdminPureTrackGroups from "../PureTrackGroups.js";
-import { api } from "../../../lib/api.js";
+import { api, ApiError } from "../../../lib/api.js";
 import * as useAuthModule from "../../../hooks/useAuth.js";
 
 vi.mock("../../../lib/api.js", async () => {
@@ -74,7 +74,7 @@ describe("AdminPureTrackGroups", () => {
 
     expect(await screen.findByText("Test Group")).toBeVisible();
 
-    const checkbox = screen.getByTestId("select-123");
+    const checkbox = screen.getByRole("checkbox", { name: "Select group Test Group" });
     fireEvent.click(checkbox);
 
     vi.mocked(api.post).mockResolvedValueOnce({ deleted: 1, alreadyGone: 0 });
@@ -100,10 +100,29 @@ describe("AdminPureTrackGroups", () => {
     expect(api.get).not.toHaveBeenCalled();
   });
 
-  it("api.get rejection shows error banner", async () => {
-    vi.mocked(api.get).mockRejectedValue(new Error("Network boom"));
+  it("api.get ApiError rejection shows detail instead of generic message", async () => {
+    vi.mocked(api.get).mockRejectedValue(new ApiError(409, "Conflict", "Lock contention on Round 123"));
     render(<AdminPureTrackGroups />);
-    expect(await screen.findByText("Network boom")).toBeVisible();
+    expect(await screen.findByText("Lock contention on Round 123")).toBeVisible();
     expect(screen.queryByRole("table")).not.toBeInTheDocument();
+  });
+
+  it("api.post ApiError rejection on delete shows detail", async () => {
+    vi.mocked(api.get).mockResolvedValueOnce([
+      { id: 123, name: "Test Group", slug: "test-group" }
+    ]);
+    render(<AdminPureTrackGroups />);
+    expect(await screen.findByText("Test Group")).toBeVisible();
+
+    const checkbox = screen.getByTestId("select-123");
+    fireEvent.click(checkbox);
+
+    vi.mocked(api.post).mockRejectedValueOnce(new ApiError(409, "Conflict", "Group is currently active"));
+    const delBtn = screen.getByRole("button", { name: "Delete selected" });
+    fireEvent.click(delBtn);
+
+    await waitFor(() => {
+      expect(screen.getByText("Group is currently active")).toBeVisible();
+    });
   });
 });
