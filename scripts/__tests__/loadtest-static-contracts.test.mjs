@@ -33,6 +33,11 @@ test("package and CI gate the complete pure load-test contract suite", async () 
   assert.match(scripts["loadtest:test"], /tests\/load\/\*\.test\.mjs/u);
   assert.doesNotMatch(scripts["loadtest:test"], /make loadtest|k6|azurite/iu);
   assert.match(workflow, /run: npm run loadtest:test/u);
+  assert.match(scripts["fixtures:test"], /fixture-operation\.test\.mjs/u);
+  assert.match(scripts["fixtures:test"], /seed-fixtures\.integration\.test\.mjs/u);
+  assert.match(scripts["fixtures:test"], /seed-fixtures\.adversarial\.test\.mjs/u);
+  assert.match(scripts["fixtures:test"], /seed-fixtures\.transaction\.test\.mjs/u);
+  assert.match(workflow, /run: npm run fixtures:test/u);
 });
 
 test("evergreen docs state the final topology, gates, ownership, and failure policy", async () => {
