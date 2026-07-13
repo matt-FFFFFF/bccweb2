@@ -8,6 +8,8 @@ import { join, resolve } from "node:path";
 import test from "node:test";
 
 import { BlobServiceClient } from "@azure/storage-blob";
+import { BCC_API_BASE_URL } from "../lib/loadTestConsts.mjs";
+import { loadTestTargetIdentity } from "../lib/loadTestTargetIdentity.mjs";
 
 const CONNECTION_STRING = process.env.FIXTURE_TEST_CONNECTION_STRING ??
   "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;" +
@@ -47,7 +49,8 @@ async function environment(t) {
     BLOB_CONTAINER_NAME: publicContainer.containerName,
     BLOB_PRIVATE_CONTAINER_NAME: privateContainer.containerName,
   };
-  return { cwd, env, publicContainer, privateContainer };
+  const seedTarget = loadTestTargetIdentity(BCC_API_BASE_URL, env);
+  return { cwd, env, publicContainer, privateContainer, seedTarget };
 }
 
 function run(script, options) {
@@ -102,8 +105,9 @@ for (const phase of [1, 2, 3, 4, 5, 6]) {
     manifest.roundIds = [roundId];
     await writeFile(manifestPath, JSON.stringify(manifest));
     await writeFile(join(context.cwd, ".loadtest-round-state.json"), JSON.stringify({
-      version: 2,
+      version: 3,
       seedRoundIds: [roundId],
+      seedTarget: context.seedTarget,
       loadRoundId: "load-preserved",
       loadTarget: "a".repeat(64),
     }));
@@ -123,7 +127,13 @@ for (const phase of [1, 2, 3, 4, 5, 6]) {
     const resumed = run(WIPE_SCRIPT, context);
     assert.equal(resumed.status, 0, resumed.stderr);
     const state = JSON.parse(await readFile(join(context.cwd, ".loadtest-round-state.json"), "utf8"));
-    assert.deepEqual(state, { version: 2, seedRoundIds: [], loadRoundId: "load-preserved", loadTarget: "a".repeat(64) });
+    assert.deepEqual(state, {
+      version: 3,
+      seedRoundIds: [],
+      seedTarget: null,
+      loadRoundId: "load-preserved",
+      loadTarget: "a".repeat(64),
+    });
     await assert.rejects(readFile(join(context.cwd, "tests/load/.prepared-round.json")), { code: "ENOENT" });
   });
 }
@@ -183,8 +193,9 @@ for (const [label, stateField, removed] of [
     await mkdir(join(context.cwd, "tests/load"), { recursive: true });
     await writeFile(join(context.cwd, "tests/load/.prepared-round.json"), JSON.stringify({ roundId }));
     await writeFile(join(context.cwd, ".loadtest-round-state.json"), JSON.stringify({
-      version: 2,
+      version: 3,
       seedRoundIds: stateField === "seedRoundIds" ? [roundId] : [],
+      seedTarget: stateField === "seedRoundIds" ? context.seedTarget : null,
       loadRoundId: stateField === "loadRoundId" ? roundId : null,
       loadTarget: stateField === "loadRoundId" ? "a".repeat(64) : null,
     }));

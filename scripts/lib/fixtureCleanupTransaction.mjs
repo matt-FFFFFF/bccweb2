@@ -9,13 +9,16 @@ import {
   writeJsonDurably,
 } from "./fixtureOperation.mjs";
 import {
+  BCC_API_BASE_URL,
   FIXTURE_MANIFEST_PATH,
   PREPARED_ROUND_PATH,
 } from "./loadTestConsts.mjs";
 import {
   readLoadTestRoundState,
+  assertSeedRoundTarget,
   replaceSeedRoundIds,
 } from "./loadTestRoundState.mjs";
+import { loadTestTargetIdentity } from "./loadTestTargetIdentity.mjs";
 
 function fail(message) {
   throw new Error(`FIXTURE_CLEANUP_OWNERSHIP: ${message}`);
@@ -35,6 +38,7 @@ export async function removePreparedMetadataForSeedRound() {
   const preparedRoundId = await readPreparedRoundId();
   if (preparedRoundId === null) return false;
   const state = await readLoadTestRoundState();
+  assertSeedRoundTarget(state, loadTestTargetIdentity(BCC_API_BASE_URL));
   if (!state.seedRoundIds.includes(preparedRoundId)) return false;
   await rm(PREPARED_ROUND_PATH, { force: true });
   return true;
@@ -57,6 +61,8 @@ export async function cleanupFixturesTransaction(
   const ownership = parseFixtureOwnership(manifest);
   const retainedOwnership = retainedManifest ? parseFixtureOwnership(retainedManifest) : undefined;
   const roundState = await readLoadTestRoundState();
+  const seedTarget = loadTestTargetIdentity(BCC_API_BASE_URL);
+  assertSeedRoundTarget(roundState, seedTarget);
   if ((checkpoint?.phase ?? 0) < 5) {
     assertRoundProof(ownership, roundState.seedRoundIds);
   }
@@ -91,7 +97,8 @@ export async function cleanupFixturesTransaction(
   await rm(FIXTURE_MANIFEST_PATH, { force: true });
   await afterPhase(5);
   await replaceSeedRoundIds(
-    roundState.seedRoundIds.filter((roundId) => !ownedRounds.has(roundId))
+    roundState.seedRoundIds.filter((roundId) => !ownedRounds.has(roundId)),
+    seedTarget,
   );
   const preparedRoundId = await readPreparedRoundId();
   if (preparedRoundId !== null && ownedRounds.has(preparedRoundId)) {

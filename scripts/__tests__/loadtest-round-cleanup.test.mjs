@@ -79,7 +79,13 @@ test("load cleanup consumes checkpoint ownership without prepared metadata", asy
 
   // When
   const result = await cleanupLoadRound({
-    readState: async () => ({ version: 2, seedRoundIds: ["seed-preserved"], loadRoundId: "load-orphan", loadTarget: TARGET }),
+    readState: async () => ({
+      version: 3,
+      seedRoundIds: ["seed-preserved"],
+      seedTarget: TARGET,
+      loadRoundId: "load-orphan",
+      loadTarget: TARGET,
+    }),
     targetIdentity: TARGET,
     cleanup: async (roundIds) => {
       calls.push({ kind: "cleanup", roundIds });
@@ -104,7 +110,13 @@ test("load cleanup removes stale prepared metadata without guessing a round", as
 
   // When
   const result = await cleanupLoadRound({
-    readState: async () => ({ version: 2, seedRoundIds: ["seed-preserved"], loadRoundId: null, loadTarget: null }),
+    readState: async () => ({
+      version: 3,
+      seedRoundIds: ["seed-preserved"],
+      seedTarget: TARGET,
+      loadRoundId: null,
+      loadTarget: null,
+    }),
     targetIdentity: TARGET,
     cleanup: async () => calls.push({ kind: "unexpected-cleanup" }),
     clearLoadRoundId: async () => calls.push({ kind: "unexpected-clear" }),
