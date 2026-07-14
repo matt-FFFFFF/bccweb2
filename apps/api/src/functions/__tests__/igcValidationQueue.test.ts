@@ -1,6 +1,5 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
-// allow: SIZE_OK — one Azurite-backed acceptance matrix for the T6 queue transaction.
 import { randomUUID } from "node:crypto";
 import type { FlightValidation, IgcValidationJob, Round, SeasonResults } from "@bccweb/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

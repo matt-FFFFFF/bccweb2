@@ -1,6 +1,5 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
-// allow: SIZE_OK — one Azurite-backed acceptance matrix for both T8 remediation endpoints.
 import { randomUUID } from "node:crypto";
 import type {
   Flight,
