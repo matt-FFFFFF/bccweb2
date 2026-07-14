@@ -43,6 +43,7 @@ const fullDefaultConfig = {
   maxPilotScoresCountedPerTeam: 4, // BaseController.cs:2359
   leagueRoundScoresCounted: 6, // LeagueTeamSeasonViewModel.cs:27
   flightDateValidationEnabled: true,
+  flightSignatureValidationEnabled: false,
   roundBriefRecipients: [],
   wingFactors: defaultWingFactors,
   taskMaxPoints: 1000, // BaseController.cs:2461 (int taskMaxPoints = 1000)
@@ -60,6 +61,7 @@ const validConfig = {
   maxPilotScoresCountedPerTeam: 3,
   leagueRoundScoresCounted: 5,
   flightDateValidationEnabled: false,
+  flightSignatureValidationEnabled: true,
   roundBriefRecipients: [],
   wingFactors: {
     "EN A": 1.1,
@@ -129,6 +131,10 @@ describe("ConfigSchema", () => {
 
   test("round brief recipients default to an empty array", () => {
     expect(ConfigSchema.parse({}).roundBriefRecipients).toEqual([]);
+  });
+
+  test("flight signature validation defaults to false when absent", () => {
+    expect(ConfigSchema.parse({}).flightSignatureValidationEnabled).toBe(false);
   });
 
   test("round brief recipients heal by dropping invalid entries", () => {
@@ -223,6 +229,12 @@ describe("ConfigSchema", () => {
 });
 
 describe("ConfigPatchSchema", () => {
+  test("accepts a flight signature validation toggle", () => {
+    expect(ConfigPatchSchema.parse({ flightSignatureValidationEnabled: true })).toEqual({
+      flightSignatureValidationEnabled: true,
+    });
+  });
+
   test("rejects invalid round brief recipients", () => {
     expect(
       ConfigPatchSchema.safeParse({ roundBriefRecipients: ["nope"] }).success,

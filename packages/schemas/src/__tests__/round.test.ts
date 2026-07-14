@@ -1,6 +1,12 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
+/// <reference types="node" />
+
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, test } from "vitest";
+import * as z from "zod/v4";
 
 import { BriefSchema } from "../brief.js";
 import {
@@ -32,6 +38,30 @@ const validFlight = {
   awardedUKPB: false,
   awardedOverallPB: false,
 } as const;
+
+const fullFlightValidation = {
+  signature: "valid",
+  date: "valid",
+  overridden: true,
+  overriddenBy: "admin-1",
+  overriddenAt: "2026-06-11T18:40:00.000Z",
+  checkedAt: "2026-06-11T18:39:00.000Z",
+  validationAttemptId: "validation-attempt-1",
+  faiStatus: "VERIFIED",
+  faiServer: "https://vali.fai-civl.org",
+  faiMsg: "G-Record valid",
+} as const;
+
+const legacyRoundFixturePath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../scoring/src/__tests__/fixtures/legacy-rounds/legacy-01-one-flight-one-club.json",
+);
+
+const LegacyRoundFixtureSchema = z.object({
+  input: z.object({
+    round: z.unknown(),
+  }),
+});
 
 const validPilotSlot = {
   placeInTeam: 1,
@@ -180,6 +210,37 @@ describe("RoundSummarySchema", () => {
 describe("RoundSchema", () => {
   test("round-trips a valid Round", () => {
     expect(RoundSchema.parse(validRound)).toEqual(validRound);
+  });
+
+  test("preserves a full nested flight validation object", () => {
+    const roundWithValidation = {
+      ...validRound,
+      teams: [
+        {
+          ...validTeam,
+          pilots: [
+            {
+              ...validPilotSlot,
+              flight: { ...validFlight, validation: fullFlightValidation },
+            },
+          ],
+        },
+      ],
+    };
+
+    const parsed = RoundSchema.parse(roundWithValidation);
+
+    expect(JSON.stringify(parsed.teams[0]?.pilots[0]?.flight?.validation)).toBe(
+      JSON.stringify(fullFlightValidation),
+    );
+  });
+
+  test("parses an existing legacy round fixture without flight validation", () => {
+    const fixture = LegacyRoundFixtureSchema.parse(
+      JSON.parse(readFileSync(legacyRoundFixturePath, "utf8")),
+    );
+
+    expect(RoundSchema.safeParse(fixture.input.round).success).toBe(true);
   });
 
   test("fails when id identity field is missing", () => {
@@ -423,6 +484,16 @@ describe("PilotSlotSchema and FlightSchema", () => {
     expect(parsed.sanityFlags).toEqual(["GPS_SPIKE"]);
     expect(parsed.scoredAt).toBe("2026-06-11T18:45:00.000Z");
     expect(parsed.scoredByVersion).toBe("scoring@1.2.3");
+  });
+
+  test("round-trips full flight validation and strips unknown validation keys", () => {
+    const parsed = FlightSchema.parse({
+      ...validFlight,
+      validation: { ...fullFlightValidation, obsolete: "drop-me" },
+    });
+
+    expect(parsed.validation).toEqual(fullFlightValidation);
+    expect(parsed.validation).not.toHaveProperty("obsolete");
   });
 });
 
