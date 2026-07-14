@@ -125,9 +125,10 @@ export default function RoundManage() {
     const maxCount = Math.max(pdfActive ? pollCount : 0, ptActive ? ptPollCount : 0);
     const delay = Math.min(3000 * Math.pow(1.5, maxCount), 15000);
     const timer = setTimeout(() => {
-      void loadRound();
-      if (pdfActive) setPollCount((c) => c + 1);
-      if (ptActive) setPtPollCount((c) => c + 1);
+      void loadRound().finally(() => {
+        if (pdfActive) setPollCount((c) => c + 1);
+        if (ptActive) setPtPollCount((c) => c + 1);
+      });
     }, delay);
     return () => clearTimeout(timer);
   }, [round?.brief?.pdfStatus, round?.pureTrack?.status, pollCount, pollTimeout, ptPollCount, ptPollTimeout, loadRound]);
