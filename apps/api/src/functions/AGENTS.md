@@ -1,7 +1,8 @@
 # apps/api/src/functions — HTTP handler modules
 
-Each file self-registers one or more `app.http(...)` or `app.storageQueue(...)` handlers
-at the **bottom**. **A new file here is DEAD until imported in [`../index.ts`](../index.ts).**
+Entry modules self-register `app.http(...)` or `app.storageQueue(...)` handlers at the
+**bottom** and are dead until imported in [`../index.ts`](../index.ts). Helper modules
+(for example `roundUnregistration.ts`) are imported by an entry module instead.
 See [`apps/api/AGENTS.md`](../../AGENTS.md) for the module list, auth, env, and testing
 gotchas, and root [AGENTS.md](../../../../AGENTS.md) for the overall architecture.
 
@@ -46,6 +47,6 @@ gotchas, and root [AGENTS.md](../../../../AGENTS.md) for the overall architectur
 
 ## New file checklist
 
-- [ ] Import it in [`../index.ts`](../index.ts).
-- [ ] Bottom-of-file `app.http(...)` / `app.storageQueue(...)` registration, existing style.
+- [ ] Entry module: import it in [`../index.ts`](../index.ts) and register at the bottom.
+- [ ] Helper module: import it from its owning entry module; do not self-register.
 - [ ] Use `withErrorHandler` + shared response shape — do NOT invent a new error format.

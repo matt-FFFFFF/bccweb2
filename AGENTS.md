@@ -163,8 +163,9 @@ justify the exception at their call site. `BLOB_SCHEMA_MODE` (`observe`/`enforce
 the WingClass break-glass order, `DATA_SHAPE_INVALID`, and the `bootstrapAdmin`
 allowlisted-exception rule are detailed in
 [packages/schemas/AGENTS.md](packages/schemas/AGENTS.md) and the architecture doc — the
-`bootstrapAdmin` in `apps/api/src/__tests__/helpers/seed.ts` remains the **sole test-fixture**
-raw-JSON exception; any new test exception must update its banner and that section.
+Test raw access in `apps/api/src/__tests__/helpers/seed.ts` is limited to its banner's
+allowlist: bootstrap, controlled fixture overrides, deliberately corrupt fixtures, and
+assertion reads. Any new category must update its banner and that section.
 
 ## API (`apps/api`)
 

@@ -62,8 +62,9 @@ Vitest ([vitest.config.ts](vitest.config.ts)):
   timeout).
 - `@azure/functions` is **mocked** — `app.http()` populates a registry; tests invoke via
   `getRegisteredHandler(name)` (queue triggers via `getRegisteredQueueHandler(name)`).
-  `email`, `pdf`, `puretrack` are mocked too. `helpers/seed.ts` seeds via handlers, not
-  direct writes (except the test-fixture `bootstrapAdmin` case documented at root).
+  `email`, `pdf`, `puretrack` are mocked too. `helpers/seed.ts` prefers handlers but uses
+  raw fixture access for bootstrap, controlled ID/team/state overrides, deliberately
+  corrupt negative fixtures, and assertion reads; its banner is the allowlist.
 - `fileParallelism: false` + `sequence.concurrent: false` — sequential for stable blob
   state.
 - `TEST_BCRYPT_COST` honored only when `NODE_ENV === "test"`; else cost stays 12.

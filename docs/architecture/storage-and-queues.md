@@ -46,9 +46,10 @@ must be avoided.
 - **`DATA_SHAPE_INVALID`**: a server-side data-invariant violation. The response body is
   `{error, path, schema}` — never field values (actual values are logged server-side
   only).
-- **Test-fixture exception**: `apps/api/src/__tests__/helpers/seed.ts:bootstrapAdmin` is the
-  sole direct raw-JSON exception in test seeding because the API cannot create the first
-  admin. Any new test-fixture exception must update both its banner and this section.
+- **Test-fixture raw access**: `apps/api/src/__tests__/helpers/seed.ts` prefers handlers,
+  but its banner allows bootstrap, controlled fixture overrides, deliberately corrupt
+  negative fixtures, and assertion reads. A new category must update the banner and this
+  section.
 
 ## Storage Queues
 
@@ -89,8 +90,9 @@ Any extra key is rejected at serialisation time, so PII can never enter these me
 `POST /api/rounds/{id}/lock` sets `brief.pdfStatus = "pending"` and a fresh
 `brief.pdfAttemptId` on the round blob, then enqueues
 `{roundId, briefVersion, pdfAttemptId}`. The `briefPdf` queue-trigger consumer
-(`apps/api/src/functions/briefPdf.ts`) renders the PDF, uploads it to
-`round-briefs/{uuid}.pdf`, emails it, and flips `pdfStatus` to `ready`. Correctness is
+(`apps/api/src/functions/briefPdf.ts`) renders and uploads the PDF, then atomically flips
+`pdfStatus` to `ready`; only after that commit succeeds does it send configured email.
+Readiness therefore confirms the artifact commit, not email delivery. Correctness is
 guarded by `pdfAttemptId` plus an atomic compare-and-set commit
 (`commitBriefPdfReady`) — **not** by `briefVersion` or `visibilityTimeout`. Status values:
 `pending | processing | ready | failed`. Unlocking clears the PDF status fields.

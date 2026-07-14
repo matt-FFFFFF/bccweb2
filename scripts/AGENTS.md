@@ -1,7 +1,7 @@
 # scripts — admin, migration, load-test, and CI-gate scripts
 
-Node ESM scripts, mostly under the root `@bccweb/*` workspace (`scripts/migrate/` is the
-one exception — see below). See root [AGENTS.md](../AGENTS.md) for the storage/queue
+Node ESM scripts run from the root `bccweb2` package; `scripts/migrate/` is a standalone
+package outside the workspace graph. See root [AGENTS.md](../AGENTS.md) for the storage/queue
 architecture these scripts operate on, and
 [docs/architecture/storage-and-queues.md](../docs/architecture/storage-and-queues.md) for
 the full container/queue reference.
@@ -67,8 +67,8 @@ gate thresholds live in [docs/runbooks/load-testing.md](../docs/runbooks/load-te
 — read it before touching these scripts. `npm run loadtest:test`
 (`scripts/__tests__/loadtest-*.test.mjs`) covers pure orchestration/artifact/static
 contracts without k6 or Azurite; it also parses this repo's root AGENTS.md, `tests/load/README.md`,
-and the load-testing runbook to assert the phase sequence and cleanup policy stay in sync
-— keep those three documents' wording aligned when you touch any of them.
+and the load-testing runbook. It checks the phase sequence in each document, while other
+policy claims are checked across their combined text; keep all three aligned.
 
 ## Other key scripts
 

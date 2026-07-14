@@ -15,8 +15,10 @@ of season T&Cs.
   `{ data, loading, error, notFound }`.
 - [`api.get/post/put/delete`](lib/api.ts) — authenticated `/api/*` fetch wrapper;
   auto-attaches `Authorization: Bearer <token>`.
-- [`useAuth.tsx`](hooks/useAuth.tsx): tokens in `localStorage` (`bcc_access_token`,
-  `bcc_refresh_token`, `bcc_identity`); auto-refresh near expiry.
+- [`useAuth.tsx`](hooks/useAuth.tsx) defines the auth context/hook;
+  [`AuthProvider.tsx`](components/AuthProvider.tsx) owns token persistence and startup
+  refresh. Tokens use `localStorage` keys `bcc_access_token`, `bcc_refresh_token`, and
+  `bcc_identity`; [`api.ts`](lib/api.ts) handles single-flight refresh after a 401.
 
 ## Roles
 

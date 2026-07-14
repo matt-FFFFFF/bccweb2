@@ -61,4 +61,6 @@ touch a schema.
   (`make build`), or web tests alias to `src` and won't catch a stale build.
 - A new field must land here **before** API writes it in `enforce` mode (else it's stripped).
 - API JSON normally uses schema helpers; justified raw lease/index operations must document
-  their exception at the call site. `bootstrapAdmin` is the sole test-fixture exception.
+  their exception at the call site. Test raw access is limited by the allowlist banner in
+  `apps/api/src/__tests__/helpers/seed.ts` (bootstrap, controlled fixture overrides,
+  deliberately corrupt fixtures, and assertion reads).
