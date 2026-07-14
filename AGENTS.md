@@ -187,7 +187,20 @@ on the job status blob (`rescore-jobs/{jobId}.json`) — NOT dead-lettered; the
 only as a safety net for catastrophic/uncaught host-level failures (dead-lettered after
 `maxDequeueCount=5`). For failure triage, inspect the job status blob + App Insights.
 
-**Connection invariant**: both producers (`apps/api/src/lib/queue.ts`) and all
+**Async PureTrack group flow**: both the lock endpoint (`POST /api/rounds/{id}/lock`)
+and the manual `POST /api/rounds/{id}/puretrack/create-groups` endpoint set
+`round.pureTrack.status = "pending"` and a fresh `pureTrack.attemptId`, then enqueue a
+`{roundId, attemptId}` job (strict `PureTrackGroupJobSchema` in
+`apps/api/src/lib/queue.ts` — no PII in the message) onto `round-puretrack-group`. The
+`puretrackGroups` queue-trigger consumer (`apps/api/src/functions/puretrackGroups.ts`)
+takes a global PureTrack mutation guard, replaces then re-creates the round's PureTrack
+groups, and commits via the `attemptId` + owner-token compare-and-set
+`commitPureTrackReady` (`apps/api/src/lib/puretrackStatus.ts`), which flips
+`pureTrack.status` to `ready` only while it is still `processing`. Status values:
+`pending | processing | ready | failed`. Poisoned messages land on
+`round-puretrack-group-poison` after `maxDequeueCount=5`.
+
+**Connection invariant**: all producers (`apps/api/src/lib/queue.ts`) and all
 `app.storageQueue` triggers use the `AzureWebJobsStorage` connection setting. That is
 the only setting carrying a `QueueEndpoint` in local/Docker; `BLOB_CONNECTION_STRING` is
 blob-only. Never switch any producer to `BLOB_CONNECTION_STRING` — it would silently
