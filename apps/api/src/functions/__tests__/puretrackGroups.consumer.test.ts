@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import { randomUUID } from "node:crypto";
+import { BlockBlobClient } from "@azure/storage-blob";
 import type { PureTrackGroup, Round, RoundBrief } from "@bccweb/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -246,6 +247,52 @@ describe("pureTrackGroups queue consumer", () => {
     expect(createdGroups).toHaveLength(2);
     expect(createdGroups.every((group) => group.createdBy === requestedBy)).toBe(true);
     expect(getRegisteredQueueHandler("pureTrackGroups").queueName).toBe("round-puretrack-group");
+  });
+
+  it("skips a malformed group record while replacing valid records", async () => {
+    // Given
+    const job = await seedJob();
+    const malformedPath = "puretrack-groups/000-malformed.json";
+    await getPrivateContainer().getBlockBlobClient(malformedPath).uploadData(Buffer.from("{bad"));
+    mockSuccessfulUpstream();
+
+    // When
+    try {
+      await invokeQueue("pureTrackGroups", job, { dequeueCount: 1 });
+    } finally {
+      await getPrivateContainer().getBlobClient(malformedPath).deleteIfExists();
+    }
+
+    // Then
+    const round = await readPrivateJson<Round>(`rounds/${job.roundId}.json`);
+    expect(round?.pureTrack).toMatchObject({ status: "ready", attemptId: job.attemptId });
+    expect(round?.pureTrackGroupId).toBe(20);
+    expect(await privateBlobExists("puretrack-groups/old-round.json")).toBe(false);
+    expect(await privateBlobExists("puretrack-groups/old-team.json")).toBe(false);
+    expect(telemetryMock.trackEvent).toHaveBeenCalledWith({
+      name: "puretrack.malformedGroupRecord",
+      properties: { path: malformedPath },
+    });
+  });
+
+  it("propagates a non-404 group-record download error", async () => {
+    // Given
+    const job = await seedJob();
+    const storageError = Object.assign(new Error("injected storage failure"), { statusCode: 500 });
+    const downloadSpy = vi.spyOn(BlockBlobClient.prototype, "downloadToBuffer")
+      .mockRejectedValueOnce(storageError);
+    mockSuccessfulUpstream();
+
+    // When
+    const operation = invokeQueue("pureTrackGroups", job, { dequeueCount: 1 });
+
+    // Then
+    try {
+      await expect(operation).rejects.toBe(storageError);
+    } finally {
+      downloadSpy.mockRestore();
+    }
+    expect((await readPrivateJson<Round>(`rounds/${job.roundId}.json`))?.pureTrack?.status).toBe("pending");
   });
 
   it("preserves default group attribution for a system-created attempt", async () => {

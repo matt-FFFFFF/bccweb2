@@ -127,15 +127,33 @@ export default function RoundDetail() {
       }
     }
 
-    if (!doPoll) return;
+    if (!doPoll || !id) return;
 
+    let cancelled = false;
     const delay = Math.min(3000 * Math.pow(1.5, ptPollCount), 15000);
     const timer = setTimeout(() => {
-      loadRound({ silent: true });
-      setPtPollCount((c) => c + 1);
+      api.get<Round>(`rounds/${id}`)
+        .then((roundData) => {
+          if (!cancelled) {
+            setRound(roundData);
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            console.warn("PureTrack poll round fetch failed", err);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setPtPollCount((c) => c + 1);
+          }
+        });
     }, delay);
-    return () => clearTimeout(timer);
-  }, [round?.pureTrack?.status, ptPollCount, ptPollTimeout, loadRound]);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [round?.pureTrack?.status, ptPollCount, ptPollTimeout, id]);
 
   const { data: pilotsIndex } = useBlob<PilotSummary[]>("pilots.json");
 

@@ -45,6 +45,7 @@ import {
   releasePureTrackGuard,
 } from "../lib/puretrackGuard.js";
 import { mutatePureTrackEchoes, setPureTrackStatus } from "../lib/puretrackStatus.js";
+import { parsePureTrackRecord } from "../lib/puretrackRecord.js";
 import { enqueuePureTrackGroupJob } from "../lib/queue.js";
 
 const DeletePureTrackGroupsBodySchema = z.object({
@@ -55,11 +56,6 @@ const DeletePureTrackGroupsBodySchema = z.object({
     "ids must be unique",
   ),
 }).strict();
-
-const PureTrackRecordRefSchema = z.looseObject({
-  roundId: z.string().min(1),
-  externalId: z.string().regex(/^\d+$/),
-});
 
 function isCoord(roles: string[]): boolean {
   return roles.includes("RoundsCoord") || roles.includes("Admin");
@@ -115,20 +111,20 @@ async function listPureTrackRecordRefs(ids: ReadonlySet<number>): Promise<PureTr
   const records: PureTrackRecordRef[] = [];
   for await (const item of container.listBlobsFlat({ prefix: "puretrack-groups/" })) {
     if (!item.name.endsWith(".json")) continue;
+    let buffer: Buffer;
     try {
-      const raw: unknown = JSON.parse(
-        (await container.getBlockBlobClient(item.name).downloadToBuffer()).toString("utf8"),
-      );
-      const parsed = PureTrackRecordRefSchema.safeParse(raw);
-      if (!parsed.success) continue;
-      const externalId = Number(parsed.data.externalId);
-      if (Number.isSafeInteger(externalId) && ids.has(externalId)) {
-        records.push({ path: item.name, roundId: parsed.data.roundId, externalId });
-      }
+      buffer = await container.getBlockBlobClient(item.name).downloadToBuffer();
     } catch (error: unknown) {
       if (!(error instanceof Object) || !("statusCode" in error) || error.statusCode !== 404) {
         throw error;
       }
+      continue;
+    }
+    const parsed = parsePureTrackRecord(buffer, item.name);
+    if (parsed === null) continue;
+    const externalId = Number(parsed.externalId);
+    if (Number.isSafeInteger(externalId) && ids.has(externalId)) {
+      records.push({ path: item.name, roundId: parsed.roundId, externalId });
     }
   }
   return records;

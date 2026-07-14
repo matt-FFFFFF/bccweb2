@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { randomUUID } from "crypto";
+import { BlockBlobClient } from "@azure/storage-blob";
 import type { PureTrackGroup, Round, RoundBrief } from "@bccweb/types";
 import { makeAuthRequest, invoke, invokeQueue } from "../../__tests__/helpers/api.js";
 import {
@@ -16,6 +17,18 @@ import {
   releasePureTrackGuard,
 } from "../../lib/puretrackGuard.js";
 import * as blobJson from "../../lib/blobJson.js";
+
+const telemetryMock = vi.hoisted(() => {
+  const trackEvent = vi.fn();
+  return { trackEvent, client: { trackEvent } };
+});
+vi.mock("../../lib/telemetry.js", () => ({
+  getTelemetryClient: () => telemetryMock.client,
+  setup: vi.fn(),
+  resetForTests: vi.fn(),
+}));
+
+import { getPrivateContainer } from "../../__tests__/helpers/azurite.js";
 import "../puretrack.js";
 import "../puretrackGroups.js";
 
@@ -320,14 +333,23 @@ describe("POST /api/manage/puretrack/groups/delete", () => {
     };
     await writePrivateJson(`round-briefs/${roundId}.json`, brief);
     const record = await seedPureTrackGroupBlob({ roundId, externalId: "10" });
+    const malformedPath = "puretrack-groups/000-malformed.json";
+    await getPrivateContainer().getBlockBlobClient(malformedPath).uploadData(
+      Buffer.from(JSON.stringify({ roundId: randomUUID(), externalId: "not-numeric" })),
+    );
     await writePrivateJson(`signatures/${roundId}/proof.json`, { signed: true });
     mockPureTrack([{ id: 10, name: "Round group", slug: "round-group" }]);
     const { user } = await makeUser({ roles: ["Admin"] });
 
-    const res = await invoke(
-      "deletePureTrackGroups",
-      makeAuthRequest(user.id, user.email, { method: "POST", body: { ids: [10, 99] } }),
-    );
+    let res: Awaited<ReturnType<typeof invoke>>;
+    try {
+      res = await invoke(
+        "deletePureTrackGroups",
+        makeAuthRequest(user.id, user.email, { method: "POST", body: { ids: [10, 99] } }),
+      );
+    } finally {
+      await getPrivateContainer().getBlobClient(malformedPath).deleteIfExists();
+    }
 
     expect(res.status).toBe(200);
     expect(res.jsonBody).toEqual({ deleted: 1, alreadyGone: 1 });
@@ -339,6 +361,35 @@ describe("POST /api/manage/puretrack/groups/delete", () => {
     expect(updatedRound?.scoring).toEqual(round.scoring);
     expect(updatedBrief?.hash).toBe("frozen-hash");
     expect(await readPrivateJson(`signatures/${roundId}/proof.json`)).toEqual({ signed: true });
+    expect(telemetryMock.trackEvent).toHaveBeenCalledWith({
+      name: "puretrack.malformedGroupRecord",
+      properties: { path: malformedPath },
+    });
+  });
+
+  it("propagates a non-404 group-record download error", async () => {
+    // Given
+    const roundId = randomUUID();
+    const record = await seedPureTrackGroupBlob({ roundId, externalId: "10" });
+    mockPureTrack([{ id: 10, name: "Round group", slug: "round-group" }]);
+    const storageError = Object.assign(new Error("injected storage failure"), { statusCode: 500 });
+    const downloadSpy = vi.spyOn(BlockBlobClient.prototype, "downloadToBuffer")
+      .mockRejectedValueOnce(storageError);
+    const { user } = await makeUser({ roles: ["Admin"] });
+
+    // When
+    const operation = invoke(
+      "deletePureTrackGroups",
+      makeAuthRequest(user.id, user.email, { method: "POST", body: { ids: [10] } }),
+    );
+
+    // Then
+    try {
+      expect((await operation).status).toBe(500);
+    } finally {
+      downloadSpy.mockRestore();
+      await getPrivateContainer().getBlobClient(`puretrack-groups/${record.id}.json`).deleteIfExists();
+    }
   });
 
   it("reports a group that disappears at DELETE time as already gone", async () => {

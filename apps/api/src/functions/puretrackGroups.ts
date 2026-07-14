@@ -3,7 +3,6 @@
 import { app, type InvocationContext } from "@azure/functions";
 import { BlobServiceClient, type ContainerClient } from "@azure/storage-blob";
 import { RoundSchema } from "@bccweb/schemas";
-import * as z from "zod/v4";
 
 import { getPrivateBlobClient } from "../lib/blob.js";
 import { readJson } from "../lib/blobJson.js";
@@ -11,17 +10,13 @@ import { acquirePureTrackMutationGuard, assertPureTrackGuardOwned, releasePureTr
 import { authenticate, createPureTrackGroups, deleteGroups, isPureTrackEnabled, listMyGroups, loadPilotPureTrackIds, PureTrackCreateResponseError, PureTrackDeleteError, PureTrackGroupOperationError, type BeforePureTrackOutbound, type PureTrackRoundResult, type PureTrackSession } from "../lib/puretrack.js";
 import { commitPureTrackReady, mutatePureTrackEchoes, setPureTrackStatus } from "../lib/puretrackStatus.js";
 import { enqueuePureTrackGroupJob, PureTrackGroupJobSchema, type PureTrackGroupJob } from "../lib/queue.js";
+import { parsePureTrackRecord } from "../lib/puretrackRecord.js";
 import { getTelemetryClient } from "../lib/telemetry.js";
 import { redactObject } from "../lib/telemetryRedactor.js";
 
 const MAX_DEQUEUE = 5;
 const FINAL_FAILURE_STATUSES = ["pending", "processing"] as const;
-const PureTrackRecordSchema = z.looseObject({
-  roundId: z.string(),
-  externalId: z.string().regex(/^\d+$/),
-});
 
-type QueueMessage = unknown;
 type RecordedGroup = { readonly path: string; readonly externalId: number };
 type ActiveJob = {
   readonly job: PureTrackGroupJob;
@@ -41,7 +36,7 @@ class PureTrackAttemptSupersededError extends Error {
   constructor() { super("PureTrack group attempt was superseded"); }
 }
 
-function parseQueueMessage(message: QueueMessage): PureTrackGroupJob {
+function parseQueueMessage(message: unknown): PureTrackGroupJob {
   const raw: unknown = typeof message === "string" ? JSON.parse(message) : message;
   return PureTrackGroupJobSchema.parse(raw);
 }
@@ -63,17 +58,18 @@ async function listRecordedGroups(roundId: string): Promise<readonly RecordedGro
   const records: RecordedGroup[] = [];
   for await (const item of container.listBlobsFlat({ prefix: "puretrack-groups/" })) {
     if (!item.name.endsWith(".json")) continue;
+    let buffer: Buffer;
     try {
-      const parsed = PureTrackRecordSchema.safeParse(
-        JSON.parse((await container.getBlockBlobClient(item.name).downloadToBuffer()).toString("utf8")),
-      );
-      if (!parsed.success || parsed.data.roundId !== roundId) continue;
-      const externalId = Number(parsed.data.externalId);
-      if (Number.isSafeInteger(externalId) && externalId > 0) {
-        records.push({ path: item.name, externalId });
-      }
+      buffer = await container.getBlockBlobClient(item.name).downloadToBuffer();
     } catch (error: unknown) {
       if (statusCodeOf(error) !== 404) throw error;
+      continue;
+    }
+    const parsed = parsePureTrackRecord(buffer, item.name);
+    if (parsed === null || parsed.roundId !== roundId) continue;
+    const externalId = Number(parsed.externalId);
+    if (Number.isSafeInteger(externalId) && externalId > 0) {
+      records.push({ path: item.name, externalId });
     }
   }
   return records;
@@ -194,7 +190,7 @@ async function processEnabledJob(job: PureTrackGroupJob, guard: RenewableGuard):
   }
 }
 
-export async function handlePureTrackGroupJob(message: QueueMessage, ctx: InvocationContext): Promise<void> {
+export async function handlePureTrackGroupJob(message: unknown, ctx: InvocationContext): Promise<void> {
   const job = parseQueueMessage(message);
   const dequeueCount = Number(ctx.triggerMetadata?.["dequeueCount"] ?? 1);
   const initialRound = await readRound(job.roundId);
@@ -248,7 +244,7 @@ export async function handlePureTrackGroupJob(message: QueueMessage, ctx: Invoca
   }
 }
 
-export async function handlePureTrackGroupPoison(message: QueueMessage): Promise<void> {
+export async function handlePureTrackGroupPoison(message: unknown): Promise<void> {
   let job: PureTrackGroupJob;
   try {
     job = parseQueueMessage(message);

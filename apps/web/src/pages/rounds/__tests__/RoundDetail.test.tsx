@@ -407,6 +407,49 @@ describe("RoundDetail — PureTrack rendering and polling", () => {
     expect(screen.getByText("Round 1 puretrack")).toBeInTheDocument();
   });
 
+  it("polls successfully to ready even if the brief endpoint returns 500 on subsequent requests", async () => {
+    vi.useFakeTimers();
+    mockIdentity = { userId: "u", email: "a@x", roles: ["Admin"], pilotId: null, clubId: null };
+    const baseRound = makeRound("Locked");
+    baseRound.pureTrackGroupName = "Round 1 puretrack";
+    baseRound.pureTrackGroupSlug = "round-1-puretrack";
+    baseRound.pureTrack = { status: "pending" };
+
+    let roundFetchCount = 0;
+    let briefFetchCount = 0;
+    vi.mocked(api.get).mockImplementation((path: string) => {
+      if (path === "rounds/r1") {
+        roundFetchCount += 1;
+        if (roundFetchCount === 2) baseRound.pureTrack = { status: "ready" };
+        return Promise.resolve({ ...baseRound, pureTrack: { ...baseRound.pureTrack } }) as Promise<unknown>;
+      }
+      if (path === "rounds/r1/brief") {
+        briefFetchCount += 1;
+        if (briefFetchCount === 1) return Promise.resolve({ version: 1 });
+        return Promise.reject(new ApiError(500, "SERVER_ERROR", "broken brief"));
+      }
+      return Promise.reject(new Error(`unexpected ${path}`));
+    });
+
+    renderPage();
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Queued…")).toBeInTheDocument();
+    expect(roundFetchCount).toBe(1);
+    expect(briefFetchCount).toBe(1);
+
+    await act(async () => { await vi.advanceTimersByTimeAsync(3100); });
+
+    expect(roundFetchCount).toBe(2);
+    expect(screen.getByText("Round 1 puretrack")).toBeInTheDocument();
+  });
+
   it("surfaces retry affordance when poll timeout is reached", async () => {
     vi.useFakeTimers();
     mockIdentity = { userId: "u", email: "a@x", roles: ["Admin"], pilotId: null, clubId: null };
