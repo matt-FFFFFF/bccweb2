@@ -50,6 +50,7 @@ describe("AdminConfig", () => {
     leagueRoundScoresCounted: 4,
     taskMaxPoints: 900,
     flightDateValidationEnabled: false,
+    flightSignatureValidationEnabled: false,
     roundBriefRecipients: [],
     wingFactors: {
       "EN A": 1.1,
@@ -109,6 +110,7 @@ describe("AdminConfig", () => {
     fireEvent.change(getInputByLabel("Advanced Pilot"), { target: { value: "0.98" } });
     fireEvent.change(getInputByLabel("3 flights"), { target: { value: "0.75" } });
     fireEvent.change(getInputByLabel("Pilot scores counted per team"), { target: { value: "6" } });
+    fireEvent.click(screen.getByLabelText("IGC signature validation enabled"));
 
     // Submit
     fireEvent.click(screen.getByRole("button", { name: /Save config/ }));
@@ -123,6 +125,7 @@ describe("AdminConfig", () => {
         leagueRoundScoresCounted: 4,
         taskMaxPoints: 900,
         flightDateValidationEnabled: false,
+        flightSignatureValidationEnabled: true, // toggled
         roundBriefRecipients: [],
         wingFactors: {
           "EN A": 1.1,
