@@ -78,7 +78,6 @@ locals {
     "jwt-secret"                    = { value = local.jwt_secret_test_value, version = var.jwt_secret_version }
     "acs-connection-string"         = { value = local.acs_connection_string_test_value, version = var.acs_secret_version }
     "appinsights-connection-string" = { value = var.app_insights_connection_string, version = "1" }
-    "round-brief-emails"            = { value = var.round_brief_emails, version = "1" }
     "puretrack-api-key"             = { value = var.puretrack_api_key, version = "1" }
     "puretrack-email"               = { value = var.puretrack_email, version = "1" }
     "puretrack-password"            = { value = var.puretrack_password, version = "1" }

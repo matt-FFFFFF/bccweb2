@@ -14,7 +14,6 @@ locals {
     { name = "ACS_CONNECTION_STRING", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/acs-connection-string/)" },
     { name = "APPLICATIONINSIGHTS_CONNECTION_STRING", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/appinsights-connection-string/)" },
     { name = "ACS_SENDER_ADDRESS", value = var.acs_sender_address },
-    { name = "ROUND_BRIEF_EMAILS", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/round-brief-emails/)" },
     { name = "PURETRACK_API_KEY", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/puretrack-api-key/)" },
     { name = "PURETRACK_EMAIL", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/puretrack-email/)" },
     { name = "PURETRACK_PASSWORD", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/puretrack-password/)" },

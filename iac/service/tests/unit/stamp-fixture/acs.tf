@@ -13,7 +13,7 @@
 # per-stamp to preserve env blast-radius isolation.
 #
 # Required module inputs (see variables.tf): acs_email_domain_id,
-# acs_sender_address, round_brief_emails, puretrack_api_key, puretrack_email,
+# acs_sender_address, puretrack_api_key, puretrack_email,
 # puretrack_password.
 #
 # Coordination:

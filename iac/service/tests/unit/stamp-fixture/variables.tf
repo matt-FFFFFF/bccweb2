@@ -77,13 +77,6 @@ variable "acs_sender_address" {
   nullable    = false
 }
 
-variable "round_brief_emails" {
-  description = "Comma-separated round brief recipient addresses."
-  type        = string
-  sensitive   = true
-  nullable    = false
-}
-
 variable "puretrack_api_key" {
   description = "PureTrack API key for the BCC account."
   type        = string

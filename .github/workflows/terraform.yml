@@ -49,7 +49,6 @@ jobs:
       # Sensitive service-stack inputs flow as TF_VAR_* env vars straight from
       # env-scoped secrets — never written to disk. Unset for the common
       # stack, which declares no such variables (terraform ignores extras).
-      TF_VAR_round_brief_emails: ${{ secrets.TF_VAR_ROUND_BRIEF_EMAILS }}
       TF_VAR_puretrack_api_key: ${{ secrets.TF_VAR_PURETRACK_API_KEY }}
       TF_VAR_puretrack_email: ${{ secrets.TF_VAR_PURETRACK_EMAIL }}
       TF_VAR_puretrack_password: ${{ secrets.TF_VAR_PURETRACK_PASSWORD }}
@@ -101,7 +100,7 @@ jobs:
           set -euo pipefail
           cat > "iac/env/${{ inputs.env }}.tfvars" <<EOF
           # Generated at workflow runtime from GitHub env-scoped vars — never committed.
-          # Sensitive values (round_brief_emails, puretrack_*) ride TF_VAR_* env vars.
+          # Sensitive PureTrack values ride TF_VAR_* env vars.
           stamp_name = "${{ inputs.env }}"
           location   = "uksouth"
 
