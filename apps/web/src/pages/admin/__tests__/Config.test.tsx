@@ -149,4 +149,120 @@ describe("AdminConfig", () => {
       });
     });
   });
+
+  describe("Round brief recipients", () => {
+    it("case 1: load config -> both render", async () => {
+      vi.mocked(api.get).mockResolvedValue({ ...mockConfig, roundBriefRecipients: ["a@x.com", "b@y.com"] });
+      render(<AdminConfig />);
+      await screen.findByRole("heading", { name: "League Config" });
+      expect(screen.getByDisplayValue("a@x.com")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("b@y.com")).toBeInTheDocument();
+    });
+
+    it("case 2: type invalid email + Add -> NOT added, error shown", async () => {
+      vi.mocked(api.get).mockResolvedValue(mockConfig);
+      render(<AdminConfig />);
+      await screen.findByRole("heading", { name: "League Config" });
+      fireEvent.change(screen.getByLabelText("New recipient email"), { target: { value: "invalid" } });
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
+      expect(screen.queryByDisplayValue("invalid")).not.toHaveAttribute("aria-label", expect.stringContaining("Recipient"));
+      expect(screen.getByText("Invalid email.")).toBeInTheDocument();
+    });
+
+    it("case 3: add c@z.com -> appears", async () => {
+      vi.mocked(api.get).mockResolvedValue(mockConfig);
+      render(<AdminConfig />);
+      await screen.findByRole("heading", { name: "League Config" });
+      fireEvent.change(screen.getByLabelText("New recipient email"), { target: { value: "c@z.com" } });
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
+      expect(screen.getByDisplayValue("c@z.com")).toBeInTheDocument();
+      expect(screen.getByLabelText("Recipient 1")).toHaveValue("c@z.com");
+    });
+
+    it("case 4: remove a@x.com -> gone", async () => {
+      vi.mocked(api.get).mockResolvedValue({ ...mockConfig, roundBriefRecipients: ["a@x.com", "b@y.com"] });
+      render(<AdminConfig />);
+      await screen.findByRole("heading", { name: "League Config" });
+      const removeBtns = screen.getAllByRole("button", { name: "Remove" });
+      fireEvent.click(removeBtns[0]);
+      expect(screen.queryByDisplayValue("a@x.com")).not.toBeInTheDocument();
+      expect(screen.getByDisplayValue("b@y.com")).toBeInTheDocument();
+    });
+
+    it("case 5: edit a row to a valid new address + Save -> api.put called with edited list", async () => {
+      vi.mocked(api.get).mockResolvedValue({ ...mockConfig, roundBriefRecipients: ["a@x.com"] });
+      vi.mocked(api.put).mockResolvedValue({});
+      render(<AdminConfig />);
+      await screen.findByRole("heading", { name: "League Config" });
+      fireEvent.change(screen.getByLabelText("Recipient 1"), { target: { value: "new@x.com" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save config" }));
+      await waitFor(() => {
+        expect(api.put).toHaveBeenCalledWith("manage/config", expect.objectContaining({
+          roundBriefRecipients: ["new@x.com"],
+        }));
+      });
+    });
+
+    it("case 6: edit a row to an invalid address -> Save BLOCKED with inline error, api.put NOT called", async () => {
+      vi.mocked(api.get).mockResolvedValue({ ...mockConfig, roundBriefRecipients: ["a@x.com"] });
+      vi.mocked(api.put).mockResolvedValue({});
+      render(<AdminConfig />);
+      await screen.findByRole("heading", { name: "League Config" });
+      fireEvent.change(screen.getByLabelText("Recipient 1"), { target: { value: "invalid" } });
+      expect(screen.getByText("Invalid email.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Save config" }));
+      expect(screen.getByText("Please fix invalid or duplicate email recipients before saving.")).toBeInTheDocument();
+      expect(api.put).not.toHaveBeenCalled();
+    });
+
+    it("case 7: load 2 recipients, Save with NO changes -> api.put body.roundBriefRecipients deep-equals the original 2", async () => {
+      vi.mocked(api.get).mockResolvedValue({ ...mockConfig, roundBriefRecipients: ["a@x.com", "b@y.com"] });
+      vi.mocked(api.put).mockResolvedValue({});
+      render(<AdminConfig />);
+      await screen.findByRole("heading", { name: "League Config" });
+      fireEvent.click(screen.getByRole("button", { name: "Save config" }));
+      await waitFor(() => {
+        expect(api.put).toHaveBeenCalledWith("manage/config", expect.objectContaining({
+          roundBriefRecipients: ["a@x.com", "b@y.com"],
+        }));
+      });
+    });
+
+    it("case 8: add with surrounding whitespace -> persisted api.put body value is trimmed", async () => {
+      vi.mocked(api.get).mockResolvedValue(mockConfig);
+      vi.mocked(api.put).mockResolvedValue({});
+      render(<AdminConfig />);
+      await screen.findByRole("heading", { name: "League Config" });
+      fireEvent.change(screen.getByLabelText("New recipient email"), { target: { value: "  d@z.com  " } });
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
+      fireEvent.click(screen.getByRole("button", { name: "Save config" }));
+      await waitFor(() => {
+        expect(api.put).toHaveBeenCalledWith("manage/config", expect.objectContaining({
+          roundBriefRecipients: ["d@z.com"],
+        }));
+      });
+    });
+
+    it("case 9a: Add a case-only duplicate -> NOT added / Save BLOCKED with inline error", async () => {
+      vi.mocked(api.get).mockResolvedValue({ ...mockConfig, roundBriefRecipients: ["a@x.com"] });
+      render(<AdminConfig />);
+      await screen.findByRole("heading", { name: "League Config" });
+      fireEvent.change(screen.getByLabelText("New recipient email"), { target: { value: "A@X.COM" } });
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
+      expect(screen.getByText("Duplicate email.")).toBeInTheDocument();
+      expect(screen.queryByLabelText("Recipient 2")).not.toBeInTheDocument();
+    });
+
+    it("case 9b: inline-edit an existing row to a case-only duplicate -> Save BLOCKED with inline error", async () => {
+      vi.mocked(api.get).mockResolvedValue({ ...mockConfig, roundBriefRecipients: ["a@x.com", "b@y.com"] });
+      vi.mocked(api.put).mockResolvedValue({});
+      render(<AdminConfig />);
+      await screen.findByRole("heading", { name: "League Config" });
+      fireEvent.change(screen.getByLabelText("Recipient 2"), { target: { value: "A@X.COM" } });
+      expect(screen.getByText("Duplicate email.")).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Save config" }));
+      expect(screen.getByText("Please fix invalid or duplicate email recipients before saving.")).toBeInTheDocument();
+      expect(api.put).not.toHaveBeenCalled();
+    });
+  });
 });

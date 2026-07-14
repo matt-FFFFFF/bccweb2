@@ -126,6 +126,9 @@ export default function AdminConfig() {
   const [msgOk, setMsgOk] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
+  const [newRecipient, setNewRecipient] = useState("");
+  const [addError, setAddError] = useState<string | null>(null);
+
   const isAdmin = identity?.roles.includes("Admin");
 
   useEffect(() => {
@@ -163,9 +166,74 @@ export default function AdminConfig() {
     setForm((p) => p ? { ...p, minDistanceFactors: { ...p.minDistanceFactors, [k]: v } } : p);
   }
 
+  function validateEmail(val: string) {
+    const trimmed = val.trim();
+    if (!trimmed) return "Cannot be empty.";
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return "Invalid email.";
+    return null;
+  }
+
+  function handleAddRecipient() {
+    const trimmed = newRecipient.trim();
+    const err = validateEmail(trimmed);
+    if (err) {
+      setAddError(err);
+      return;
+    }
+    const lower = trimmed.toLowerCase();
+    if (form?.roundBriefRecipients.some(r => r.trim().toLowerCase() === lower)) {
+      setAddError("Duplicate email.");
+      return;
+    }
+    setForm(p => p ? { ...p, roundBriefRecipients: [...p.roundBriefRecipients, trimmed] } : p);
+    setNewRecipient("");
+    setAddError(null);
+  }
+
+  function updateRecipient(idx: number, val: string) {
+    setForm(p => {
+      if (!p) return p;
+      const next = [...p.roundBriefRecipients];
+      next[idx] = val;
+      return { ...p, roundBriefRecipients: next };
+    });
+  }
+
+  function removeRecipient(idx: number) {
+    setForm(p => {
+      if (!p) return p;
+      const next = [...p.roundBriefRecipients];
+      next.splice(idx, 1);
+      return { ...p, roundBriefRecipients: next };
+    });
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form) return;
+
+    let hasError = false;
+    const lowerSet = new Set<string>();
+    for (const r of form.roundBriefRecipients) {
+      const trimmed = r.trim();
+      if (validateEmail(trimmed) !== null) {
+        hasError = true;
+        break;
+      }
+      const lower = trimmed.toLowerCase();
+      if (lowerSet.has(lower)) {
+        hasError = true;
+        break;
+      }
+      lowerSet.add(lower);
+    }
+    
+    if (hasError) {
+      setMsg("Please fix invalid or duplicate email recipients before saving.");
+      setMsgOk(false);
+      return;
+    }
+
     setBusy(true);
     setMsg(null);
     try {
@@ -177,7 +245,7 @@ export default function AdminConfig() {
         leagueRoundScoresCounted: Number(form.leagueRoundScoresCounted),
         taskMaxPoints: Number(form.taskMaxPoints),
         flightDateValidationEnabled: form.flightDateValidationEnabled,
-        roundBriefRecipients: form.roundBriefRecipients,
+        roundBriefRecipients: form.roundBriefRecipients.map(r => r.trim()),
         wingFactors: Object.fromEntries(
           WING_CLASSES.map((wc) => [wc, Number(form.wingFactors[wc])])
         ) as Record<WingClass, number>,
@@ -244,6 +312,48 @@ export default function AdminConfig() {
             />
             Flight date validation enabled
           </label>
+        </div>
+
+        <div style={{ border: "1px solid #dee2e6", borderRadius: "0.5rem", padding: "1rem", marginBottom: "1.5rem" }}>
+          <h2 style={{ fontSize: "1rem", margin: "0 0 1rem" }}>Round brief recipients</h2>
+          <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "1rem" }}>
+            {form.roundBriefRecipients.map((r, i) => {
+              const err = validateEmail(r) || (
+                form.roundBriefRecipients.findIndex(x => x.trim().toLowerCase() === r.trim().toLowerCase()) !== i
+                  ? "Duplicate email."
+                  : null
+              );
+              return (
+                <div key={i} style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                  <input
+                    type="text"
+                    style={{ ...fi, width: "300px" }}
+                    value={r}
+                    onChange={(e) => updateRecipient(i, e.target.value)}
+                    aria-label={`Recipient ${i + 1}`}
+                  />
+                  <button type="button" onClick={() => removeRecipient(i)} style={btnStyle("#58151c", "#f8d7da")}>
+                    Remove
+                  </button>
+                  {err && <span style={{ fontSize: "0.8rem", color: "#58151c" }}>{err}</span>}
+                </div>
+              );
+            })}
+          </div>
+          <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+            <input
+              type="text"
+              style={{ ...fi, width: "300px" }}
+              value={newRecipient}
+              onChange={(e) => setNewRecipient(e.target.value)}
+              placeholder="New recipient email"
+              aria-label="New recipient email"
+            />
+            <button type="button" onClick={handleAddRecipient} style={btnStyle("#0a3622", "#d1e7dd")}>
+              Add
+            </button>
+            {addError && <span style={{ fontSize: "0.8rem", color: "#58151c" }}>{addError}</span>}
+          </div>
         </div>
 
         <div style={{ border: "1px solid #dee2e6", borderRadius: "0.5rem", padding: "1rem", marginBottom: "1.5rem" }}>
