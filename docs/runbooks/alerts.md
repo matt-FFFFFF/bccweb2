@@ -405,8 +405,6 @@ to the project owner — this may indicate a systematic schema mismatch or a bro
 
 ---
 
----
-
 ## PureTrack group pipeline (status / guard / queue / partial failure)
 
 **Severity**: 2 (investigate-async) unless noted otherwise below.
