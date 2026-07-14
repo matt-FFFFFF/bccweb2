@@ -1,8 +1,9 @@
 # apps/api/src/functions — HTTP handler modules
 
-Each file self-registers one or more `app.http(...)` handlers at the **bottom** of
-the file. **A new file here is DEAD until imported in [`../index.ts`](../index.ts).**
-See root [AGENTS.md](../../../../AGENTS.md) for the module list, roles, and env.
+Each file self-registers one or more `app.http(...)` or `app.storageQueue(...)` handlers
+at the **bottom**. **A new file here is DEAD until imported in [`../index.ts`](../index.ts).**
+See [`apps/api/AGENTS.md`](../../AGENTS.md) for the module list, auth, env, and testing
+gotchas, and root [AGENTS.md](../../../../AGENTS.md) for the overall architecture.
 
 ## Handler shape (copy `teamsCaptain.ts` / `me.ts`)
 
@@ -10,7 +11,7 @@ See root [AGENTS.md](../../../../AGENTS.md) for the module list, roles, and env.
 2. `mutationRateLimit(...)` before any write.
 3. Parse body: typed cast OR zod `safeParse`. Validate route params/required fields early.
 4. Read/write blobs via **schema helpers** (`readJson`/`writeJson`/`writePrivateJson`),
-   never raw JSON except non-JSON artifacts (PDF/image/lock).
+   except non-JSON artifacts or a justified lease/index operation documented at its call site.
 5. Return `{ status, jsonBody }`. Wrap the handler in `withErrorHandler(...)`.
 
 - Queue-trigger test handlers are captured via `getRegisteredQueueHandler(name)` in
@@ -46,5 +47,5 @@ See root [AGENTS.md](../../../../AGENTS.md) for the module list, roles, and env.
 ## New file checklist
 
 - [ ] Import it in [`../index.ts`](../index.ts).
-- [ ] Bottom-of-file `app.http(...)` registration, existing comment style.
+- [ ] Bottom-of-file `app.http(...)` / `app.storageQueue(...)` registration, existing style.
 - [ ] Use `withErrorHandler` + shared response shape — do NOT invent a new error format.

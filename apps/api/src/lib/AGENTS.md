@@ -1,7 +1,22 @@
 # apps/api/src/lib — API helpers
 
-Usage contracts for the shared helpers. Root [AGENTS.md](../../../../AGENTS.md) lists
-these by name; this file is the **cheat sheet** so you don't re-read the source.
+Usage contracts for the shared helpers. [`apps/api/AGENTS.md`](../../AGENTS.md) lists
+these by name and owns the module map/auth/env; this file is the **cheat sheet** so you
+don't re-read the source.
+
+## queue.ts — producers + job schemas
+
+- `enqueueBriefPdf`/`enqueueSignToFlyReflect`/`enqueuePureTrackGroupJob` — all use
+  the `AzureWebJobsStorage` connection (the only setting with a `QueueEndpoint` locally).
+  **Never** switch a producer to `BLOB_CONNECTION_STRING` — that's blob-only and would
+  silently break queueing.
+- `BriefPdfJobSchema`, `SignToFlyReflectJobSchema`, `PureTrackGroupJobSchema` are
+  `z.object({...}).strict()` — any extra key is rejected at serialisation time so PII can
+  never enter a queue message. `RescoreJobMessageSchema` (same pattern) lives in
+  `rescoreJob.ts` instead, guarding the Admin-only rescore enqueue.
+- Full flow-by-flow detail (brief PDF / sign reflect / rescore / PureTrack, CAS/attempt
+  semantics, poison behavior) is in
+  [docs/architecture/storage-and-queues.md](../../../../docs/architecture/storage-and-queues.md).
 
 ## blob.ts — clients + leases
 
@@ -27,6 +42,8 @@ these by name; this file is the **cheat sheet** so you don't re-read the source.
   `blob.healed` when raw JSON healed on read.
 - `writeJson` / `writePrivateJson(path,schema,data,leaseId?,opts?)` — validate-first;
   `observe` logs bad shapes, `enforce` strips/rejects before delegating to `writeBlob`.
+- Prefer these helpers for JSON. A deliberate raw JSON read/write must explain at its
+  call site why schema healing is unsafe or why it is maintaining a schema-backed index.
 
 ## http.ts
 
