@@ -147,6 +147,26 @@ export function IgcUploadButton({
               <strong>Flags:</strong> {successFlight.sanityFlags.join(", ")}
             </div>
           )}
+          {successFlight.validation && (
+            <div style={{ marginTop: "0.4rem", paddingTop: "0.4rem", borderTop: "1px solid #badbcc" }} data-testid="flight-validation">
+              {successFlight.validation.date && (
+                <div style={{ color: successFlight.validation.date === "invalid" ? "#842029" : "inherit" }}>
+                  Date: {successFlight.validation.date}
+                </div>
+              )}
+              {successFlight.validation.signature && (
+                <div>
+                  Signature: {successFlight.validation.signature === "pending" ? (
+                    <span style={{ color: "#055160" }}>checking… (coordinator will see final result)</span>
+                  ) : (
+                    <span style={{ color: successFlight.validation.signature === "invalid" ? "#842029" : "inherit" }}>
+                      {successFlight.validation.signature}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>
