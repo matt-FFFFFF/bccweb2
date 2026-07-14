@@ -162,7 +162,7 @@ export default function AdminPureTrackGroups() {
                     <a
                       href={`https://puretrack.io/group/${g.slug}`}
                       target="_blank"
-                      rel="noreferrer"
+                      rel="noopener noreferrer"
                       style={{ color: "#0066cc", textDecoration: "none" }}
                     >
                       View

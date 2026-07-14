@@ -11,14 +11,14 @@ vi.mock("../../../lib/api.js", () => ({
 }));
 
 describe("RoundWorkflowActions", () => {
-  it("allows 'Recreate PureTrack Groups' when pending or processing", () => {
+  it("shows 'Recreate PureTrack Groups' when round is Locked and user can manage", () => {
     const runAction = vi.fn();
     const recreatePureTrack = vi.fn();
     const setActionErr = vi.fn();
     const setActionBusy = vi.fn();
     const setConfirmModal = vi.fn();
 
-    // Render with pureTrackStatus="pending"
+    // Render a Locked round with canManage=true
     render(
       <RoundWorkflowActions
         roundId="test-123"
@@ -38,7 +38,7 @@ describe("RoundWorkflowActions", () => {
 
     const recreateBtn = screen.getByRole("button", { name: "Recreate PureTrack Groups" });
 
-    // It should not be disabled despite being 'pending'
+    // The button is enabled (no action in progress)
     expect(recreateBtn).not.toBeDisabled();
 
     fireEvent.click(recreateBtn);
