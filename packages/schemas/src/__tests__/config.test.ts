@@ -43,6 +43,7 @@ const fullDefaultConfig = {
   maxPilotScoresCountedPerTeam: 4, // BaseController.cs:2359
   leagueRoundScoresCounted: 6, // LeagueTeamSeasonViewModel.cs:27
   flightDateValidationEnabled: true,
+  roundBriefRecipients: [],
   wingFactors: defaultWingFactors,
   taskMaxPoints: 1000, // BaseController.cs:2461 (int taskMaxPoints = 1000)
   pilotFactors: defaultPilotFactors,
@@ -59,6 +60,7 @@ const validConfig = {
   maxPilotScoresCountedPerTeam: 3,
   leagueRoundScoresCounted: 5,
   flightDateValidationEnabled: false,
+  roundBriefRecipients: [],
   wingFactors: {
     "EN A": 1.1,
     "EN B": 1.0,
@@ -123,6 +125,17 @@ describe("ConfigSchema", () => {
     expect(parsed.pilotFactors).toEqual(defaultPilotFactors);
     expect(parsed.clubsAttendingFactors).toEqual(defaultClubsAttendingFactors);
     expect(parsed.minDistanceFactors).toEqual(defaultMinDistanceFactors);
+  });
+
+  test("round brief recipients default to an empty array", () => {
+    expect(ConfigSchema.parse({}).roundBriefRecipients).toEqual([]);
+  });
+
+  test("round brief recipients heal by dropping invalid entries", () => {
+    expect(
+      ConfigSchema.parse({ roundBriefRecipients: ["ok@x.com", "bad", 5] })
+        .roundBriefRecipients,
+    ).toEqual(["ok@x.com"]);
   });
 
   test("unknown wingFactors key is rejected in strict mode", () => {
@@ -210,6 +223,22 @@ describe("ConfigSchema", () => {
 });
 
 describe("ConfigPatchSchema", () => {
+  test("rejects invalid round brief recipients", () => {
+    expect(
+      ConfigPatchSchema.safeParse({ roundBriefRecipients: ["nope"] }).success,
+    ).toBe(false);
+  });
+
+  test("accepts an empty patch without injecting round brief recipients", () => {
+    expect(ConfigPatchSchema.safeParse({}).success).toBe(true);
+  });
+
+  test("accepts valid round brief recipients", () => {
+    expect(
+      ConfigPatchSchema.safeParse({ roundBriefRecipients: ["a@b.com"] }).success,
+    ).toBe(true);
+  });
+
   test("a single nested factor key yields exactly that key — no siblings, no top-level defaults", () => {
     const patch = ConfigPatchSchema.parse({ pilotFactors: { Pilot: 1.1 } });
 

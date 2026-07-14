@@ -48,6 +48,7 @@ interface FormState {
   leagueRoundScoresCounted: string;
   taskMaxPoints: string;
   flightDateValidationEnabled: boolean;
+  roundBriefRecipients: string[];
   wingFactors: Record<WingClass, string>;
   pilotFactors: Record<PilotRatingValue, string>;
   clubsAttendingFactors: {
@@ -94,6 +95,7 @@ function configToForm(c: Partial<Config> | null | undefined): FormState {
     leagueRoundScoresCounted: String(safe.leagueRoundScoresCounted ?? 6),
     taskMaxPoints: String(safe.taskMaxPoints ?? 1000),
     flightDateValidationEnabled: safe.flightDateValidationEnabled ?? true,
+    roundBriefRecipients: safe.roundBriefRecipients ?? [],
     wingFactors: Object.fromEntries(
       WING_CLASSES.map((wc) => [wc, String(wf[wc] ?? WING_FACTOR_DEFAULTS[wc])])
     ) as Record<WingClass, string>,
@@ -175,6 +177,7 @@ export default function AdminConfig() {
         leagueRoundScoresCounted: Number(form.leagueRoundScoresCounted),
         taskMaxPoints: Number(form.taskMaxPoints),
         flightDateValidationEnabled: form.flightDateValidationEnabled,
+        roundBriefRecipients: form.roundBriefRecipients,
         wingFactors: Object.fromEntries(
           WING_CLASSES.map((wc) => [wc, Number(form.wingFactors[wc])])
         ) as Record<WingClass, number>,

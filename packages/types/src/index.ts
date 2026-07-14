@@ -93,6 +93,8 @@ export interface Config {
    */
   leagueRoundScoresCounted: number;
   flightDateValidationEnabled: boolean;
+  /** Email addresses that receive the round-brief PDF when a round is locked; admin-editable via config. */
+  roundBriefRecipients: string[];
   wingFactors: Record<WingClass, number>;
   /** Max points a round awards before pilot/club/distance factors (intended default 1000). */
   taskMaxPoints: number;

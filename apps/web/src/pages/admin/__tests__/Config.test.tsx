@@ -47,6 +47,7 @@ describe("AdminConfig", () => {
     leagueRoundScoresCounted: 4,
     taskMaxPoints: 900,
     flightDateValidationEnabled: false,
+    roundBriefRecipients: [],
     wingFactors: {
       "EN A": 1.1,
       "EN B": 0.95,
@@ -119,6 +120,7 @@ describe("AdminConfig", () => {
         leagueRoundScoresCounted: 4,
         taskMaxPoints: 900,
         flightDateValidationEnabled: false,
+        roundBriefRecipients: [],
         wingFactors: {
           "EN A": 1.1,
           "EN B": 0.95,

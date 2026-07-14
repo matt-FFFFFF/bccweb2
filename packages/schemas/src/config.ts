@@ -3,7 +3,7 @@
 import type { Config } from "@bccweb/types";
 import * as z from "zod/v4";
 
-import { healed } from "./helpers.js";
+import { healed, healingArray } from "./helpers.js";
 
 // ─── Full-config nested factor schemas (LENIENT: heal + per-key defaults) ────
 
@@ -81,6 +81,7 @@ export const ConfigSchema = z
     maxPilotScoresCountedPerTeam: healed(z.number(), 4).default(4),
     leagueRoundScoresCounted: healed(z.number(), 6).default(6),
     flightDateValidationEnabled: healed(z.boolean(), true).default(true),
+    roundBriefRecipients: healingArray(z.email()).default([]),
     wingFactors: WingFactorsSchema.default({
       "EN A": 1.0,
       "EN B": 0.9,
@@ -182,6 +183,7 @@ export const ConfigPatchSchema = z
     maxPilotScoresCountedPerTeam: z.number().optional(),
     leagueRoundScoresCounted: z.number().optional(),
     flightDateValidationEnabled: z.boolean().optional(),
+    roundBriefRecipients: z.array(z.email()).optional(),
     wingFactors: WingFactorsPatchSchema.optional(),
     taskMaxPoints: z.number().optional(),
     pilotFactors: PilotFactorsPatchSchema.optional(),
