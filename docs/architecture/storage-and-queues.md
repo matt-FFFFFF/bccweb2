@@ -30,11 +30,11 @@ Atomic read-modify-write on either container uses 30-second blob leases —
 
 ## Schema layer
 
-Every blob family has one canonical Zod schema in `packages/schemas`. JSON normally uses
-`readJson(client, Schema)` and `writeJson` / `writePrivateJson` (see
-`apps/api/src/lib/blobJson.ts`). Raw helpers remain valid for non-JSON artifacts and for
-explicitly justified lease/index operations whose call sites document why schema healing
-must be avoided.
+Schema-backed domain blob families have canonical Zod schemas in `packages/schemas` and
+use `readJson(client, Schema)` plus `writeJson` / `writePrivateJson` (see
+`apps/api/src/lib/blobJson.ts`). Operational/control records such as rescore status blobs
+may use documented raw JSON and are outside `BLOB_SCHEMA_MODE`; raw helpers also remain
+valid for non-JSON artifacts and explicitly justified lease/index operations.
 
 - **`BLOB_SCHEMA_MODE`** (Function App env): `observe` (default) heals bad shapes in
   memory and emits telemetry only; `enforce` writes schema-parsed output, stripping
@@ -69,10 +69,10 @@ unreachable the script throws and exits non-zero. Blob containers are created ea
 the same run, so a queue-service outage still surfaces as a hard failure rather than a
 partial success.
 
-**Connection invariant**: every producer (`apps/api/src/lib/queue.ts`) and every
-`app.storageQueue` trigger uses the `AzureWebJobsStorage` connection setting — the only
-setting carrying a `QueueEndpoint` in local/Docker. `BLOB_CONNECTION_STRING` is blob-only.
-Never point a producer at `BLOB_CONNECTION_STRING`; it would silently break queueing.
+**Connection invariant**: every producer (`apps/api/src/lib/queue.ts` and
+`apps/api/src/lib/rescoreJob.ts`) and every `app.storageQueue` trigger uses the
+`AzureWebJobsStorage` connection setting — the only setting carrying a `QueueEndpoint` in
+local/Docker. `BLOB_CONNECTION_STRING` is blob-only; using it would silently break queueing.
 
 **Queue privacy**: `privacy-scan.mjs` does not cover Storage Queues. The compensating
 control is strict, `.strict()` job schemas in `apps/api/src/lib/queue.ts` and

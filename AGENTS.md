@@ -157,9 +157,10 @@ reflect/rescore/PureTrack flows, CAS/attempt semantics, poison behavior):
 
 ### Schema layer
 
-Every blob family has a canonical schema in `packages/schemas`. JSON normally goes through
-`readJson` / `writeJson` / `writePrivateJson`; deliberate raw lease/index operations must
-justify the exception at their call site. `BLOB_SCHEMA_MODE` (`observe`/`enforce`),
+Schema-backed domain blob families have canonical schemas in `packages/schemas` and use
+`readJson` / `writeJson` / `writePrivateJson`. Operational/control records such as rescore
+status blobs may use documented raw JSON; deliberate raw operations must justify the
+exception at their call site. `BLOB_SCHEMA_MODE` (`observe`/`enforce`),
 the WingClass break-glass order, `DATA_SHAPE_INVALID`, and the `bootstrapAdmin`
 allowlisted-exception rule are detailed in
 [packages/schemas/AGENTS.md](packages/schemas/AGENTS.md) and the architecture doc — the
