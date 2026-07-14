@@ -80,10 +80,8 @@ async function listRecordedGroups(roundId: string): Promise<readonly RecordedGro
 }
 
 function echoedGroupIds(round: Awaited<ReturnType<typeof readRound>>): readonly number[] {
-  return [
-    round.pureTrackGroupId,
-    ...round.teams.map((team) => team.pureTrackGroupId),
-  ].filter((id): id is number => Number.isSafeInteger(id) && id !== undefined && id > 0);
+  return [round.pureTrackGroupId, ...round.teams.map((team) => team.pureTrackGroupId)]
+    .filter((id): id is number => Number.isSafeInteger(id) && id !== undefined && id > 0);
 }
 
 async function clearDeletedGroups(roundId: string, attemptId: string, ids: readonly number[]): Promise<void> {
@@ -181,13 +179,14 @@ async function processEnabledJob(job: PureTrackGroupJob, guard: RenewableGuard):
     await cleanupInvocationGroups(active, ids);
     throw error;
   }
-  guard.handle = await renewPureTrackGuard(guard.handle);
-  const { committed } = await commitPureTrackReady(job.roundId, job.attemptId, guard.handle.ownerToken, result);
-  if (!committed && result !== null) {
-    await cleanupInvocationGroups(active, [
-      result.roundGroupId,
-      ...result.teams.map((team) => team.groupId),
-    ]);
+  const createdIds = result === null ? [] : [result.roundGroupId, ...result.teams.map((team) => team.groupId)];
+  try {
+    guard.handle = await renewPureTrackGuard(guard.handle);
+    const { committed } = await commitPureTrackReady(job.roundId, job.attemptId, guard.handle.ownerToken, result);
+    if (!committed) await cleanupInvocationGroups(active, createdIds);
+  } catch (error: unknown) {
+    await cleanupInvocationGroups(active, createdIds);
+    throw error;
   }
 }
 

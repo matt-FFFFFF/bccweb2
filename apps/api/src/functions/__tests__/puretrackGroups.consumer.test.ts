@@ -42,6 +42,7 @@ import {
 } from "../../lib/puretrackGuard.js";
 import * as blob from "../../lib/blob.js";
 import * as blobJson from "../../lib/blobJson.js";
+import * as puretrackStatus from "../../lib/puretrackStatus.js";
 import "../puretrackGroups.js";
 
 const fetchMock = vi.fn<typeof fetch>();
@@ -308,13 +309,35 @@ describe("pureTrackGroups queue consumer", () => {
     const cleanupUrls = fetchMock.mock.calls
       .filter(([, init]) => init?.method === "DELETE")
       .map(([input]) => input instanceof Request ? input.url : String(input));
+    expect(cleanupUrls.slice(-2)).toEqual([
+      "https://puretrack.io/api/groups/20",
+      "https://puretrack.io/api/groups/21",
+    ]);
+    const round = await readPrivateJson<Round>(`rounds/${job.roundId}.json`);
+    expect(round?.pureTrack).toMatchObject({ status: "pending", attemptId: "replacement" });
+    expect(round?.pureTrackGroupId).not.toBe(20);
+  });
+
+  it("deletes invocation-owned groups when the ready commit throws", async () => {
+    // Given
+    const job = await seedJob();
+    mockSuccessfulUpstream();
+    vi.spyOn(puretrackStatus, "commitPureTrackReady").mockRejectedValueOnce(
+      new Error("injected ready commit failure"),
+    );
+
+    // When
+    const operation = invokeQueue("pureTrackGroups", job, { dequeueCount: 1 });
+
+    // Then
+    await expect(operation).rejects.toThrow("injected ready commit failure");
+    const cleanupUrls = fetchMock.mock.calls
+      .filter(([, init]) => init?.method === "DELETE")
+      .map(([input]) => input instanceof Request ? input.url : String(input));
     expect(cleanupUrls).toEqual(expect.arrayContaining([
       "https://puretrack.io/api/groups/20",
       "https://puretrack.io/api/groups/21",
     ]));
-    const round = await readPrivateJson<Round>(`rounds/${job.roundId}.json`);
-    expect(round?.pureTrack).toMatchObject({ status: "pending", attemptId: "replacement" });
-    expect(round?.pureTrackGroupId).not.toBe(20);
   });
 
   it("retries cleanup for a created id after its record write and immediate delete fail", async () => {

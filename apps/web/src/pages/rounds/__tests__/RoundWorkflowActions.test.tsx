@@ -35,7 +35,7 @@ describe("RoundWorkflowActions", () => {
     );
 
     const recreateBtn = screen.getByRole("button", { name: "Recreate PureTrack Groups" });
-    
+
     // It should not be disabled despite being 'pending'
     expect(recreateBtn).not.toBeDisabled();
 
@@ -66,7 +66,7 @@ describe("RoundWorkflowActions", () => {
     );
 
     const recreateBtn = screen.getByRole("button", { name: "Working…" });
-    
+
     expect(recreateBtn).toBeDisabled();
   });
 });

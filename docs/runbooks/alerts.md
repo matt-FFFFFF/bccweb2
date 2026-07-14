@@ -481,11 +481,17 @@ Normal worker failures (e.g. `puretrack.io` API errors) are caught on dequeue 5,
    | summarize n = count(), sample_stack = any(details) by type, problemId
    | order by n desc
    ```
-2. Common causes: PureTrack upstream (`puretrack.io`) returning persistent errors, an expired
-   PureTrack session/credential (`PURETRACK_*` env), or a malformed `attemptId` mismatch caused
-   by a relock racing the worker.
+2. Common causes are genuinely uncaught host/runtime failures, such as a host termination, OOM,
+   or process crash mid-invocation, or a failure while recording the terminal `failed` status
+   itself (the status-write inside the catch path throws, so the catch can't complete and the
+   message survives to be dead-lettered). Persistent PureTrack upstream (`puretrack.io`) errors,
+   an expired PureTrack session/credential, and an `attemptId` mismatch from a relock racing the
+   worker are NOT poison causes: the first two are caught on dequeue 5, marked `failed` on the
+   round blob, and ACKed; the mismatch case returns without throwing and is ACKed immediately.
+   For those, inspect the round blob's `pureTrack.status` plus App Insights; there is no poison
+   message to find.
 3. Once the root cause is resolved, use the round's `Recreate Groups` action in the Admin UI to
-   re-run — the old poison message can be discarded.
+   re-run — the old poison message (if any) can be discarded.
 
 ### Upstream partial failure / orphaned groups
 
