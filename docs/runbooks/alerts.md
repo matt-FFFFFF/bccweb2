@@ -440,7 +440,7 @@ PureTrack groups.
    az storage message peek --queue-name round-puretrack-group-poison --num-messages 32 \
      --account-name "$(terraform -chdir=iac/service output -raw storage_account_name)"
    ```
-3. If `failed` and the queue is empty (poison consumer already ran), use the round's
+3. If `failed` and the main queue is empty (the worker recorded the failure and ACKed the message), use the round's
    `Recreate Groups` action in the Admin UI (`POST /api/rounds/{id}/puretrack/create-groups`)
    to re-enqueue — this returns `202 {status:"pending"}` and is safe to retry.
 4. If `pending`/`processing` for longer than ~15 minutes with no queue activity, the guard is

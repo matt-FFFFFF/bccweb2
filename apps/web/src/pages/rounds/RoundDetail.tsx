@@ -365,9 +365,14 @@ export default function RoundDetail() {
                     <button
                       type="button"
                       onClick={() => {
-                        setPtPollCount(0);
-                        setPtPollTimeout(null);
-                        loadRound({ silent: true });
+                        if (!id) return;
+                        api.get<Round>(`rounds/${id}`)
+                          .then((roundData) => setRound(roundData))
+                          .catch((err: unknown) => setActionError(err as Error))
+                          .finally(() => {
+                            setPtPollCount(0);
+                            setPtPollTimeout(null);
+                          });
                       }}
                       style={{ padding: "0.2rem 0.5rem", fontSize: "0.7rem", background: "#f1f3f5", border: "1px solid #ccc", borderRadius: "0.2rem", cursor: "pointer" }}
                     >
