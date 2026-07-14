@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import type { Config, WingClass, PilotRatingValue } from "@bccweb/types";
 import { WING_CLASSES, PILOT_RATINGS } from "@bccweb/types";
+import * as z from "zod/v4";
 import { useAuth } from "../../hooks/useAuth.js";
 import { api } from "../../lib/api.js";
 import { LoadingSpinner } from "../../components/LoadingSpinner.js";
@@ -169,7 +170,7 @@ export default function AdminConfig() {
   function validateEmail(val: string) {
     const trimmed = val.trim();
     if (!trimmed) return "Cannot be empty.";
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed)) return "Invalid email.";
+    if (!z.email().safeParse(trimmed).success) return "Invalid email.";
     return null;
   }
 

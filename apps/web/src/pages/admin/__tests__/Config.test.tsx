@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
+/// <reference types="@testing-library/jest-dom" />
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import AdminConfig from "../Config.js";
@@ -166,6 +167,20 @@ describe("AdminConfig", () => {
       fireEvent.change(screen.getByLabelText("New recipient email"), { target: { value: "invalid" } });
       fireEvent.click(screen.getByRole("button", { name: "Add" }));
       expect(screen.queryByDisplayValue("invalid")).not.toHaveAttribute("aria-label", expect.stringContaining("Recipient"));
+      expect(screen.getByText("Invalid email.")).toBeInTheDocument();
+    });
+
+    it("rejects consecutive dots in the email domain before adding a recipient", async () => {
+      vi.mocked(api.get).mockResolvedValue(mockConfig);
+      render(<AdminConfig />);
+      await screen.findByRole("heading", { name: "League Config" });
+
+      fireEvent.change(screen.getByLabelText("New recipient email"), {
+        target: { value: "a@b..com" },
+      });
+      fireEvent.click(screen.getByRole("button", { name: "Add" }));
+
+      expect(screen.queryByLabelText("Recipient 1")).not.toBeInTheDocument();
       expect(screen.getByText("Invalid email.")).toBeInTheDocument();
     });
 
