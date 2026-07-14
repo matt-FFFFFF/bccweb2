@@ -22,9 +22,9 @@ checks. Docker Desktop root-owned mounts still satisfy the normal current-owner 
 
 ## `init-storage.mjs` — fatal, uniform provisioning
 
-Creates the two blob containers and all eight Storage Queues (see the architecture doc)
+Creates the two blob containers and all ten Storage Queues (see the architecture doc)
 in Azurite, using only Node built-ins (Shared Key auth against the Blob/Queue REST APIs —
-no SDK). All eight queues are created uniformly **fatally**: if the Queue service is
+no SDK). All ten queues are created uniformly **fatally**: if the Queue service is
 unreachable the script throws and exits non-zero, exactly like `round-brief-pdf`. Blob
 containers are created earlier in the same run, so a queue-service outage still surfaces
 as a hard failure rather than a silent partial success.

@@ -45,6 +45,9 @@ const CONTAINERS = [
  * messages are parked onto `rescore-jobs-poison` by the Functions host.
  * The PureTrack group pipeline enqueues jobs onto `round-puretrack-group`;
  * dead-letter messages are parked onto `round-puretrack-group-poison`.
+ * The async IGC signature/date validation pipeline enqueues jobs onto
+ * `igc-validation`; dead-letter messages are parked onto
+ * `igc-validation-poison`.
  * Names MUST match the Terraform-provisioned queues + the API producer/consumer.
  */
 const QUEUES = [
