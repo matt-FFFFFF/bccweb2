@@ -7,6 +7,8 @@ import AdminConfig from "../Config.js";
 import { api } from "../../../lib/api.js";
 import type { Config } from "@bccweb/types";
 
+import { useAuth } from "../../../hooks/useAuth.js";
+
 vi.mock("../../../lib/api.js", async () => {
   const actual = await vi.importActual<typeof import("../../../lib/api.js")>("../../../lib/api.js");
   return {
@@ -19,7 +21,7 @@ vi.mock("../../../lib/api.js", async () => {
 });
 
 vi.mock("../../../hooks/useAuth.js", () => ({
-  useAuth: () => ({
+  useAuth: vi.fn(() => ({
     identity: {
       userId: "admin-user",
       email: "admin@example.test",
@@ -32,7 +34,7 @@ vi.mock("../../../hooks/useAuth.js", () => ({
     login: vi.fn(),
     logout: vi.fn(),
     refreshIdentity: vi.fn(),
-  }),
+  })),
 }));
 
 describe("AdminConfig", () => {
@@ -295,6 +297,45 @@ describe("AdminConfig", () => {
       
       expect(screen.getByDisplayValue("first@x.com")).toBeInTheDocument();
       expect(screen.getByDisplayValue("last@x.com")).toBeInTheDocument();
+    });
+
+    it("case 11: blocks save if a new recipient is pending in the input", async () => {
+      vi.mocked(api.get).mockResolvedValue(mockConfig);
+      vi.mocked(api.put).mockResolvedValue({});
+      render(<AdminConfig />);
+      await screen.findByRole("heading", { name: "League Config" });
+
+      fireEvent.change(screen.getByLabelText("New recipient email"), { target: { value: "pending@example.test" } });
+      fireEvent.click(screen.getByRole("button", { name: "Save config" }));
+
+      expect(screen.getByText("Add or clear the pending recipient before saving.")).toBeInTheDocument();
+      expect(api.put).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Non-admin access", () => {
+    it("renders the forbidden message for non-admin without hanging on the loading spinner", async () => {
+      vi.mocked(useAuth).mockReturnValue({
+        identity: {
+          userId: "pilot-user",
+          email: "pilot@example.test",
+          roles: ["Pilot"],
+          pilotId: "p1",
+          clubId: "c1",
+        },
+        loading: false,
+        isRefreshing: false,
+        login: vi.fn(),
+        logout: vi.fn(),
+        refreshIdentity: vi.fn(),
+      });
+      render(<AdminConfig />);
+
+      await waitFor(() => {
+        expect(screen.queryByText("Loading config…")).not.toBeInTheDocument();
+      });
+      expect(screen.getByText("Admin access required.")).toBeInTheDocument();
+      expect(api.get).not.toHaveBeenCalled();
     });
   });
 });

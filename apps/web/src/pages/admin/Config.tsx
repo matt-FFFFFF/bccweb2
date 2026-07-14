@@ -134,7 +134,10 @@ export default function AdminConfig() {
   const isAdmin = identity?.roles.includes("Admin");
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (!isAdmin) {
+      setLoading(false);
+      return;
+    }
     async function load() {
       try {
         const cfg = await api.get<Config>("manage/config");
@@ -221,6 +224,11 @@ export default function AdminConfig() {
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form) return;
+
+    if (newRecipient.trim()) {
+      setAddError("Add or clear the pending recipient before saving.");
+      return;
+    }
 
     let hasError = false;
     const lowerSet = new Set<string>();
@@ -342,6 +350,7 @@ export default function AdminConfig() {
                     value={r}
                     onChange={(e) => updateRecipient(i, e.target.value)}
                     aria-label={`Recipient ${i + 1}`}
+                    aria-invalid={!!err}
                   />
                   <button
                     type="button"
@@ -351,7 +360,7 @@ export default function AdminConfig() {
                   >
                     Remove
                   </button>
-                  {err && <span style={{ fontSize: "0.8rem", color: "#58151c" }}>{err}</span>}
+                  {err && <span role="alert" style={{ fontSize: "0.8rem", color: "#58151c" }}>{err}</span>}
                 </div>
               );
             })}
@@ -368,7 +377,7 @@ export default function AdminConfig() {
             <button type="button" onClick={handleAddRecipient} style={btnStyle("#0a3622", "#d1e7dd")}>
               Add
             </button>
-            {addError && <span style={{ fontSize: "0.8rem", color: "#58151c" }}>{addError}</span>}
+            {addError && <span role="alert" style={{ fontSize: "0.8rem", color: "#58151c" }}>{addError}</span>}
           </div>
         </div>
 
