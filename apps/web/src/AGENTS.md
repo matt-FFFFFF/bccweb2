@@ -1,7 +1,35 @@
 # apps/web/src — React SPA source
 
-Conventions for the SPA tree. Root [AGENTS.md](../../../AGENTS.md) covers `router.tsx`,
-`useBlob`, `useAuth`, `api.ts`, route guards, and token storage — not repeated here.
+Conventions for the SPA tree. See root [AGENTS.md](../../../AGENTS.md) for the monorepo
+build DAG and TypeScript quirks.
+
+## Entry, routing, and data access
+
+Entry: `src/main.tsx` → [`src/router.tsx`](router.tsx) (React Router v8, `BrowserRouter`).
+`RequireAuth` / `RequireCoord` wrap protected routes; unauthenticated →
+`/login?return=<path>`. `FirstLoginOfSeasonGate` wraps the router to force re-acceptance
+of season T&Cs.
+
+- [`useBlob<T>(path)`](hooks/useBlob.ts) — reads public blobs directly via
+  `VITE_BLOB_BASE_URL` (dev proxies `/blob/*` → Azurite). Returns
+  `{ data, loading, error, notFound }`.
+- [`api.get/post/put/delete`](lib/api.ts) — authenticated `/api/*` fetch wrapper;
+  auto-attaches `Authorization: Bearer <token>`.
+- [`useAuth.tsx`](hooks/useAuth.tsx) defines the auth context/hook;
+  [`AuthProvider.tsx`](components/AuthProvider.tsx) owns token persistence and startup
+  refresh. Tokens use `localStorage` keys `bcc_access_token`, `bcc_refresh_token`, and
+  `bcc_identity`; [`api.ts`](lib/api.ts) handles single-flight refresh after a 401.
+
+## Roles
+
+`Admin` (all admin pages + writes); `RoundsCoord` (manage rounds + club teams for own
+`clubId`, sees `/club` self-service); `Pilot` (read authenticated endpoints, edit own
+profile); anon (public blobs only).
+
+## Tests
+
+[apps/web/vitest.config.ts](../vitest.config.ts): `jsdom` + `@testing-library/react`;
+aliases `@bccweb/types` to `packages/types/src` (no rebuild needed for web tests).
 
 ## Import style (REQUIRED)
 

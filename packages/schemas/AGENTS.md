@@ -3,7 +3,21 @@
 One schema module per blob family; barrel-exported from [`src/index.ts`](src/index.ts).
 Reads/writes go through `readJson`/`writeJson`/`writePrivateJson` in
 [`apps/api/src/lib/blobJson.ts`](../../apps/api/src/lib/blobJson.ts). See root
-[AGENTS.md](../../AGENTS.md) for `BLOB_SCHEMA_MODE` (observe/enforce) and WingClass break-glass.
+[AGENTS.md](../../AGENTS.md) for the monorepo build DAG.
+
+## Schema modes and break-glass
+
+- **`BLOB_SCHEMA_MODE`** (Function App env): `observe` (default) heals bad shapes in
+  memory and emits telemetry only; `enforce` writes schema-parsed output, stripping
+  unknown keys for `.strip()` objects and rejecting them for `.strict()` objects.
+  Toggling is an app-setting change, no redeploy — see `docs/runbooks/alerts.md`.
+- **WingClass break-glass**: adding a `WingClass` requires, in order, types → schema →
+  API deploy → admin UI emitting the new key. Reversing that order means `enforce` mode
+  rejects or strips the field.
+- **`DATA_SHAPE_INVALID`**: server-side data-invariant violation surfaced by
+  `apps/api/src/lib/http.ts`. Body is `{error, path, schema}`, never field values.
+- Full container/queue architecture:
+  [docs/architecture/storage-and-queues.md](../../docs/architecture/storage-and-queues.md).
 
 ## Authoring pattern
 
@@ -46,3 +60,7 @@ touch a schema.
 - `composite: true` + project refs → build `packages/schemas` before api/web typecheck
   (`make build`), or web tests alias to `src` and won't catch a stale build.
 - A new field must land here **before** API writes it in `enforce` mode (else it's stripped).
+- Schema-backed domain JSON uses schema helpers; documented operational/control records and
+  justified raw lease/index operations are exceptions. Test raw access is limited by the banner in
+  `apps/api/src/__tests__/helpers/seed.ts` (bootstrap, controlled fixture overrides,
+  deliberately corrupt fixtures, and assertion reads).
