@@ -109,3 +109,41 @@ exit fails the workflow and blocks the merge.
 | `user-index.json` email entry | Removed at GDPR erasure time |
 
 See `docs/runbooks/gdpr-erasure.md` for the full GDPR right-to-erasure procedure.
+
+## FAI Signature Validation: Outbound PII Egress
+
+`apps/api/src/lib/faiVali.ts` (`validateIgcSignature`) uploads the raw IGC file for a
+flight to the FAI online validator (`https://vali.fai-civl.org` by default, overridable
+via `FAI_VALI_BASE_URL`) whenever `flightSignatureValidationEnabled` is on and a pilot
+uploads or revalidates an IGC track. This is a genuine outbound PII egress: an IGC file's
+`HFPLT` header carries the pilot's name, and its `B`-record track log is the pilot's GPS
+flight path for that round. Both leave BCC's infrastructure and reach a third-party
+service outside our control.
+
+- **Scanner limitation**: `scripts/privacy-scan.mjs` only scans blobs written into the
+  `data` (public) container. It has no visibility into this outbound HTTP call, so it
+  cannot catch a regression that widens what gets sent to FAI or that sends flights that
+  should have been exempted. Any change to `faiVali.ts` or its callers needs a manual
+  privacy review; it is not covered by CI.
+- **Disable controls**: setting the app setting `FAI_VALI_ENABLED=false` makes
+  `validateIgcSignature` return `{signature: "unverified", faiStatus: "DISABLED"}`
+  immediately, without any network call, regardless of the `config.json` toggle below.
+  This is the hard kill switch for the outbound call itself (see
+  `apps/api/local.settings.example.json`).
+- **Feature toggle** (`config.json` → `flightSignatureValidationEnabled`, admin-editable
+  via the Config page): turning this off does not retroactively re-score already-Complete
+  rounds: a round's published score only changes on an explicit rescore
+  (`POST /api/rounds/{id}/rescore`) or recompute. To apply a toggle flip to a round's
+  score, rescore it; to repair the derived league table after a validation-driven score
+  change on a `Complete` round, use `POST /api/manage/rounds/{id}/recompute`
+  (`apps/api/src/functions/admin.ts`).
+- **Queued jobs and the toggle**: disabling `flightSignatureValidationEnabled` does not
+  purge jobs already sitting on the `igc-validation` queue. The `igcValidationWorker`
+  re-reads `config.json` immediately before each FAI call and skips the call if the
+  toggle has since been switched off, so most already-queued jobs land as
+  `unverified`/`DISABLED` rather than reaching FAI. There is a documented sub-second
+  TOCTOU window: a job that has already passed that config re-check when the toggle
+  flips off can still complete its in-flight FAI call. This is accepted; coupling
+  config writes to the FAI call guard would be disproportionate to a window measured in
+  single-digit seconds at worst, bounded by the global pace guard's 2-second FAI call
+  interval.

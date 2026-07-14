@@ -53,8 +53,8 @@ valid for non-JSON artifacts and explicitly justified lease/index operations.
 
 ## Storage Queues
 
-Eight queues, same storage account as the blobs, created by `init-storage.mjs` — across
-four families, each a main queue plus a `-poison` dead-letter queue
+Ten queues, same storage account as the blobs, created by `init-storage.mjs` — across
+five families, each a main queue plus a `-poison` dead-letter queue
 (`maxDequeueCount=5` in `host.json`):
 
 | Family | Main queue | Poison queue |
@@ -63,13 +63,14 @@ four families, each a main queue plus a `-poison` dead-letter queue
 | Sign-to-fly reflect | `signtofly-reflect` | `signtofly-reflect-poison` |
 | Rescore | `rescore-jobs` | `rescore-jobs-poison` |
 | PureTrack group | `round-puretrack-group` | `round-puretrack-group-poison` |
+| IGC validation | `igc-validation` | `igc-validation-poison` |
 
 The Functions host dead-letters only messages whose final invocation still throws.
 Workers normally catch terminal domain failures and record status/telemetry instead, so
 poison queues are fallbacks for uncaught host/handler failures rather than a complete
 inventory of jobs that exhausted ordinary retries.
 
-`init-storage.mjs` creates all eight uniformly and fatally: if the Queue service is
+`init-storage.mjs` creates all ten uniformly and fatally: if the Queue service is
 unreachable the script throws and exits non-zero. Blob containers are created earlier in
 the same run, so a queue-service outage still surfaces as a hard failure rather than a
 partial success.
@@ -87,6 +88,7 @@ control is strict, `.strict()` job schemas in `apps/api/src/lib/queue.ts` and
 - `SignToFlyReflectJobSchema` — only `{roundId}`.
 - `PureTrackGroupJobSchema` — only `{roundId, attemptId}`.
 - `RescoreJobMessageSchema` — only `{jobId, roundId, requestedAt}`.
+- `IgcValidationJobSchema` — only `{roundId, teamId, place, flightId, validationAttemptId}`.
 
 Any extra key is rejected at serialisation time, so PII can never enter these messages.
 
@@ -138,6 +140,43 @@ owner-token compare-and-set `commitPureTrackReady`
 (`apps/api/src/lib/puretrackStatus.ts`), which flips `pureTrack.status` to `ready` only
 while it is still `processing`. Status values: `pending | processing | ready | failed`.
 Only failures that escape the worker after the final dequeue reach the poison queue.
+
+### IGC validation flow
+
+IGC upload and revalidation (`apps/api/src/functions/igc.ts`) set the flight's
+`validation.signature = "pending"`, stamp a fresh `validationAttemptId`, and enqueue
+`{roundId, teamId, place, flightId, validationAttemptId}` onto `igc-validation`. The
+`igcValidationWorker` queue-trigger consumer
+(`apps/api/src/functions/igcValidationWorker.ts`) re-reads the round, drops the message
+(ACK, no-op) if the flight or its `validationAttemptId` has since moved on: a newer
+upload or re-validation supersedes it, and reuses a durable
+`readValidationResult(validationAttemptId)` record instead of re-calling FAI if one
+already exists for this attempt.
+
+Otherwise it acquires a single global blob-lease guard
+(`igc-validation/active.json`, `acquireIgcValidationGuard`/`releaseIgcValidationGuard`
+in `apps/api/src/lib/igcValidationJob.ts`) so at most one call to the FAI validator runs
+at a time, paces itself to at least 2 seconds since the last call
+(`paceBeforeFaiCall`), and only then re-reads `config.json`. If
+`flightSignatureValidationEnabled` has been switched off since the message was queued,
+the worker records `signature: "unverified", faiStatus: "DISABLED"` and skips the FAI
+call entirely; see `docs/runbooks/privacy.md` for the accepted sub-second TOCTOU window
+this leaves. Otherwise it calls
+`validateIgcSignature` (`apps/api/src/lib/faiVali.ts`) against the flight's immutable
+`igcPath` bytes, persists the outcome via `writeValidationResult` (create-only,
+durable) before releasing the guard, then commits the result onto the round under a
+private lease, re-scores via `scoreRoundEnforcingValidation`, and, for a `Complete`
+round, it calls `recomputeSeason`. If the `recomputeSeason` step fails it is logged and
+ACKed rather than retried, since the terminal validation result and round score are
+already committed; an operator repairs the published league via
+`POST /api/manage/rounds/{id}/recompute` (see `docs/runbooks/privacy.md` for the
+outbound-egress and toggle implications of this flow).
+
+Transport failures talking to FAI (timeout, 5xx, non-JSON, oversized file) are mapped to
+a terminal `unverified` result and ACKed; they never retry the FAI call. Only a failure
+in the commit-phase lease write throws, so the host retries; that retry finds the
+durable `writeValidationResult` record and skips FAI again. After `maxDequeueCount:5`
+such retries dead-letter to `igc-validation-poison` as a host-crash safety net.
 
 ## Related runbooks
 
