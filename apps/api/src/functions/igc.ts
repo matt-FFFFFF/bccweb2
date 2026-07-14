@@ -19,7 +19,13 @@ import {
   InvocationContext,
 } from "@azure/functions";
 import { randomUUID } from "node:crypto";
-import type { CallerIdentity, Flight, PilotSlot, Round } from "@bccweb/types";
+import type {
+  CallerIdentity,
+  Flight,
+  FlightValidation,
+  PilotSlot,
+  Round,
+} from "@bccweb/types";
 import { RoundSchema } from "@bccweb/schemas";
 import {
   getPrivateBlobClient,
@@ -35,8 +41,17 @@ import {
 } from "../lib/auth.js";
 import { HttpError, withErrorHandler } from "../lib/http.js";
 import { scoreIgc } from "../lib/igcScoring.js";
-import { findSlot, readRoundOr404, resolveExpectedPilotName, streamToBuffer } from "../lib/flightHelpers.js";
+import {
+  findSlot,
+  loadConfig,
+  readRoundOr404,
+  resolveExpectedPilotName,
+  streamToBuffer,
+} from "../lib/flightHelpers.js";
+import { enqueueIgcValidation } from "../lib/igcValidationJob.js";
 import { mutationRateLimit } from "../lib/rateLimit.js";
+import { recomputeSeason, updateRoundsIndex } from "../lib/recompute.js";
+import { scoreRoundEnforcingValidation } from "../lib/scoreRoundValidated.js";
 
 // Raw IGC uploads are plain-text B-record logs; a real track is a few hundred KB.
 const MAX_IGC_BYTES = 15 * 1024 * 1024;
@@ -77,6 +92,10 @@ function canDeleteSlotIgc(caller: CallerIdentity, round: Round): boolean {
     caller.clubId !== null &&
     round.organisingClub?.id === caller.clubId
   );
+}
+
+function canRemediateSlotIgc(caller: CallerIdentity, round: Round): boolean {
+  return canDeleteSlotIgc(caller, round);
 }
 
 // ─── POST /api/rounds/{id}/teams/{teamId}/pilots/{place}/igc ─────────────────────
@@ -134,6 +153,7 @@ async function uploadIgc(
   }
 
   const expectedPilotName = await resolveExpectedPilotName(slot.pilotId);
+  const config = await loadConfig();
 
   let scored: Awaited<ReturnType<typeof scoreIgc>>;
   try {
@@ -148,14 +168,28 @@ async function uploadIgc(
     throw new HttpError(400, "IGC_PARSE_ERROR", "Could not score IGC file");
   }
 
-  // Overwrite implicit — a re-upload replaces the prior track at the same path.
-  const igcPath = `flight-igcs/${id}/${slot.pilotId}.igc`;
+  const flightId = randomUUID();
+  const validationAttemptId = config.flightSignatureValidationEnabled
+    ? randomUUID()
+    : undefined;
+  const igcPath = `flight-igcs/${id}/${slot.pilotId}/${flightId}.igc`;
   await getPrivateBlockBlobClient(igcPath).upload(buffer, buffer.length, {
     blobHTTPHeaders: { blobContentType: "text/plain; charset=utf-8" },
   });
 
+  const validation: FlightValidation = {};
+  if (config.flightDateValidationEnabled) {
+    validation.date = scored.sanityFlags.includes("IGC_DATE_MISMATCH")
+      ? "invalid"
+      : "valid";
+  }
+  if (validationAttemptId) {
+    validation.signature = "pending";
+    validation.validationAttemptId = validationAttemptId;
+  }
+
   const flight: Flight = {
-    id: randomUUID(),
+    id: flightId,
     distance: scored.distance,
     igcPath,
     sanityFlags: scored.sanityFlags,
@@ -163,24 +197,91 @@ async function uploadIgc(
     scoredByVersion: scored.scoredByVersion,
     scoringType: "XC",
     isManualLog: false,
+    validation:
+      config.flightDateValidationEnabled || validationAttemptId
+        ? validation
+        : undefined,
     // Placeholders — the pilot/team score is derived later by scoreRound(), NOT here.
     wingFactor: 0,
     score: 0,
   };
 
-  const saved = await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
-    // Raw read (NOT readJson): `FlightSchema` now includes `igcPath`/`sanityFlags`,
-    // so a schema read via `RoundSchema` preserves OTHER slots' IGC results. The raw
-    // read is retained as a deliberate defensive choice for this lease-guarded
-    // read-modify-write (belt-and-suspenders, avoids any schema-healing side effects
-    // mid-transaction), then mutate and write.
-    const current = (await readBlob(getPrivateBlobClient(roundPath))) as Round;
-    const currentSlot = findSlot(current, teamId, place);
-    if (!currentSlot) throw new HttpError(404, "NOT_FOUND", "Pilot slot not found");
-    currentSlot.flight = flight;
-    await writePrivateJson(roundPath, RoundSchema, current, leaseId);
-    return flight;
-  });
+  let supersededIgcPath: string | undefined;
+  let saved: Flight;
+  try {
+    saved = await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
+      // Raw read (NOT readJson): this lease transaction must observe the exact current
+      // slot before replacing it, including an IGC committed by a concurrent upload.
+      const current = (await readBlob(getPrivateBlobClient(roundPath))) as Round;
+      if (current.status !== "Locked") {
+        throw new HttpError(
+          409,
+          "ROUND_NOT_LOCKED",
+          `Round status is ${current.status}`,
+        );
+      }
+      const currentSlot = findSlot(current, teamId, place);
+      if (!currentSlot || currentSlot.pilotId !== slot.pilotId) {
+        throw new HttpError(404, "NOT_FOUND", "Pilot slot changed during upload");
+      }
+      if (!canWriteSlotIgc(caller, current, currentSlot)) {
+        throw new HttpError(403, "FORBIDDEN", "Not permitted to upload this IGC");
+      }
+      supersededIgcPath = currentSlot.flight?.igcPath;
+      currentSlot.flight = flight;
+      await writePrivateJson(roundPath, RoundSchema, current, leaseId);
+      return flight;
+    });
+  } catch (error: unknown) {
+    await getPrivateBlockBlobClient(igcPath).deleteIfExists();
+    throw error;
+  }
+
+  if (validationAttemptId) {
+    try {
+      await enqueueIgcValidation({
+        roundId: id,
+        teamId,
+        place,
+        flightId,
+        validationAttemptId,
+      });
+    } catch {
+      let fallbackApplied = false;
+      await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
+        const current = (await readBlob(getPrivateBlobClient(roundPath))) as Round;
+        const currentFlight = findSlot(current, teamId, place)?.flight;
+        if (
+          currentFlight?.id !== flightId ||
+          currentFlight.validation?.validationAttemptId !== validationAttemptId
+        ) {
+          return;
+        }
+        currentFlight.validation = {
+          ...currentFlight.validation,
+          signature: "unverified",
+          faiStatus: "ENQUEUE_FAILED",
+        };
+        await writePrivateJson(roundPath, RoundSchema, current, leaseId);
+        fallbackApplied = true;
+      });
+      if (fallbackApplied && saved.validation) {
+        saved.validation.signature = "unverified";
+        saved.validation.faiStatus = "ENQUEUE_FAILED";
+      }
+    }
+  }
+
+  if (supersededIgcPath && supersededIgcPath !== igcPath) {
+    void getPrivateBlockBlobClient(supersededIgcPath)
+      .deleteIfExists()
+      .catch((error: unknown) => {
+        _ctx.warn(
+          `[uploadIgc:${id}] Superseded IGC cleanup failed`,
+          error instanceof Error ? error.name : "UnknownError",
+        );
+      });
+  }
 
   return { status: 200, jsonBody: saved };
 }
@@ -289,6 +390,171 @@ async function deleteIgc(
   return { status: 204 };
 }
 
+async function revalidateIgc(
+  req: HttpRequest,
+  _ctx: InvocationContext,
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+
+  const id = req.params["id"];
+  const teamId = req.params["teamId"];
+  const place = parseInt(req.params["place"] ?? "", 10);
+  if (!id || !teamId || !Number.isInteger(place)) {
+    throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
+  }
+
+  const roundPath = `rounds/${id}.json`;
+  const round = await readRoundOr404(roundPath);
+  if (!canRemediateSlotIgc(caller, round)) return forbiddenResponse();
+
+  const config = await loadConfig();
+  if (!config.flightSignatureValidationEnabled) {
+    throw new HttpError(
+      409,
+      "SIGNATURE_VALIDATION_DISABLED",
+      "IGC signature validation is disabled",
+    );
+  }
+
+  await mutationRateLimit(req, caller, "revalidateIgc", "flights");
+  const validationAttemptId = randomUUID();
+  let currentFlightId = "";
+  let savedFlight = await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
+    const current = (await readBlob(getPrivateBlobClient(roundPath))) as Round;
+    if (!canRemediateSlotIgc(caller, current)) {
+      throw new HttpError(403, "FORBIDDEN", "Not permitted to revalidate this IGC");
+    }
+    const flight = findSlot(current, teamId, place)?.flight;
+    if (!flight?.igcPath) {
+      throw new HttpError(404, "NOT_FOUND", "IGC not found");
+    }
+    if (flight.isManualLog) {
+      throw new HttpError(
+        409,
+        "MANUAL_FLIGHT_NOT_REVALIDATABLE",
+        "Manual flights cannot be signature revalidated",
+      );
+    }
+    currentFlightId = flight.id;
+    flight.validation = {
+      ...flight.validation,
+      signature: "pending",
+      validationAttemptId,
+    };
+    await writePrivateJson(roundPath, RoundSchema, current, leaseId);
+    return flight;
+  });
+
+  try {
+    await enqueueIgcValidation({
+      roundId: id,
+      teamId,
+      place,
+      flightId: currentFlightId,
+      validationAttemptId,
+    });
+  } catch {
+    let fallbackApplied = false;
+    await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
+      const current = (await readBlob(getPrivateBlobClient(roundPath))) as Round;
+      const flight = findSlot(current, teamId, place)?.flight;
+      if (
+        flight?.id !== currentFlightId ||
+        flight.validation?.validationAttemptId !== validationAttemptId
+      ) {
+        return;
+      }
+      flight.validation = {
+        ...flight.validation,
+        signature: "unverified",
+        faiStatus: "ENQUEUE_FAILED",
+      };
+      await writePrivateJson(roundPath, RoundSchema, current, leaseId);
+      fallbackApplied = true;
+    });
+    if (fallbackApplied) {
+      savedFlight = {
+        ...savedFlight,
+        validation: {
+          ...savedFlight.validation,
+          signature: "unverified",
+          faiStatus: "ENQUEUE_FAILED",
+        },
+      };
+    }
+  }
+
+  return { status: 200, jsonBody: savedFlight };
+}
+
+async function allowIgc(
+  req: HttpRequest,
+  _ctx: InvocationContext,
+): Promise<HttpResponseInit> {
+  const caller = await getCallerIdentity(req);
+  if (!caller) return unauthorizedResponse();
+  if (!caller.roles.includes("Admin")) return forbiddenResponse();
+
+  const id = req.params["id"];
+  const teamId = req.params["teamId"];
+  const place = parseInt(req.params["place"] ?? "", 10);
+  if (!id || !teamId || !Number.isInteger(place)) {
+    throw new HttpError(400, "MISSING_IDS", "Missing round, team, or place");
+  }
+
+  await mutationRateLimit(req, caller, "allowIgc", "flights");
+  const config = await loadConfig();
+  const roundPath = `rounds/${id}.json`;
+  const saved = await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
+    const current = (await readBlob(getPrivateBlobClient(roundPath))) as Round;
+    const flight = findSlot(current, teamId, place)?.flight;
+    if (!flight) throw new HttpError(404, "NOT_FOUND", "Flight not found");
+    const validation = flight.validation;
+    const isDefinitivelyInvalid =
+      validation?.signature === "invalid" || validation?.date === "invalid";
+    if (
+      flight.isManualLog ||
+      validation?.overridden === true ||
+      !isDefinitivelyInvalid
+    ) {
+      throw new HttpError(
+        409,
+        "FLIGHT_NOT_ALLOWABLE",
+        "Only a non-manual, non-overridden invalid flight can be allowed",
+      );
+    }
+    flight.validation = {
+      ...validation,
+      overridden: true,
+      overriddenBy: caller.email,
+      overriddenAt: new Date().toISOString(),
+    };
+    const { round: scored, derivation } = scoreRoundEnforcingValidation(
+      current,
+      config,
+    );
+    scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
+    await writePrivateJson(roundPath, RoundSchema, scored, leaseId);
+    return { round: scored, flight };
+  });
+
+  await updateRoundsIndex(saved.round);
+  if (saved.round.status === "Complete") {
+    try {
+      await recomputeSeason(saved.round.season.year);
+    } catch {
+      throw new HttpError(
+        503,
+        "SEASON_RECOMPUTE_FAILED",
+        "The override was saved; retry to publish season results",
+      );
+    }
+  }
+
+  return { status: 200, jsonBody: saved.flight };
+}
+
 // ─── Registration ───────────────────────────────────────────────────────────────
 
 app.http("uploadIgc", {
@@ -310,4 +576,18 @@ app.http("deleteIgc", {
   authLevel: "anonymous",
   route: "rounds/{id}/teams/{teamId}/pilots/{place}/igc",
   handler: withErrorHandler(deleteIgc),
+});
+
+app.http("revalidateIgc", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "rounds/{id}/teams/{teamId}/pilots/{place}/igc/revalidate",
+  handler: withErrorHandler(revalidateIgc),
+});
+
+app.http("allowIgc", {
+  methods: ["POST"],
+  authLevel: "anonymous",
+  route: "rounds/{id}/teams/{teamId}/pilots/{place}/igc/allow",
+  handler: withErrorHandler(allowIgc),
 });
