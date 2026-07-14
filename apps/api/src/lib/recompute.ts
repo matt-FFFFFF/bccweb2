@@ -31,8 +31,12 @@ const RoundSummariesSchema = z.array(RoundSummarySchema);
 const PilotIndexEntrySchema = z.array(PilotSummarySchema);
 
 const STALE_RECOMPUTE_MARKER_MS = 5 * 60 * 1000;
+const RECOMPUTE_LEASE_RETRY_DEADLINE_MS = 45_000;
+const RECOMPUTE_LEASE_RETRY_BASE_MS = 25;
+const RECOMPUTE_LEASE_RETRY_CAP_MS = 250;
 
 const recomputeInFlight = new Map<number, Promise<void>>();
+const recomputeDirty = new Set<number>();
 
 // ─── updateRoundsIndex ────────────────────────────────────────────────────────
 
@@ -94,13 +98,35 @@ export async function updateRoundsIndex(round: Round): Promise<void> {
  */
 export async function recomputeSeason(seasonYear: number): Promise<void> {
   const existing = recomputeInFlight.get(seasonYear);
-  if (existing) return existing;
+  if (existing) {
+    recomputeDirty.add(seasonYear);
+    return existing;
+  }
 
-  const promise = recomputeSeasonUncached(seasonYear).finally(() => {
-    recomputeInFlight.delete(seasonYear);
-  });
+  const promise = runRecomputePasses(seasonYear);
   recomputeInFlight.set(seasonYear, promise);
   return promise;
+}
+
+async function runRecomputePasses(seasonYear: number): Promise<void> {
+  let passError: Error | null = null;
+  try {
+    do {
+      recomputeDirty.delete(seasonYear);
+      try {
+        await recomputeSeasonUncached(seasonYear);
+        passError = null;
+      } catch (err) {
+        passError = err instanceof Error
+          ? err
+          : new Error("Season recompute failed", { cause: err });
+      }
+    } while (recomputeDirty.has(seasonYear));
+    if (passError) throw passError;
+  } finally {
+    recomputeInFlight.delete(seasonYear);
+    recomputeDirty.delete(seasonYear);
+  }
 }
 
 async function loadConfig(): Promise<Config> {
@@ -117,49 +143,49 @@ async function loadConfig(): Promise<Config> {
 
 async function recomputeSeasonUncached(seasonYear: number): Promise<void> {
   const seasonPath = `seasons/${seasonYear}.json`;
-  const season = await readJson(getBlobClient(seasonPath), SeasonSchema, seasonPath);
-
-  // Load all rounds in parallel; skip rounds that fail to load
-  const maybeRounds = await Promise.all(
-    season.rounds.map((id) => {
-      const path = `rounds/${id}.json`;
-      return readJson(getPrivateBlobClient(path), RoundSchema, path).catch(() => null);
-    })
-  );
-  const normalizedRounds: Round[] = [];
-  for (const round of maybeRounds) {
-    if (round !== null) normalizedRounds.push(normalizeRoundForRecompute(round));
-  }
-  normalizedRounds.sort(compareRounds);
-
-  // Compute league table. D13: the league RE-derives from persisted per-round
-  // team.score aggregates under the CURRENT config, so editing
-  // leagueRoundScoresCounted intentionally re-windows the league. The
-  // "immutable to config edits" guarantee scopes to per-round scores + the
-  // Round.scoring snapshot, NOT to the league table.
-  const config = await loadConfig();
-  const leagueTable = stableLeagueTable(computeLeague(normalizedRounds, config));
-  const seasonPayload: Season = stableSeason({ ...season, leagueTable });
-
-  // Load pilot index for name resolution in results
-  let pilotNameMap: Record<string, string> = {};
-  try {
-    const idx = await readJson(
-      getBlobClient("pilots.json"),
-      PilotIndexEntrySchema,
-      "pilots.json",
-    );
-    pilotNameMap = Object.fromEntries(idx.map((p) => [p.id, p.name]));
-  } catch {
-    // pilots.json may not exist yet — names will fall back to IDs
-  }
-
-  // Compute and persist per-round results
-  const results = stableSeasonResults(buildSeasonResults(normalizedRounds, pilotNameMap));
-  const roundsIndex = await buildRoundsIndex();
-
   await ensureRecomputeLockBlob(seasonYear);
-  await withLeaseRenewing(`seasons/${seasonYear}.json.lock`, async () => {
+  await withRecomputeLeaseRetry(seasonYear, async () => {
+    const season = await readJson(getBlobClient(seasonPath), SeasonSchema, seasonPath);
+
+    // Load all rounds in parallel; skip rounds that fail to load
+    const maybeRounds = await Promise.all(
+      season.rounds.map((id) => {
+        const path = `rounds/${id}.json`;
+        return readJson(getPrivateBlobClient(path), RoundSchema, path).catch(() => null);
+      })
+    );
+    const normalizedRounds: Round[] = [];
+    for (const round of maybeRounds) {
+      if (round !== null) normalizedRounds.push(normalizeRoundForRecompute(round));
+    }
+    normalizedRounds.sort(compareRounds);
+
+    // Compute league table. D13: the league RE-derives from persisted per-round
+    // team.score aggregates under the CURRENT config, so editing
+    // leagueRoundScoresCounted intentionally re-windows the league. The
+    // "immutable to config edits" guarantee scopes to per-round scores + the
+    // Round.scoring snapshot, NOT to the league table.
+    const config = await loadConfig();
+    const leagueTable = stableLeagueTable(computeLeague(normalizedRounds, config));
+    const seasonPayload: Season = stableSeason({ ...season, leagueTable });
+
+    // Load pilot index for name resolution in results
+    let pilotNameMap: Record<string, string> = {};
+    try {
+      const idx = await readJson(
+        getBlobClient("pilots.json"),
+        PilotIndexEntrySchema,
+        "pilots.json",
+      );
+      pilotNameMap = Object.fromEntries(idx.map((p) => [p.id, p.name]));
+    } catch {
+      // pilots.json may not exist yet — names will fall back to IDs
+    }
+
+    // Compute and persist per-round results
+    const results = stableSeasonResults(buildSeasonResults(normalizedRounds, pilotNameMap));
+    const roundsIndex = await buildRoundsIndex();
+
     await createRecomputeMarker(seasonYear);
     try {
       await swapJsonBlob(seasonPath, seasonPayload);
@@ -168,9 +194,38 @@ async function recomputeSeasonUncached(seasonYear: number): Promise<void> {
     } finally {
       await deleteRecomputeMarker(seasonYear);
     }
-  }, {
-    renewIntervalMs: 10_000,
   });
+}
+
+async function withRecomputeLeaseRetry(
+  seasonYear: number,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const path = `seasons/${seasonYear}.json.lock`;
+  const deadline = Date.now() + RECOMPUTE_LEASE_RETRY_DEADLINE_MS;
+  while (true) {
+    let acquired = false;
+    try {
+      await withLeaseRenewing(path, async () => {
+        acquired = true;
+        await fn();
+      }, { renewIntervalMs: 10_000 });
+      return;
+    } catch (err) {
+      if (acquired) throw err;
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      if (statusCode !== 409 && statusCode !== 412) throw err;
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw err;
+      const backoffMs = Math.min(
+        remainingMs,
+        RECOMPUTE_LEASE_RETRY_CAP_MS,
+        RECOMPUTE_LEASE_RETRY_BASE_MS
+          + Math.random() * (RECOMPUTE_LEASE_RETRY_CAP_MS - RECOMPUTE_LEASE_RETRY_BASE_MS),
+      );
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
 }
 
 // ─── buildSeasonResults ───────────────────────────────────────────────────────
