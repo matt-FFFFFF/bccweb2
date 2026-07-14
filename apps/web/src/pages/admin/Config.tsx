@@ -227,7 +227,7 @@ export default function AdminConfig() {
       }
       lowerSet.add(lower);
     }
-    
+
     if (hasError) {
       setMsg("Please fix invalid or duplicate email recipients before saving.");
       setMsgOk(false);
