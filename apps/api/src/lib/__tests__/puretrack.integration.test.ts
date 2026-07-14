@@ -7,7 +7,9 @@ import type { Round } from "@bccweb/types";
 import { getPrivateContainer } from "../../__tests__/helpers/azurite.js";
 import {
   createPureTrackGroups,
+  listMyGroups,
   roundGroupName,
+  teamGroupName,
   type PureTrackRoundResult,
 } from "../puretrack.js";
 
@@ -339,9 +341,23 @@ describe.skipIf(!hasCreds)("PureTrack live integration", () => {
     if (!teamResult) throw new Error("PureTrack did not return a team group result");
     expect(teamResult.groupId).toBeGreaterThan(0);
 
-    const headers = authHeaders(await authenticate());
+    const session = await authenticate();
+    const headers = authHeaders(session);
     const roundState = await getGroupState(headers, createdResult.roundGroupId);
     const teamState = await getGroupState(headers, teamResult.groupId);
+    const myGroups = await listMyGroups(session, async () => {});
+    expect(myGroups).toEqual(expect.arrayContaining([
+      {
+        id: createdResult.roundGroupId,
+        name: createdResult.roundGroupName,
+        slug: createdResult.roundGroupSlug,
+      },
+      {
+        id: teamResult.groupId,
+        name: teamGroupName(round.date, round.teams[0]?.teamName ?? ""),
+        slug: teamResult.groupSlug,
+      },
+    ]));
 
     const expectedExternalIds = [
       String(createdResult.roundGroupId),

@@ -17,6 +17,7 @@ export function RoundWorkflowActions({
   setActionBusy,
   setConfirmModal,
   runAction,
+  recreatePureTrack,
 }: {
   roundId: string;
   status: RoundStatus;
@@ -29,10 +30,13 @@ export function RoundWorkflowActions({
   setActionBusy: (busy: string | null) => void;
   setConfirmModal: (modal: { label: string; endpoint: string; count: number } | null) => void;
   runAction: (label: string, fn: () => Promise<unknown>) => void;
+  recreatePureTrack: () => void;
 }) {
   const workflowActions = WORKFLOW[status] ?? [];
+  const canRecreatePt = status === "Locked" || status === "Complete";
+  const hasActions = workflowActions.length > 0 || canRecreatePt || canOverrideSign;
 
-  if (!canManage || workflowActions.length === 0) return null;
+  if (!canManage || !hasActions) return null;
 
   return (
     <div style={{ ...sectionStyle, display: "flex", gap: "0.75rem", flexWrap: "wrap", alignItems: "center" }}>
@@ -65,6 +69,15 @@ export function RoundWorkflowActions({
           onClick={() => void runAction("Re-sync Sign-to-Fly", () => api.post(`rounds/${roundId}/reflect-sign-to-fly`))}
         >
           {actionBusy === "Re-sync Sign-to-Fly" ? "Working…" : "Re-sync Sign-to-Fly"}
+        </button>
+      )}
+      {canRecreatePt && (
+        <button
+          disabled={actionBusy !== null}
+          style={btnStyle("#0f5132", "#d1e7dd")}
+          onClick={() => recreatePureTrack()}
+        >
+          {actionBusy === "Recreate PureTrack Groups" ? "Working…" : "Recreate PureTrack Groups"}
         </button>
       )}
       {actionErr && <Banner msg={actionErr} />}

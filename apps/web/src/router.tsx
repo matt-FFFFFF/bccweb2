@@ -38,6 +38,7 @@ const PilotSeasonClubs = lazy(() => import("./pages/admin/PilotSeasonClubs.js"))
 const AdminSites = lazy(() => import("./pages/admin/Sites.js"));
 const AdminConfig = lazy(() => import("./pages/admin/Config.js"));
 const AdminManufacturers = lazy(() => import("./pages/admin/Manufacturers.js"));
+const AdminPureTrackGroups = lazy(() => import("./pages/admin/PureTrackGroups.js"));
 const SignToFlyWording = lazy(() => import("./pages/admin/SignToFlyWording.js"));
 const MyClub = lazy(() => import("./pages/club/MyClub.js"));
 import FirstLoginOfSeasonGate from "./components/FirstLoginOfSeasonGate.js";
@@ -70,6 +71,9 @@ function AdminMenu() {
       </NavLink>
       <NavLink to="/admin/manufacturers" className={navLinkClass}>
         Manufacturers
+      </NavLink>
+      <NavLink to="/admin/puretrack-groups" className={navLinkClass}>
+        PureTrack groups
       </NavLink>
       <NavLink to="/admin/seasons" className={navLinkClass}>
         Seasons
@@ -266,6 +270,7 @@ function RoutedContent() {
           <Route path="/admin/users" element={<RequireAuth><Page><AdminUsers /></Page></RequireAuth>} />
           <Route path="/admin/clubs" element={<RequireAuth><Page><AdminClubs /></Page></RequireAuth>} />
           <Route path="/admin/manufacturers" element={<RequireAuth><Page><AdminManufacturers /></Page></RequireAuth>} />
+          <Route path="/admin/puretrack-groups" element={<RequireAuth><Page><AdminPureTrackGroups /></Page></RequireAuth>} />
           <Route path="/admin/seasons" element={<RequireAuth><Page><AdminSeasons /></Page></RequireAuth>} />
           <Route path="/admin/seasons/:year/clubs" element={<RequireAuth><Page><SeasonClubs /></Page></RequireAuth>} />
           <Route path="/admin/pilot-season-clubs" element={<RequireAuth><Page><PilotSeasonClubs /></Page></RequireAuth>} />

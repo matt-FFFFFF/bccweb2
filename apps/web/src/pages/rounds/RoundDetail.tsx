@@ -56,6 +56,9 @@ export default function RoundDetail() {
   const [notFound, setNotFound] = useState(false);
   const [accountBusy, setAccountBusy] = useState<string | null>(null);
 
+  const [ptPollCount, setPtPollCount] = useState(0);
+  const [ptPollTimeout, setPtPollTimeout] = useState<number | null>(null);
+
   const loadRound = useCallback((opts?: { silent?: boolean }) => {
     if (!id) {
       setLoading(false);
@@ -109,6 +112,48 @@ export default function RoundDetail() {
   useEffect(() => {
     return loadRound();
   }, [loadRound]);
+
+  useEffect(() => {
+    const ptActive = round?.pureTrack?.status === "pending" || round?.pureTrack?.status === "processing";
+
+    let doPoll = false;
+    if (ptActive) {
+      if (ptPollCount >= 15 && ptPollTimeout === null) setPtPollTimeout(Date.now());
+      else if (ptPollCount < 15) doPoll = true;
+    } else {
+      if (ptPollCount > 0) {
+        setPtPollCount(0);
+        setPtPollTimeout(null);
+      }
+    }
+
+    if (!doPoll || !id) return;
+
+    let cancelled = false;
+    const delay = Math.min(3000 * Math.pow(1.5, ptPollCount), 15000);
+    const timer = setTimeout(() => {
+      api.get<Round>(`rounds/${id}`)
+        .then((roundData) => {
+          if (!cancelled) {
+            setRound(roundData);
+          }
+        })
+        .catch((err) => {
+          if (!cancelled) {
+            console.warn("PureTrack poll round fetch failed", err);
+          }
+        })
+        .finally(() => {
+          if (!cancelled) {
+            setPtPollCount((c) => c + 1);
+          }
+        });
+    }, delay);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [round?.pureTrack?.status, ptPollCount, ptPollTimeout, id]);
 
   const { data: pilotsIndex } = useBlob<PilotSummary[]>("pilots.json");
 
@@ -309,11 +354,40 @@ export default function RoundDetail() {
             </dd>
           </div>
         )}
-        {round.pureTrackGroupName && round.pureTrackGroupName !== "Not set yet..." && (
+        {(round.pureTrack?.status || (round.pureTrackGroupName && round.pureTrackGroupName !== "Not set yet...")) && (
           <div>
             <dt style={{ fontSize: "0.75rem", color: "#888", fontWeight: 600 }}>PureTrack Group</dt>
-            <dd style={{ margin: 0, fontSize: "0.85em" }}>
-              {round.pureTrackGroupSlug ? (
+            <dd style={{ margin: 0, fontSize: "0.85em", display: "flex", alignItems: "center", gap: "0.5rem" }}>
+              {(round.pureTrack?.status === "pending" || round.pureTrack?.status === "processing") ? (
+                ptPollTimeout ? (
+                  <>
+                    <span style={{ color: "#666" }}>Still {round.pureTrack.status === "pending" ? "queued" : "creating"}…</span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!id) return;
+                        api.get<Round>(`rounds/${id}`)
+                          .then((roundData) => setRound(roundData))
+                          .catch((err: unknown) => setActionError(err as Error))
+                          .finally(() => {
+                            setPtPollCount(0);
+                            setPtPollTimeout(null);
+                          });
+                      }}
+                      style={{ padding: "0.2rem 0.5rem", fontSize: "0.7rem", background: "#f1f3f5", border: "1px solid #ccc", borderRadius: "0.2rem", cursor: "pointer" }}
+                    >
+                      Refresh
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <span style={{ display: "inline-block", width: "12px", height: "12px", border: "2px solid #dee2e6", borderTopColor: "currentColor", borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+                    <span style={{ color: "#666" }}>{round.pureTrack.status === "pending" ? "Queued…" : "Creating…"}</span>
+                  </>
+                )
+              ) : round.pureTrack?.status === "failed" ? (
+                <span style={{ color: "#d32f2f" }}>Creation failed</span>
+              ) : round.pureTrackGroupSlug ? (
                 <a
                   href={`https://puretrack.io/group/${round.pureTrackGroupSlug}`}
                   target="_blank"
@@ -322,8 +396,10 @@ export default function RoundDetail() {
                 >
                   {round.pureTrackGroupName}
                 </a>
-              ) : (
+              ) : round.pureTrackGroupName ? (
                 round.pureTrackGroupName
+              ) : (
+                <span style={{ color: "#888" }}>No groups (none created)</span>
               )}
             </dd>
           </div>

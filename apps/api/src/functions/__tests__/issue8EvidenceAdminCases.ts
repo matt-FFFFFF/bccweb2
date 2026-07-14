@@ -17,6 +17,7 @@ export const ADMIN_CASES: readonly CallSiteCase[] = [
   { file: "clubs.ts", handler: "updateClub", endpoint: "updateClub", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("PUT", { id: randomUUID() }, { name: "Forbidden Club" }) },
   { file: "clubs.ts", handler: "deleteClub", endpoint: "deleteClub", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("DELETE", { id: randomUUID() }) },
   { file: "pilots.ts", handler: "createPilot", endpoint: "createPilot", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("POST", {}, { firstName: "Forbidden", lastName: "Pilot" }) },
+  { file: "puretrack.ts", handler: "deletePureTrackGroups", endpoint: "deletePureTrackGroups", tier: "heavy", forbiddenKind: "admin-only", setup: adminOnly("POST", {}, { ids: [1] }) },
   { file: "seasonClubs.ts", handler: "createSeasonClub", endpoint: "createSeasonClub", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("POST", { year: "2026" }, { clubId: randomUUID(), numTeams: 1, acceptTsCs: true }) },
   { file: "seasonClubs.ts", handler: "updateSeasonClub", endpoint: "updateSeasonClub", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("PUT", { year: "2026", seasonClubId: randomUUID() }, { numTeams: 1 }) },
   { file: "seasonClubs.ts", handler: "deleteSeasonClub", endpoint: "deleteSeasonClub", tier: "standard", forbiddenKind: "admin-only", setup: adminOnly("DELETE", { year: "2026", seasonClubId: randomUUID() }) },

@@ -272,6 +272,49 @@ describe("RoundSchema", () => {
     expect(parsed).toHaveProperty("brief");
   });
 
+  test("preserves valid PureTrack status metadata", () => {
+    const pureTrack = {
+      status: "processing",
+      attemptId: "x",
+      ownerToken: "worker-a",
+      requestedBy: "user-a",
+    } as const;
+
+    expect(RoundSchema.parse({ ...validRound, pureTrack }).pureTrack).toEqual(pureTrack);
+  });
+
+  test("allows PureTrack status metadata to be absent", () => {
+    const parsed = RoundSchema.parse(validRound);
+
+    expect(parsed).not.toHaveProperty("pureTrack");
+  });
+
+  test("strips unknown PureTrack child keys without dropping valid siblings", () => {
+    const parsed = RoundSchema.parse({
+      ...validRound,
+      pureTrack: { status: "pending", attemptId: "x", obsolete: true },
+    });
+
+    expect(parsed.pureTrack).toEqual({ status: "pending", attemptId: "x" });
+  });
+
+  test("heals a bogus pureTrack.status enum to undefined without throwing", () => {
+    const parsed = RoundSchema.parse({
+      ...validRound,
+      pureTrack: { status: "bogus", attemptId: "x" },
+    });
+
+    expect(parsed.pureTrack).toEqual({ status: undefined, attemptId: "x" });
+  });
+
+  test("preserves scoring alongside PureTrack status metadata", () => {
+    const pureTrack = { status: "pending", attemptId: "x" } as const;
+    const parsed = RoundSchema.parse({ ...validRound, pureTrack, scoring: validScoring });
+
+    expect(parsed.pureTrack).toEqual(pureTrack);
+    expect(parsed.scoring).toEqual(validScoring);
+  });
+
   test("fills optional fields with undefined when invalid", () => {
     const parsed = RoundSchema.parse({
       ...validRound,

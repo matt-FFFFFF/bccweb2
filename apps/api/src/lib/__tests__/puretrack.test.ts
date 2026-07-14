@@ -1,9 +1,38 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
-import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Round } from "@bccweb/types";
 
-const fetchMock = vi.fn();
+const fetchMock = vi.fn<typeof fetch>();
+const trackEventSpy = vi.hoisted(() => vi.fn());
+const writePrivateBlobSpy = vi.hoisted(() => vi.fn().mockResolvedValue(undefined));
+
+vi.mock("../blob.js", () => ({
+  getPrivateBlobClient: vi.fn(),
+  writePrivateBlob: writePrivateBlobSpy,
+}));
+vi.mock("../telemetry.js", () => ({
+  getTelemetryClient: () => ({ trackEvent: trackEventSpy }),
+}));
+
+const session = { accessToken: "token", csrfToken: "csrf", cookieHeader: "session=cookie" } as const;
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+}
+
+function requestUrl(input: string | URL | Request): string {
+  return typeof input === "string"
+    ? input
+    : input instanceof URL
+      ? input.href
+      : input.url;
+}
+
+function requestBody(init: RequestInit | undefined): string {
+  if (typeof init?.body !== "string") throw new Error("Expected a string request body");
+  return init.body;
+}
 
 function makeRound(): Round {
   return {
@@ -15,101 +44,408 @@ function makeRound(): Round {
     minimumScore: 0,
     site: { id: "site-1", name: "Milk Hill" },
     season: { year: 2026 },
-    teams: [
-      {
-        id: "team-1",
-        teamName: "Alpha",
-        club: { id: "club-1", name: "Club" },
-        score: 0,
-        pilots: [
-          { placeInTeam: 1, isScoring: true, status: "Filled", accountedFor: false, signToFly: false, noScore: false, pilotPoints: 0, pilotId: "pilot-1", snapshot: null, flight: null },
-          { placeInTeam: 2, isScoring: true, status: "Filled", accountedFor: false, signToFly: false, noScore: false, pilotPoints: 0, pilotId: "pilot-2", snapshot: null, flight: null },
-        ],
-      },
-    ],
+    teams: [{
+      id: "team-1",
+      teamName: "Alpha",
+      club: { id: "club-1", name: "Club" },
+      score: 0,
+      pilots: [
+        { placeInTeam: 1, isScoring: true, status: "Filled", accountedFor: false, signToFly: false, noScore: false, pilotPoints: 0, pilotId: "pilot-1", snapshot: null, flight: null },
+        { placeInTeam: 2, isScoring: true, status: "Filled", accountedFor: false, signToFly: false, noScore: false, pilotPoints: 0, pilotId: "pilot-2", snapshot: null, flight: null },
+      ],
+    }],
   };
 }
 
-describe("createPureTrackGroups", () => {
+describe("PureTrack API contracts", () => {
   beforeEach(() => {
     fetchMock.mockReset();
+    trackEventSpy.mockReset();
+    writePrivateBlobSpy.mockReset();
+    writePrivateBlobSpy.mockResolvedValue(undefined);
     vi.stubGlobal("fetch", fetchMock);
-    process.env.PURETRACK_API_KEY = "key";
-    process.env.PURETRACK_EMAIL = "pilot@example.com";
-    process.env.PURETRACK_PASSWORD = "secret";
+    process.env["PURETRACK_API_KEY"] = "key";
+    process.env["PURETRACK_EMAIL"] = "pilot@example.com";
+    process.env["PURETRACK_PASSWORD"] = "secret";
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+    delete process.env["PURETRACK_API_KEY"];
+    delete process.env["PURETRACK_EMAIL"];
+    delete process.env["PURETRACK_PASSWORD"];
+  });
+
+  it.each([
+    { access_token: "" },
+    { access_token: "token", extra: true },
+  ])("strict-parses the login token before requesting CSRF: %s", async (body) => {
+    const { authenticate } = await import("../puretrack.js");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    fetchMock.mockResolvedValueOnce(jsonResponse(body));
+
+    await expect(authenticate(beforeOutbound)).rejects.toThrow();
+
+    expect(beforeOutbound).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("reuses one authenticated session for list and create calls", async () => {
+    const { createGroup, listMyGroups } = await import("../puretrack.js");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: 7, name: "Round", slug: "round" }] }))
+      .mockResolvedValueOnce(jsonResponse({ id: 8, name: "Team", slug: "team" }));
+
+    const groups = await listMyGroups(session, beforeOutbound);
+    const created = await createGroup("Team", beforeOutbound, session);
+
+    expect(groups).toEqual([{ id: 7, name: "Round", slug: "round" }]);
+    expect(created).toEqual({ id: 8, name: "Team", slug: "team" });
+    expect(fetchMock.mock.calls.map(([url]) => requestUrl(url))).toEqual([
+      "https://puretrack.io/api/groups?mine=1",
+      "https://puretrack.io/api/groups",
+    ]);
+    expect(beforeOutbound).toHaveBeenCalledTimes(2);
+  });
+
+  it("checks the fence again before the CSRF request", async () => {
+    // Given
+    const { authenticate } = await import("../puretrack.js");
+    const guardLost = new Error("guard lost");
+    const beforeOutbound = vi.fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(guardLost);
+    fetchMock.mockResolvedValueOnce(jsonResponse({ access_token: "token" }));
+
+    // When / Then
+    await expect(authenticate(beforeOutbound)).rejects.toBe(guardLost);
+    expect(beforeOutbound).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks listing when the outbound fence is lost", async () => {
+    // Given
+    const { listMyGroups } = await import("../puretrack.js");
+    const guardLost = new Error("guard lost");
+    const beforeOutbound = vi.fn().mockRejectedValueOnce(guardLost);
+
+    // When / Then
+    await expect(listMyGroups(session, beforeOutbound)).rejects.toBe(guardLost);
+    expect(beforeOutbound).toHaveBeenCalledTimes(1);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it.each<readonly [unknown, string]>([
+    [{ data: [{ id: 1, name: "Name", slug: "slug", extra: true }] }, "extra group field"],
+    [{ data: [{ id: 1, name: "Name" }] }, "missing group field"],
+    [{ data: [{ id: 0, name: "Name", slug: "slug" }] }, "non-positive group id"],
+    [{ groups: [] }, "missing data"],
+    [{ data: [], extra: true }, "extra response field"],
+  ])("rejects a malformed list response: %s (%s)", async (body) => {
+    const { listMyGroups } = await import("../puretrack.js");
+    fetchMock.mockResolvedValueOnce(jsonResponse(body));
+
+    await expect(listMyGroups(session, vi.fn().mockResolvedValue(undefined))).rejects.toThrow();
+  });
+
+  it.each([
+    { id: 41, name: "Name", slug: "slug", extra: true },
+    { id: 41, name: "Name" },
+  ])("preserves a valid cleanupId when the full create response is malformed: %s", async (body) => {
+    const { createGroup, PureTrackCreateResponseError } = await import("../puretrack.js");
+    fetchMock.mockResolvedValueOnce(jsonResponse(body));
+
+    const error = await createGroup("Name", vi.fn().mockResolvedValue(undefined), session).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(PureTrackCreateResponseError);
+    expect(error).toMatchObject({ cleanupId: 41 });
+    expect(trackEventSpy).not.toHaveBeenCalled();
+  });
+
+  it("emits orphan telemetry when malformed create JSON has no safe cleanup id", async () => {
+    const { createGroup, PureTrackCreateResponseError } = await import("../puretrack.js");
+    fetchMock.mockResolvedValueOnce(jsonResponse({ id: "41", name: "Name", slug: "slug" }));
+
+    const error = await createGroup("Name", vi.fn().mockResolvedValue(undefined), session).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(PureTrackCreateResponseError);
+    expect(error).toMatchObject({ cleanupId: undefined });
+    expect(trackEventSpy).toHaveBeenCalledWith({
+      name: "puretrack.orphanRecoveryRequired",
+      properties: { operation: "createGroup" },
+    });
+  });
+
+  it("sends the unchanged group body after the outbound fence", async () => {
+    const { createGroup } = await import("../puretrack.js");
+    const order: string[] = [];
+    const beforeOutbound = vi.fn(async () => { order.push("fence"); });
+    fetchMock.mockImplementationOnce(async (_url, init) => {
+      order.push("post");
+      expect(JSON.parse(requestBody(init))).toEqual({
+        id: null,
+        name: "BCC Team",
+        public: true,
+        event: false,
+        protected: false,
+        password: "oshi",
+        timezone: "Europe/London",
+        slug: "BCC Team",
+        start: null,
+        end: null,
+      });
+      return jsonResponse({ id: 5, name: "BCC Team", slug: "bcc-team" });
+    });
+
+    await createGroup("BCC Team", beforeOutbound, session);
+
+    expect(order).toEqual(["fence", "post"]);
+  });
+
+  it("reports sequential mid-batch delete progress and tolerates already-gone groups", async () => {
+    const { deleteGroups, PureTrackDeleteError } = await import("../puretrack.js");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(null, { status: 410 }))
+      .mockResolvedValueOnce(new Response("upstream failed", { status: 500 }));
+
+    const error = await deleteGroups(session, [11, 12, 13, 14, 15], beforeOutbound).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(PureTrackDeleteError);
+    expect(error).toMatchObject({
+      deletedIds: [11],
+      alreadyGoneIds: [12, 13],
+      failedId: 14,
+    });
+    expect(error).toHaveProperty("cause");
+    expect(beforeOutbound).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.map(([url]) => requestUrl(url))).toEqual([
+      "https://puretrack.io/api/groups/11",
+      "https://puretrack.io/api/groups/12",
+      "https://puretrack.io/api/groups/13",
+      "https://puretrack.io/api/groups/14",
+    ]);
+  });
+
+  it("returns the actual deleted and already-gone ids after a successful delete batch", async () => {
+    // Given
+    const { deleteGroups } = await import("../puretrack.js");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    fetchMock
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(null, { status: 404 }))
+      .mockResolvedValueOnce(new Response(null, { status: 410 }));
+
+    // When
+    const result = await deleteGroups(session, [21, 22, 23], beforeOutbound);
+
+    // Then
+    expect(result).toEqual({ deletedIds: [21], alreadyGoneIds: [22, 23] });
+  });
+
+  it("aborts a PureTrack request at the request timeout", async () => {
+    // Given
+    vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((delay) => {
+      const controller = new AbortController();
+      setTimeout(
+        () => controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")),
+        delay,
+      );
+      return controller.signal;
+    });
+    const { listMyGroups, PURETRACK_REQUEST_TIMEOUT_MS } = await import("../puretrack.js");
+    fetchMock.mockImplementationOnce((_input, init) => new Promise((_resolve, reject) => {
+      init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
+    }));
+
+    // When
+    const request = listMyGroups(session, vi.fn().mockResolvedValue(undefined));
+    const rejection = expect(request).rejects.toMatchObject({ name: "TimeoutError" });
+    await vi.advanceTimersByTimeAsync(PURETRACK_REQUEST_TIMEOUT_MS);
+
+    // Then
+    await rejection;
+  });
+
+  it("aborts a stalled PureTrack response body at the request timeout", async () => {
+    // Given
+    vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((delay) => {
+      const controller = new AbortController();
+      setTimeout(
+        () => controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")),
+        delay,
+      );
+      return controller.signal;
+    });
+    const { listMyGroups, PURETRACK_REQUEST_TIMEOUT_MS } = await import("../puretrack.js");
+    let rejectBody: ((reason: unknown) => void) | undefined;
+    let requestSignal: AbortSignal | undefined;
+    fetchMock.mockImplementationOnce(async (_input, init) => {
+      const signal = init?.signal;
+      if (!(signal instanceof AbortSignal)) throw new Error("Expected a request abort signal");
+      requestSignal = signal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          rejectBody = (reason) => controller.error(reason);
+          signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+          controller.enqueue(new TextEncoder().encode('{"data":'));
+        },
+      });
+      return new Response(body, { headers: { "Content-Type": "application/json" } });
+    });
+
+    // When
+    const request = listMyGroups(session, vi.fn().mockResolvedValue(undefined));
+    const rejection = expect(request).rejects.toMatchObject({ name: "TimeoutError" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(PURETRACK_REQUEST_TIMEOUT_MS);
+    const timedOut = requestSignal?.aborted === true;
+    if (!timedOut) rejectBody?.(new Error("Response body timeout was cleared after headers"));
+
+    // Then
+    await rejection;
+    expect(timedOut).toBe(true);
+  });
+});
+
+describe("createPureTrackGroups guarded orchestration", () => {
+  beforeEach(() => {
+    fetchMock.mockReset();
+    writePrivateBlobSpy.mockReset();
+    writePrivateBlobSpy.mockResolvedValue(undefined);
+    vi.stubGlobal("fetch", fetchMock);
+    vi.spyOn(globalThis, "setTimeout").mockImplementation((callback: () => void) => {
+      callback();
+      return 0 as never;
+    });
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
-    delete process.env.PURETRACK_API_KEY;
-    delete process.env.PURETRACK_EMAIL;
-    delete process.env.PURETRACK_PASSWORD;
   });
 
-  it("PureTrack group creation skips pilots with null pureTrackId; group created with N-1 members; warning emitted", async () => {
+  it("reuses a supplied session and sends comma-free generated group names", async () => {
     const { createPureTrackGroups } = await import("../puretrack.js");
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(globalThis, "setTimeout").mockImplementation((cb: any) => {
-      if (typeof cb === "function") cb();
-      return 0 as never;
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ id: 1, name: "Round", slug: "round" }))
+      .mockResolvedValueOnce(jsonResponse({ id: 2, name: "Team", slug: "team" }))
+      .mockResolvedValueOnce(new Response("ok"))
+      .mockResolvedValueOnce(new Response("ok"));
+
+    const result = await createPureTrackGroups(makeRound(), new Map([["pilot-1", 101]]), {
+      beforeOutbound,
+      session,
     });
 
-    fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "tok" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response("<meta name=\"csrf-token\" content=\"csrf\">", { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 1, name: "BCC Milk Hill Sat 09 Jun 26", slug: "round" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 2, name: "BCC 09 Jun 26 Alpha", slug: "team" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response("ok", { status: 200 }))
-      .mockResolvedValueOnce(new Response("ok", { status: 200 }));
-
-    const result = await createPureTrackGroups(makeRound(), new Map([
-      ["pilot-1", 123],
-      ["pilot-2", undefined as never],
-    ]));
-
-    expect(result?.teams).toHaveLength(1);
-    expect(warnSpy).toHaveBeenCalledWith(
-      "[METRIC] puretrack.skip pilot lacks pureTrackId",
-      { pilotId: "pilot-2" },
-    );
+    expect(result?.roundGroupId).toBe(1);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(fetchMock.mock.calls.some(([url]) => requestUrl(url).endsWith("/api/login"))).toBe(false);
+    const createBodies = fetchMock.mock.calls
+      .filter(([url, init]) => requestUrl(url).endsWith("/api/groups") && init?.method === "POST")
+      .map(([, init]) => JSON.parse(requestBody(init)) as { name: string });
+    expect(createBodies.map(({ name }) => name)).toEqual([
+      "BCC Milk Hill Tue 09 Jun 26",
+      "BCC Tue 09 Jun 26 Alpha",
+    ]);
+    expect(createBodies.every(({ name }) => !name.includes(","))).toBe(true);
+    expect(fetchMock.mock.calls.every(([, init]) => {
+      const headers = new Headers(init?.headers);
+      return headers.get("Authorization") === "Bearer token" &&
+        headers.get("Cookie") === "session=cookie";
+    })).toBe(true);
+    expect(beforeOutbound).toHaveBeenCalledTimes(4);
+    expect(writePrivateBlobSpy).toHaveBeenCalledTimes(2);
   });
 
-  it("PureTrack group creation skips pilots with pureTrackId === 0", async () => {
-    const { createPureTrackGroups } = await import("../puretrack.js");
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
-    vi.spyOn(globalThis, "setTimeout").mockImplementation((cb: any) => {
-      if (typeof cb === "function") cb();
-      return 0 as never;
-    });
-
+  it("carries the round id when its record write and immediate delete both fail", async () => {
+    // Given
+    const { createPureTrackGroups, PureTrackGroupOperationError } = await import("../puretrack.js");
+    const recordError = new Error("record write failed");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    writePrivateBlobSpy.mockRejectedValueOnce(recordError);
     fetchMock
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: "tok" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response("<meta name=\"csrf-token\" content=\"csrf\">", { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 1, name: "BCC Milk Hill Sat 09 Jun 26", slug: "round" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 2, name: "BCC 09 Jun 26 Alpha", slug: "team" }), { status: 200 }))
-      .mockResolvedValueOnce(new Response("ok", { status: 200 }))
-      .mockResolvedValueOnce(new Response("ok", { status: 200 }));
+      .mockResolvedValueOnce(jsonResponse({ id: 31, name: "Round", slug: "round" }))
+      .mockResolvedValueOnce(new Response("delete failed", { status: 500 }));
 
-    const result = await createPureTrackGroups(makeRound(), new Map([
-      ["pilot-1", 0],
-      ["pilot-2", 456],
-    ]));
+    // When
+    const error = await createPureTrackGroups(makeRound(), new Map([["pilot-1", 101]]), {
+      beforeOutbound,
+      session,
+    }).catch((cause: unknown) => cause);
 
-    expect(result?.teams).toHaveLength(1);
-    expect(warnSpy).toHaveBeenCalledWith(
-      "[METRIC] puretrack.skip pilot lacks pureTrackId",
-      { pilotId: "pilot-1" },
-    );
+    // Then
+    expect(error).toBeInstanceOf(PureTrackGroupOperationError);
+    expect(error).toMatchObject({ cleanupIds: [31], cause: recordError });
+    expect(fetchMock.mock.calls.map(([url]) => requestUrl(url))).toEqual([
+      "https://puretrack.io/api/groups",
+      "https://puretrack.io/api/groups/31",
+    ]);
+    expect(beforeOutbound).toHaveBeenCalledTimes(2);
   });
 
-  it("PureTrack group does NOT throw when ALL pilots lack pureTrackId (logs warning, returns null/empty group result)", async () => {
+  it("carries round and team ids when a team record write and immediate delete both fail", async () => {
+    // Given
+    const { createPureTrackGroups, PureTrackGroupOperationError } = await import("../puretrack.js");
+    const recordError = new Error("team record write failed");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    writePrivateBlobSpy
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(recordError);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ id: 41, name: "Round", slug: "round" }))
+      .mockResolvedValueOnce(jsonResponse({ id: 42, name: "Team", slug: "team" }))
+      .mockResolvedValueOnce(new Response("delete failed", { status: 500 }));
+
+    // When
+    const error = await createPureTrackGroups(makeRound(), new Map([["pilot-1", 101]]), {
+      beforeOutbound,
+      session,
+    }).catch((cause: unknown) => cause);
+
+    // Then
+    expect(error).toBeInstanceOf(PureTrackGroupOperationError);
+    expect(error).toMatchObject({ cleanupIds: [41, 42], cause: recordError });
+    expect(fetchMock.mock.calls.map(([url]) => requestUrl(url))).toEqual([
+      "https://puretrack.io/api/groups",
+      "https://puretrack.io/api/groups",
+      "https://puretrack.io/api/groups/42",
+    ]);
+  });
+
+  it("carries every exact cleanup id after a partial import failure", async () => {
+    const { createPureTrackGroups, PureTrackGroupOperationError } = await import("../puretrack.js");
+    const beforeOutbound = vi.fn().mockResolvedValue(undefined);
+    fetchMock
+      .mockResolvedValueOnce(jsonResponse({ id: 51, name: "Round", slug: "round" }))
+      .mockResolvedValueOnce(jsonResponse({ id: 52, name: "Team", slug: "team" }))
+      .mockResolvedValueOnce(new Response("import failed", { status: 500 }));
+
+    const error = await createPureTrackGroups(makeRound(), new Map([["pilot-1", 101]]), {
+      beforeOutbound,
+      session,
+    }).catch((cause: unknown) => cause);
+
+    expect(error).toBeInstanceOf(PureTrackGroupOperationError);
+    expect(error).toMatchObject({ cleanupIds: [51, 52] });
+  });
+
+  it("preserves team and round skip semantics when pilots lack PureTrack ids", async () => {
     const { createPureTrackGroups } = await import("../puretrack.js");
-    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
 
     const result = await createPureTrackGroups(makeRound(), new Map());
 
     expect(result).toBeNull();
+    expect(fetchMock).not.toHaveBeenCalled();
     expect(warnSpy).toHaveBeenCalled();
   });
 });

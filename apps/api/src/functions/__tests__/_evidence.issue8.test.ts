@@ -2,7 +2,13 @@
 // SPDX-License-Identifier: MPL-2.0
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+vi.mock("../../lib/queue.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../lib/queue.js")>()),
+  enqueuePureTrackGroupJob: vi.fn(),
+}));
+
 import "../admin.js";
 import "../adminWording.js";
 import "../brief.js";

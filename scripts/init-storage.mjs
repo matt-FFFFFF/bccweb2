@@ -43,6 +43,8 @@ const CONTAINERS = [
  * `signtofly-reflect-poison` (after maxDequeueCount=5 per host.json).
  * The async rescore pipeline enqueues jobs onto `rescore-jobs`; dead-letter
  * messages are parked onto `rescore-jobs-poison` by the Functions host.
+ * The PureTrack group pipeline enqueues jobs onto `round-puretrack-group`;
+ * dead-letter messages are parked onto `round-puretrack-group-poison`.
  * Names MUST match the Terraform-provisioned queues + the API producer/consumer.
  */
 const QUEUES = [
@@ -52,6 +54,8 @@ const QUEUES = [
   "signtofly-reflect-poison",
   "rescore-jobs",
   "rescore-jobs-poison",
+  "round-puretrack-group",
+  "round-puretrack-group-poison",
 ];
 
 /**

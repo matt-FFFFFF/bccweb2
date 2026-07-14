@@ -129,10 +129,9 @@ resource "azapi_resource" "storage_container_data_private" {
 
 # ─── Queue Service ───────────────────────────────────────────────────────────
 #
-# Backs the async round-brief PDF and sign-to-fly reflect pipelines. The API
-# enqueues jobs on the `round-brief-pdf` / `signtofly-reflect` queues; queue-
-# triggered Functions process them. The queue service is the parent for all
-# named queues (name must be "default").
+# Backs the async round-brief PDF, sign-to-fly reflect, rescore, and PureTrack
+# group pipelines. Queue-triggered Functions process jobs from the named queues.
+# The queue service is the parent for all named queues (name must be "default").
 
 resource "azapi_resource" "queue_service" {
   type      = "Microsoft.Storage/storageAccounts/queueServices@2025-06-01"
@@ -201,6 +200,25 @@ resource "azapi_resource" "queue_rescore_jobs" {
 resource "azapi_resource" "queue_rescore_jobs_poison" {
   type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
   name      = "rescore-jobs-poison"
+  parent_id = azapi_resource.queue_service.id
+}
+
+# ─── PureTrack Group Queues ───────────────────────────────────────────────────
+#
+# `round-puretrack-group` carries PureTrack group jobs for a round.
+# `round-puretrack-group-poison` collects messages that exhaust the Functions
+# host retry budget. Names MUST match the producer / consumer
+# AzureWebJobsStorage queue bindings — do not rename.
+
+resource "azapi_resource" "queue_puretrack_group" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "round-puretrack-group"
+  parent_id = azapi_resource.queue_service.id
+}
+
+resource "azapi_resource" "queue_puretrack_group_poison" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "round-puretrack-group-poison"
   parent_id = azapi_resource.queue_service.id
 }
 

@@ -143,12 +143,13 @@ give atomic read-modify-write (30s lease).
 
 ### Storage Queues
 
-Six queues (created by `scripts/init-storage.mjs`, same storage account as blobs):
-`round-brief-pdf` (main) and `round-brief-pdf-poison` (dead-letter after
+Eight queues (created by `scripts/init-storage.mjs`, same storage account as blobs), across
+four families: `round-brief-pdf` (main) and `round-brief-pdf-poison` (dead-letter after
 `maxDequeueCount=5` per `host.json`), plus `signtofly-reflect` (main) and
 `signtofly-reflect-poison` (dead-letter, same `maxDequeueCount=5` policy), plus
-`rescore-jobs` (main) and `rescore-jobs-poison` (dead-letter, same policy).
-`init-storage.mjs` creates all six queues uniformly fatally (consistent with
+`rescore-jobs` (main) and `rescore-jobs-poison` (dead-letter, same policy), plus
+`round-puretrack-group` (main) and `round-puretrack-group-poison` (dead-letter, same policy).
+`init-storage.mjs` creates all eight queues uniformly fatally (consistent with
 `round-brief-pdf`/`signtofly-reflect`) — if the Queue service is unreachable the
 script throws and exits non-zero. Blob containers are created earlier in the same
 run, so a queue-service outage still surfaces as a hard failure.
@@ -186,7 +187,20 @@ on the job status blob (`rescore-jobs/{jobId}.json`) — NOT dead-lettered; the
 only as a safety net for catastrophic/uncaught host-level failures (dead-lettered after
 `maxDequeueCount=5`). For failure triage, inspect the job status blob + App Insights.
 
-**Connection invariant**: both producers (`apps/api/src/lib/queue.ts`) and all
+**Async PureTrack group flow**: both the lock endpoint (`POST /api/rounds/{id}/lock`)
+and the manual `POST /api/rounds/{id}/puretrack/create-groups` endpoint set
+`round.pureTrack.status = "pending"` and a fresh `pureTrack.attemptId`, then enqueue a
+`{roundId, attemptId}` job (strict `PureTrackGroupJobSchema` in
+`apps/api/src/lib/queue.ts` — no PII in the message) onto `round-puretrack-group`. The
+`puretrackGroups` queue-trigger consumer (`apps/api/src/functions/puretrackGroups.ts`)
+takes a global PureTrack mutation guard, replaces then re-creates the round's PureTrack
+groups, and commits via the `attemptId` + owner-token compare-and-set
+`commitPureTrackReady` (`apps/api/src/lib/puretrackStatus.ts`), which flips
+`pureTrack.status` to `ready` only while it is still `processing`. Status values:
+`pending | processing | ready | failed`. Poisoned messages land on
+`round-puretrack-group-poison` after `maxDequeueCount=5`.
+
+**Connection invariant**: all producers (`apps/api/src/lib/queue.ts`) and all
 `app.storageQueue` triggers use the `AzureWebJobsStorage` connection setting. That is
 the only setting carrying a `QueueEndpoint` in local/Docker; `BLOB_CONNECTION_STRING` is
 blob-only. Never switch any producer to `BLOB_CONNECTION_STRING` — it would silently
@@ -195,8 +209,10 @@ break queueing.
 **Queue privacy**: `privacy-scan.mjs` does NOT cover Storage Queues. The compensating
 control is strict job schemas in `apps/api/src/lib/queue.ts`: `BriefPdfJobSchema`
 (`z.object().strict()`) rejects any key beyond `{roundId, briefVersion, pdfAttemptId}`,
-and `SignToFlyReflectJobSchema` (`z.object({roundId}).strict()`) rejects any key beyond
-`{roundId}` — so PII can never enter either queue message at serialisation time.
+`SignToFlyReflectJobSchema` (`z.object({roundId}).strict()`) rejects any key beyond
+`{roundId}`, and `PureTrackGroupJobSchema` (`z.object({roundId, attemptId}).strict()`)
+rejects any key beyond `{roundId, attemptId}` — so PII can never enter any of these queue
+messages at serialisation time.
 
 A PR-gated [privacy scanner](file:///Volumes/code/bccweb2/scripts/privacy-scan.mjs)
 fails CI if PII leaks into the public container. **Never put PII fields in `data/` blobs.**
@@ -237,6 +253,11 @@ main `rescore-jobs` queue only; unlike `briefPdf`/`signaturesReflect` it does NO
 register a `rescore-jobs-poison` consumer, because job failures are recorded on the job
 status blob rather than dead-lettered; re-scores a round via the IGC path and writes
 status to `rescore-jobs/{jobId}.json`; the third non-HTTP trigger — not a pair)**,
+`puretrackGroups` **(queue-trigger — registers `app.storageQueue(...)` for BOTH
+`round-puretrack-group` and `round-puretrack-group-poison`, like `briefPdf`/`signaturesReflect`,
+NOT like `rescoreWorker`'s single-queue registration; replaces-then-creates a round's PureTrack
+groups under a global mutation guard and commits via `commitPureTrackReady`; the fourth
+non-HTTP trigger module and the third main+poison trigger pair)**,
 `puretrack`, `authFunctions`, `signatures`, `roundRegistration`, `clubTeams`,
 `seasonClubs`, `pilotSeasonClubs`, `teamsCaptain`.
 

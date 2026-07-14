@@ -320,6 +320,18 @@ run "storage_queues_planned" {
 
   assert {
     condition = (
+      azapi_resource.queue_puretrack_group.name == "round-puretrack-group" &&
+      azapi_resource.queue_puretrack_group.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
+      azapi_resource.queue_puretrack_group.parent_id == azapi_resource.queue_service.id &&
+      azapi_resource.queue_puretrack_group_poison.name == "round-puretrack-group-poison" &&
+      azapi_resource.queue_puretrack_group_poison.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
+      azapi_resource.queue_puretrack_group_poison.parent_id == azapi_resource.queue_service.id
+    )
+    error_message = "The round-puretrack-group queue and its poison queue must plan under the queue service with the exact expected names, types, and parent linkage."
+  }
+
+  assert {
+    condition = (
       length(azapi_resource.storage_lifecycle.body.properties.policy.rules) == 2 &&
       azapi_resource.storage_lifecycle.body.properties.policy.rules[0].name == "gc-auth-tokens" &&
       azapi_resource.storage_lifecycle.body.properties.policy.rules[1].name == "gc-rescore-status" &&

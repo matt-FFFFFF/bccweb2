@@ -36,15 +36,9 @@ import {
   writePrivateJson,
   writePublicJson,
 } from "../../__tests__/helpers/seed.js";
+import * as pureTrack from "../../lib/puretrack.js";
 
 // ─── External-service mocks (deterministic + no real I/O) ─────────────────────
-const pureTrackMock = vi.hoisted(() => ({
-  createPureTrackGroups: vi.fn(),
-}));
-vi.mock("../../lib/puretrack.js", () => ({
-  createPureTrackGroups: pureTrackMock.createPureTrackGroups,
-}));
-
 const pdfMock = vi.hoisted(() => ({
   generateBriefPdf: vi.fn(),
 }));
@@ -68,6 +62,7 @@ vi.mock("../../lib/email.js", () => ({
 vi.mock("../../lib/queue.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../lib/queue.js")>()),
   enqueueBriefPdf: vi.fn(),
+  enqueuePureTrackGroupJob: vi.fn(),
 }));
 
 // CRITICAL: the default 15s renewIntervalMs trips the leaseDurationSec*500
@@ -91,7 +86,7 @@ vi.mock("../../lib/blob.js", async (importOriginal) => {
 });
 
 // Register handlers (side-effectful imports)
-import { enqueueBriefPdf } from "../../lib/queue.js";
+import { enqueueBriefPdf, enqueuePureTrackGroupJob } from "../../lib/queue.js";
 import "../roundsMutate.js";
 import "../teams.js";
 import "../signatures.js";
@@ -188,14 +183,9 @@ async function seedBaseEntities(): Promise<E2ECtx> {
 describe("brief lifecycle end-to-end via API handlers (no direct brief blob writes)", () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    pureTrackMock.createPureTrackGroups.mockResolvedValue({
-      roundGroupId: 999,
-      roundGroupName: "E2E Group",
-      roundGroupSlug: "e2e-group",
-      teams: [],
-    });
     pdfMock.generateBriefPdf.mockResolvedValue(Buffer.from("%PDF-1.4 e2e"));
     vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
+    vi.mocked(enqueuePureTrackGroupJob).mockResolvedValue(undefined);
     emailMock.getBriefRecipients.mockReturnValue([]);
   });
 
@@ -205,6 +195,7 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
 
   test("create seeds brief -> PUT /brief edit -> brief-complete freezes -> sign -> lock refreshes derived", async () => {
     const base = await seedBaseEntities();
+    const createPureTrackGroupsSpy = vi.spyOn(pureTrack, "createPureTrackGroups");
 
     const createRes = await invoke(
       "createRound",
@@ -323,6 +314,11 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
     const roundAfterSign = await readPrivateJson<Round>(`rounds/${roundId}.json`);
     expect(roundAfterSign?.teams[0]?.pilots[0]?.signToFly).toBe(true);
 
+    vi.mocked(enqueuePureTrackGroupJob).mockImplementationOnce(async (job) => {
+      const committed = await readPrivateJson<Round>(`rounds/${job.roundId}.json`);
+      expect(committed?.status).toBe("Locked");
+      expect(committed?.pureTrack).toMatchObject({ status: "pending", attemptId: job.attemptId });
+    });
     const lockRes = await invoke(
       "lockRound",
       makeAuthRequest(base.adminUserId, base.adminEmail, {
@@ -335,12 +331,20 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
     expect(lockedRound.status).toBe("Locked");
     expect(lockedRound.brief?.pdfStatus).toBe("pending");
     expect(lockedRound.brief?.pdfAttemptId).toBeTruthy();
+    expect(lockedRound.pureTrack?.status).toBe("pending");
+    expect(lockedRound.pureTrack?.attemptId).toBeTruthy();
     expect(enqueueBriefPdf).toHaveBeenCalledTimes(1);
     expect(enqueueBriefPdf).toHaveBeenCalledWith({
       roundId,
       briefVersion: lockedRound.brief?.version,
       pdfAttemptId: lockedRound.brief?.pdfAttemptId,
     });
+    expect(enqueuePureTrackGroupJob).toHaveBeenCalledTimes(1);
+    expect(enqueuePureTrackGroupJob).toHaveBeenCalledWith({
+      roundId,
+      attemptId: lockedRound.pureTrack?.attemptId,
+    });
+    expect(createPureTrackGroupsSpy).not.toHaveBeenCalled();
     expect(pdfMock.generateBriefPdf).not.toHaveBeenCalled();
     expect(emailMock.sendEmail).not.toHaveBeenCalled();
     expect(await privateBlobExists(`round-briefs/${roundId}.pdf`)).toBe(false);
