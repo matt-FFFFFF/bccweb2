@@ -9,6 +9,9 @@ protect, so migration/cutover concerns are forward-looking, not remediation.
 > statement here no longer matches the code (stale versions, renamed/added/removed
 > modules, changed build steps or paths), VERIFY against the files and UPDATE it in
 > the same change that revealed the drift — don't just flag it. Accuracy is part of "done".
+> This extends to the human-facing docs linked from any AGENTS.md, including
+> [docs/architecture/](docs/architecture/) and [docs/runbooks/](docs/runbooks/): if a
+> linked doc drifts from the code, fix it in the same change that revealed the drift.
 
 ## Monorepo Layout (npm workspaces)
 
@@ -20,6 +23,8 @@ packages/schemas/ @bccweb/schemas  — Zod schemas, one per blob family (the sch
 packages/scoring/ @bccweb/scoring  — Pure scoring: scoreRound(), computeLeague()
 iac/              Terraform (Azure), 3 stacks   scripts/  Admin/migration/privacy-scan
 tests/e2e/        Playwright E2E (`npm run e2e`)  dist/web/ Vite build output (→ SWA)
+docs/architecture/ Human-facing design docs (storage-and-queues.md)
+docs/runbooks/    Operational runbooks (alerts, cutover, privacy, load-testing, ...)
 ```
 
 **Build DAG**: `types → schemas → {scoring, api, web}`; `scoring → api`. Consumers
@@ -42,7 +47,8 @@ symlinking, drifts versions). [`.npmrc`](.npmrc): `engine-strict` + `save-exact`
 (no-caret). Updates are security-only via Dependabot (no `dependabot.yml`). Exception:
 `scripts/migrate/` is a standalone package **outside** the `workspaces` globs with its
 own lockfile (pulls `mssql`, kept out of the deployed tree); root `npm ci` skips it,
-`ci.yml` installs it separately for migration unit tests.
+`ci.yml` installs it separately for migration unit tests. See
+[scripts/AGENTS.md](scripts/AGENTS.md) for script-family guidance.
 
 ## Build / Test / Dev
 
@@ -90,7 +96,7 @@ Local `make seed` bootstraps `admin@bcc.local` and writes its generated credenti
 to the ignored root `.dev-credentials` at mode 0600; the value is never logged.
 Subsequent seed/load control scripts consume that file automatically. `ADMIN_PASSWORD`
 remains the explicit override. Malformed, linked, foreign-owned, or non-0600 files fail
-before API/storage mutation.
+before API/storage mutation. Script guidance: [scripts/AGENTS.md](scripts/AGENTS.md).
 
 For `make docker-up`, prepare writes the override (when present) into that same private
 bind-mounted file, never into Compose environment. Make passes only the host UID/GID to
@@ -127,177 +133,56 @@ The bespoke, zero-dependency checker `scripts/spdx-header.mjs` enumerates tracke
 
 ## Data Storage (Azure Blob)
 
-Two containers, created by `scripts/init-storage.mjs`. **`data`** — public
-(`publicAccess = "blob"`), SPA reads directly via `VITE_BLOB_BASE_URL` (dev: Vite
-proxies `/blob/* → /devstoreaccount1/data/*`). **`data-private`** — private, API-only
-via JWT. `withLease()` / `withPrivateLease()` in
-[apps/api/src/lib/blob.ts](file:///Volumes/code/bccweb2/apps/api/src/lib/blob.ts)
-give atomic read-modify-write (30s lease).
+Two containers, created by `scripts/init-storage.mjs`: **`data`** (public, anon read,
+SPA reads directly via `VITE_BLOB_BASE_URL`) and **`data-private`** (API-only via JWT,
+holds PII). `withLease()` / `withPrivateLease()` in
+[apps/api/src/lib/blob.ts](apps/api/src/lib/blob.ts) give atomic read-modify-write
+(30s lease). **Never put PII fields in `data/` blobs** — a PR-gated
+[privacy scanner](scripts/privacy-scan.mjs) fails CI if PII leaks into the public
+container.
 
-- **Public** (anon read): `rounds.json`, `seasons.json`, `seasons/{year}.json`,
-  `results/{year}.json`, `pilots.json`, `clubs.json`, `club-teams.json`, `sites.json`.
-- **Private** (API only): `rounds/{uuid}.json`, `pilots/{uuid}.json` (PII),
-  `clubs/{uuid}.json`, `club-teams/{uuid}.json`, `sites/{uuid}.json`, `config.json`,
-  `users/{uuid}.json`, `user-index.json`, `auth/{uuid}.json`, `auth/tokens/{hash}.json`,
-  `round-briefs/{uuid}.{json,pdf}`, `frequencies/*`, `pilot-season-clubs/*`, `season-clubs/*`.
+**Storage Queues**: eight queues (same storage account), across four families —
+brief PDF, sign-to-fly reflect, rescore, PureTrack group — each a main queue plus a
+`-poison` dead-letter (except job-status-tracked rescore, which has no HTTP-visible
+retry path but still provisions a poison queue as a host-failure safety net). All
+producers/triggers use the `AzureWebJobsStorage` connection only; never
+`BLOB_CONNECTION_STRING`. Queue job schemas (`BriefPdfJobSchema`,
+`SignToFlyReflectJobSchema`, `PureTrackGroupJobSchema`, `RescoreJobMessageSchema`) are
+all `.strict()` so PII can never enter a queue message — `privacy-scan.mjs` does not
+cover queues, so these schemas are the compensating control.
 
-### Storage Queues
-
-Eight queues (created by `scripts/init-storage.mjs`, same storage account as blobs), across
-four families: `round-brief-pdf` (main) and `round-brief-pdf-poison` (dead-letter after
-`maxDequeueCount=5` per `host.json`), plus `signtofly-reflect` (main) and
-`signtofly-reflect-poison` (dead-letter, same `maxDequeueCount=5` policy), plus
-`rescore-jobs` (main) and `rescore-jobs-poison` (dead-letter, same policy), plus
-`round-puretrack-group` (main) and `round-puretrack-group-poison` (dead-letter, same policy).
-`init-storage.mjs` creates all eight queues uniformly fatally (consistent with
-`round-brief-pdf`/`signtofly-reflect`) — if the Queue service is unreachable the
-script throws and exits non-zero. Blob containers are created earlier in the same
-run, so a queue-service outage still surfaces as a hard failure.
-
-**Async brief-PDF flow**: the lock endpoint (`POST /api/rounds/{id}/lock`) sets
-`brief.pdfStatus = "pending"` and `brief.pdfAttemptId` on the round blob, then enqueues
-a `{roundId, briefVersion, pdfAttemptId}` job. The `briefPdf` queue-trigger consumer
-(`apps/api/src/functions/briefPdf.ts`) renders the PDF, uploads it to
-`round-briefs/{uuid}.pdf`, emails it, and flips `pdfStatus` to `ready`. Correctness is
-guarded by `pdfAttemptId` + an atomic compare-and-set commit (`commitBriefPdfReady`),
-NOT by `briefVersion` or `visibilityTimeout`. Status values: `pending | processing |
-ready | failed`. On unlock the PDF status fields are cleared.
-
-**Async sign-to-fly reflect flow**: the sign endpoints enqueue a `{ roundId }` job onto
-`signtofly-reflect`. The `signaturesReflect` queue-trigger consumer
-(`apps/api/src/functions/signaturesReflect.ts`) re-materializes `slot.signToFly` for
-the entire round by replaying the signature ledger (`signTofly/*`), then writes the
-updated round blob. This decouples the HTTP response from the potentially expensive
-full-round recompute.
-Operator recovery: `POST /api/rounds/{id}/reflect-sign-to-fly` (Admin/scoped-coord)
-synchronously re-runs the reflect and returns the corrected round.
-
-**Async rescore flow**: the Admin rescore path only (`POST /api/rounds/{id}/rescore`)
-enqueues a `{ jobId, roundId, requestedAt }` job (guarded by the strict
-`RescoreJobMessageSchema` in `apps/api/src/lib/rescoreJob.ts`, so no PII can enter the
-message) onto `rescore-jobs` — single-pilot IGC file upload
-stays SYNCHRONOUS and does NOT trigger this flow. The `rescoreWorker` queue-trigger
-consumer (`apps/api/src/functions/rescoreWorker.ts`) re-scores the round using the
-IGC-based scoring path, writes the result, and updates the job status blob
-`rescore-jobs/{jobId}.json` (status values: `queued | running | completed | partial |
-failed`). The Admin UI polls `GET /api/rounds/{id}/rescore/{jobId}` to surface progress
-and the final result. Normal job failures are caught, ACKed, and recorded as `failed`
-on the job status blob (`rescore-jobs/{jobId}.json`) — NOT dead-lettered; the
-`rescore-jobs-poison` queue (provisioned in Terraform + `init-storage.mjs`) is retained
-only as a safety net for catastrophic/uncaught host-level failures (dead-lettered after
-`maxDequeueCount=5`). For failure triage, inspect the job status blob + App Insights.
-
-**Async PureTrack group flow**: both the lock endpoint (`POST /api/rounds/{id}/lock`)
-and the manual `POST /api/rounds/{id}/puretrack/create-groups` endpoint set
-`round.pureTrack.status = "pending"` and a fresh `pureTrack.attemptId`, then enqueue a
-`{roundId, attemptId}` job (strict `PureTrackGroupJobSchema` in
-`apps/api/src/lib/queue.ts` — no PII in the message) onto `round-puretrack-group`. The
-`puretrackGroups` queue-trigger consumer (`apps/api/src/functions/puretrackGroups.ts`)
-takes a global PureTrack mutation guard, replaces then re-creates the round's PureTrack
-groups, and commits via the `attemptId` + owner-token compare-and-set
-`commitPureTrackReady` (`apps/api/src/lib/puretrackStatus.ts`), which flips
-`pureTrack.status` to `ready` only while it is still `processing`. Status values:
-`pending | processing | ready | failed`. Poisoned messages land on
-`round-puretrack-group-poison` after `maxDequeueCount=5`.
-
-**Connection invariant**: all producers (`apps/api/src/lib/queue.ts`) and all
-`app.storageQueue` triggers use the `AzureWebJobsStorage` connection setting. That is
-the only setting carrying a `QueueEndpoint` in local/Docker; `BLOB_CONNECTION_STRING` is
-blob-only. Never switch any producer to `BLOB_CONNECTION_STRING` — it would silently
-break queueing.
-
-**Queue privacy**: `privacy-scan.mjs` does NOT cover Storage Queues. The compensating
-control is strict job schemas in `apps/api/src/lib/queue.ts`: `BriefPdfJobSchema`
-(`z.object().strict()`) rejects any key beyond `{roundId, briefVersion, pdfAttemptId}`,
-`SignToFlyReflectJobSchema` (`z.object({roundId}).strict()`) rejects any key beyond
-`{roundId}`, and `PureTrackGroupJobSchema` (`z.object({roundId, attemptId}).strict()`)
-rejects any key beyond `{roundId, attemptId}` — so PII can never enter any of these queue
-messages at serialisation time.
-
-A PR-gated [privacy scanner](file:///Volumes/code/bccweb2/scripts/privacy-scan.mjs)
-fails CI if PII leaks into the public container. **Never put PII fields in `data/` blobs.**
+Full container/family/flow reference (containers, all eight queues, brief PDF/sign
+reflect/rescore/PureTrack flows, CAS/attempt semantics, poison behavior):
+[docs/architecture/storage-and-queues.md](docs/architecture/storage-and-queues.md).
 
 ### Schema layer
 
-Every blob family has exactly one schema in `packages/schemas`. JSON reads go through
-`readJson(client, Schema)`, writes through `writeJson` / `writePrivateJson` (see
-`apps/api/src/lib/blobJson.ts`). Use raw `readBlob` / `writeBlob` only for non-JSON
-artifacts (PDF, image, `.lock`, audit logs).
-
-- **`BLOB_SCHEMA_MODE`** (Function App env): `observe` (default) heals in memory + emits
-  telemetry only; `enforce` strips dead keys on write. Toggling is an app-setting change,
-  no redeploy. Flip to `enforce` per `docs/runbooks/alerts.md`.
-- **WingClass break-glass**: adding a `WingClass` requires order types → schema → API
-  deploy → admin UI emits the new key. Reversing that lets `enforce` reject/strip the field.
-- **`DATA_SHAPE_INVALID`**: server-side data-invariant violation; body is `{error, path,
-  schema}`, never field values (logged server-side only).
-- **`bootstrapAdmin` exception**: `apps/api/src/__tests__/helpers/seed.ts:bootstrapAdmin`
-  is the single permitted direct `readBlob`/`writeBlob` call site (API can't create the
-  first admin). F2 oracle allowlists it; any new exception must update both the seed.ts
-  banner and this section.
+Every blob family has a canonical schema in `packages/schemas`. JSON normally goes through
+`readJson` / `writeJson` / `writePrivateJson`; deliberate raw lease/index operations must
+justify the exception at their call site. `BLOB_SCHEMA_MODE` (`observe`/`enforce`),
+the WingClass break-glass order, `DATA_SHAPE_INVALID`, and the `bootstrapAdmin`
+allowlisted-exception rule are detailed in
+[packages/schemas/AGENTS.md](packages/schemas/AGENTS.md) and the architecture doc — the
+`bootstrapAdmin` in `apps/api/src/__tests__/helpers/seed.ts` remains the **sole test-fixture**
+raw-JSON exception; any new test exception must update its banner and that section.
 
 ## API (`apps/api`)
 
-Entry: [src/index.ts](file:///Volumes/code/bccweb2/apps/api/src/index.ts) imports every
-function module — each self-registers via `app.http(...)` or `app.storageQueue(...)`.
-**A new function file is dead unless added to `src/index.ts`.**
-
-Modules: `health`, `me`, `meProfile`, `rounds`, `roundsMutate`, `seasons`, `pilots`,
-`clubs`, `sites`, `teams`, `flights`, `admin`, `adminWording`, `brief`,
-`briefPdf` **(queue-trigger — registers `app.storageQueue(...)` for `round-brief-pdf`
-and `round-brief-pdf-poison`; the first non-HTTP triggers in the codebase)**,
-`signaturesReflect` **(queue-trigger — registers `app.storageQueue(...)` for
-`signtofly-reflect` and `signtofly-reflect-poison`; the second non-HTTP trigger pair)**,
-`rescoreWorker` **(queue-trigger — registers a SINGLE `app.storageQueue(...)` for the
-main `rescore-jobs` queue only; unlike `briefPdf`/`signaturesReflect` it does NOT
-register a `rescore-jobs-poison` consumer, because job failures are recorded on the job
-status blob rather than dead-lettered; re-scores a round via the IGC path and writes
-status to `rescore-jobs/{jobId}.json`; the third non-HTTP trigger — not a pair)**,
-`puretrackGroups` **(queue-trigger — registers `app.storageQueue(...)` for BOTH
-`round-puretrack-group` and `round-puretrack-group-poison`, like `briefPdf`/`signaturesReflect`,
-NOT like `rescoreWorker`'s single-queue registration; replaces-then-creates a round's PureTrack
-groups under a global mutation guard and commits via `commitPureTrackReady`; the fourth
-non-HTTP trigger module and the third main+poison trigger pair)**,
-`puretrack`, `authFunctions`, `signatures`, `roundRegistration`, `clubTeams`,
-`seasonClubs`, `pilotSeasonClubs`, `teamsCaptain`.
-
-Lib helpers: `blob` (storage + lease), `blobJson` (schema read/write), `auth` +
-`authHelpers` (HS256 JWT), `roundAuth`, `accountMutation`, `email` (ACS), `http`,
-`clientIp`, `pdf` (puppeteer-core + @sparticuz/chromium), `rateLimit`, `recompute`,
-`puretrack`, `teamCaptain`, `briefPdf` (PDF status CAS helpers: `setBriefPdfStatus`,
-`commitBriefPdfReady`, `sendBriefIfConfigured`), `queue` (enqueue + `BriefPdfJobSchema`
-strict guard), `telemetry` + `telemetryRedactor` (App Insights PII scrubber,
-set up BEFORE function imports), `signTofly/*` (signature ledger). See
-`docs/runbooks/alerts.md#blobhealed-events--blob-heal-storm-alert` for `blob.healed` triage.
+Entry: [src/index.ts](apps/api/src/index.ts) imports every function module — each
+self-registers via `app.http(...)` or `app.storageQueue(...)`. **A new function file is
+dead unless added to `src/index.ts`.** Module map, NodeNext import rule, auth/env, and
+test-isolation gotchas: [apps/api/AGENTS.md](apps/api/AGENTS.md). Handler conventions:
+[apps/api/src/functions/AGENTS.md](apps/api/src/functions/AGENTS.md). Helper cheat sheet:
+[apps/api/src/lib/AGENTS.md](apps/api/src/lib/AGENTS.md).
 
 **Auth**: bespoke HS256 JWT (`JWT_SECRET` env). Access token 1h, refresh 30d. Roles
-`Admin`, `RoundsCoord`, `Pilot`. `getCallerIdentity(req)` returns `CallerIdentity | null`;
-`RoundsCoord` users have a `clubId` scoping their writes.
-
-**Env** ([local.settings.example.json](file:///Volumes/code/bccweb2/apps/api/local.settings.example.json)):
-`BLOB_CONNECTION_STRING`, `BLOB_CONTAINER_NAME` (`data`), `BLOB_PRIVATE_CONTAINER_NAME`
-(`data-private`), `JWT_SECRET` (≥32 chars), `ACS_CONNECTION_STRING`, `ACS_SENDER_ADDRESS`,
-`ROUND_BRIEF_EMAILS`, `PURETRACK_*`. Copy the example → `local.settings.json`.
+`Admin`, `RoundsCoord`, `Pilot`. `RoundsCoord` users have a `clubId` scoping their writes.
 
 ## Web (`apps/web`)
 
-Entry: `src/main.tsx` → [`src/router.tsx`](file:///Volumes/code/bccweb2/apps/web/src/router.tsx)
-(React Router v8, `BrowserRouter`). `RequireAuth` / `RequireCoord` wrap protected routes;
-unauthenticated → `/login?return=<path>`. `FirstLoginOfSeasonGate` wraps the router to
-force re-acceptance of season T&Cs. Pages under
+Entry: `src/main.tsx` → [`src/router.tsx`](apps/web/src/router.tsx). Pages under
 `src/pages/{auth,rounds,results,pilots,admin,club}/`; theme in `src/bcc-theme.css`.
-
-- [`useBlob<T>(path)`](file:///Volumes/code/bccweb2/apps/web/src/hooks/useBlob.ts) — reads
-  public blobs directly via `VITE_BLOB_BASE_URL` (dev proxies `/blob/*` → Azurite).
-  Returns `{ data, loading, error, notFound }`.
-- [`api.get/post/put/delete`](file:///Volumes/code/bccweb2/apps/web/src/lib/api.ts) —
-  authenticated `/api/*` fetch wrapper; auto-attaches `Authorization: Bearer <token>`.
-- [`useAuth.tsx`](file:///Volumes/code/bccweb2/apps/web/src/hooks/useAuth.tsx): tokens in
-  `localStorage` (`bcc_access_token`, `bcc_refresh_token`, `bcc_identity`); auto-refresh near expiry.
-
-**Roles**: `Admin` (all admin pages + writes); `RoundsCoord` (manage rounds + club teams
-for own `clubId`, sees `/club` self-service); `Pilot` (read authenticated endpoints, edit
-own profile); anon (public blobs only).
+Router/hooks/`api.ts`/`useAuth`/roles/test details: [apps/web/src/AGENTS.md](apps/web/src/AGENTS.md).
 
 ## Feature Completeness Rule
 
@@ -309,27 +194,12 @@ documented rationale in the PR + an entry here.
 ## Testing — Critical Gotchas
 
 **Vitest 4.1.9** (root devDep). Root [`vitest.config.ts`](vitest.config.ts) `test.projects`
-covers `packages/{scoring,types,schemas}` + `apps/{api,web}`.
-
-**API** ([apps/api/vitest.config.ts](file:///Volumes/code/bccweb2/apps/api/vitest.config.ts)):
-- **Per-file Azurite containers**: each file gets its own `test-data-<rand>` /
-  `test-priv-<rand>`, deleted in `afterAll`; stale `test-*` (>1h) swept from `127.0.0.1`
-  only. Isolation must NOT rely on fresh-worker-per-file — `helpers/setup.ts` calls
-  `resetBlobSingletons()` before container creation (contains blast radius: a file
-  crashing mid-lease can't stall the next behind a 30s lease timeout).
-- `@azure/functions` is **mocked** — `app.http()` populates a registry; tests invoke via
-  `getRegisteredHandler(name)`. `email`, `pdf`, `puretrack` mocked too. `helpers/seed.ts`
-  seeds via handlers, not direct writes (except allowlisted `bootstrapAdmin`).
-- `fileParallelism: false` + `sequence.concurrent: false` — sequential for stable blob state.
-- `TEST_BCRYPT_COST` honored only when `NODE_ENV === "test"`; else cost stays 12.
-- 3 heavy tests excluded (`blob`, `puretrack`, `telemetry.integration`) — reasons inline;
-  run via `make test-heavy`. PureTrack live-API tests are opt-in (`make test-integration`,
-  needs `apps/api/.env` + network); self-skip without creds, excluded from CI.
-
-**Web** ([apps/web/vitest.config.ts](file:///Volumes/code/bccweb2/apps/web/vitest.config.ts)):
-`jsdom` + `@testing-library/react`; aliases `@bccweb/types` to `packages/types/src` (no
-rebuild needed for web tests). **E2E**: Playwright vs `E2E_BASE_URL` (default `:5173`);
-CI: 2 retries, 1 worker, `forbidOnly`.
+covers `packages/{scoring,types,schemas}` + `apps/{api,web}`. API-specific gotchas
+(per-file Azurite containers, mocked `@azure/functions`, heavy/integration exclusions):
+[apps/api/AGENTS.md](apps/api/AGENTS.md). Web tests use `jsdom` +
+`@testing-library/react`; aliases `@bccweb/types` to `packages/types/src` (no rebuild
+needed). **E2E**: Playwright vs `E2E_BASE_URL` (default `:5173`); CI: 2 retries,
+1 worker, `forbidOnly`.
 
 ## Infra / Deploy (`iac/`)
 
@@ -346,10 +216,10 @@ Vitest incl. heavy tests with Azurite, `docker compose build`); `deploy-dev.yml`
 release-ancestry check on `main` → same gate + jobs); `terraform.yml` (manual plan/apply
 per stack × env; also drift-reconcile); `privacy-scan.yml` (Azurite + seed + `privacy-scan.mjs`,
 fails on PII leak). Prod SPA: Static Web App + routes in
-[`staticwebapp.config.json`](file:///Volumes/code/bccweb2/apps/web/public/staticwebapp.config.json)
+[`staticwebapp.config.json`](apps/web/public/staticwebapp.config.json)
 (kept in `apps/web/public/` so Vite copies it to the `dist/web` output-location root the SWA
 deploy uploads — SPA fallback, security headers, `/api/*` → Function App); local Docker uses Caddy with the
-same proxy shape ([`Caddyfile`](file:///Volumes/code/bccweb2/apps/web/Caddyfile)).
+same proxy shape ([`Caddyfile`](apps/web/Caddyfile)).
 
 ## Operations
 
@@ -357,6 +227,8 @@ Runbooks in `docs/runbooks/`: `alerts`, `cutover`, `decommission`, `deploy-smoke
 `dns-cutover`, `gdpr-erasure`, `load-testing`, `privacy`, `round-club-pilot-decision` — read the relevant
 one before the matching op. Migration scripts in `scripts/migrate/` (legacy .NET → blob)
 keep state under `.migration-state/` (gitignored); `scripts/admin/anonymize-pilot.mjs` for GDPR erasure.
+Run the tracked manufacturers promotion per `docs/runbooks/manufacturers-move.md` after its
+deploy. Script-family guidance: [scripts/AGENTS.md](scripts/AGENTS.md).
 
 ## Plan Execution (worktrees)
 
