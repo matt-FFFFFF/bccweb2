@@ -146,7 +146,7 @@ async function applyValidationResult(
   await withPrivateLeaseRenewing(path, async (leaseId) => {
     const round = RoundSchema.parse(await readBlob(getPrivateBlobClient(path)));
     const flight = matchingFlight(round, job);
-    if (flight === null) return;
+    if (flight === null || flight.isManualLog === true) return;
     flight.validation = {
       ...flight.validation,
       ...result,
@@ -176,14 +176,14 @@ export async function igcValidationWorker(
   }
   const path = `rounds/${job.roundId}.json`;
   const flight = matchingFlight(await readRound(path), job);
-  if (flight === null) return;
+  if (flight === null || flight.isManualLog === true) return;
   const result = await resolveValidationResult(job, flight);
   if (result === null) return;
   const applied = await applyValidationResult(path, job, result);
   if (applied.kind === "stale" || applied.round.status !== "Complete") return;
   try {
     await recomputeSeason(applied.round.season.year);
-  } catch (error: unknown) { // no-excuse-ok: catch — derived failure must log and ACK.
+  } catch (error: unknown) {
     context.error(
       `[igcValidationWorker] recomputeSeason(${applied.round.season.year}) failed:`,
       error,

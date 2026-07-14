@@ -38,6 +38,7 @@ import {
   readValidationResult,
   releaseIgcValidationGuard,
 } from "../../lib/igcValidationJob.js";
+import * as blobModule from "../../lib/blob.js";
 import { getRegisteredQueueHandler } from "../../__tests__/helpers/setup.js";
 import "../igcValidationWorker.js";
 
@@ -205,6 +206,34 @@ describe("igcValidationWorker queue transaction", () => {
     },
   );
 
+  it("ACKs a crafted matching manual-flight job before IGC or FAI egress", async () => {
+    const seed = await seedValidation();
+    const before = await persistedRound(seed);
+    const flight = before.teams[0]?.pilots[0]?.flight;
+    if (flight === null || flight === undefined) throw new Error("Validation fixture has no flight");
+    flight.isManualLog = true;
+    await writePrivateJson(seed.path, before);
+    const readPaths: string[] = [];
+    const realGetPrivateBlobClient = blobModule.getPrivateBlobClient;
+    const clientSpy = vi.spyOn(blobModule, "getPrivateBlobClient").mockImplementation((path) => {
+      const client = realGetPrivateBlobClient(path);
+      const download = client.download.bind(client);
+      vi.spyOn(client, "download").mockImplementation(async () => {
+        readPaths.push(path);
+        return download();
+      });
+      return client;
+    });
+
+    await invokeQueue("igcValidationWorker", seed.job);
+
+    expect(faiMock.validate).not.toHaveBeenCalled();
+    expect(jobMock.pace).not.toHaveBeenCalled();
+    expect(readPaths).toEqual([seed.path]);
+    clientSpy.mockRestore();
+    expect(await persistedRound(seed)).toEqual(before);
+  });
+
   it("replays an already-terminal Complete attempt without FAI and recomputes results", async () => {
     const seed = await seedValidation({ status: "Complete" });
     const round = await persistedRound(seed);
@@ -305,6 +334,25 @@ describe("igcValidationWorker queue transaction", () => {
       signature: "pending",
       validationAttemptId: replacementAttemptId,
     });
+    expect(await readValidationResult(seed.job.validationAttemptId)).toMatchObject({ signature: "invalid" });
+  });
+
+  it("ACKs when the matching flight becomes manual before leased apply", async () => {
+    const seed = await seedValidation();
+    let converted: Round | null = null;
+    faiMock.validate.mockImplementationOnce(async () => {
+      const concurrent = await persistedRound(seed);
+      const flight = concurrent.teams[0]?.pilots[0]?.flight;
+      if (flight === null || flight === undefined) throw new Error("Validation fixture has no flight");
+      flight.isManualLog = true;
+      converted = concurrent;
+      await writePrivateJson(seed.path, concurrent);
+      return { signature: "invalid", faiStatus: "FAILED" };
+    });
+
+    await invokeQueue("igcValidationWorker", seed.job);
+
+    expect(await persistedRound(seed)).toEqual(converted);
     expect(await readValidationResult(seed.job.validationAttemptId)).toMatchObject({ signature: "invalid" });
   });
 
