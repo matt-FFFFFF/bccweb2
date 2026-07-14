@@ -47,7 +47,7 @@ Bespoke HS256 JWT (`JWT_SECRET` env, ≥32 chars). Access token 1h, refresh 30d.
 See [local.settings.example.json](local.settings.example.json): `AzureWebJobsStorage`,
 `BLOB_CONNECTION_STRING`,
 `BLOB_CONTAINER_NAME` (`data`), `BLOB_PRIVATE_CONTAINER_NAME` (`data-private`),
-`JWT_SECRET`, `ACS_CONNECTION_STRING`, `ACS_SENDER_ADDRESS`, `ROUND_BRIEF_EMAILS`,
+`JWT_SECRET`, `ACS_CONNECTION_STRING`, `ACS_SENDER_ADDRESS`,
 `PURETRACK_*`. Copy the example → `local.settings.json`.
 
 ## Testing — gotchas
