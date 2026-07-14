@@ -213,17 +213,17 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
                     {flight?.validation ? (
                       <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", alignItems: "flex-start" }}>
                         {flight.validation.signature && (
-                          <StatusBadge 
-                            status={flight.validation.signature === "valid" ? "Active" : 
+                          <StatusBadge
+                            status={flight.validation.signature === "valid" ? "Active" :
                                    flight.validation.signature === "invalid" ? "Cancelled" :
-                                   flight.validation.signature === "unverified" ? "Locked" : "Proposed"} 
-                            label={`Sig: ${flight.validation.signature}`} 
+                                   flight.validation.signature === "unverified" ? "Locked" : "Proposed"}
+                            label={`Sig: ${flight.validation.signature}`}
                           />
                         )}
                         {flight.validation.date && (
-                          <StatusBadge 
-                            status={flight.validation.date === "valid" ? "Active" : "Cancelled"} 
-                            label={`Date: ${flight.validation.date}`} 
+                          <StatusBadge
+                            status={flight.validation.date === "valid" ? "Active" : "Cancelled"}
+                            label={`Date: ${flight.validation.date}`}
                           />
                         )}
                         {flight.validation.overridden && (

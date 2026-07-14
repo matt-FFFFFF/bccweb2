@@ -50,7 +50,7 @@ test.describe("IGC signature date validation E2E", () => {
 
     // Scoped coord must NOT see Allow on invalid
     await expect(invalidRowCoord.getByTestId("allow-igc-btn")).toBeHidden();
-    
+
     // Scoped coord must see Resubmit on unverified
     await expect(unverifiedRowCoord.getByTestId("revalidate-igc-btn")).toBeVisible();
 
@@ -80,7 +80,7 @@ test.describe("IGC signature date validation E2E", () => {
     await expect(adminTable).toBeVisible();
 
     const invalidRowAdmin = adminTable.locator("tr").filter({ hasText: "Sig: invalid" });
-    
+
     const allowBtn = invalidRowAdmin.getByTestId("allow-igc-btn");
     await expect(allowBtn).toBeVisible();
 
@@ -89,7 +89,7 @@ test.describe("IGC signature date validation E2E", () => {
 
     // The row should update to show Overridden
     await expect(invalidRowAdmin.getByText("Overridden")).toBeVisible({ timeout: 15_000 });
-    
+
     // Verify scoring is actually persisted to the private blob
     await expect.poll(
       async () => {

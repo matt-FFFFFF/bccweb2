@@ -51,10 +51,10 @@ export async function readPersistedScores(
   const priv = svc.getContainerClient(PRIVATE_CONTAINER);
   const buffer = await priv.getBlockBlobClient(`rounds/${roundId}.json`).downloadToBuffer();
   const round = JSON.parse(buffer.toString("utf8")) as RoundBlob;
-  
+
   const team = round.teams.find((t) => t.id === teamId);
   if (!team) throw new Error("Team not found in persisted blob");
-  
+
   const slot = team.pilots.find((p) => p.pilotId === pilotId);
   if (!slot) throw new Error("Slot not found in persisted blob");
 

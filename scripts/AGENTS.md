@@ -34,7 +34,9 @@ as a hard failure rather than a silent partial success.
 Fails CI if PII leaks into public blobs, the SPA bundle, or telemetry/log fixtures. Its
 storage scan covers public **blob storage** only — it does **not** cover Storage Queues (see the
 architecture doc's "Queue privacy" section for the compensating control: strict `.strict()`
-job schemas in `apps/api/src/lib/queue.ts` and `rescoreJob.ts`). PII field list lives in
+job schemas in `apps/api/src/lib/{queue,rescoreJob}.ts` and
+`packages/schemas/src/igcValidationJob.ts`, including the IGC-validation family's
+`IgcValidationJobSchema`). PII field list lives in
 [`scripts/lib/pii.mjs`](lib/pii.mjs) and must stay in sync with
 `apps/api/src/lib/telemetryRedactor.ts`'s `PII_FIELDS`.
 

@@ -136,7 +136,7 @@ describe("CoordIgcTable", () => {
     // p-up: signature unverified, date invalid. Allow should show (due to date invalid). Resubmit should show (due to unverified).
     expect(screen.getByText("Sig: unverified")).toBeInTheDocument();
     expect(screen.getByText("Date: invalid")).toBeInTheDocument();
-    
+
     // Check buttons
     expect(screen.getByTestId("revalidate-igc-btn")).toBeInTheDocument();
     expect(screen.getByTestId("allow-igc-btn")).toBeInTheDocument();

@@ -6,16 +6,19 @@ don't re-read the source.
 
 ## queue.ts — producers + job schemas
 
-- `enqueueBriefPdf`/`enqueueSignToFlyReflect`/`enqueuePureTrackGroupJob` — all use
-  the `AzureWebJobsStorage` connection (the only setting with a `QueueEndpoint` locally).
-  **Never** switch a producer to `BLOB_CONNECTION_STRING` — that's blob-only and would
-  silently break queueing.
+- `enqueueBriefPdf`/`enqueueSignToFlyReflect`/`enqueuePureTrackGroupJob` and
+  `igcValidationJob.ts`'s `enqueueIgcValidation` use `AzureWebJobsStorage` (the only
+  setting with a `QueueEndpoint` locally). **Never** switch a producer to
+  `BLOB_CONNECTION_STRING` — that's blob-only and would silently break queueing.
 - `BriefPdfJobSchema`, `SignToFlyReflectJobSchema`, `PureTrackGroupJobSchema` are
   `z.object({...}).strict()` — any extra key is rejected at serialisation time so PII can
   never enter a queue message. `RescoreJobMessageSchema` (same pattern) lives in
-  `rescoreJob.ts` instead, guarding the Admin-only rescore enqueue.
-- Full flow-by-flow detail (brief PDF / sign reflect / rescore / PureTrack, CAS/attempt
-  semantics, poison behavior) is in
+  `rescoreJob.ts`; `IgcValidationJobSchema` lives in
+  `packages/schemas/src/igcValidationJob.ts`.
+- `igcValidationJob.ts` also owns create-only durable validation-attempt results and the
+  global leased guard that serializes and paces FAI calls.
+- Full flow-by-flow detail (brief PDF / sign reflect / rescore / PureTrack / IGC
+  validation, CAS/attempt semantics, poison behavior) is in
   [docs/architecture/storage-and-queues.md](../../../../docs/architecture/storage-and-queues.md).
 
 ## blob.ts — clients + leases

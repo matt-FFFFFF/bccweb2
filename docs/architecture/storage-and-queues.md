@@ -75,14 +75,15 @@ unreachable the script throws and exits non-zero. Blob containers are created ea
 the same run, so a queue-service outage still surfaces as a hard failure rather than a
 partial success.
 
-**Connection invariant**: every producer (`apps/api/src/lib/queue.ts` and
-`apps/api/src/lib/rescoreJob.ts`) and every `app.storageQueue` trigger uses the
+**Connection invariant**: every producer (`apps/api/src/lib/queue.ts`,
+`apps/api/src/lib/rescoreJob.ts`, and `apps/api/src/lib/igcValidationJob.ts`) and every
+`app.storageQueue` trigger uses the
 `AzureWebJobsStorage` connection setting — the only setting carrying a `QueueEndpoint` in
 local/Docker. `BLOB_CONNECTION_STRING` is blob-only; using it would silently break queueing.
 
 **Queue privacy**: `privacy-scan.mjs` does not cover Storage Queues. The compensating
-control is strict, `.strict()` job schemas in `apps/api/src/lib/queue.ts` and
-`apps/api/src/lib/rescoreJob.ts`:
+control is strict, `.strict()` job schemas in `apps/api/src/lib/queue.ts`,
+`apps/api/src/lib/rescoreJob.ts`, and `packages/schemas/src/igcValidationJob.ts`:
 
 - `BriefPdfJobSchema` — only `{roundId, briefVersion, pdfAttemptId}`.
 - `SignToFlyReflectJobSchema` — only `{roundId}`.

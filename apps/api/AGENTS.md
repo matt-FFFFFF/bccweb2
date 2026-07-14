@@ -50,7 +50,8 @@ See [local.settings.example.json](local.settings.example.json): `AzureWebJobsSto
 `BLOB_CONNECTION_STRING`,
 `BLOB_CONTAINER_NAME` (`data`), `BLOB_PRIVATE_CONTAINER_NAME` (`data-private`),
 `JWT_SECRET`, `ACS_CONNECTION_STRING`, `ACS_SENDER_ADDRESS`,
-`PURETRACK_*`. Copy the example → `local.settings.json`.
+`PURETRACK_*`, `FAI_VALI_ENABLED`, `FAI_VALI_BASE_URL`, `FAI_VALI_TIMEOUT_MS`.
+Copy the example → `local.settings.json`.
 
 ## Testing — gotchas
 
