@@ -4,7 +4,8 @@ import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { QueueClient } from "@azure/storage-queue";
 import type { HttpResponseInit } from "@azure/functions";
-import type { Flight, RescoreJob, RescoreJobMessage, Round, User } from "@bccweb/types";
+import type { Config, Flight, RescoreJob, RescoreJobMessage, Round, User } from "@bccweb/types";
+import { ConfigSchema } from "@bccweb/schemas";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { makeAuthRequest, MockHttpRequest } from "../../__tests__/helpers/api.js";
@@ -12,6 +13,8 @@ import { getRegisteredHandler, getRegisteredQueueHandler } from "../../__tests__
 import { getPrivateContainer } from "../../__tests__/helpers/azurite.js";
 import * as blobModule from "../../lib/blob.js";
 import { getPrivateBlobClient, readBlob, writePrivateBlob } from "../../lib/blob.js";
+import * as faiValidationModule from "../../lib/faiVali.js";
+import * as igcValidationJobModule from "../../lib/igcValidationJob.js";
 import { acquireActiveGuard, activeGuardPath, readJobStatus, RESCORE_QUEUE_NAME, writeJobStatus } from "../../lib/rescoreJob.js";
 
 vi.mock("../../lib/igcScoring.js", async (importOriginal) => {
@@ -25,6 +28,7 @@ vi.mock("../../lib/recompute.js", async (importOriginal) => {
 });
 
 import { scoreIgc } from "../../lib/igcScoring.js";
+import type { SanityFlag } from "../../lib/igcSanity.js";
 import * as rescoreRoundModule from "../rescoreRound.js";
 import "../igc.js";
 import "../manualFlight.js";
@@ -36,10 +40,10 @@ const VALID_JUSTIFICATION = "GPS failed; distance measured from the task map.";
 
 interface MixedRound { roundId: string; teamId: string; admin: User; coord: User; pilot: User }
 
-function scored(distance: number) {
+function scored(distance: number, sanityFlags: SanityFlag[] = []) {
   return {
     distance,
-    sanityFlags: [],
+    sanityFlags,
     scoredAt: new Date().toISOString(),
     scoredByVersion: "vitest-scorer",
     parserErrors: [],
@@ -290,6 +294,98 @@ describe("rescore enqueue/status/worker async chain", () => {
     expect(finished?.status).toBe("completed");
     // rescoredCount reclassified 2 → 1; the stale slot joins skippedManualCount (1 → 2).
     expect(finished?.counts).toEqual({ rescoredCount: 1, skippedManualCount: 2, skippedNoIgcCount: 1, skippedBudgetCount: 0, errorCount: 0 });
+  });
+
+  it("refreshes date while preserving signature and override state", async () => {
+    const ctx = await seedMixedRound();
+    const path = `rounds/${ctx.roundId}.json`;
+    const current = (await readBlob(getPrivateBlobClient(path))) as Round;
+    const flight = current.teams[0]?.pilots[0]?.flight;
+    if (!flight) throw new Error("Expected seeded IGC flight");
+    flight.validation = { signature: "valid", overridden: true };
+    await writePrivateBlob(path, current);
+    vi.mocked(scoreIgc).mockResolvedValueOnce(scored(101, ["IGC_DATE_MISMATCH"])).mockResolvedValueOnce(scored(202));
+    const job = await seedQueuedJob(ctx.roundId, ctx.admin);
+
+    await getRegisteredQueueHandler("rescoreWorker").handler(rescoreMessage(job), invocationContext("rescoreWorker"));
+
+    const persisted = (await readBlob(getPrivateBlobClient(path))) as Round;
+    expect(persisted.teams[0]?.pilots[0]?.flight?.validation).toEqual({ signature: "valid", overridden: true, date: "invalid" });
+    expect(persisted.teams[0]?.pilots[0]?.flight?.score).toBe(0);
+  });
+
+  it("preserves a concurrent Allow recorded on the leased round", async () => {
+    const ctx = await seedMixedRound();
+    const path = `rounds/${ctx.roundId}.json`;
+    const realReadBlob = blobModule.readBlob;
+    let roundReads = 0;
+    vi.spyOn(blobModule, "readBlob").mockImplementation(async (client) => {
+      const value = await realReadBlob(client);
+      const candidate = value as Round;
+      if (candidate?.id === ctx.roundId) {
+        roundReads += 1;
+        if (roundReads >= 2) {
+          const flight = candidate.teams[0]?.pilots[0]?.flight;
+          if (flight) flight.validation = { signature: "valid", overridden: true };
+        }
+      }
+      return value;
+    });
+    vi.mocked(scoreIgc).mockResolvedValueOnce(scored(101, ["IGC_DATE_MISMATCH"])).mockResolvedValueOnce(scored(202));
+    const job = await seedQueuedJob(ctx.roundId, ctx.admin);
+
+    await getRegisteredQueueHandler("rescoreWorker").handler(rescoreMessage(job), invocationContext("rescoreWorker"));
+
+    const persisted = (await realReadBlob(getPrivateBlobClient(path))) as Round;
+    expect(persisted.teams[0]?.pilots[0]?.flight?.validation).toEqual({ signature: "valid", overridden: true, date: "invalid" });
+  });
+
+  it("clears stale date when disabled without touching signature or override", async () => {
+    const ctx = await seedMixedRound();
+    const path = `rounds/${ctx.roundId}.json`;
+    const current = (await readBlob(getPrivateBlobClient(path))) as Round;
+    const flight = current.teams[0]?.pilots[0]?.flight;
+    if (!flight) throw new Error("Expected seeded IGC flight");
+    flight.validation = { signature: "valid", overridden: true, date: "invalid" };
+    await writePrivateBlob(path, current);
+    const config: Config = { ...ConfigSchema.parse({}), flightDateValidationEnabled: false };
+    await writePrivateBlob("config.json", config);
+    vi.mocked(scoreIgc).mockResolvedValueOnce(scored(101, ["IGC_DATE_MISMATCH"])).mockResolvedValueOnce(scored(202));
+    const job = await seedQueuedJob(ctx.roundId, ctx.admin);
+
+    await getRegisteredQueueHandler("rescoreWorker").handler(rescoreMessage(job), invocationContext("rescoreWorker"));
+
+    const persisted = (await readBlob(getPrivateBlobClient(path))) as Round;
+    expect(persisted.teams[0]?.pilots[0]?.flight?.validation).toEqual({ signature: "valid", overridden: true });
+  });
+
+  it("uses the under-lease config after a mid-run toggle for both state and enforcement", async () => {
+    const ctx = await seedMixedRound();
+    const config: Config = { ...ConfigSchema.parse({}), flightDateValidationEnabled: false };
+    await writePrivateBlob("config.json", config);
+    vi.mocked(scoreIgc).mockImplementationOnce(async () => {
+      await writePrivateBlob("config.json", { ...config, flightDateValidationEnabled: true });
+      return scored(101, ["IGC_DATE_MISMATCH"]);
+    }).mockResolvedValueOnce(scored(202));
+    const job = await seedQueuedJob(ctx.roundId, ctx.admin);
+
+    await getRegisteredQueueHandler("rescoreWorker").handler(rescoreMessage(job), invocationContext("rescoreWorker"));
+
+    const persisted = (await readBlob(getPrivateBlobClient(`rounds/${ctx.roundId}.json`))) as Round;
+    expect(persisted.teams[0]?.pilots[0]?.flight?.validation?.date).toBe("invalid");
+    expect(persisted.teams[0]?.pilots[0]?.pilotPoints).toBe(0);
+  });
+
+  it("does not call FAI validation or enqueue an IGC validation job", async () => {
+    const ctx = await seedMixedRound();
+    const validateSpy = vi.spyOn(faiValidationModule, "validateIgcSignature");
+    const enqueueSpy = vi.spyOn(igcValidationJobModule, "enqueueIgcValidation");
+    const job = await seedQueuedJob(ctx.roundId, ctx.admin);
+
+    await getRegisteredQueueHandler("rescoreWorker").handler(rescoreMessage(job), invocationContext("rescoreWorker"));
+
+    expect(validateSpy).not.toHaveBeenCalled();
+    expect(enqueueSpy).not.toHaveBeenCalled();
   });
 
   it("marks failed and releases the guard when runRescoreJob throws without rejecting the queue handler", async () => {

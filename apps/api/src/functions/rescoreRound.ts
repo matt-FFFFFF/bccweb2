@@ -24,7 +24,9 @@ type RescoreCounters = {
 
 type RescoreError = { teamId: string; place: number; error: string };
 
-type FlightUpdate = { teamId: string; place: number; flightId: string; flightPatch: Partial<Flight> };
+type FlightUpdate = {
+  teamId: string; place: number; flightId: string; flightPatch: Partial<Flight>; dateMismatch: boolean;
+};
 
 async function loadConfig(): Promise<Config> {
   try {
@@ -43,7 +45,7 @@ function matchingSlot(round: Round, update: FlightUpdate): PilotSlot | undefined
   return team?.pilots.find((slot) => slot.placeInTeam === update.place);
 }
 
-function applyUpdates(round: Round, updates: readonly FlightUpdate[]): number {
+function applyUpdates(round: Round, updates: readonly FlightUpdate[], config: Config): number {
   let skippedStale = 0;
   for (const update of updates) {
     const slot = matchingSlot(round, update);
@@ -58,6 +60,10 @@ function applyUpdates(round: Round, updates: readonly FlightUpdate[]): number {
       continue;
     }
     slot.flight = { ...slot.flight, ...update.flightPatch };
+    const validation = { ...slot.flight.validation };
+    if (!config.flightDateValidationEnabled) delete validation.date;
+    else validation.date = update.dateMismatch ? "invalid" : "valid";
+    slot.flight.validation = validation;
   }
   return skippedStale;
 }
@@ -117,6 +123,7 @@ async function buildRescoreUpdates(round: Round, startedAt: number): Promise<{
           teamId: team.id,
           place: slot.placeInTeam,
           flightId: flight.id,
+          dateMismatch: result.sanityFlags.includes("IGC_DATE_MISMATCH"),
           flightPatch: {
             distance: result.distance,
             sanityFlags: result.sanityFlags,
@@ -156,7 +163,8 @@ export async function runRescoreJob(
 
   await withPrivateLeaseRenewing(path, async (leaseId) => {
     const leasedRound = (await readBlob(getPrivateBlobClient(path))) as Round;
-    const skippedStale = applyUpdates(leasedRound, updates);
+    const config = await loadConfig();
+    const skippedStale = applyUpdates(leasedRound, updates, config);
     if (skippedStale > 0) {
       // A manual override / IGC re-upload landed on these slots during the
       // unlocked scoring window; they were NOT rescored. Reclassify from
@@ -165,7 +173,6 @@ export async function runRescoreJob(
       counters.rescoredCount -= skippedStale;
       counters.skippedManualCount += skippedStale;
     }
-    const config = await loadConfig();
     const { round: scored, derivation } = scoreRoundEnforcingValidation(leasedRound, config);
     scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
     await writePrivateJson(path, RoundSchema, scored, leaseId);
