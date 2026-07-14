@@ -3,7 +3,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { randomUUID } from "node:crypto";
 import type { Config, Flight, PilotSlot, RescoreJob, Round } from "@bccweb/types";
-import { scoreRound } from "@bccweb/scoring";
 import { ConfigSchema, RoundSchema } from "@bccweb/schemas";
 
 import { getPrivateBlobClient, readBlob, withPrivateLeaseRenewing, writePrivateBlob } from "../lib/blob.js";
@@ -14,6 +13,7 @@ import { mutationRateLimit } from "../lib/rateLimit.js";
 import { scoreIgc } from "../lib/igcScoring.js";
 import { readRoundOr404, resolveExpectedPilotName, streamToBuffer } from "../lib/flightHelpers.js";
 import { acquireActiveGuard, enqueueRescore, readJobStatus, releaseActiveGuard, writeJobStatus } from "../lib/rescoreJob.js";
+import { scoreRoundEnforcingValidation } from "../lib/scoreRoundValidated.js";
 
 const BUDGET_MS = 8 * 60_000;
 
@@ -166,7 +166,7 @@ export async function runRescoreJob(
       counters.skippedManualCount += skippedStale;
     }
     const config = await loadConfig();
-    const { round: scored, derivation } = scoreRound(leasedRound, config);
+    const { round: scored, derivation } = scoreRoundEnforcingValidation(leasedRound, config);
     scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
     await writePrivateJson(path, RoundSchema, scored, leaseId);
   });

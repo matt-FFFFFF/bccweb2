@@ -34,7 +34,6 @@ import type {
   Signature,
 } from "@bccweb/types";
 import { normalizeStatus } from "@bccweb/types";
-import { scoreRound } from "@bccweb/scoring";
 import {
   BriefSchema,
   ConfigSchema,
@@ -45,6 +44,7 @@ import {
   SiteSchema,
 } from "@bccweb/schemas";
 import * as z from "zod/v4";
+import { scoreRoundEnforcingValidation } from "../lib/scoreRoundValidated.js";
 import {
   getBlobClient,
   getPrivateBlobClient,
@@ -1343,7 +1343,7 @@ async function completeRound(
       }
 
       const config = await loadConfig();
-      const { round: scored, derivation } = scoreRound(r, config);
+      const { round: scored, derivation } = scoreRoundEnforcingValidation(r, config);
       scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
       scored.status = "Complete";
       scored.isLocked = false;
