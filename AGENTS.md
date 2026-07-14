@@ -169,9 +169,9 @@ assertion reads. Any new category must update its banner and that section.
 
 ## API (`apps/api`)
 
-Entry: [src/index.ts](apps/api/src/index.ts) imports every function module — each
-self-registers via `app.http(...)` or `app.storageQueue(...)`. **A new function file is
-dead unless added to `src/index.ts`.** Module map, NodeNext import rule, auth/env, and
+Entry: [src/index.ts](apps/api/src/index.ts) imports every self-registering function entry
+module; helpers are imported by their owner. **A new entry module is dead unless added to
+`src/index.ts`.** Module map, NodeNext import rule, auth/env, and
 test-isolation gotchas: [apps/api/AGENTS.md](apps/api/AGENTS.md). Handler conventions:
 [apps/api/src/functions/AGENTS.md](apps/api/src/functions/AGENTS.md). Helper cheat sheet:
 [apps/api/src/lib/AGENTS.md](apps/api/src/lib/AGENTS.md).

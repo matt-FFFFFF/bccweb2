@@ -1,8 +1,8 @@
 # apps/api — Azure Functions v4 API
 
-Node 24, ESM, TypeScript. Entry: [`src/index.ts`](src/index.ts) imports every function
-module — each self-registers via `app.http(...)` or `app.storageQueue(...)`. **A new
-function file is dead unless added to `src/index.ts`.** See root
+Node 24, ESM, TypeScript. Entry: [`src/index.ts`](src/index.ts) imports every
+self-registering function entry module; helper modules are imported by their owner.
+**A new entry module is dead unless added to `src/index.ts`.** See root
 [AGENTS.md](../../AGENTS.md) for the monorepo build DAG and storage/queue architecture
 (also in [docs/architecture/storage-and-queues.md](../../docs/architecture/storage-and-queues.md)).
 
@@ -74,9 +74,10 @@ Vitest ([vitest.config.ts](vitest.config.ts)):
   network); self-skip without credentials, excluded from CI. See
   [README.md](README.md#puretrack-integration-tests-opt-in-live-api).
 
-## New function checklist
+## New function module checklist
 
-- [ ] Import it in `src/index.ts`.
+- [ ] Entry module: import it in `src/index.ts` and self-register.
+- [ ] Helper module: import it from its owning entry module; do not self-register.
 - [ ] Follow the handler shape / registration style in
       [`src/functions/AGENTS.md`](src/functions/AGENTS.md).
 - [ ] If it's Admin-managed data, ship the operator UI in the same PR (root

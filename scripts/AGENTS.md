@@ -31,8 +31,8 @@ as a hard failure rather than a silent partial success.
 
 ## `privacy-scan.mjs` — CI success gate
 
-Fails CI if PII leaks into public blobs, the SPA bundle, or telemetry/log fixtures. Scope
-is public **blob storage** only — it does **not** cover Storage Queues (see the
+Fails CI if PII leaks into public blobs, the SPA bundle, or telemetry/log fixtures. Its
+storage scan covers public **blob storage** only — it does **not** cover Storage Queues (see the
 architecture doc's "Queue privacy" section for the compensating control: strict `.strict()`
 job schemas in `apps/api/src/lib/queue.ts` and `rescoreJob.ts`). PII field list lives in
 [`scripts/lib/pii.mjs`](lib/pii.mjs) and must stay in sync with

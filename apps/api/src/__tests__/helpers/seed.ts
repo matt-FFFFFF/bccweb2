@@ -12,7 +12,11 @@ import { clearSentEmails, getLastVerificationUrl } from "./setup.js";
 
 import "../../index.js";
 
-// DIRECT BLOB ACCESS — permitted ONLY for: (1) bootstrapAdmin (above); (2) seeding deliberately-corrupt fixtures in negative healing-layer tests (Tasks 28-38 use this); (3) reading blobs in assertions (no write). Any other use is a bug.
+// DIRECT BLOB ACCESS — permitted ONLY for: (1) bootstrapAdmin; (2) controlled
+// fixture overrides that handlers cannot express (IDs, teams, normalized state);
+// (3) deliberately corrupt fixtures in negative healing-layer tests; and
+// (4) assertion reads. Any other use is a bug. Keep packages/schemas/AGENTS.md
+// and docs/architecture/storage-and-queues.md aligned with this allowlist.
 
 async function writeJson<T>(
   containerFn: () => import("@azure/storage-blob").ContainerClient,
@@ -113,7 +117,9 @@ export async function bootstrapAdmin(): Promise<BootstrapAdmin> {
     createdAt: new Date().toISOString(),
   };
 
-  // EXCEPTION: direct write to data-private/users/<adminId>.json. The auth API requires an existing admin to grant the Admin role; no API path creates the first one. This is the only direct write permitted in seed.ts. F2 oracle allowlists this exact call site.
+  // Bootstrap exception: the auth API requires an existing admin to grant Admin,
+  // so no handler can create this first user. Other raw fixture writes are limited
+  // to the file-level allowlist above; the F2 oracle allowlists this exact call site.
   await writePrivateJson(`users/${adminId}.json`, user);
   bootstrapAdminMemo = { user, token: signAccessToken(adminId, adminEmail, 0) };
   return bootstrapAdminMemo;
