@@ -130,7 +130,8 @@ unrelated fixtures/seed rounds survive.
 
 ## Azure configuration and cost controls
 
-Use `PURETRACK_ENABLED=false`, `ROUND_BRIEF_EMAILS=""`, a dedicated JWT secret and
+Use `PURETRACK_ENABLED=false`, leave `config.json` `roundBriefRecipients` empty (the
+default) to disable brief email, a dedicated JWT secret and
 storage account, and non-production/omitted ACS. Warm the health endpoint if cold-start
 behavior is not the subject. Azure scale, storage leases, and authentication topology
 differ from Azurite; record those differences with the result rather than weakening

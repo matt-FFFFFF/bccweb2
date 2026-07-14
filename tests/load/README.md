@@ -74,7 +74,8 @@ make loadtest
 ```
 
 For a dedicated Azure stack also set `BCC_API_BASE_URL` and `ADMIN_PASSWORD`, and
-disable external effects (`PURETRACK_ENABLED=false`, `ROUND_BRIEF_EMAILS=""`). Remote
+disable external effects (`PURETRACK_ENABLED=false`; leave `config.json`
+`roundBriefRecipients` empty, the default, to disable brief email). Remote
 hostnames must contain `loadtest` or `staging`; production-looking names are rejected
 before any directory, checkpoint, or API mutation.
 
