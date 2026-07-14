@@ -93,6 +93,32 @@ describe("AdminPureTrackGroups", () => {
     });
   });
 
+  it("prevents selecting more than MAX_DELETE_BATCH groups", async () => {
+    vi.mocked(api.get).mockResolvedValueOnce([
+      { id: 1, name: "G1", slug: "g1" },
+      { id: 2, name: "G2", slug: "g2" },
+      { id: 3, name: "G3", slug: "g3" },
+      { id: 4, name: "G4", slug: "g4" },
+      { id: 5, name: "G5", slug: "g5" },
+      { id: 6, name: "G6", slug: "g6" },
+    ]);
+
+    render(<AdminPureTrackGroups />);
+    expect(await screen.findByText("G1")).toBeVisible();
+
+    for (let i = 1; i <= 5; i++) {
+      fireEvent.click(screen.getByTestId(`select-${i}`));
+    }
+
+    expect(screen.getByTestId("select-6")).toBeDisabled();
+
+    expect(screen.getByText("Limit reached: 5 groups")).toBeVisible();
+
+    fireEvent.click(screen.getByTestId("select-5"));
+    expect(screen.getByTestId("select-6")).not.toBeDisabled();
+    expect(screen.queryByText("Limit reached: 5 groups")).not.toBeInTheDocument();
+  });
+
   it("non-Admin shows the guard", () => {
     mockAuth(["Pilot"]);
     render(<AdminPureTrackGroups />);

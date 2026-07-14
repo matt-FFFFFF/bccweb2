@@ -12,7 +12,6 @@ import {
   getPrivateBlockBlobClient,
   withPrivateLease,
   withRoundAndBriefLease,
-  writePrivateBlob,
 } from "./blob.js";
 import { readJson, writePrivateJson } from "./blobJson.js";
 import type { PureTrackRoundResult } from "./puretrack.js";
@@ -231,16 +230,18 @@ function applyPureTrackResult(
 }
 
 async function ensureBriefExists(briefPath: string, roundId: string): Promise<void> {
+  const placeholder: RoundBrief = {
+    roundId,
+    generatedAt: new Date().toISOString(),
+    date: "1970-01-01",
+    siteName: "Pending",
+    teams: [],
+  };
   try {
-    await writePrivateBlob(
+    await writePrivateJson<RoundBrief>(
       briefPath,
-      {
-        roundId,
-        generatedAt: new Date().toISOString(),
-        date: "1970-01-01",
-        siteName: "Pending",
-        teams: [],
-      },
+      BriefSchema,
+      placeholder,
       undefined,
       { ifNoneMatch: "*" },
     );

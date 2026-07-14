@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import { BlockBlobClient } from "@azure/storage-blob";
+import { BriefSchema } from "@bccweb/schemas";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { writePrivateBlob } from "../blob.js";
@@ -108,6 +109,36 @@ describe("PureTrack status and echo commits", () => {
     expect(committed).toBe(true);
     expect(await readRound(round.id)).not.toHaveProperty("pureTrackGroupId");
     expect(await readBrief(round.id)).not.toHaveProperty("pureTrackGroupName");
+  });
+
+  test("creates a schema-valid placeholder brief once through the schema write path", async () => {
+    // Given
+    const round = roundFixture();
+    await seedRound(round);
+    const writeSpy = vi.spyOn(blobJson, "writePrivateJson");
+    const briefPath = `round-briefs/${round.id}.json`;
+
+    // When
+    await mutatePureTrackEchoes(round.id, () => false);
+    const firstBytes = await bytes(briefPath);
+    await mutatePureTrackEchoes(round.id, () => false);
+
+    // Then
+    const createCall = writeSpy.mock.calls.find(([path]) => path === briefPath);
+    expect(createCall).toEqual([
+      briefPath,
+      BriefSchema,
+      expect.objectContaining({
+        roundId: round.id,
+        date: "1970-01-01",
+        siteName: "Pending",
+        teams: [],
+      }),
+      undefined,
+      { ifNoneMatch: "*" },
+    ]);
+    expect(BriefSchema.safeParse(await readBrief(round.id)).success).toBe(true);
+    expect(await bytes(briefPath)).toEqual(firstBytes);
   });
 
   test("leaves the brief unchanged when the round-only commit fails", async () => {

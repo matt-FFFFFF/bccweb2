@@ -228,7 +228,6 @@ export default function RoundManage() {
         setActionBusy={setActionBusy}
         setConfirmModal={setConfirmModal}
         runAction={runAction}
-        pureTrackStatus={r.pureTrack?.status}
       />
       {/* Metadata */}
       {canManage && (

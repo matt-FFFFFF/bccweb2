@@ -37,6 +37,8 @@ interface Group {
   slug: string;
 }
 
+const MAX_DELETE_BATCH = 5; // Must match DeletePureTrackGroupsBodySchema in API
+
 export default function AdminPureTrackGroups() {
   const { identity, loading: authLoading } = useAuth();
   const [groups, setGroups] = useState<Group[]>([]);
@@ -113,13 +115,20 @@ export default function AdminPureTrackGroups() {
       <div style={{ border: "1px solid #dee2e6", borderRadius: "0.5rem", padding: "1rem", marginBottom: "1.5rem" }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "1rem" }}>
           <h2 style={{ fontSize: "1rem", margin: "0" }}>Live Groups</h2>
-          <button
-            onClick={handleDelete}
-            disabled={busy || selectedIds.size === 0}
-            style={btnStyle("#fff", busy || selectedIds.size === 0 ? "#6c757d" : "#dc3545")}
-          >
-            {busy ? "Deleting…" : "Delete selected"}
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: "1rem" }}>
+            {selectedIds.size >= MAX_DELETE_BATCH && (
+              <span style={{ fontSize: "0.8rem", color: "#666" }}>
+                Limit reached: {MAX_DELETE_BATCH} groups
+              </span>
+            )}
+            <button
+              onClick={handleDelete}
+              disabled={busy || selectedIds.size === 0 || selectedIds.size > MAX_DELETE_BATCH}
+              style={btnStyle("#fff", busy || selectedIds.size === 0 || selectedIds.size > MAX_DELETE_BATCH ? "#6c757d" : "#dc3545")}
+            >
+              {busy ? "Deleting…" : "Delete selected"}
+            </button>
+          </div>
         </div>
 
         {groups.length === 0 ? (
@@ -143,6 +152,7 @@ export default function AdminPureTrackGroups() {
                       aria-label={`Select group ${g.name}`}
                       checked={selectedIds.has(g.id)}
                       onChange={() => toggleSelect(g.id)}
+                      disabled={!selectedIds.has(g.id) && selectedIds.size >= MAX_DELETE_BATCH}
                       data-testid={`select-${g.id}`}
                     />
                   </td>

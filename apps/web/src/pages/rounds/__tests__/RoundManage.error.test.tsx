@@ -45,7 +45,7 @@ describe("RoundManage error handling", () => {
       if (path.endsWith("/brief")) return { pdfStatus: "failed" };
       return { id: "round-1", site: { name: "Site" }, season: { year: 2026 }, teams: [], brief: { pdfStatus: "failed" }, status: "Locked", isLocked: true };
     });
-    
+
     vi.mocked(api.post).mockRejectedValueOnce(
       new ApiError(409, "Conflict", "Conflict", undefined, "Wait 12 minutes before recreating")
     );
@@ -57,10 +57,10 @@ describe("RoundManage error handling", () => {
         </Routes>
       </MemoryRouter>
     );
-    
+
     const btn = await screen.findByRole("button", { name: "Regenerate PDF" });
     fireEvent.click(btn);
-    
+
     await waitFor(() => {
       expect(screen.getByText("Wait 12 minutes before recreating")).toBeInTheDocument();
     });

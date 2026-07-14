@@ -233,10 +233,10 @@ describe("POST /api/manage/puretrack/groups/delete", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
-  it("rejects more than eight ids with the synchronous batch-limit detail", async () => {
+  it("rejects more than five ids with the synchronous batch-limit detail", async () => {
     // Given
     const { user } = await makeUser({ roles: ["Admin"] });
-    const ids = Array.from({ length: 9 }, (_, index) => index + 1);
+    const ids = Array.from({ length: 6 }, (_, index) => index + 1);
 
     // When
     const res = await invoke(
@@ -248,7 +248,7 @@ describe("POST /api/manage/puretrack/groups/delete", () => {
     expect(res.status).toBe(400);
     expect(res.jsonBody).toMatchObject({
       code: "INVALID_IDS",
-      detail: "ids must contain 1 to 8 unique positive integers",
+      detail: "ids must contain 1 to 5 unique positive integers",
     });
     expect(fetchMock).not.toHaveBeenCalled();
   });

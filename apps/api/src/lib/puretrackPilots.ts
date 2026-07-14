@@ -19,9 +19,14 @@ export async function loadPilotPureTrackIds(
       const path = `pilots/${pilotId}.json`;
       const pilot = await readJson(getPrivateBlobClient(path), PilotSchema, path);
       if (pilot.pureTrackId != null) pilotPureTrackIds.set(pilotId, pilot.pureTrackId);
-    } catch {
-      return;
+    } catch (error: unknown) {
+      if (statusCodeOf(error) !== 404) throw error;
     }
   }));
   return pilotPureTrackIds;
+}
+
+function statusCodeOf(error: unknown): number | undefined {
+  if (!(error instanceof Object) || !("statusCode" in error)) return undefined;
+  return typeof error.statusCode === "number" ? error.statusCode : undefined;
 }
