@@ -8,7 +8,8 @@ Reads/writes go through `readJson`/`writeJson`/`writePrivateJson` in
 ## Schema modes and break-glass
 
 - **`BLOB_SCHEMA_MODE`** (Function App env): `observe` (default) heals bad shapes in
-  memory and emits telemetry only; `enforce` strips dead keys on write via `.strip()`.
+  memory and emits telemetry only; `enforce` writes schema-parsed output, stripping
+  unknown keys for `.strip()` objects and rejecting them for `.strict()` objects.
   Toggling is an app-setting change, no redeploy — see `docs/runbooks/alerts.md`.
 - **WingClass break-glass**: adding a `WingClass` requires, in order, types → schema →
   API deploy → admin UI emitting the new key. Reversing that order means `enforce` mode

@@ -37,8 +37,9 @@ explicitly justified lease/index operations whose call sites document why schema
 must be avoided.
 
 - **`BLOB_SCHEMA_MODE`** (Function App env): `observe` (default) heals bad shapes in
-  memory and emits telemetry only; `enforce` strips dead keys on write. This is an app
-  setting, not a redeploy — flip it per `docs/runbooks/alerts.md`.
+  memory and emits telemetry only; `enforce` writes schema-parsed output, stripping
+  unknown keys for `.strip()` objects and rejecting them for `.strict()` objects. This
+  is an app setting, not a redeploy — flip it per `docs/runbooks/alerts.md`.
 - **WingClass break-glass**: adding a `WingClass` requires, in order, types → schema →
   API deploy → admin UI emitting the new key. Doing it out of order means `enforce`
   mode will reject or strip the field.
