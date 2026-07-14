@@ -388,6 +388,96 @@ describe("pureTrackGroups queue consumer", () => {
     expect((await readPrivateJson<Round>(`rounds/${job.roundId}.json`))?.pureTrack?.status).toBe("pending");
   });
 
+  it("fails a matching pending attempt when the final dequeue read fails before claim", async () => {
+    // Given
+    const job = await seedJob();
+    const originalReadJson = blobJson.readJson;
+    let roundReadCount = 0;
+    const readSpy = vi.spyOn(blobJson, "readJson").mockImplementation((client, schema, path) => {
+      if (path === `rounds/${job.roundId}.json` && ++roundReadCount === 2) {
+        return Promise.reject(new Error("injected pre-claim round read failure"));
+      }
+      return originalReadJson(client, schema, path);
+    });
+
+    // When
+    try {
+      await invokeQueue("pureTrackGroups", job, { dequeueCount: 5 });
+    } finally {
+      readSpy.mockRestore();
+    }
+
+    // Then
+    expect((await readPrivateJson<Round>(`rounds/${job.roundId}.json`))?.pureTrack).toMatchObject({
+      status: "failed",
+      attemptId: job.attemptId,
+    });
+  });
+
+  it("rethrows a pre-claim read failure before the final dequeue for host retry", async () => {
+    // Given
+    const job = await seedJob();
+    const originalReadJson = blobJson.readJson;
+    let roundReadCount = 0;
+    const readSpy = vi.spyOn(blobJson, "readJson").mockImplementation((client, schema, path) => {
+      if (path === `rounds/${job.roundId}.json` && ++roundReadCount === 2) {
+        return Promise.reject(new Error("injected retryable pre-claim round read failure"));
+      }
+      return originalReadJson(client, schema, path);
+    });
+
+    // When
+    const operation = invokeQueue("pureTrackGroups", job, { dequeueCount: 4 });
+
+    // Then
+    try {
+      await expect(operation).rejects.toThrow("injected retryable pre-claim round read failure");
+    } finally {
+      readSpy.mockRestore();
+    }
+    expect((await readPrivateJson<Round>(`rounds/${job.roundId}.json`))?.pureTrack).toMatchObject({
+      status: "pending",
+      attemptId: job.attemptId,
+    });
+  });
+
+  it("does not fail a superseded attempt when the final dequeue read fails before claim", async () => {
+    // Given
+    const job = await seedJob();
+    const replacementAttemptId = randomUUID();
+    const originalRound = await readPrivateJson<Round>(`rounds/${job.roundId}.json`);
+    if (originalRound === null) throw new Error("Seeded round disappeared");
+    const originalReadJson = blobJson.readJson;
+    let roundReadCount = 0;
+    const readSpy = vi.spyOn(blobJson, "readJson").mockImplementation(async (client, schema, path) => {
+      if (path === `rounds/${job.roundId}.json` && ++roundReadCount === 2) {
+        await writePrivateJson(path, {
+          ...originalRound,
+          pureTrack: {
+            status: "pending",
+            attemptId: replacementAttemptId,
+            updatedAt: new Date().toISOString(),
+          },
+        });
+        throw new Error("injected superseded pre-claim round read failure");
+      }
+      return originalReadJson(client, schema, path);
+    });
+
+    // When
+    try {
+      await invokeQueue("pureTrackGroups", job, { dequeueCount: 5 });
+    } finally {
+      readSpy.mockRestore();
+    }
+
+    // Then
+    expect((await readPrivateJson<Round>(`rounds/${job.roundId}.json`))?.pureTrack).toMatchObject({
+      status: "pending",
+      attemptId: replacementAttemptId,
+    });
+  });
+
   it("throws on live guard contention before the final dequeue", async () => {
     const job = await seedJob();
     const owner = await acquirePureTrackMutationGuard("global", "other-attempt");

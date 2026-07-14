@@ -29,7 +29,7 @@ type ActiveJob = {
   readonly beforeOutbound: BeforePureTrackOutbound;
   readonly beforeCleanup: BeforePureTrackOutbound;
 };
-type RenewableGuard = { handle: PureTrackMutationGuardHandle };
+type RenewableGuard = { handle: PureTrackMutationGuardHandle; claimed: boolean };
 
 class PureTrackGuardContendedError extends Error {
   readonly name = "PureTrackGuardContendedError";
@@ -203,7 +203,7 @@ export async function handlePureTrackGroupJob(message: QueueMessage, ctx: Invoca
     await enqueuePureTrackGroupJob(job, { visibilityTimeoutSeconds: 30 });
     return;
   }
-  const guard: RenewableGuard = { handle };
+  const guard: RenewableGuard = { handle, claimed: false };
 
   try {
     const currentRound = await readRound(job.roundId);
@@ -214,6 +214,7 @@ export async function handlePureTrackGroupJob(message: QueueMessage, ctx: Invoca
       newOwnerToken: guard.handle.ownerToken,
     });
     if (!updated) return;
+    guard.claimed = true;
     if (!isPureTrackEnabled()) {
       await setPureTrackStatus(job.roundId, "ready", {
         expectAttemptId: job.attemptId,
@@ -235,7 +236,7 @@ export async function handlePureTrackGroupJob(message: QueueMessage, ctx: Invoca
     await setPureTrackStatus(job.roundId, "failed", {
       error: errorCode(error),
       expectAttemptId: job.attemptId,
-      expectOwnerToken: guard.handle.ownerToken,
+      ...(guard.claimed ? { expectOwnerToken: guard.handle.ownerToken } : {}),
       fromStatuses: FINAL_FAILURE_STATUSES,
     });
   } finally {

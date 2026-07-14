@@ -244,7 +244,7 @@ status to `rescore-jobs/{jobId}.json`; the third non-HTTP trigger — not a pair
 `round-puretrack-group` and `round-puretrack-group-poison`, like `briefPdf`/`signaturesReflect`,
 NOT like `rescoreWorker`'s single-queue registration; replaces-then-creates a round's PureTrack
 groups under a global mutation guard and commits via `commitPureTrackReady`; the fourth
-non-HTTP trigger pair)**,
+non-HTTP trigger module and the third main+poison trigger pair)**,
 `puretrack`, `authFunctions`, `signatures`, `roundRegistration`, `clubTeams`,
 `seasonClubs`, `pilotSeasonClubs`, `teamsCaptain`.
 
