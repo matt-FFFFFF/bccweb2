@@ -93,6 +93,7 @@ export interface Config {
    */
   leagueRoundScoresCounted: number;
   flightDateValidationEnabled: boolean;
+  flightSignatureValidationEnabled: boolean;
   /** Email addresses that receive the round-brief PDF when a round is locked; admin-editable via config. */
   roundBriefRecipients: string[];
   wingFactors: Record<WingClass, number>;
@@ -384,6 +385,19 @@ export interface PilotSnapshot {
   medicalInfo?: string;
 }
 
+export interface FlightValidation {
+  signature?: "valid" | "invalid" | "unverified" | "pending";
+  date?: "valid" | "invalid";
+  overridden?: boolean;
+  overriddenBy?: string;
+  overriddenAt?: string;
+  checkedAt?: string;
+  validationAttemptId?: string;
+  faiStatus?: string;
+  faiServer?: string;
+  faiMsg?: string;
+}
+
 export interface Flight {
   id: string;
   /** Raw kilometres from the IGC solver, before pilot-rating, wing-class, and normalization. */
@@ -402,6 +416,7 @@ export interface Flight {
   igcPath?: string;
   /** Advisory tags from IGC scoring; non-fatal warnings */
   sanityFlags?: string[];
+  validation?: FlightValidation;
   /** ISO datetime of last successful scoring */
   scoredAt?: string;
   /** semver of igc-xc-score package at scoring time, for rescore audit */
@@ -577,6 +592,14 @@ export interface RescoreJobMessage {
   jobId: string;
   roundId: string;
   requestedAt: string;
+}
+
+export interface IgcValidationJob {
+  roundId: string;
+  teamId: string;
+  place: number;
+  flightId: string;
+  validationAttemptId: string;
 }
 
 // ─── Sign-to-Fly / Audit ─────────────────────────────────────────────────────
