@@ -56,6 +56,8 @@ const QUEUES = [
   "rescore-jobs-poison",
   "round-puretrack-group",
   "round-puretrack-group-poison",
+  "igc-validation",
+  "igc-validation-poison",
 ];
 
 /**
