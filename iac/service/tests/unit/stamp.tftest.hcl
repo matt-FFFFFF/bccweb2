@@ -101,7 +101,6 @@ variables {
   dns_zone_resource_group_name   = "dns-rg-test"
   acs_email_domain_id            = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-bccweb-platform-unit/providers/Microsoft.Communication/emailServices/acs-email-bccweb-unit/domains/mail.example.test"
   acs_sender_address             = "noreply@mail.example.test"
-  round_brief_emails             = "briefs@example.test"
   puretrack_api_key              = "TEST_PT_KEY_SENTINEL"
   puretrack_email                = "TEST_PT_EMAIL@example.test"
   puretrack_password             = "TEST_PT_PASSWORD_SENTINEL"
@@ -131,7 +130,7 @@ run "module_plans_with_minimum_inputs" {
   }
 }
 
-run "key_vault_has_seven_secrets" {
+run "key_vault_has_six_secrets" {
   command = plan
 
   providers = {
@@ -144,14 +143,14 @@ run "key_vault_has_seven_secrets" {
   }
 
   assert {
-    condition = length(azapi_data_plane_resource.secrets) == 7 && length(setsubtract(
+    condition = length(azapi_data_plane_resource.secrets) == 6 && length(setsubtract(
       toset(keys(azapi_data_plane_resource.secrets)),
-      toset(["jwt-secret", "acs-connection-string", "appinsights-connection-string", "round-brief-emails", "puretrack-api-key", "puretrack-email", "puretrack-password"])
+      toset(["jwt-secret", "acs-connection-string", "appinsights-connection-string", "puretrack-api-key", "puretrack-email", "puretrack-password"])
       )) == 0 && length(setsubtract(
-      toset(["jwt-secret", "acs-connection-string", "appinsights-connection-string", "round-brief-emails", "puretrack-api-key", "puretrack-email", "puretrack-password"]),
+      toset(["jwt-secret", "acs-connection-string", "appinsights-connection-string", "puretrack-api-key", "puretrack-email", "puretrack-password"]),
       toset(keys(azapi_data_plane_resource.secrets))
     )) == 0
-    error_message = "The Key Vault secret for_each block should plan exactly the seven expected secret names."
+    error_message = "The Key Vault secret for_each block should plan exactly the six expected secret names."
   }
 }
 
@@ -171,8 +170,8 @@ run "function_app_settings_use_kv_references" {
     condition = length([
       for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting
       if strcontains(setting.value, "@Microsoft.KeyVault(SecretUri=")
-    ]) >= 7
-    error_message = "The Function App should use SecretUri Key Vault references for at least seven app settings."
+    ]) >= 6
+    error_message = "The Function App should use SecretUri Key Vault references for at least six app settings."
   }
 }
 
@@ -188,16 +187,11 @@ run "no_plaintext_secrets_in_plan" {
     source = "./tests/unit/stamp-fixture"
   }
 
-  variables {
-    round_brief_emails = "TEST_BRIEF_EMAILS_SENTINEL@example.test"
-  }
-
   assert {
     condition = (
       !strcontains(jsonencode(azapi_resource.function_app.body.properties.siteConfig.appSettings), "TEST_PT_KEY_SENTINEL") &&
       !strcontains(jsonencode(azapi_resource.function_app.body.properties.siteConfig.appSettings), "TEST_PT_EMAIL@example.test") &&
       !strcontains(jsonencode(azapi_resource.function_app.body.properties.siteConfig.appSettings), "TEST_PT_PASSWORD_SENTINEL") &&
-      !strcontains(jsonencode(azapi_resource.function_app.body.properties.siteConfig.appSettings), "TEST_BRIEF_EMAILS_SENTINEL@example.test") &&
       !strcontains(jsonencode(azapi_resource.function_app.body.properties.siteConfig.appSettings), "TEST_APPINSIGHTS_SENTINEL")
     )
     error_message = "Sensitive sentinel values must not appear in Function App appSettings; Key Vault references should replace them."

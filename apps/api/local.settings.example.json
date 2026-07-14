@@ -10,7 +10,6 @@
     "JWT_SECRET": "dev-secret-minimum-32-characters-long",
     "ACS_CONNECTION_STRING": "",
     "ACS_SENDER_ADDRESS": "noreply@localhost",
-    "ROUND_BRIEF_EMAILS": "dev@localhost",
     "PURETRACK_API_KEY": "dev",
     "PURETRACK_EMAIL": "dev@localhost",
     "PURETRACK_PASSWORD": "dev"

@@ -14,7 +14,7 @@ secrets, email, and alerting. Observability lives in the sibling
 ## Resources
 
 Storage account (+ lifecycle, locks, containers), Function App (Flex/Linux,
-UMI), Static Web App, Key Vault (RBAC, 7 secrets), ACS
+UMI), Static Web App, Key Vault (RBAC, 6 secrets), ACS
 (`communicationServices` — the email service + DNS-verified domain live in
 [`iac/common/`](../common/README.md) and are linked here by ID), 7 alert
 rules + ops action group, optional production DNS CNAME.

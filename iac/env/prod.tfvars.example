@@ -24,7 +24,6 @@ ops_email = "<REQUIRED: operator must replace before apply>" # REQUIRED
 # this address must be on that domain.
 acs_sender_address = "<REQUIRED: operator must replace before apply>" # REQUIRED
 
-round_brief_emails = "<REQUIRED: see TF_VAR_round_brief_emails>" # REQUIRED
 puretrack_api_key  = "<REQUIRED: see TF_VAR_puretrack_api_key>" # REQUIRED
 puretrack_email    = "<REQUIRED: see TF_VAR_puretrack_email>" # REQUIRED
 puretrack_password = "<REQUIRED: see TF_VAR_puretrack_password>" # REQUIRED

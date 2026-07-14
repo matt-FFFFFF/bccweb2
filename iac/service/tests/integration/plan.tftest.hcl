@@ -41,7 +41,6 @@ variables {
 
   # Sentinel values — never real secrets. The plan-only invocation does not
   # write these anywhere; they only need to satisfy `nullable = false`.
-  round_brief_emails = "TEST_ROUND_BRIEF_EMAILS@example.invalid"
   puretrack_api_key  = "TEST_PURETRACK_API_KEY"
   puretrack_email    = "TEST_PURETRACK_EMAIL@example.invalid"
   puretrack_password = "TEST_PURETRACK_PASSWORD"

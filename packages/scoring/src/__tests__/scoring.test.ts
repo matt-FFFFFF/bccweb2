@@ -12,6 +12,7 @@ const baseConfig: Config = {
   maxPilotScoresCountedPerTeam: 4,
   leagueRoundScoresCounted: 6,
   flightDateValidationEnabled: true,
+  roundBriefRecipients: [],
   wingFactors: {
     "EN A": 1,
     "EN B": 0.9,

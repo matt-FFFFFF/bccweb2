@@ -178,7 +178,16 @@ test-isolation gotchas: [apps/api/AGENTS.md](apps/api/AGENTS.md). Handler conven
 [apps/api/src/lib/AGENTS.md](apps/api/src/lib/AGENTS.md).
 
 **Auth**: bespoke HS256 JWT (`JWT_SECRET` env). Access token 1h, refresh 30d. Roles
-`Admin`, `RoundsCoord`, `Pilot`. `RoundsCoord` users have a `clubId` scoping their writes.
+`Admin`, `RoundsCoord`, `Pilot`. `getCallerIdentity(req)` returns `CallerIdentity | null`;
+`RoundsCoord` users have a `clubId` scoping their writes.
+
+**Env** ([local.settings.example.json](apps/api/local.settings.example.json)):
+`AzureWebJobsStorage`, `BLOB_CONNECTION_STRING`, `BLOB_CONTAINER_NAME` (`data`),
+`BLOB_PRIVATE_CONTAINER_NAME` (`data-private`), `JWT_SECRET` (≥32 chars),
+`ACS_CONNECTION_STRING`, `ACS_SENDER_ADDRESS`, `PURETRACK_*`. Copy the example →
+`local.settings.json`. Round-brief recipients are no
+longer an env var — they live in `config.json`'s `roundBriefRecipients` (admin-editable);
+leave it empty to disable brief email.
 
 ## Web (`apps/web`)
 

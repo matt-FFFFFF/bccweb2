@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import type { BriefPdfStatus, Round, RoundBrief, RoundStatus } from "@bccweb/types";
-import { RoundSchema } from "@bccweb/schemas";
+import { ConfigSchema, RoundSchema } from "@bccweb/schemas";
 
 import {
   getPrivateBlobClient,
@@ -13,9 +13,9 @@ import { readJson, writePrivateJson } from "./blobJson.js";
 import {
   briefHtmlBody,
   briefPlainText,
-  getBriefRecipients,
   sendEmail,
 } from "./email.js";
+import { getTelemetryClient } from "./telemetry.js";
 
 const MAX_PDF_ERROR_LENGTH = 200;
 const REDACTED_ERROR_TEXT = "Brief PDF generation failed";
@@ -69,7 +69,24 @@ export async function sendBriefIfConfigured(
   brief: RoundBrief,
   pdfBuffer: Buffer | null,
 ): Promise<void> {
-  const recipients = getBriefRecipients();
+  let recipients: string[] = [];
+  try {
+    const config = await readJson(
+      getPrivateBlobClient("config.json"),
+      ConfigSchema,
+      "config.json",
+    );
+    recipients = config.roundBriefRecipients;
+  } catch (_err: unknown) {
+    getTelemetryClient()?.trackEvent({
+      name: "brief.email.suppressed",
+      properties: {
+        reason: "config-read-failed",
+        roundId: brief.roundId,
+      },
+    });
+    return;
+  }
   if (recipients.length === 0) return;
 
   const dateDisplay = new Date(brief.date + "T00:00:00Z").toLocaleDateString(

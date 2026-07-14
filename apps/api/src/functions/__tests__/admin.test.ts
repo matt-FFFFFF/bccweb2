@@ -33,6 +33,7 @@ import { getRegisteredHandler } from "../../__tests__/helpers/setup.js";
 import { makeAuthRequest, makeRequest } from "../../__tests__/helpers/api.js";
 import {
   bootstrapAdmin,
+  makeConfig,
   makePilot,
   makeUser,
   privateBlobExists,
@@ -227,6 +228,44 @@ describe("PUT /api/manage/config — schema validation & lease", () => {
     expect(persistedCfg?.pilotFactors["Advanced Pilot"]).toBe(0.85);
     expect(persistedCfg?.pilotFactors.Pilot).toBe(1.1);
     expect(persistedCfg?.wingFactors).toEqual(seeded.wingFactors);
+  });
+
+  test("replaces round brief recipients wholesale and persists the replacement", async () => {
+    // Given
+    await makeConfig({ roundBriefRecipients: ["a@x.com", "b@y.com"] });
+    const { user } = await bootstrapAdmin();
+
+    // When
+    const res = await invoke(
+      "updateConfig",
+      makeAuthRequest(user.id, user.email, {
+        method: "PUT",
+        body: { roundBriefRecipients: ["c@z.com"] },
+      }),
+    );
+
+    // Then
+    expect(res.status).toBe(200);
+    expect((res.jsonBody as Config).roundBriefRecipients).toEqual(["c@z.com"]);
+    const persisted = await readPrivateJson<Config>("config.json");
+    expect(persisted?.roundBriefRecipients).toEqual(["c@z.com"]);
+  });
+
+  test("rejects an invalid round brief recipient", async () => {
+    // Given
+    const { user } = await bootstrapAdmin();
+
+    // When
+    const res = await invoke(
+      "updateConfig",
+      makeAuthRequest(user.id, user.email, {
+        method: "PUT",
+        body: { roundBriefRecipients: ["nope"] },
+      }),
+    );
+
+    // Then
+    expect(res.status).toBe(400);
   });
 
   test("concurrent updates: exactly one 200, others 503 LEASE_HELD", async () => {
