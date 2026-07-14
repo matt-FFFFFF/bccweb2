@@ -55,7 +55,7 @@ must be avoided.
 
 Eight queues, same storage account as the blobs, created by `init-storage.mjs` — across
 four families, each a main queue plus a `-poison` dead-letter queue
-(`maxDequeueCount=5` in `host.json`, except where noted):
+(`maxDequeueCount=5` in `host.json`):
 
 | Family | Main queue | Poison queue |
 |---|---|---|

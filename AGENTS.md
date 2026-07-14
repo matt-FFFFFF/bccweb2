@@ -143,8 +143,8 @@ container.
 
 **Storage Queues**: eight queues (same storage account), across four families —
 brief PDF, sign-to-fly reflect, rescore, PureTrack group — each a main queue plus a
-`-poison` dead-letter (except job-status-tracked rescore, which has no HTTP-visible
-retry path but still provisions a poison queue as a host-failure safety net). All
+`-poison` dead-letter. Rescore normally records failures on its job-status blob; its
+poison queue remains a host-failure safety net rather than an HTTP-visible retry path. All
 producers/triggers use the `AzureWebJobsStorage` connection only; never
 `BLOB_CONNECTION_STRING`. Queue job schemas (`BriefPdfJobSchema`,
 `SignToFlyReflectJobSchema`, `PureTrackGroupJobSchema`, `RescoreJobMessageSchema`) are
