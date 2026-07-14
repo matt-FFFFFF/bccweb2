@@ -7,6 +7,7 @@ import { useAuth } from "../../../hooks/useAuth.js";
 import { useBlob } from "../../../hooks/useBlob.js";
 import { api } from "../../../lib/api.js";
 import { ManualFlightModal } from "./ManualFlightModal.js";
+import { StatusBadge } from "../../../components/StatusBadge.js";
 
 interface CoordIgcTableProps {
   round: Round;
@@ -128,6 +129,34 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
     }
   }
 
+  async function handleRevalidate(team: Team, slot: PilotSlot) {
+    const key = `rev:${team.id}:${slot.placeInTeam}`;
+    setBusyKey(key);
+    setErrorMsg(null);
+    try {
+      await api.post(`rounds/${round.id}/teams/${team.id}/pilots/${slot.placeInTeam}/igc/revalidate`, {});
+      onChanged();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Resubmit failed");
+    } finally {
+      setBusyKey((cur) => (cur === key ? null : cur));
+    }
+  }
+
+  async function handleAllow(team: Team, slot: PilotSlot) {
+    const key = `allow:${team.id}:${slot.placeInTeam}`;
+    setBusyKey(key);
+    setErrorMsg(null);
+    try {
+      await api.post(`rounds/${round.id}/teams/${team.id}/pilots/${slot.placeInTeam}/igc/allow`, {});
+      onChanged();
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : "Allow failed");
+    } finally {
+      setBusyKey((cur) => (cur === key ? null : cur));
+    }
+  }
+
   return (
     <section data-testid="coord-igc-table" style={{ marginTop: "2rem" }}>
       <h2 style={{ fontSize: "1.1rem" }}>Pilot IGC Status</h2>
@@ -159,6 +188,7 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
               <th>Place</th>
               <th>Pilot Name</th>
               <th>IGC Status</th>
+              <th>Validation</th>
               <th style={{ textAlign: "right" }}>Distance (km)</th>
               <th>Sanity Flags</th>
               <th>Actions</th>
@@ -171,12 +201,39 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
               const dlBusy = busyKey === `dl:${rowKey}`;
               const delBusy =
                 busyKey === `del:${rowKey}` || busyKey === `delf:${rowKey}`;
+              const revBusy = busyKey === `rev:${rowKey}`;
+              const allowBusy = busyKey === `allow:${rowKey}`;
               return (
                 <tr key={rowKey}>
                   <td>{team.teamName}</td>
                   <td>{slot.placeInTeam}</td>
                   <td>{pilotName(slot)}</td>
                   <td data-testid="igc-status">{igcStatusOf(slot)}</td>
+                  <td data-testid="igc-validation">
+                    {flight?.validation ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "0.25rem", alignItems: "flex-start" }}>
+                        {flight.validation.signature && (
+                          <StatusBadge 
+                            status={flight.validation.signature === "valid" ? "Active" : 
+                                   flight.validation.signature === "invalid" ? "Cancelled" :
+                                   flight.validation.signature === "unverified" ? "Locked" : "Proposed"} 
+                            label={`Sig: ${flight.validation.signature}`} 
+                          />
+                        )}
+                        {flight.validation.date && (
+                          <StatusBadge 
+                            status={flight.validation.date === "valid" ? "Active" : "Cancelled"} 
+                            label={`Date: ${flight.validation.date}`} 
+                          />
+                        )}
+                        {flight.validation.overridden && (
+                          <StatusBadge status="Confirmed" label="Overridden" />
+                        )}
+                      </div>
+                    ) : (
+                      <span style={{ color: "#bbb" }}>—</span>
+                    )}
+                  </td>
                   <td style={{ textAlign: "right" }}>
                     {flight ? flight.distance : "—"}
                   </td>
@@ -264,6 +321,34 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
                         >
                           Delete flight
                         </button>
+                      )}
+                      {flight?.validation && (
+                        <>
+                          {(flight.validation.signature === "unverified" || flight.validation.signature === "pending") && (isAdmin || isScopedCoord) && (
+                            <button
+                              type="button"
+                              className="bcc-btn bcc-btn--outline"
+                              data-testid="revalidate-igc-btn"
+                              disabled={revBusy}
+                              onClick={() => { void handleRevalidate(team, slot); }}
+                              style={{ padding: "0.2rem 0.5rem", fontSize: "0.75rem" }}
+                            >
+                              {revBusy ? "Resubmitting…" : "Resubmit"}
+                            </button>
+                          )}
+                          {(flight.validation.signature === "invalid" || flight.validation.date === "invalid") && !flight.validation.overridden && isAdmin && (
+                            <button
+                              type="button"
+                              className="bcc-btn bcc-btn--outline"
+                              data-testid="allow-igc-btn"
+                              disabled={allowBusy}
+                              onClick={() => { void handleAllow(team, slot); }}
+                              style={{ padding: "0.2rem 0.5rem", fontSize: "0.75rem", borderColor: "#f1aeb5", color: "#58151c" }}
+                            >
+                              {allowBusy ? "Allowing…" : "Allow"}
+                            </button>
+                          )}
+                        </>
                       )}
                     </span>
                   </td>

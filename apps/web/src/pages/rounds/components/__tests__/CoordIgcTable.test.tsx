@@ -84,7 +84,7 @@ function makeRound(): Round {
         club: { id: "cA", name: "Club A" },
         score: 0,
         pilots: [
-          // Uploaded IGC (igcPath set, not manual) + a sanity flag
+          // Uploaded IGC (igcPath set, not manual) + a sanity flag + validation
           slot(
             1,
             "p-up",
@@ -94,10 +94,11 @@ function makeRound(): Round {
               igcPath: "flight-igcs/r1/p-up.igc",
               isManualLog: false,
               sanityFlags: ["GPS_SPIKE"],
+              validation: { signature: "unverified", date: "invalid" },
             }),
           ),
           // Manual log
-          slot(2, "p-man", flight({ id: "f-man", distance: 30, isManualLog: true })),
+          slot(2, "p-man", flight({ id: "f-man", distance: 30, isManualLog: true, validation: { signature: "invalid", date: "valid", overridden: true } })),
           // Empty — no flight / no IGC
           slot(3, "p-none", null),
         ],
@@ -126,6 +127,72 @@ afterEach(() => {
 });
 
 describe("CoordIgcTable", () => {
+  it("renders validation badges and actions correctly (Admin)", () => {
+    mockIdentity = ADMIN;
+    render(<CoordIgcTable round={makeRound()} onChanged={vi.fn()} />);
+
+    // p-up: unverified signature, invalid date. Should have Resubmit, no Allow (since date is invalid but not overridden... wait, Allow shows when invalid AND not overridden. Let's check: date invalid => Allow should be there.)
+    // Wait, the test config:
+    // p-up: signature unverified, date invalid. Allow should show (due to date invalid). Resubmit should show (due to unverified).
+    expect(screen.getByText("Sig: unverified")).toBeInTheDocument();
+    expect(screen.getByText("Date: invalid")).toBeInTheDocument();
+    
+    // Check buttons
+    expect(screen.getByTestId("revalidate-igc-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("allow-igc-btn")).toBeInTheDocument();
+
+    // p-man: signature invalid, date valid, overridden.
+    expect(screen.getByText("Sig: invalid")).toBeInTheDocument();
+    expect(screen.getByText("Date: valid")).toBeInTheDocument();
+    expect(screen.getByText("Overridden")).toBeInTheDocument();
+    // Overridden => no Allow button for p-man. We can query all Allow buttons and there should be 1.
+    expect(screen.getAllByTestId("allow-igc-btn")).toHaveLength(1);
+  });
+
+  it("posts to revalidate endpoint when Resubmit is clicked", async () => {
+    mockIdentity = ADMIN;
+    const onChanged = vi.fn();
+    vi.mocked(api.post).mockResolvedValue(undefined);
+
+    render(<CoordIgcTable round={makeRound()} onChanged={onChanged} />);
+
+    fireEvent.click(screen.getByTestId("revalidate-igc-btn"));
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith("rounds/r1/teams/t1/pilots/1/igc/revalidate", {});
+    });
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("posts to allow endpoint when Allow is clicked", async () => {
+    mockIdentity = ADMIN;
+    const onChanged = vi.fn();
+    vi.mocked(api.post).mockResolvedValue(undefined);
+
+    render(<CoordIgcTable round={makeRound()} onChanged={onChanged} />);
+
+    fireEvent.click(screen.getByTestId("allow-igc-btn"));
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith("rounds/r1/teams/t1/pilots/1/igc/allow", {});
+    });
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows Resubmit to scoped coord but hides Allow", () => {
+    mockIdentity = {
+      userId: "u",
+      email: "c@x",
+      roles: ["RoundsCoord"],
+      pilotId: null,
+      clubId: "cA",
+    };
+    render(<CoordIgcTable round={makeRound()} onChanged={vi.fn()} />);
+
+    expect(screen.getByTestId("revalidate-igc-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("allow-igc-btn")).toBeNull();
+  });
+
   it("renders one row per slot with the correct IGC status string (Admin)", () => {
     mockIdentity = ADMIN;
     render(<CoordIgcTable round={makeRound()} onChanged={vi.fn()} />);
