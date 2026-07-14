@@ -67,6 +67,7 @@ export async function setPureTrackStatus(
         attemptId: opts.newAttemptId,
         status,
         updatedAt: new Date().toISOString(),
+        ...(opts.requestedBy === undefined ? {} : { requestedBy: opts.requestedBy }),
       };
       await writePrivateJson(roundPath, RoundSchema, round, leaseId);
       return statusResult(true, previousStatus);

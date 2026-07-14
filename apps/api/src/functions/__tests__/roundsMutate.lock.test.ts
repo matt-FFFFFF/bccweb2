@@ -253,6 +253,7 @@ describe("lockRound async brief PDF queue", () => {
     expect(lockedRound.brief?.pdfUpdatedAt).toBeTruthy();
     expect(lockedRound.pureTrack?.status).toBe("pending");
     expect(lockedRound.pureTrack?.attemptId).toMatch(UUID_RE);
+    expect(lockedRound.pureTrack?.requestedBy).toBeUndefined();
     expect(lockedRound.pureTrackGroupId).toBeUndefined();
     expect(lockedRound.pureTrackGroupName).toBeUndefined();
     expect(lockedRound.pureTrackGroupSlug).toBeUndefined();
@@ -428,10 +429,22 @@ describe("lockRound async brief PDF queue", () => {
     const res = await lock(ctx);
 
     expect(res.status).toBe(200);
+    expect(res.jsonBody).toMatchObject({
+      status: "Locked",
+      pureTrack: {
+        status: "failed",
+        error: "enqueue_failed",
+        updatedAt: expect.any(String),
+      },
+    });
     const round = await readRequiredRound(ctx.roundId);
     expect(round.status).toBe("Locked");
     expect(round.pureTrack?.status).toBe("failed");
     expect(round.pureTrack?.error).toBe("enqueue_failed");
+    expect((res.jsonBody as Round).pureTrack).toEqual(round.pureTrack);
+    expect(res.jsonBody).toEqual(round);
+    const index = await readPublicJson<Array<{ id: string; status: string }>>("rounds.json");
+    expect(index?.find((entry) => entry.id === ctx.roundId)?.status).toBe("Locked");
   });
 
   it("keeps the lock and marks the PDF failed when enqueue fails", async () => {
@@ -442,10 +455,20 @@ describe("lockRound async brief PDF queue", () => {
     const res = await lock(ctx);
 
     expect(res.status).toBe(200);
+    expect(res.jsonBody).toMatchObject({
+      status: "Locked",
+      brief: {
+        pdfStatus: "failed",
+        pdfError: "enqueue_failed",
+        pdfUpdatedAt: expect.any(String),
+      },
+    });
     const round = await readRequiredRound(ctx.roundId);
     expect(round.status).toBe("Locked");
     expect(round.brief?.pdfStatus).toBe("failed");
     expect(round.brief?.pdfError).toBe("enqueue_failed");
+    expect((res.jsonBody as Round).brief).toEqual(round.brief);
+    expect(res.jsonBody).toEqual(round);
     expect(enqueueBriefPdf).toHaveBeenCalledTimes(1);
     expect(pdfMock.generateBriefPdf).not.toHaveBeenCalled();
   });
@@ -464,6 +487,7 @@ describe("lockRound async brief PDF queue", () => {
 
     const round = await readRequiredRound(ctx.roundId);
     expect(round.status).toBe("Locked");
+    expect(res.jsonBody).toEqual(round);
 
     const index = await readPublicJson<Array<{ id: string; status: string }>>("rounds.json");
     const entry = index?.find((r) => r.id === ctx.roundId);

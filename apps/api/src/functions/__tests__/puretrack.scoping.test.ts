@@ -55,6 +55,10 @@ describe("POST /api/rounds/{id}/puretrack/create-groups scoping", () => {
       roundId,
       attemptId: expect.any(String),
     });
+    expect((await readPrivateJson<Round>(`rounds/${roundId}.json`))?.pureTrack).toMatchObject({
+      status: "pending",
+      requestedBy: user.id,
+    });
   });
 
   it("RoundsCoord allowed own club", async () => {

@@ -9,6 +9,7 @@ export interface SetPureTrackStatusOptions {
   readonly fromStatuses?: readonly PureTrackStatus[];
   readonly newAttemptId?: string;
   readonly newOwnerToken?: string;
+  readonly requestedBy?: string;
   readonly requireRoundStatuses?: readonly RoundStatus[];
   readonly rejectStatuses?: readonly PureTrackStatus[];
   readonly supersedeRejectedAfterMs?: number;

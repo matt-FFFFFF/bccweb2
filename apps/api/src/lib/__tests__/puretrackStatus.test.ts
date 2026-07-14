@@ -267,6 +267,7 @@ describe("PureTrack status and echo commits", () => {
 
     const started = await setPureTrackStatus(round.id, "pending", {
       newAttemptId: "attempt-B",
+      requestedBy: "user-B",
       requireRoundStatuses: ["Locked", "Complete"],
       rejectStatuses: ["pending", "processing"],
     });
@@ -281,6 +282,7 @@ describe("PureTrack status and echo commits", () => {
     expect((await readRound(round.id)).pureTrack).toMatchObject({
       status: "failed",
       attemptId: "attempt-B",
+      requestedBy: "user-B",
       error: "PureTrack group operation failed",
     });
   });

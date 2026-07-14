@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import { randomUUID } from "node:crypto";
-import type { Round, RoundBrief } from "@bccweb/types";
+import type { PureTrackGroup, Round, RoundBrief } from "@bccweb/types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const queueMock = vi.hoisted(() => ({ enqueue: vi.fn(), reflect: vi.fn() }));
@@ -36,6 +36,7 @@ import {
   writePrivateJson,
 } from "../../__tests__/helpers/seed.js";
 import { getRegisteredQueueHandler } from "../../__tests__/helpers/setup.js";
+import { getPrivateContainer } from "../../__tests__/helpers/azurite.js";
 import {
   acquirePureTrackMutationGuard,
   releasePureTrackGuard,
@@ -65,7 +66,7 @@ function slot(pilotId: string): Round["teams"][number]["pilots"][number] {
   };
 }
 
-async function seedJob(): Promise<SeededJob> {
+async function seedJob(requestedBy?: string): Promise<SeededJob> {
   const roundId = randomUUID();
   const pilot = await makePilot();
   const pilotId = pilot.id;
@@ -88,7 +89,12 @@ async function seedJob(): Promise<SeededJob> {
       pureTrackGroupId: 11,
       pureTrackGroupSlug: "old-team",
     }],
-    pureTrack: { status: "pending", attemptId, updatedAt: new Date().toISOString() },
+    pureTrack: {
+      status: "pending",
+      attemptId,
+      updatedAt: new Date().toISOString(),
+      ...(requestedBy === undefined ? {} : { requestedBy }),
+    },
     pureTrackGroupId: 10,
     pureTrackGroupName: "Old round",
     pureTrackGroupSlug: "old-round",
@@ -157,6 +163,15 @@ async function seedJob(): Promise<SeededJob> {
   return { roundId, attemptId };
 }
 
+async function readCreatedGroups(roundId: string): Promise<readonly PureTrackGroup[]> {
+  const groups: PureTrackGroup[] = [];
+  for await (const item of getPrivateContainer().listBlobsFlat({ prefix: "puretrack-groups/" })) {
+    const group = await readPrivateJson<PureTrackGroup>(item.name);
+    if (group?.roundId === roundId) groups.push(group);
+  }
+  return groups;
+}
+
 function mockSuccessfulUpstream(onImport?: () => Promise<void>): void {
   fetchMock.mockImplementation(async (input, init) => {
     const url = typeof input === "string"
@@ -208,7 +223,8 @@ afterEach(() => {
 
 describe("pureTrackGroups queue consumer", () => {
   it("deletes recorded groups before replacement and commits the matching attempt ready", async () => {
-    const job = await seedJob();
+    const requestedBy = randomUUID();
+    const job = await seedJob(requestedBy);
     mockSuccessfulUpstream();
 
     await invokeQueue("pureTrackGroups", job, { dequeueCount: 1 });
@@ -226,7 +242,24 @@ describe("pureTrackGroups queue consumer", () => {
     expect(rescoreMock.enqueue).not.toHaveBeenCalled();
     expect(await privateBlobExists("puretrack-groups/old-round.json")).toBe(false);
     expect(await privateBlobExists("puretrack-groups/old-team.json")).toBe(false);
+    const createdGroups = await readCreatedGroups(job.roundId);
+    expect(createdGroups).toHaveLength(2);
+    expect(createdGroups.every((group) => group.createdBy === requestedBy)).toBe(true);
     expect(getRegisteredQueueHandler("pureTrackGroups").queueName).toBe("round-puretrack-group");
+  });
+
+  it("preserves default group attribution for a system-created attempt", async () => {
+    // Given
+    const job = await seedJob();
+    mockSuccessfulUpstream();
+
+    // When
+    await invokeQueue("pureTrackGroups", job, { dequeueCount: 1 });
+
+    // Then
+    const createdGroups = await readCreatedGroups(job.roundId);
+    expect(createdGroups).toHaveLength(2);
+    expect(createdGroups.every((group) => group.createdBy === undefined)).toBe(true);
   });
 
   it("ignores a stale attempt without outbound work", async () => {

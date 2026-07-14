@@ -169,7 +169,11 @@ async function processEnabledJob(job: PureTrackGroupJob, guard: RenewableGuard):
   const pilotIds = await loadPilotPureTrackIds(round);
   let result: PureTrackRoundResult | null;
   try {
-    result = await createPureTrackGroups(round, pilotIds, { beforeOutbound, session });
+    result = await createPureTrackGroups(round, pilotIds, {
+      beforeOutbound,
+      session,
+      callerUserId: round.pureTrack?.requestedBy,
+    });
   } catch (error: unknown) {
     const ids = error instanceof PureTrackGroupOperationError
       ? error.cleanupIds

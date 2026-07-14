@@ -1155,7 +1155,9 @@ async function lockRound(
     await enqueueBriefPdf({ roundId: id, briefVersion: updated.brief!.version!, pdfAttemptId });
   } catch {
     // Recovery is best-effort: a failure here must NOT fail the lock or skip updateRoundsIndex.
-    await setBriefPdfStatus(id, "failed", { error: "enqueue_failed", expectAttemptId: pdfAttemptId, fromStatuses: ["pending", "processing"] }).catch(() => {});
+    await setBriefPdfStatus(id, "failed", { error: "enqueue_failed", expectAttemptId: pdfAttemptId, fromStatuses: ["pending", "processing"] }).catch(() => undefined);
+    const recovered = await readJson(getPrivateBlobClient(path), RoundSchema, path).catch(() => undefined);
+    if (recovered?.brief !== undefined) updated.brief = recovered.brief;
   }
 
   try {
@@ -1168,7 +1170,9 @@ async function lockRound(
       error: "enqueue_failed",
       expectAttemptId: pureTrackAttemptId,
       fromStatuses: ["pending", "processing"],
-    }).catch(() => {});
+    }).catch(() => undefined);
+    const recovered = await readJson(getPrivateBlobClient(path), RoundSchema, path).catch(() => undefined);
+    if (recovered?.pureTrack !== undefined) updated.pureTrack = recovered.pureTrack;
   }
 
   await updateRoundsIndex(updated);

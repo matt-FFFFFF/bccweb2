@@ -231,6 +231,7 @@ async function createPureTrackGroupsHandler(
   const attemptId = randomUUID();
   const { updated, previousStatus } = await setPureTrackStatus(id, "pending", {
     newAttemptId: attemptId,
+    requestedBy: caller.userId,
     requireRoundStatuses: ["Locked", "Complete"],
     rejectStatuses: ["pending", "processing"],
     supersedeRejectedAfterMs: PURETRACK_STALE_GUARD_MS,
