@@ -342,7 +342,7 @@ export default function AdminConfig() {
                   checked={form.flightSignatureValidationEnabled}
                   onChange={(e) => setF("flightSignatureValidationEnabled", e.target.checked)}
                 />
-                IGC signature validation enabled
+                FAI CIVL Validation
               </label>
             </div>
           </div>

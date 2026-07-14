@@ -110,7 +110,7 @@ describe("AdminConfig", () => {
     fireEvent.change(getInputByLabel("Advanced Pilot"), { target: { value: "0.98" } });
     fireEvent.change(getInputByLabel("3 flights"), { target: { value: "0.75" } });
     fireEvent.change(getInputByLabel("Pilot scores counted per team"), { target: { value: "6" } });
-    fireEvent.click(screen.getByLabelText("IGC signature validation enabled"));
+    fireEvent.click(screen.getByLabelText("FAI CIVL Validation"));
 
     // Submit
     fireEvent.click(screen.getByRole("button", { name: /Save config/ }));
