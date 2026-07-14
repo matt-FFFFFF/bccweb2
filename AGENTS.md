@@ -229,8 +229,7 @@ Runbooks in `docs/runbooks/`: `alerts`, `cutover`, `decommission`, `deploy-smoke
 `dns-cutover`, `gdpr-erasure`, `load-testing`, `privacy`, `round-club-pilot-decision` — read the relevant
 one before the matching op. Migration scripts in `scripts/migrate/` (legacy .NET → blob)
 keep state under `.migration-state/` (gitignored); `scripts/admin/anonymize-pilot.mjs` for GDPR erasure.
-Run the tracked manufacturers promotion per `docs/runbooks/manufacturers-move.md` after its
-deploy. Script-family guidance: [scripts/AGENTS.md](scripts/AGENTS.md).
+After its deploy, run the tracked manufacturers promotion per `docs/runbooks/manufacturers-move.md`; script guidance: [scripts/AGENTS.md](scripts/AGENTS.md).
 
 ## Plan Execution (worktrees)
 
