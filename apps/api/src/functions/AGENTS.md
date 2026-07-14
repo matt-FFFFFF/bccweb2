@@ -12,7 +12,8 @@ gotchas, and root [AGENTS.md](../../../../AGENTS.md) for the overall architectur
 2. `mutationRateLimit(...)` before any write.
 3. Parse body: typed cast OR zod `safeParse`. Validate route params/required fields early.
 4. Read/write blobs via **schema helpers** (`readJson`/`writeJson`/`writePrivateJson`),
-   except non-JSON artifacts or a justified lease/index operation documented at its call site.
+   except non-JSON artifacts, documented operational/control JSON, or a justified
+   lease/index operation whose call site explains the exception.
 5. Return `{ status, jsonBody }`. Wrap the handler in `withErrorHandler(...)`.
 
 - Queue-trigger test handlers are captured via `getRegisteredQueueHandler(name)` in

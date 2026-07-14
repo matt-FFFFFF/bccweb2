@@ -42,8 +42,8 @@ don't re-read the source.
   `blob.healed` when raw JSON healed on read.
 - `writeJson` / `writePrivateJson(path,schema,data,leaseId?,opts?)` — validate-first;
   `observe` logs bad shapes, `enforce` strips/rejects before delegating to `writeBlob`.
-- Prefer these helpers for JSON. A deliberate raw JSON read/write must explain at its
-  call site why schema healing is unsafe or why it is maintaining a schema-backed index.
+- Prefer these helpers for schema-backed domain JSON. Raw operational/control records and
+  deliberate lease/index operations must document their exception at the call site.
 
 ## http.ts
 
