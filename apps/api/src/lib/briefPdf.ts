@@ -15,6 +15,7 @@ import {
   briefPlainText,
   sendEmail,
 } from "./email.js";
+import { getTelemetryClient } from "./telemetry.js";
 
 const MAX_PDF_ERROR_LENGTH = 200;
 const REDACTED_ERROR_TEXT = "Brief PDF generation failed";
@@ -76,7 +77,14 @@ export async function sendBriefIfConfigured(
       "config.json",
     );
     recipients = config.roundBriefRecipients;
-  } catch {
+  } catch (_err: unknown) {
+    getTelemetryClient()?.trackEvent({
+      name: "brief.email.suppressed",
+      properties: {
+        reason: "config-read-failed",
+        roundId: brief.roundId,
+      },
+    });
     return;
   }
   if (recipients.length === 0) return;
