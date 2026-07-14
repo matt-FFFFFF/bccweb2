@@ -12,6 +12,7 @@ import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-li
 import { MemoryRouter, Route, Routes } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { CallerIdentity, Round } from "@bccweb/types";
+import { ApiError } from "../../../lib/api.js";
 import RoundManage from "../RoundManage.js";
 
 const state = vi.hoisted(() => ({
@@ -167,11 +168,9 @@ describe("RoundManage override sign", () => {
   });
 
   it("runAction surfaces ApiError.detail when an action fails", async () => {
-    import("../../../lib/api.js").then((mod) => {
-      state.apiPost.mockRejectedValueOnce(
-        new mod.ApiError(409, "Conflict", "Conflict", undefined, "Wait 12 minutes before recreating")
-      );
-    });
+    state.apiPost.mockRejectedValueOnce(
+      new ApiError(409, "Conflict", "Conflict", undefined, "Wait 12 minutes before recreating"),
+    );
 
     renderPage();
 
