@@ -279,5 +279,22 @@ describe("AdminConfig", () => {
       expect(screen.getByText("Please fix invalid or duplicate email recipients before saving.")).toBeInTheDocument();
       expect(api.put).not.toHaveBeenCalled();
     });
+
+    it("case 10: removing a middle row keeps other rows' values correct", async () => {
+      vi.mocked(api.get).mockResolvedValue({ ...mockConfig, roundBriefRecipients: ["first@x.com", "middle@x.com", "last@x.com"] });
+      render(<AdminConfig />);
+      await screen.findByRole("heading", { name: "League Config" });
+      
+      expect(screen.getByDisplayValue("first@x.com")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("middle@x.com")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("last@x.com")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "Remove middle@x.com" }));
+
+      expect(screen.queryByDisplayValue("middle@x.com")).not.toBeInTheDocument();
+      
+      expect(screen.getByDisplayValue("first@x.com")).toBeInTheDocument();
+      expect(screen.getByDisplayValue("last@x.com")).toBeInTheDocument();
+    });
   });
 });

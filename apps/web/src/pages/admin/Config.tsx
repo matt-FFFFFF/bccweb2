@@ -127,6 +127,7 @@ export default function AdminConfig() {
   const [msgOk, setMsgOk] = useState(false);
   const [loadErr, setLoadErr] = useState<string | null>(null);
 
+  const [recipientKeys, setRecipientKeys] = useState<string[]>([]);
   const [newRecipient, setNewRecipient] = useState("");
   const [addError, setAddError] = useState<string | null>(null);
 
@@ -137,7 +138,9 @@ export default function AdminConfig() {
     async function load() {
       try {
         const cfg = await api.get<Config>("manage/config");
-        setForm(configToForm(cfg));
+        const f = configToForm(cfg);
+        setForm(f);
+        setRecipientKeys(f.roundBriefRecipients.map(() => crypto.randomUUID()));
       } catch (ex) {
         setLoadErr(ex instanceof Error ? ex.message : "Failed to load config");
       } finally {
@@ -187,6 +190,7 @@ export default function AdminConfig() {
       return;
     }
     setForm(p => p ? { ...p, roundBriefRecipients: [...p.roundBriefRecipients, trimmed] } : p);
+    setRecipientKeys(p => [...p, crypto.randomUUID()]);
     setNewRecipient("");
     setAddError(null);
   }
@@ -206,6 +210,11 @@ export default function AdminConfig() {
       const next = [...p.roundBriefRecipients];
       next.splice(idx, 1);
       return { ...p, roundBriefRecipients: next };
+    });
+    setRecipientKeys(p => {
+      const next = [...p];
+      next.splice(idx, 1);
+      return next;
     });
   }
 
@@ -319,13 +328,14 @@ export default function AdminConfig() {
           <h2 style={{ fontSize: "1rem", margin: "0 0 1rem" }}>Round brief recipients</h2>
           <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem", marginBottom: "1rem" }}>
             {form.roundBriefRecipients.map((r, i) => {
+              const rKey = recipientKeys[i] || crypto.randomUUID();
               const err = validateEmail(r) || (
                 form.roundBriefRecipients.findIndex(x => x.trim().toLowerCase() === r.trim().toLowerCase()) !== i
                   ? "Duplicate email."
                   : null
               );
               return (
-                <div key={i} style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                <div key={rKey} style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
                   <input
                     type="text"
                     style={{ ...fi, width: "300px" }}
@@ -337,7 +347,7 @@ export default function AdminConfig() {
                     type="button"
                     onClick={() => removeRecipient(i)}
                     style={btnStyle("#58151c", "#f8d7da")}
-                    aria-label={r.trim() ? `Remove ${r}` : `Remove recipient ${i + 1}`}
+                    aria-label={r.trim() ? `Remove ${r.trim()}` : `Remove recipient ${i + 1}`}
                   >
                     Remove
                   </button>
