@@ -51,6 +51,7 @@ import "./functions/igc.js";
 import "./functions/manualFlight.js";
 import "./functions/rescoreRound.js";
 import "./functions/rescoreWorker.js";
+import "./functions/igcValidationWorker.js";
 
 // Phase 6 — Captain management
 import "./functions/teamsCaptain.js";

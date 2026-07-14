@@ -22,7 +22,7 @@ HTTP handlers. See
 [`src/functions/AGENTS.md`](src/functions/AGENTS.md) for handler conventions and the
 non-obvious file map.
 
-Four queue-trigger modules (see the architecture doc for the flows they drive):
+Five queue-trigger modules (see the architecture doc for the flows they drive):
 
 - `briefPdf` — `round-brief-pdf` + `-poison` (first non-HTTP triggers in the codebase).
 - `signaturesReflect` — `signtofly-reflect` + `-poison`.
@@ -30,6 +30,8 @@ Four queue-trigger modules (see the architecture doc for the flows they drive):
   others it does NOT register a poison-queue consumer, because job failures are recorded
   on the job status blob rather than dead-lettered.
 - `puretrackGroups` — `round-puretrack-group` + `-poison`, like `briefPdf`/`signaturesReflect`.
+- `igcValidationWorker` — `igc-validation`; serializes and paces FAI signature checks,
+  then re-scores the matching flight attempt with durable replay protection.
 
 Lib helpers live in [`src/lib/AGENTS.md`](src/lib/AGENTS.md): `blob`, `blobJson`, `auth` +
 `authHelpers`, `roundAuth`, `accountMutation`, `email`, `http`, `clientIp`, `pdf`,
