@@ -73,14 +73,12 @@ vi.mock("../../lib/pdf.js", () => ({
 
 const emailMock = vi.hoisted(() => ({
   sendEmail: vi.fn().mockResolvedValue(undefined),
-  getBriefRecipients: vi.fn().mockReturnValue([]),
   briefHtmlBody: vi.fn().mockReturnValue("<p>brief</p>"),
   briefPlainText: vi.fn().mockReturnValue("brief"),
 }));
 
 vi.mock("../../lib/email.js", () => ({
   sendEmail: emailMock.sendEmail,
-  getBriefRecipients: emailMock.getBriefRecipients,
   briefHtmlBody: emailMock.briefHtmlBody,
   briefPlainText: emailMock.briefPlainText,
 }));
@@ -91,7 +89,7 @@ vi.mock("../../lib/queue.js", async (importOriginal) => ({
   enqueuePureTrackGroupJob: vi.fn(),
 }));
 
-import { getBriefRecipients, sendEmail } from "../../lib/email.js";
+import { sendEmail } from "../../lib/email.js";
 import { enqueueBriefPdf, enqueuePureTrackGroupJob } from "../../lib/queue.js";
 import { recomputeSeason } from "../../lib/recompute.js";
 import "../roundsMutate.js";
@@ -108,7 +106,6 @@ describe("round lifecycle integration", () => {
     pdfMock.generateBriefPdf.mockResolvedValue(Buffer.from("%PDF-1.4 lifecycle"));
     vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
     vi.mocked(enqueuePureTrackGroupJob).mockResolvedValue(undefined);
-    vi.mocked(getBriefRecipients).mockReturnValue([]);
   });
 
   afterEach(() => {
@@ -118,7 +115,6 @@ describe("round lifecycle integration", () => {
   });
 
   it("happy path create -> confirm -> brief-complete -> sign -> lock enqueues PDF job and freezes brief metadata", async () => {
-    vi.mocked(getBriefRecipients).mockReturnValue(["ops@example.com"]);
     const createPureTrackGroupsSpy = vi.spyOn(pureTrack, "createPureTrackGroups");
     const ctx = await seedCreatedRoundViaHandlers();
     await seedBrief(ctx, { windSpeedDirection: "W 10kt" });

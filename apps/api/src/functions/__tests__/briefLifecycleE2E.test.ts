@@ -48,13 +48,11 @@ vi.mock("../../lib/pdf.js", () => ({
 
 const emailMock = vi.hoisted(() => ({
   sendEmail: vi.fn().mockResolvedValue(undefined),
-  getBriefRecipients: vi.fn().mockReturnValue([]),
   briefHtmlBody: vi.fn().mockReturnValue("<p>brief</p>"),
   briefPlainText: vi.fn().mockReturnValue("brief"),
 }));
 vi.mock("../../lib/email.js", () => ({
   sendEmail: emailMock.sendEmail,
-  getBriefRecipients: emailMock.getBriefRecipients,
   briefHtmlBody: emailMock.briefHtmlBody,
   briefPlainText: emailMock.briefPlainText,
 }));
@@ -186,7 +184,6 @@ describe("brief lifecycle end-to-end via API handlers (no direct brief blob writ
     pdfMock.generateBriefPdf.mockResolvedValue(Buffer.from("%PDF-1.4 e2e"));
     vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
     vi.mocked(enqueuePureTrackGroupJob).mockResolvedValue(undefined);
-    emailMock.getBriefRecipients.mockReturnValue([]);
   });
 
   afterEach(() => {

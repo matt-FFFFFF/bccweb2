@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import type { BriefPdfStatus, Round, RoundBrief, RoundStatus } from "@bccweb/types";
-import { RoundSchema } from "@bccweb/schemas";
+import { ConfigSchema, RoundSchema } from "@bccweb/schemas";
 
 import {
   getPrivateBlobClient,
@@ -13,7 +13,6 @@ import { readJson, writePrivateJson } from "./blobJson.js";
 import {
   briefHtmlBody,
   briefPlainText,
-  getBriefRecipients,
   sendEmail,
 } from "./email.js";
 
@@ -69,7 +68,17 @@ export async function sendBriefIfConfigured(
   brief: RoundBrief,
   pdfBuffer: Buffer | null,
 ): Promise<void> {
-  const recipients = getBriefRecipients();
+  let recipients: string[] = [];
+  try {
+    const config = await readJson(
+      getPrivateBlobClient("config.json"),
+      ConfigSchema,
+      "config.json",
+    );
+    recipients = config.roundBriefRecipients;
+  } catch {
+    return;
+  }
   if (recipients.length === 0) return;
 
   const dateDisplay = new Date(brief.date + "T00:00:00Z").toLocaleDateString(

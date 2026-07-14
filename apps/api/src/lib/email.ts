@@ -7,7 +7,6 @@
  * Requires environment variables:
  *   ACS_CONNECTION_STRING — from the azurerm_communication_service resource
  *   ACS_SENDER_ADDRESS    — e.g. "noreply@yourdomain.com"
- *   ROUND_BRIEF_EMAILS    — comma-separated list of recipient addresses
  */
 
 import { EmailClient } from "@azure/communication-email";
@@ -32,15 +31,6 @@ function getSenderAddress(): string {
   const addr = process.env["ACS_SENDER_ADDRESS"];
   if (!addr) throw new Error("ACS_SENDER_ADDRESS environment variable is not set");
   return addr;
-}
-
-/** Parse ROUND_BRIEF_EMAILS into an array of trimmed, non-empty addresses. */
-export function getBriefRecipients(): string[] {
-  const raw = process.env["ROUND_BRIEF_EMAILS"] ?? "";
-  return raw
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
 }
 
 // ─── Send round brief ─────────────────────────────────────────────────────────

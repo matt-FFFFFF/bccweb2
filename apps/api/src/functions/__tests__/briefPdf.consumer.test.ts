@@ -19,9 +19,9 @@ import {
 } from "../../__tests__/helpers/setup.js";
 import {
   privateBlobExists,
+  makeConfig,
   writePrivateJson,
 } from "../../__tests__/helpers/seed.js";
-import { getBriefRecipients } from "../../lib/email.js";
 import { getPrivateBlobClient } from "../../lib/blob.js";
 import { readJson } from "../../lib/blobJson.js";
 import { RoundSchema } from "@bccweb/schemas";
@@ -98,15 +98,16 @@ async function readPdf(roundId: string): Promise<Buffer> {
 }
 
 describe("briefPdf queue consumer", () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     vi.clearAllMocks();
     clearSentEmails();
     pdfMock.generateBriefPdf.mockResolvedValue(PDF_A);
-    vi.mocked(getBriefRecipients).mockReturnValue(["ops@example.com"]);
+    await getPrivateBlobClient("config.json").deleteIfExists();
   });
 
   it("renders, commits ready status, and sends one email for a fresh pending job", async () => {
     // Given
+    await makeConfig({ roundBriefRecipients: ["ops@example.com"] });
     const job = await seedJob();
 
     // When
@@ -117,10 +118,12 @@ describe("briefPdf queue consumer", () => {
     expect(await readPdf(job.roundId)).toEqual(PDF_A);
     expect((await readRound(job.roundId)).brief?.pdfStatus).toBe("ready");
     expect(getSentEmails()).toHaveLength(1);
+    expect(getSentEmails()[0]?.to).toEqual(["ops@example.com"]);
   });
 
   it("does not resend email when the same ready job is redelivered", async () => {
     // Given
+    await makeConfig({ roundBriefRecipients: ["ops@example.com"] });
     const job = await seedJob();
     await invokeQueue("briefPdf", job, { dequeueCount: 1 });
 
@@ -130,6 +133,16 @@ describe("briefPdf queue consumer", () => {
     // Then
     expect(getSentEmails()).toHaveLength(1);
     expect((await readRound(job.roundId)).brief?.pdfStatus).toBe("ready");
+  });
+
+  it("keeps the PDF ready without sending or throwing when config is absent", async () => {
+    // Given
+    const job = await seedJob();
+
+    // When / Then
+    await expect(invokeQueue("briefPdf", job, { dequeueCount: 1 })).resolves.toBeUndefined();
+    expect((await readRound(job.roundId)).brief?.pdfStatus).toBe("ready");
+    expect(getSentEmails()).toHaveLength(0);
   });
 
   it("returns without writing PDF or email when the attempt is stale", async () => {

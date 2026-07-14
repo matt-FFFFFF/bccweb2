@@ -50,13 +50,11 @@ vi.mock("../../lib/pdf.js", () => ({
 
 const emailMock = vi.hoisted(() => ({
   sendEmail: vi.fn().mockResolvedValue(undefined),
-  getBriefRecipients: vi.fn().mockReturnValue([]),
   briefHtmlBody: vi.fn().mockReturnValue("<p>brief</p>"),
   briefPlainText: vi.fn().mockReturnValue("brief"),
 }));
 vi.mock("../../lib/email.js", () => ({
   sendEmail: emailMock.sendEmail,
-  getBriefRecipients: emailMock.getBriefRecipients,
   briefHtmlBody: emailMock.briefHtmlBody,
   briefPlainText: emailMock.briefPlainText,
 }));
@@ -299,7 +297,6 @@ describe("lockRound preserves the frozen material hash while refreshing teams (T
     pdfMock.generateBriefPdf.mockResolvedValue(Buffer.from("%PDF-1.4 lock-test"));
     vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
     vi.mocked(enqueuePureTrackGroupJob).mockResolvedValue(undefined);
-    emailMock.getBriefRecipients.mockReturnValue([]);
     telemetryMock.trackTrace.mockClear();
   });
 
