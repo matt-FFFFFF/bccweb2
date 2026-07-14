@@ -333,7 +333,12 @@ export default function AdminConfig() {
                     onChange={(e) => updateRecipient(i, e.target.value)}
                     aria-label={`Recipient ${i + 1}`}
                   />
-                  <button type="button" onClick={() => removeRecipient(i)} style={btnStyle("#58151c", "#f8d7da")}>
+                  <button
+                    type="button"
+                    onClick={() => removeRecipient(i)}
+                    style={btnStyle("#58151c", "#f8d7da")}
+                    aria-label={r.trim() ? `Remove ${r}` : `Remove recipient ${i + 1}`}
+                  >
                     Remove
                   </button>
                   {err && <span style={{ fontSize: "0.8rem", color: "#58151c" }}>{err}</span>}

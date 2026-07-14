@@ -198,8 +198,8 @@ describe("AdminConfig", () => {
       vi.mocked(api.get).mockResolvedValue({ ...mockConfig, roundBriefRecipients: ["a@x.com", "b@y.com"] });
       render(<AdminConfig />);
       await screen.findByRole("heading", { name: "League Config" });
-      const removeBtns = screen.getAllByRole("button", { name: "Remove" });
-      fireEvent.click(removeBtns[0]);
+      expect(screen.getByRole("button", { name: "Remove b@y.com" })).toBeInTheDocument();
+      fireEvent.click(screen.getByRole("button", { name: "Remove a@x.com" }));
       expect(screen.queryByDisplayValue("a@x.com")).not.toBeInTheDocument();
       expect(screen.getByDisplayValue("b@y.com")).toBeInTheDocument();
     });
