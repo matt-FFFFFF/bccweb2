@@ -64,6 +64,11 @@ four families, each a main queue plus a `-poison` dead-letter queue
 | Rescore | `rescore-jobs` | `rescore-jobs-poison` |
 | PureTrack group | `round-puretrack-group` | `round-puretrack-group-poison` |
 
+The Functions host dead-letters only messages whose final invocation still throws.
+Workers normally catch terminal domain failures and record status/telemetry instead, so
+poison queues are fallbacks for uncaught host/handler failures rather than a complete
+inventory of jobs that exhausted ordinary retries.
+
 `init-storage.mjs` creates all eight uniformly and fatally: if the Queue service is
 unreachable the script throws and exits non-zero. Blob containers are created earlier in
 the same run, so a queue-service outage still surfaces as a hard failure rather than a
@@ -132,7 +137,7 @@ replaces then re-creates the round's PureTrack groups, and commits via the `atte
 owner-token compare-and-set `commitPureTrackReady`
 (`apps/api/src/lib/puretrackStatus.ts`), which flips `pureTrack.status` to `ready` only
 while it is still `processing`. Status values: `pending | processing | ready | failed`.
-Poisoned messages land on `round-puretrack-group-poison` after `maxDequeueCount=5`.
+Only failures that escape the worker after the final dequeue reach the poison queue.
 
 ## Related runbooks
 
