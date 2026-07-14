@@ -251,6 +251,14 @@ describe("PureTrack API contracts", () => {
   it("aborts a PureTrack request at the request timeout", async () => {
     // Given
     vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((delay) => {
+      const controller = new AbortController();
+      setTimeout(
+        () => controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")),
+        delay,
+      );
+      return controller.signal;
+    });
     const { listMyGroups, PURETRACK_REQUEST_TIMEOUT_MS } = await import("../puretrack.js");
     fetchMock.mockImplementationOnce((_input, init) => new Promise((_resolve, reject) => {
       init?.signal?.addEventListener("abort", () => reject(init.signal?.reason), { once: true });
@@ -263,6 +271,47 @@ describe("PureTrack API contracts", () => {
 
     // Then
     await rejection;
+  });
+
+  it("aborts a stalled PureTrack response body at the request timeout", async () => {
+    // Given
+    vi.useFakeTimers();
+    vi.spyOn(AbortSignal, "timeout").mockImplementation((delay) => {
+      const controller = new AbortController();
+      setTimeout(
+        () => controller.abort(new DOMException("The operation was aborted due to timeout", "TimeoutError")),
+        delay,
+      );
+      return controller.signal;
+    });
+    const { listMyGroups, PURETRACK_REQUEST_TIMEOUT_MS } = await import("../puretrack.js");
+    let rejectBody: ((reason: unknown) => void) | undefined;
+    let requestSignal: AbortSignal | undefined;
+    fetchMock.mockImplementationOnce(async (_input, init) => {
+      const signal = init?.signal;
+      if (!(signal instanceof AbortSignal)) throw new Error("Expected a request abort signal");
+      requestSignal = signal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          rejectBody = (reason) => controller.error(reason);
+          signal.addEventListener("abort", () => controller.error(signal.reason), { once: true });
+          controller.enqueue(new TextEncoder().encode('{"data":'));
+        },
+      });
+      return new Response(body, { headers: { "Content-Type": "application/json" } });
+    });
+
+    // When
+    const request = listMyGroups(session, vi.fn().mockResolvedValue(undefined));
+    const rejection = expect(request).rejects.toMatchObject({ name: "TimeoutError" });
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(PURETRACK_REQUEST_TIMEOUT_MS);
+    const timedOut = requestSignal?.aborted === true;
+    if (!timedOut) rejectBody?.(new Error("Response body timeout was cleared after headers"));
+
+    // Then
+    await rejection;
+    expect(timedOut).toBe(true);
   });
 });
 

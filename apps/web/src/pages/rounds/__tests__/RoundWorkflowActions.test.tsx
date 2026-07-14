@@ -13,6 +13,7 @@ vi.mock("../../../lib/api.js", () => ({
 describe("RoundWorkflowActions", () => {
   it("allows 'Recreate PureTrack Groups' when pending or processing", () => {
     const runAction = vi.fn();
+    const recreatePureTrack = vi.fn();
     const setActionErr = vi.fn();
     const setActionBusy = vi.fn();
     const setConfirmModal = vi.fn();
@@ -31,6 +32,7 @@ describe("RoundWorkflowActions", () => {
         setActionBusy={setActionBusy}
         setConfirmModal={setConfirmModal}
         runAction={runAction}
+        recreatePureTrack={recreatePureTrack}
       />
     );
 
@@ -40,11 +42,12 @@ describe("RoundWorkflowActions", () => {
     expect(recreateBtn).not.toBeDisabled();
 
     fireEvent.click(recreateBtn);
-    expect(runAction).toHaveBeenCalledWith("Recreate PureTrack Groups", expect.any(Function));
+    expect(recreatePureTrack).toHaveBeenCalledOnce();
   });
 
   it("disables 'Recreate PureTrack Groups' when actionBusy is set", () => {
     const runAction = vi.fn();
+    const recreatePureTrack = vi.fn();
     const setActionErr = vi.fn();
     const setActionBusy = vi.fn();
     const setConfirmModal = vi.fn();
@@ -62,6 +65,7 @@ describe("RoundWorkflowActions", () => {
         setActionBusy={setActionBusy}
         setConfirmModal={setConfirmModal}
         runAction={runAction}
+        recreatePureTrack={recreatePureTrack}
       />
     );
 

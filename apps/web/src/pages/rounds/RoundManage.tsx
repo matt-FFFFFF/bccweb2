@@ -228,6 +228,7 @@ export default function RoundManage() {
         setActionBusy={setActionBusy}
         setConfirmModal={setConfirmModal}
         runAction={runAction}
+        recreatePureTrack={() => void recreatePureTrack()}
       />
       {/* Metadata */}
       {canManage && (

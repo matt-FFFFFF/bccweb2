@@ -250,13 +250,9 @@ async function fetchPureTrack(
   input: string,
   init: RequestInit,
 ): Promise<Response> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => {
-    controller.abort(new DOMException("PureTrack request timed out", "TimeoutError"));
-  }, PURETRACK_REQUEST_TIMEOUT_MS);
-  try {
-    return await fetch(input, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeout);
-  }
+  const timeoutSignal = AbortSignal.timeout(PURETRACK_REQUEST_TIMEOUT_MS);
+  const signal = init.signal
+    ? AbortSignal.any([init.signal, timeoutSignal])
+    : timeoutSignal;
+  return fetch(input, { ...init, signal });
 }

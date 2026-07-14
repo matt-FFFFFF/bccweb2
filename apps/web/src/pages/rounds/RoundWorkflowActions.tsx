@@ -17,6 +17,7 @@ export function RoundWorkflowActions({
   setActionBusy,
   setConfirmModal,
   runAction,
+  recreatePureTrack,
 }: {
   roundId: string;
   status: RoundStatus;
@@ -29,6 +30,7 @@ export function RoundWorkflowActions({
   setActionBusy: (busy: string | null) => void;
   setConfirmModal: (modal: { label: string; endpoint: string; count: number } | null) => void;
   runAction: (label: string, fn: () => Promise<unknown>) => void;
+  recreatePureTrack: () => void;
 }) {
   const workflowActions = WORKFLOW[status] ?? [];
   const canRecreatePt = status === "Locked" || status === "Complete";
@@ -73,7 +75,7 @@ export function RoundWorkflowActions({
         <button
           disabled={actionBusy !== null}
           style={btnStyle("#0f5132", "#d1e7dd")}
-          onClick={() => void runAction("Recreate PureTrack Groups", () => api.post(`rounds/${roundId}/puretrack/create-groups`))}
+          onClick={() => recreatePureTrack()}
         >
           {actionBusy === "Recreate PureTrack Groups" ? "Working…" : "Recreate PureTrack Groups"}
         </button>
