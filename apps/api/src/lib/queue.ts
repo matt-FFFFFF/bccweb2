@@ -74,15 +74,20 @@ function getQueueClient(queueName: string): QueueClient {
   // local/docker, and it equals the queue trigger's `connection`, so producer
   // and trigger can never diverge. Do NOT fall back to BLOB_CONNECTION_STRING
   // (blob-only) — that would silently break queueing.
+  const connectionString = queueConnectionString();
+  const queueClient = new QueueClient(connectionString, queueName);
+  _clients.set(queueName, queueClient);
+  return queueClient;
+}
+
+export function queueConnectionString(): string {
   const connectionString = process.env["AzureWebJobsStorage"];
   if (!connectionString) {
     throw new Error(
       "AzureWebJobsStorage environment variable is not set (required to enqueue storage-queue jobs)",
     );
   }
-  const queueClient = new QueueClient(connectionString, queueName);
-  _clients.set(queueName, queueClient);
-  return queueClient;
+  return connectionString;
 }
 
 // ─── Producer ─────────────────────────────────────────────────────────────────
