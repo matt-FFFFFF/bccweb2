@@ -13,11 +13,10 @@ on:
     types: [published]
 
 permissions:
-  id-token: write # required for OIDC token issuance
   contents: read
 
 concurrency:
-  group: deploy-prod
+  group: environment-prod
   cancel-in-progress: false
 
 jobs:
@@ -32,9 +31,11 @@ jobs:
           fetch-depth: 0
 
       - name: Check release commit is reachable from main
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
           set -euo pipefail
-          echo "Deploying release: ${{ github.event.release.tag_name }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "Deploying release: $RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
           git fetch origin main
           if ! git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
             echo "Release commit not reachable from origin/main" >> "$GITHUB_STEP_SUMMARY"
@@ -48,6 +49,9 @@ jobs:
     runs-on: ubuntu-latest
     environment: prod
     needs: verify-release-ancestry
+    permissions:
+      contents: read
+      id-token: write
     env:
       ARM_USE_OIDC: "true"
       ARM_USE_AZUREAD: "true"
@@ -55,6 +59,9 @@ jobs:
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_IN_AUTOMATION: "true"
+      TF_VAR_platform_rg_name: ${{ vars.TF_VAR_PLATFORM_RG_NAME }}
+      TF_VAR_stamp_rg_name: ${{ vars.TF_VAR_STAMP_RG_NAME }}
+      TF_VAR_acs_email_domain: ${{ vars.TF_VAR_ACS_EMAIL_DOMAIN }}
       TF_VAR_puretrack_api_key: ${{ secrets.TF_VAR_PURETRACK_API_KEY }}
       TF_VAR_puretrack_email: ${{ secrets.TF_VAR_PURETRACK_EMAIL }}
       TF_VAR_puretrack_password: ${{ secrets.TF_VAR_PURETRACK_PASSWORD }}
@@ -72,11 +79,21 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Validate required Terraform variables
+        run: |
+          set -euo pipefail
+          for variable_name in TF_VAR_platform_rg_name TF_VAR_stamp_rg_name TF_VAR_acs_email_domain; do
+            if [[ -z "${!variable_name:-}" ]]; then
+              echo "Required GitHub environment variable is missing: ${variable_name}" >&2
+              exit 1
+            fi
+          done
+
       # iac/env/prod.tfvars is gitignored — generate the non-sensitive half
       # from env-scoped GitHub vars; sensitive values ride TF_VAR_* job env.
       - name: Generate prod tfvars (runtime)
         env:
-          TFSTATE_SA_NAME: ${{ vars.TFSTATE_SA_NAME }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
           OPS_EMAIL: ${{ vars.OPS_EMAIL }}
           ACS_SENDER_ADDRESS: ${{ vars.ACS_SENDER_ADDRESS }}
           ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
@@ -89,14 +106,12 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           set -euo pipefail
-          echo "Deploying release: ${{ github.event.release.tag_name }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "Deploying release: $RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
           cat > iac/env/prod.tfvars <<EOF
           # Generated at workflow runtime from GitHub env-scoped vars — never committed.
           # Sensitive PureTrack values ride TF_VAR_* env vars.
           stamp_name = "prod"
           location   = "uksouth"
-
-          tfstate_sa_name = "${TFSTATE_SA_NAME}"
 
           allowed_origins = ${ALLOWED_ORIGINS:-[]}
 
@@ -117,8 +132,8 @@ jobs:
           slack_webhook_url = "${SLACK_WEBHOOK_URL}"
           EOF
 
-      - name: Terraform init (service / prod)
-        run: terraform -chdir=iac/service init -input=false -backend-config=../env/prod.backend.hcl
+      - name: Terraform init (environment / prod)
+        run: terraform -chdir=iac/environment init -input=false -backend-config=../env/prod.backend.hcl
 
       # Exit code 2 = drift or pending infra changes. Deploying app code onto
       # unreconciled infra is unsafe — fail loudly and point at terraform.yml.
@@ -126,18 +141,18 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          terraform -chdir=iac/service plan -input=false -detailed-exitcode -var-file=../env/prod.tfvars | tee plan-output.txt
+          terraform -chdir=iac/environment plan -input=false -detailed-exitcode -var-file=../env/prod.tfvars | tee plan-output.txt
           rc=${PIPESTATUS[0]}
           set -e
           if [ "$rc" -eq 2 ]; then
             {
-              echo "## Service Terraform plan shows drift or pending changes"
-              echo "Run the terraform.yml workflow with stack=service env=prod mode=apply to reconcile."
+              echo "## Platform + stamp Terraform plan shows drift or pending changes"
+              echo "Run the manual terraform.yml workflow with env=prod and action=apply to reconcile."
               echo '```'
               tail -n 80 plan-output.txt
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::Service Terraform plan shows drift or pending changes. Run terraform.yml workflow with mode=apply to reconcile."
+            echo "::error::Platform + stamp Terraform plan shows drift or pending changes. Run the manual terraform.yml workflow with env=prod and action=apply to reconcile."
             exit 1
           elif [ "$rc" -ne 0 ]; then
             echo "::error::Terraform plan failed (exit $rc)"
@@ -150,12 +165,17 @@ jobs:
     runs-on: ubuntu-latest
     environment: prod
     needs: [verify-release-ancestry, terraform-check]
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Log release
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          echo "Deploying release: ${{ github.event.release.tag_name }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "Deploying release: $RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up mise
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
@@ -240,14 +260,19 @@ jobs:
     runs-on: ubuntu-latest
     environment: prod
     needs: [verify-release-ancestry, terraform-check]
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           submodules: true
 
       - name: Log release
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          echo "Deploying release: ${{ github.event.release.tag_name }}" >> "$GITHUB_STEP_SUMMARY"
+          printf '%s\n' "Deploying release: $RELEASE_TAG" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Set up mise
         uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
@@ -273,9 +298,14 @@ jobs:
         id: swa_token
         env:
           SWA_NAME: ${{ vars.SWA_NAME }}
+          STAMP_RG: ${{ vars.TF_VAR_STAMP_RG_NAME }}
         run: |
           set -euo pipefail
-          SWA_TOKEN=$(az staticwebapp secrets list --name "$SWA_NAME" --resource-group rg-bccweb-prod --query 'properties.apiKey' -o tsv)
+          if [[ -z "$STAMP_RG" ]]; then
+            echo "Required GitHub environment variable is missing: TF_VAR_STAMP_RG_NAME" >&2
+            exit 1
+          fi
+          SWA_TOKEN=$(az staticwebapp secrets list --name "$SWA_NAME" --resource-group "$STAMP_RG" --query 'properties.apiKey' -o tsv)
           echo "::add-mask::$SWA_TOKEN"
           echo "token=$SWA_TOKEN" >> "$GITHUB_OUTPUT"
 

@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: deploy-dev
+  group: environment-dev
   cancel-in-progress: false
 
 jobs:
@@ -30,6 +30,9 @@ jobs:
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_IN_AUTOMATION: "true"
+      TF_VAR_platform_rg_name: ${{ vars.TF_VAR_PLATFORM_RG_NAME }}
+      TF_VAR_stamp_rg_name: ${{ vars.TF_VAR_STAMP_RG_NAME }}
+      TF_VAR_acs_email_domain: ${{ vars.TF_VAR_ACS_EMAIL_DOMAIN }}
       TF_VAR_puretrack_api_key: ${{ secrets.TF_VAR_PURETRACK_API_KEY }}
       TF_VAR_puretrack_email: ${{ secrets.TF_VAR_PURETRACK_EMAIL }}
       TF_VAR_puretrack_password: ${{ secrets.TF_VAR_PURETRACK_PASSWORD }}
@@ -47,11 +50,20 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
+      - name: Validate required Terraform variables
+        run: |
+          set -euo pipefail
+          for variable_name in TF_VAR_platform_rg_name TF_VAR_stamp_rg_name TF_VAR_acs_email_domain; do
+            if [[ -z "${!variable_name:-}" ]]; then
+              echo "Required GitHub environment variable is missing: ${variable_name}" >&2
+              exit 1
+            fi
+          done
+
       # iac/env/dev.tfvars is gitignored — generate the non-sensitive half
       # from env-scoped GitHub vars; sensitive values ride TF_VAR_* job env.
       - name: Generate dev tfvars (runtime)
         env:
-          TFSTATE_SA_NAME: ${{ vars.TFSTATE_SA_NAME }}
           OPS_EMAIL: ${{ vars.OPS_EMAIL }}
           ACS_SENDER_ADDRESS: ${{ vars.ACS_SENDER_ADDRESS }}
           ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
@@ -69,8 +81,6 @@ jobs:
           # Sensitive PureTrack values ride TF_VAR_* env vars.
           stamp_name = "dev"
           location   = "uksouth"
-
-          tfstate_sa_name = "${TFSTATE_SA_NAME}"
 
           allowed_origins = ${ALLOWED_ORIGINS:-[]}
 
@@ -91,8 +101,8 @@ jobs:
           slack_webhook_url = "${SLACK_WEBHOOK_URL}"
           EOF
 
-      - name: Terraform init (service / dev)
-        run: terraform -chdir=iac/service init -input=false -backend-config=../env/dev.backend.hcl
+      - name: Terraform init (environment / dev)
+        run: terraform -chdir=iac/environment init -input=false -backend-config=../env/dev.backend.hcl
 
       # Exit code 2 = drift or pending infra changes. Deploying app code onto
       # unreconciled infra is unsafe — fail loudly and point at terraform.yml.
@@ -100,18 +110,18 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          terraform -chdir=iac/service plan -input=false -detailed-exitcode -var-file=../env/dev.tfvars | tee plan-output.txt
+          terraform -chdir=iac/environment plan -input=false -detailed-exitcode -var-file=../env/dev.tfvars | tee plan-output.txt
           rc=${PIPESTATUS[0]}
           set -e
           if [ "$rc" -eq 2 ]; then
             {
-              echo "## Service Terraform plan shows drift or pending changes"
-              echo "Run the terraform.yml workflow with stack=service env=dev mode=apply to reconcile."
+              echo "## Platform + stamp Terraform plan shows drift or pending changes"
+              echo "Run the manual terraform.yml workflow with env=dev and action=apply to reconcile."
               echo '```'
               tail -n 80 plan-output.txt
               echo '```'
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::error::Service Terraform plan shows drift or pending changes. Run terraform.yml workflow with mode=apply to reconcile."
+            echo "::error::Platform + stamp Terraform plan shows drift or pending changes. Run the manual terraform.yml workflow with env=dev and action=apply to reconcile."
             exit 1
           elif [ "$rc" -ne 0 ]; then
             echo "::error::Terraform plan failed (exit $rc)"
@@ -239,9 +249,14 @@ jobs:
         id: swa_token
         env:
           SWA_NAME: ${{ vars.SWA_NAME }}
+          STAMP_RG: ${{ vars.TF_VAR_STAMP_RG_NAME }}
         run: |
           set -euo pipefail
-          SWA_TOKEN=$(az staticwebapp secrets list --name "$SWA_NAME" --resource-group rg-bccweb-dev --query 'properties.apiKey' -o tsv)
+          if [[ -z "$STAMP_RG" ]]; then
+            echo "Required GitHub environment variable is missing: TF_VAR_STAMP_RG_NAME" >&2
+            exit 1
+          fi
+          SWA_TOKEN=$(az staticwebapp secrets list --name "$SWA_NAME" --resource-group "$STAMP_RG" --query 'properties.apiKey' -o tsv)
           echo "::add-mask::$SWA_TOKEN"
           echo "token=$SWA_TOKEN" >> "$GITHUB_OUTPUT"
 
