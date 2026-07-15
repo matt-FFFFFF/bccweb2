@@ -30,8 +30,9 @@ Five queue-trigger modules (see the architecture doc for the flows they drive):
   others it does NOT register a poison-queue consumer, because job failures are recorded
   on the job status blob rather than dead-lettered.
 - `puretrackGroups` — `round-puretrack-group` + `-poison`, like `briefPdf`/`signaturesReflect`.
-- `igcValidationWorker` — `igc-validation`; serializes and paces FAI signature checks,
-  then re-scores the matching flight attempt with durable replay protection.
+- `igcValidationWorker` — `igc-validation` + `-poison`; serializes and paces FAI
+  signature checks, then re-scores the matching flight attempt with durable replay
+  protection; poison handling marks matching pending attempts as worker-failed.
 
 Lib helpers live in [`src/lib/AGENTS.md`](src/lib/AGENTS.md): `blob`, `blobJson`, `auth` +
 `authHelpers`, `roundAuth`, `accountMutation`, `email`, `http`, `clientIp`, `pdf`,

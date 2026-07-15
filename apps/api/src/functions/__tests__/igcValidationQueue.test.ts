@@ -13,6 +13,7 @@ const jobMock = vi.hoisted(() => ({
   wait: vi.fn(),
 }));
 const recomputeMock = vi.hoisted(() => ({ recompute: vi.fn() }));
+const telemetryMock = vi.hoisted(() => ({ trackEvent: vi.fn() }));
 
 vi.mock("../../lib/faiVali.js", () => ({ validateIgcSignature: faiMock.validate }));
 vi.mock("../../lib/igcValidationJob.js", async (importOriginal) => {
@@ -31,6 +32,10 @@ vi.mock("../../lib/recompute.js", async (importOriginal) => {
   recomputeMock.recompute.mockImplementation(actual.recomputeSeason);
   return { ...actual, recomputeSeason: recomputeMock.recompute };
 });
+vi.mock("../../lib/telemetry.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/telemetry.js")>();
+  return { ...actual, getTelemetryClient: () => telemetryMock };
+});
 
 import { invokeQueue } from "../../__tests__/helpers/api.js";
 import { getPrivateContainer } from "../../__tests__/helpers/azurite.js";
@@ -45,6 +50,7 @@ import {
   acquireIgcValidationGuard,
   readValidationResult,
   releaseIgcValidationGuard,
+  writeValidationResult,
 } from "../../lib/igcValidationJob.js";
 import * as blobModule from "../../lib/blob.js";
 import { getRegisteredQueueHandler } from "../../__tests__/helpers/setup.js";
@@ -207,6 +213,10 @@ describe("igcValidationWorker queue transaction", () => {
         slot.flight.validation.validationAttemptId = randomUUID();
       }
       await writePrivateJson(seed.path, before);
+      await writeValidationResult(seed.job.validationAttemptId, {
+        signature: "invalid",
+        faiStatus: "FAILED",
+      });
 
       await invokeQueue("igcValidationWorker", seed.job);
 
@@ -214,6 +224,7 @@ describe("igcValidationWorker queue transaction", () => {
       expect(faiMock.validate).not.toHaveBeenCalled();
       expect(jobMock.wait).not.toHaveBeenCalled();
       expect(jobMock.record).not.toHaveBeenCalled();
+      expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
     },
   );
 
@@ -224,6 +235,10 @@ describe("igcValidationWorker queue transaction", () => {
     if (flight === null || flight === undefined) throw new Error("Validation fixture has no flight");
     flight.isManualLog = true;
     await writePrivateJson(seed.path, before);
+    await writeValidationResult(seed.job.validationAttemptId, {
+      signature: "invalid",
+      faiStatus: "FAILED",
+    });
     const readPaths: string[] = [];
     const realGetPrivateBlobClient = blobModule.getPrivateBlobClient;
     const clientSpy = vi.spyOn(blobModule, "getPrivateBlobClient").mockImplementation((path) => {
@@ -244,6 +259,7 @@ describe("igcValidationWorker queue transaction", () => {
     expect(readPaths).toEqual([seed.path]);
     clientSpy.mockRestore();
     expect(await persistedRound(seed)).toEqual(before);
+    expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
   });
 
   it("ACKs when the matching flight becomes manual after the initial guard check", async () => {
@@ -428,7 +444,7 @@ describe("igcValidationWorker queue transaction", () => {
     await releaseIgcValidationGuard(guard.leaseId);
   });
 
-  it("rechecks attempt identity under the apply lease and retains an uncommitted result", async () => {
+  it("GCs the durable result when the attempt is superseded before leased apply", async () => {
     const seed = await seedValidation();
     const replacementAttemptId = randomUUID();
     faiMock.validate.mockImplementationOnce(async () => {
@@ -446,10 +462,10 @@ describe("igcValidationWorker queue transaction", () => {
       signature: "pending",
       validationAttemptId: replacementAttemptId,
     });
-    expect(await readValidationResult(seed.job.validationAttemptId)).toMatchObject({ signature: "invalid" });
+    expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
   });
 
-  it("ACKs when the matching flight becomes manual before leased apply", async () => {
+  it("GCs the durable result when the matching flight becomes manual before leased apply", async () => {
     const seed = await seedValidation();
     let converted: Round | null = null;
     faiMock.validate.mockImplementationOnce(async () => {
@@ -465,7 +481,145 @@ describe("igcValidationWorker queue transaction", () => {
     await invokeQueue("igcValidationWorker", seed.job);
 
     expect(await persistedRound(seed)).toEqual(converted);
-    expect(await readValidationResult(seed.job.validationAttemptId)).toMatchObject({ signature: "invalid" });
+    expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
+  });
+
+  it("marks a pending matching attempt failed and GCs its result from the poison queue", async () => {
+    const seed = await seedValidation();
+    await writeValidationResult(seed.job.validationAttemptId, {
+      signature: "invalid",
+      faiStatus: "FAILED",
+    });
+
+    await invokeQueue("igcValidationPoison", seed.job);
+
+    expect(currentValidation(await persistedRound(seed))).toMatchObject({
+      signature: "unverified",
+      faiStatus: "WORKER_FAILED",
+      date: "valid",
+      validationAttemptId: seed.job.validationAttemptId,
+    });
+    expect((await persistedRound(seed)).teams[0]?.pilots[0]?.pilotPoints).toBe(100);
+    expect(await readPublicJson<Round[]>("rounds.json")).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: seed.job.roundId })]),
+    );
+    expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
+    expect(telemetryMock.trackEvent).toHaveBeenCalledWith({
+      name: "igcValidation.poisonFailed",
+      properties: {
+        roundId: seed.job.roundId,
+        teamId: seed.job.teamId,
+        place: seed.job.place,
+        flightId: seed.job.flightId,
+        validationAttemptId: seed.job.validationAttemptId,
+      },
+    });
+  });
+
+  it("keeps poison failure terminal when an in-flight worker later finishes validation", async () => {
+    const seed = await seedValidation();
+    faiMock.validate.mockImplementationOnce(async () => {
+      await invokeQueue("igcValidationPoison", seed.job);
+      return { signature: "valid", faiStatus: "PASSED" };
+    });
+
+    await invokeQueue("igcValidationWorker", seed.job);
+
+    expect(currentValidation(await persistedRound(seed))).toMatchObject({
+      signature: "unverified",
+      faiStatus: "WORKER_FAILED",
+      validationAttemptId: seed.job.validationAttemptId,
+    });
+    expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
+  });
+
+  it("recomputes Complete-round results after poison failure", async () => {
+    const seed = await seedValidation({ status: "Complete" });
+
+    await invokeQueue("igcValidationPoison", seed.job);
+
+    expect(recomputeMock.recompute).toHaveBeenCalledWith(2026);
+    const results = await readPublicJson<SeasonResults>("results/2026.json");
+    expect(results?.[0]?.teamResults[0]?.score).toBe(100);
+  });
+
+  it("retries Complete-round derived results after a post-commit poison failure", async () => {
+    const seed = await seedValidation({ status: "Complete" });
+    recomputeMock.recompute.mockRejectedValueOnce(new Error("injected recompute failure"));
+
+    await expect(invokeQueue("igcValidationPoison", seed.job)).rejects.toThrow(
+      "injected recompute failure",
+    );
+    expect(currentValidation(await persistedRound(seed))).toMatchObject({
+      signature: "unverified",
+      faiStatus: "WORKER_FAILED",
+    });
+
+    await invokeQueue("igcValidationPoison", seed.job);
+
+    expect(recomputeMock.recompute).toHaveBeenCalledTimes(2);
+    const results = await readPublicJson<SeasonResults>("results/2026.json");
+    expect(results?.[0]?.teamResults[0]?.score).toBe(100);
+  });
+
+  it("reconciles derived outputs for a matching terminal attempt from the poison queue", async () => {
+    const seed = await seedValidation({ status: "Complete" });
+    const committed = await persistedRound(seed);
+    const validation = currentValidation(committed);
+    if (validation === undefined) throw new Error("Validation fixture has no validation state");
+    validation.signature = "valid";
+    validation.faiStatus = "PASSED";
+    await writePrivateJson(seed.path, committed);
+    await writeValidationResult(seed.job.validationAttemptId, validation);
+
+    await invokeQueue("igcValidationPoison", seed.job);
+
+    expect(currentValidation(await persistedRound(seed))).toEqual(validation);
+    expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
+    expect(recomputeMock.recompute).toHaveBeenCalledWith(2026);
+    expect(await readPublicJson<Round[]>("rounds.json")).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: seed.job.roundId })]),
+    );
+  });
+
+  it("does not mutate a superseded flight when its old attempt reaches the poison queue", async () => {
+    const seed = await seedValidation();
+    const superseded = await persistedRound(seed);
+    const validation = currentValidation(superseded);
+    if (validation === undefined) throw new Error("Validation fixture has no validation state");
+    validation.validationAttemptId = randomUUID();
+    await writePrivateJson(seed.path, superseded);
+    await writeValidationResult(seed.job.validationAttemptId, {
+      signature: "invalid",
+      faiStatus: "FAILED",
+    });
+
+    await invokeQueue("igcValidationPoison", seed.job);
+
+    expect(await persistedRound(seed)).toEqual(superseded);
+    expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
+    expect(telemetryMock.trackEvent).toHaveBeenCalledWith({
+      name: "igcValidation.poisonStale",
+      properties: {
+        roundId: seed.job.roundId,
+        teamId: seed.job.teamId,
+        place: seed.job.place,
+        flightId: seed.job.flightId,
+        validationAttemptId: seed.job.validationAttemptId,
+      },
+    });
+  });
+
+  it("ACKs an unparseable poison message with redacted telemetry", async () => {
+    const secret = "pilot@example.com";
+
+    await invokeQueue("igcValidationPoison", `{\"unexpectedPii\":\"${secret}\"}`);
+
+    expect(telemetryMock.trackEvent).toHaveBeenCalledWith({
+      name: "igcValidation.poisonUnparseable",
+      properties: {},
+    });
+    expect(JSON.stringify(telemetryMock.trackEvent.mock.calls)).not.toContain(secret);
   });
 
   it("re-enqueues with delay when the mandatory global guard is contended", async () => {

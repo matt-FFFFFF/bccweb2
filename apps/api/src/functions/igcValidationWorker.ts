@@ -26,12 +26,19 @@ import {
 } from "../lib/igcValidationJob.js";
 import { recomputeSeason, updateRoundsIndex } from "../lib/recompute.js";
 import { scoreRoundEnforcingValidation } from "../lib/scoreRoundValidated.js";
+import { getTelemetryClient } from "../lib/telemetry.js";
+import { redactObject } from "../lib/telemetryRedactor.js";
 
 const GUARD_RETRY_SECONDS = 5;
 
 type ApplyResult =
   | { readonly kind: "committed"; readonly round: Round }
   | { readonly kind: "stale" };
+
+type ResolveResult =
+  | { readonly kind: "result"; readonly validation: FlightValidation }
+  | { readonly kind: "stale" }
+  | { readonly kind: "retryScheduled" };
 
 function parseJob(message: unknown): IgcValidationJob | null {
   let raw: unknown;
@@ -96,11 +103,11 @@ function hasStatusCode(error: unknown, expected: number): boolean {
 async function createValidationResult(
   job: IgcValidationJob,
   flight: Flight,
-): Promise<FlightValidation | null> {
+): Promise<ResolveResult> {
   try {
     return await withIgcValidationGuard(async (leaseId) => {
       const existing = await readValidationResult(job.validationAttemptId);
-      if (existing !== null) return existing;
+      if (existing !== null) return { kind: "result", validation: existing };
       const igcPath = igcPathFor(flight);
       const igc = await readIgc(igcPath);
       await waitForPace(leaseId);
@@ -108,7 +115,9 @@ async function createValidationResult(
         await readRound(`rounds/${job.roundId}.json`),
         job,
       );
-      if (currentFlight === null || currentFlight.isManualLog === true) return null;
+      if (currentFlight === null || currentFlight.isManualLog === true) {
+        return { kind: "stale" };
+      }
       const config = await loadConfig();
       let result: FlightValidation;
       if (config.flightSignatureValidationEnabled) {
@@ -122,23 +131,25 @@ async function createValidationResult(
         result = { signature: "unverified", faiStatus: "DISABLED" };
       }
       await writeValidationResult(job.validationAttemptId, result);
-      return result;
+      return { kind: "result", validation: result };
     });
   } catch (error: unknown) {
     if (!(error instanceof IgcValidationGuardContendedError)) throw error;
     await enqueueIgcValidation(job, { visibilityTimeoutSeconds: GUARD_RETRY_SECONDS });
-    return null;
+    return { kind: "retryScheduled" };
   }
 }
 
 async function resolveValidationResult(
   job: IgcValidationJob,
   flight: Flight,
-): Promise<FlightValidation | null> {
+): Promise<ResolveResult> {
   const terminal = terminalResult(flight);
-  if (terminal !== null) return terminal;
+  if (terminal !== null) return { kind: "result", validation: terminal };
   const durable = await readValidationResult(job.validationAttemptId);
-  return durable ?? createValidationResult(job, flight);
+  return durable === null
+    ? createValidationResult(job, flight)
+    : { kind: "result", validation: durable };
 }
 
 async function applyValidationResult(
@@ -151,6 +162,7 @@ async function applyValidationResult(
     const round = RoundSchema.parse(await readBlob(getPrivateBlobClient(path)));
     const flight = matchingFlight(round, job);
     if (flight === null || flight.isManualLog === true) return;
+    if (flight.validation?.faiStatus === "WORKER_FAILED") return;
     flight.validation = {
       ...flight.validation,
       ...result,
@@ -180,11 +192,22 @@ export async function igcValidationWorker(
   }
   const path = `rounds/${job.roundId}.json`;
   const flight = matchingFlight(await readRound(path), job);
-  if (flight === null || flight.isManualLog === true) return;
-  const result = await resolveValidationResult(job, flight);
-  if (result === null) return;
-  const applied = await applyValidationResult(path, job, result);
-  if (applied.kind === "stale" || applied.round.status !== "Complete") return;
+  if (flight === null || flight.isManualLog === true) {
+    await deleteValidationResult(job.validationAttemptId);
+    return;
+  }
+  const resolved = await resolveValidationResult(job, flight);
+  if (resolved.kind === "retryScheduled") return;
+  if (resolved.kind === "stale") {
+    await deleteValidationResult(job.validationAttemptId);
+    return;
+  }
+  const applied = await applyValidationResult(path, job, resolved.validation);
+  if (applied.kind === "stale") {
+    await deleteValidationResult(job.validationAttemptId);
+    return;
+  }
+  if (applied.round.status !== "Complete") return;
   try {
     await recomputeSeason(applied.round.season.year);
   } catch (error: unknown) {
@@ -195,8 +218,68 @@ export async function igcValidationWorker(
   }
 }
 
+export async function igcValidationPoison(message: unknown): Promise<void> {
+  const job = parseJob(message);
+  if (job === null) {
+    getTelemetryClient()?.trackEvent({
+      name: "igcValidation.poisonUnparseable",
+      properties: redactObject({}) as Record<string, unknown>,
+    });
+    return;
+  }
+  const path = `rounds/${job.roundId}.json`;
+  const poisonResult = await withPrivateLeaseRenewing(path, async (leaseId) => {
+    const round = RoundSchema.parse(await readBlob(getPrivateBlobClient(path)));
+    const flight = matchingFlight(round, job);
+    if (flight === null || flight.isManualLog === true) return null;
+    if (flight.validation?.faiStatus === "WORKER_FAILED") {
+      return { round, failed: true };
+    }
+    if (flight.validation?.signature !== "pending") {
+      return { round, failed: false };
+    }
+    flight.validation = {
+      ...flight.validation,
+      signature: "unverified",
+      faiStatus: "WORKER_FAILED",
+    };
+    const config = await loadConfig();
+    const { round: scored, derivation } = scoreRoundEnforcingValidation(round, config);
+    scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
+    await writePrivateJson(path, RoundSchema, scored, leaseId);
+    return { round: scored, failed: true };
+  });
+  await deleteValidationResult(job.validationAttemptId);
+  if (poisonResult !== null) {
+    await updateRoundsIndex(poisonResult.round);
+    if (poisonResult.round.status === "Complete") {
+      await recomputeSeason(poisonResult.round.season.year);
+    }
+  }
+  getTelemetryClient()?.trackEvent({
+    name: poisonResult === null
+      ? "igcValidation.poisonStale"
+      : poisonResult.failed
+        ? "igcValidation.poisonFailed"
+        : "igcValidation.poisonReconciled",
+    properties: redactObject({
+      roundId: job.roundId,
+      teamId: job.teamId,
+      place: job.place,
+      flightId: job.flightId,
+      validationAttemptId: job.validationAttemptId,
+    }) as Record<string, unknown>,
+  });
+}
+
 app.storageQueue("igcValidationWorker", {
   queueName: IGC_VALIDATION_QUEUE_NAME,
   connection: "AzureWebJobsStorage",
   handler: igcValidationWorker,
+});
+
+app.storageQueue("igcValidationPoison", {
+  queueName: "igc-validation-poison",
+  connection: "AzureWebJobsStorage",
+  handler: igcValidationPoison,
 });
