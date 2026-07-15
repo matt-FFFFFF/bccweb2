@@ -60,10 +60,17 @@ function applyUpdates(round: Round, updates: readonly FlightUpdate[], config: Co
       skippedStale += 1;
       continue;
     }
-    slot.flight = { ...slot.flight, ...update.flightPatch };
+    const roundDateMatches = round.date === update.expectedRoundDate;
+    const flightPatch = roundDateMatches
+      ? update.flightPatch
+      : {
+          ...update.flightPatch,
+          sanityFlags: update.flightPatch.sanityFlags?.filter((flag) => flag !== "IGC_DATE_MISMATCH"),
+        };
+    slot.flight = { ...slot.flight, ...flightPatch };
     const validation = { ...slot.flight.validation };
     if (!config.flightDateValidationEnabled) delete validation.date;
-    else if (round.date === update.expectedRoundDate) validation.date = update.dateMismatch ? "invalid" : "valid";
+    else if (roundDateMatches) validation.date = update.dateMismatch ? "invalid" : "valid";
     slot.flight.validation = validation;
   }
   return skippedStale;

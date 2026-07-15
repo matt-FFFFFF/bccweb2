@@ -334,7 +334,7 @@ describe("rescore enqueue/status/worker async chain", () => {
       }
       return value;
     });
-    vi.mocked(scoreIgc).mockResolvedValueOnce(scored(101, ["IGC_DATE_MISMATCH"])).mockResolvedValueOnce(scored(202));
+    vi.mocked(scoreIgc).mockResolvedValueOnce(scored(101, ["IGC_DATE_MISMATCH", "GPS_SPIKE"])).mockResolvedValueOnce(scored(202));
     const job = await seedQueuedJob(ctx.roundId, ctx.admin);
 
     await getRegisteredQueueHandler("rescoreWorker").handler(rescoreMessage(job), invocationContext("rescoreWorker"));
@@ -342,6 +342,7 @@ describe("rescore enqueue/status/worker async chain", () => {
     const persisted = (await realReadBlob(getPrivateBlobClient(path))) as Round;
     expect(persisted.date).toBe("2019-06-16");
     expect(persisted.teams[0]?.pilots[0]?.flight?.validation).toEqual({ signature: "valid", date: "valid" });
+    expect(persisted.teams[0]?.pilots[0]?.flight?.sanityFlags).toEqual(["GPS_SPIKE"]);
   });
 
   it("preserves a concurrent Allow recorded on the leased round", async () => {
