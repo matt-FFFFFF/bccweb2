@@ -228,6 +228,28 @@ export async function igcValidationPoison(message: unknown): Promise<void> {
     return;
   }
   const path = `rounds/${job.roundId}.json`;
+  const durableResult = await readValidationResult(job.validationAttemptId);
+  if (durableResult !== null) {
+    const applied = await applyValidationResult(path, job, durableResult);
+    if (applied.kind === "stale") {
+      await deleteValidationResult(job.validationAttemptId);
+    } else if (applied.round.status === "Complete") {
+      await recomputeSeason(applied.round.season.year);
+    }
+    getTelemetryClient()?.trackEvent({
+      name: applied.kind === "stale"
+        ? "igcValidation.poisonStale"
+        : "igcValidation.poisonReconciled",
+      properties: redactObject({
+        roundId: job.roundId,
+        teamId: job.teamId,
+        place: job.place,
+        flightId: job.flightId,
+        validationAttemptId: job.validationAttemptId,
+      }) as Record<string, unknown>,
+    });
+    return;
+  }
   const poisonResult = await withPrivateLeaseRenewing(path, async (leaseId) => {
     const round = RoundSchema.parse(await readBlob(getPrivateBlobClient(path)));
     const flight = matchingFlight(round, job);

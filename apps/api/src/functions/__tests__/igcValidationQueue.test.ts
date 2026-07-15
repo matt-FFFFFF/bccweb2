@@ -484,12 +484,41 @@ describe("igcValidationWorker queue transaction", () => {
     expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
   });
 
-  it("marks a pending matching attempt failed and GCs its result from the poison queue", async () => {
+  it("applies a durable invalid verdict and disqualifies the flight from the poison queue", async () => {
     const seed = await seedValidation();
     await writeValidationResult(seed.job.validationAttemptId, {
       signature: "invalid",
       faiStatus: "FAILED",
     });
+
+    await invokeQueue("igcValidationPoison", seed.job);
+
+    expect(currentValidation(await persistedRound(seed))).toMatchObject({
+      signature: "invalid",
+      faiStatus: "FAILED",
+      date: "valid",
+      validationAttemptId: seed.job.validationAttemptId,
+      checkedAt: expect.any(String),
+    });
+    expect((await persistedRound(seed)).teams[0]?.pilots[0]?.pilotPoints).toBe(0);
+    expect(await readPublicJson<Round[]>("rounds.json")).toEqual(
+      expect.arrayContaining([expect.objectContaining({ id: seed.job.roundId })]),
+    );
+    expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
+    expect(telemetryMock.trackEvent).toHaveBeenCalledWith({
+      name: "igcValidation.poisonReconciled",
+      properties: {
+        roundId: seed.job.roundId,
+        teamId: seed.job.teamId,
+        place: seed.job.place,
+        flightId: seed.job.flightId,
+        validationAttemptId: seed.job.validationAttemptId,
+      },
+    });
+  });
+
+  it("marks a pending attempt WORKER_FAILED when poison has no durable verdict", async () => {
+    const seed = await seedValidation();
 
     await invokeQueue("igcValidationPoison", seed.job);
 
@@ -500,9 +529,6 @@ describe("igcValidationWorker queue transaction", () => {
       validationAttemptId: seed.job.validationAttemptId,
     });
     expect((await persistedRound(seed)).teams[0]?.pilots[0]?.pilotPoints).toBe(100);
-    expect(await readPublicJson<Round[]>("rounds.json")).toEqual(
-      expect.arrayContaining([expect.objectContaining({ id: seed.job.roundId })]),
-    );
     expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
     expect(telemetryMock.trackEvent).toHaveBeenCalledWith({
       name: "igcValidation.poisonFailed",
@@ -574,7 +600,10 @@ describe("igcValidationWorker queue transaction", () => {
 
     await invokeQueue("igcValidationPoison", seed.job);
 
-    expect(currentValidation(await persistedRound(seed))).toEqual(validation);
+    expect(currentValidation(await persistedRound(seed))).toMatchObject({
+      ...validation,
+      checkedAt: expect.any(String),
+    });
     expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
     expect(recomputeMock.recompute).toHaveBeenCalledWith(2026);
     expect(await readPublicJson<Round[]>("rounds.json")).toEqual(
@@ -597,6 +626,34 @@ describe("igcValidationWorker queue transaction", () => {
     await invokeQueue("igcValidationPoison", seed.job);
 
     expect(await persistedRound(seed)).toEqual(superseded);
+    expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
+    expect(telemetryMock.trackEvent).toHaveBeenCalledWith({
+      name: "igcValidation.poisonStale",
+      properties: {
+        roundId: seed.job.roundId,
+        teamId: seed.job.teamId,
+        place: seed.job.place,
+        flightId: seed.job.flightId,
+        validationAttemptId: seed.job.validationAttemptId,
+      },
+    });
+  });
+
+  it("does not mutate a manual flight when its old attempt reaches the poison queue", async () => {
+    const seed = await seedValidation();
+    const manual = await persistedRound(seed);
+    const flight = manual.teams[0]?.pilots[0]?.flight;
+    if (flight === null || flight === undefined) throw new Error("Validation fixture has no flight");
+    flight.isManualLog = true;
+    await writePrivateJson(seed.path, manual);
+    await writeValidationResult(seed.job.validationAttemptId, {
+      signature: "invalid",
+      faiStatus: "FAILED",
+    });
+
+    await invokeQueue("igcValidationPoison", seed.job);
+
+    expect(await persistedRound(seed)).toEqual(manual);
     expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
     expect(telemetryMock.trackEvent).toHaveBeenCalledWith({
       name: "igcValidation.poisonStale",
