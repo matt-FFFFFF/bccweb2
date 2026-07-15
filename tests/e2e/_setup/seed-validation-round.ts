@@ -1,5 +1,6 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
+import { ConfigSchema } from "@bccweb/schemas";
 import { BlobServiceClient, type ContainerClient } from "@azure/storage-blob";
 import bcrypt from "bcryptjs";
 import { randomUUID } from "node:crypto";
@@ -115,6 +116,10 @@ function filledSlot(pilotId: string, placeInTeam: number, flight: Record<string,
 export async function seedValidationRound(): Promise<SeededValidationRound> {
   const svc = BlobServiceClient.fromConnectionString(CONN);
   const priv = svc.getContainerClient(PRIVATE_CONTAINER);
+
+  const config = ConfigSchema.parse({});
+  config.flightSignatureValidationEnabled = true;
+  await putJson(priv, "config.json", config);
 
   const roundId = randomUUID();
   const clubId = randomUUID();
