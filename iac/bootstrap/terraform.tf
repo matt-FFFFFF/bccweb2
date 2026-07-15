@@ -25,4 +25,3 @@ terraform {
 provider "github" {
   owner = split("/", var.github_repo)[0]
 }
-

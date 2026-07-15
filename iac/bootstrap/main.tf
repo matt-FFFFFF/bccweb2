@@ -8,8 +8,9 @@
 #   * Blob service with 30-day soft-delete
 #   * `tfstate` blob container (private)
 #   * CanNotDelete management lock on the storage account
-#   * Per-environment RGs (platform + stamp) consumed by the common and
-#     service stacks by interpolated name/ID
+#   * Per-environment RGs (platform + stamp) consumed by the `iac/environment`
+#     stack as plain inputs (platform_rg_name/stamp_rg_name) — never created
+#     or discovered by that stack itself
 #   * Per-environment Terraform UMIs with RG-scoped Owner + GitHub OIDC
 #     federation + per-env GitHub Actions secrets
 #
@@ -41,9 +42,11 @@ resource "azapi_resource" "bootstrap_rg" {
 #
 # StorageV2 + LRS is sufficient for tfstate: small, append-style writes; one
 # region is fine because the backend is regional anyway. Shared-key access is
-# enabled because the `azurerm` backend uses Azure AD when `use_azuread_auth =
-# true` is set in the backend HCL but still benefits from shared-key fallback
-# for tooling. Public blob access is disabled — tfstate is private.
+# DISABLED (`allowSharedKeyAccess = false` below) — the `azurerm` backend
+# authenticates via Azure AD (`use_azuread_auth = true` in the backend HCL),
+# and every UMI/user applying against this account gets Storage Blob Data
+# Contributor (or Owner, for the operator running this bootstrap) instead of
+# an account key. Public blob access is disabled — tfstate is private.
 
 resource "azapi_resource" "tfstate_sa" {
   type      = "Microsoft.Storage/storageAccounts@2025-06-01"
@@ -131,10 +134,13 @@ resource "azapi_resource" "tfstate_sa_lock" {
 
 # ─── Pre-created resource groups ─────────────────────────────────────────────
 #
-# Bootstrap owns every environment RG so the downstream common + service
-# stacks never need RG-create rights — they reference these by interpolated name/ID.
-# Two RGs per env: the platform RG (observability home, common stack) and the
-# stamp RG (service stack).
+# Bootstrap owns every environment RG so `iac/environment` never needs
+# RG-create rights — it consumes these as plain inputs
+# (platform_rg_name/stamp_rg_name), published as GitHub environment
+# variables (see the env_rg_vars locals below).
+# Two RGs per env: the platform RG (observability home — LAW, App Insights,
+# ACS email domain) and the stamp RG (the app: storage, Function App, SWA,
+# Key Vault).
 
 locals {
   pre_created_rgs = merge([
@@ -318,10 +324,13 @@ resource "github_actions_environment_secret" "azure" {
   environment = github_repository_environment.envs[each.value.env].environment
   secret_name = each.value.name
 
-  # plaintext_value is encrypted client-side using the environment's public
-  # key before being sent to GitHub; only the ciphertext lands in state. The
-  # values themselves are not real secrets — clientId/tenantId/subscriptionId
-  # are public identifiers (OIDC binds clientId to the federated subject).
+  # `value` is sent to GitHub's API over TLS (the provider handles that
+  # transport-level encryption; it is not something this config does). The
+  # values themselves land in this config's LOCAL terraform.tfstate in plain
+  # text — that is acceptable because they are not real secrets:
+  # clientId/tenantId/subscriptionId are public identifiers (OIDC binds
+  # clientId to the federated subject, so disclosure alone is not exploitable
+  # outside the permitted GitHub repo+environment).
 
   value = (
     each.value.name == "AZURE_CLIENT_ID" ? local.env_client_ids[each.value.env] :
@@ -333,6 +342,23 @@ resource "github_actions_environment_secret" "azure" {
   # Defensive: ensure the RG-scoped Owner + tfstate blob grants land first so
   # that each UMI is fully usable the moment CI reads these secrets.
   depends_on = [azapi_resource.tf_owner_role, azapi_resource.tf_tfstate_blob_role]
+}
+
+locals {
+  env_rg_vars = var.manage_github_secrets ? merge([
+    for k, cfg in var.terraform_umis : {
+      "${cfg.github_env}/TF_VAR_PLATFORM_RG_NAME" = { env = cfg.github_env, name = "TF_VAR_PLATFORM_RG_NAME", value = azapi_resource.pre_created_rg["platform-${k}"].name }
+      "${cfg.github_env}/TF_VAR_STAMP_RG_NAME"    = { env = cfg.github_env, name = "TF_VAR_STAMP_RG_NAME", value = azapi_resource.pre_created_rg["stamp-${k}"].name }
+    }
+  ]...) : {}
+}
+
+resource "github_actions_environment_variable" "rg_names" {
+  for_each      = local.env_rg_vars
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.envs[each.value.env].environment
+  variable_name = each.value.name
+  value         = each.value.value
 }
 
 resource "local_file" "backend_config" {
