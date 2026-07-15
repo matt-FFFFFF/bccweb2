@@ -25,7 +25,8 @@ type RescoreCounters = {
 type RescoreError = { teamId: string; place: number; error: string };
 
 type FlightUpdate = {
-  teamId: string; place: number; flightId: string; flightPatch: Partial<Flight>; dateMismatch: boolean;
+  teamId: string; place: number; flightId: string; flightPatch: Partial<Flight>;
+  expectedRoundDate: string; dateMismatch: boolean;
 };
 
 async function loadConfig(): Promise<Config> {
@@ -62,7 +63,7 @@ function applyUpdates(round: Round, updates: readonly FlightUpdate[], config: Co
     slot.flight = { ...slot.flight, ...update.flightPatch };
     const validation = { ...slot.flight.validation };
     if (!config.flightDateValidationEnabled) delete validation.date;
-    else validation.date = update.dateMismatch ? "invalid" : "valid";
+    else if (round.date === update.expectedRoundDate) validation.date = update.dateMismatch ? "invalid" : "valid";
     slot.flight.validation = validation;
   }
   return skippedStale;
@@ -123,6 +124,7 @@ async function buildRescoreUpdates(round: Round, startedAt: number): Promise<{
           teamId: team.id,
           place: slot.placeInTeam,
           flightId: flight.id,
+          expectedRoundDate: round.date,
           dateMismatch: result.sanityFlags.includes("IGC_DATE_MISMATCH"),
           flightPatch: {
             distance: result.distance,

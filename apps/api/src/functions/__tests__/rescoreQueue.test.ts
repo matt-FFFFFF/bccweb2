@@ -314,6 +314,36 @@ describe("rescore enqueue/status/worker async chain", () => {
     expect(persisted.teams[0]?.pilots[0]?.flight?.score).toBe(0);
   });
 
+  it("preserves date validation when the round date changes before the leased apply", async () => {
+    const ctx = await seedMixedRound();
+    const path = `rounds/${ctx.roundId}.json`;
+    const realReadBlob = blobModule.readBlob;
+    const current = (await realReadBlob(getPrivateBlobClient(path))) as Round;
+    const flight = current.teams[0]?.pilots[0]?.flight;
+    if (!flight) throw new Error("Expected seeded IGC flight");
+    flight.validation = { signature: "valid", date: "valid" };
+    await writePrivateBlob(path, current);
+
+    let roundReads = 0;
+    vi.spyOn(blobModule, "readBlob").mockImplementation(async (client) => {
+      const value = await realReadBlob(client);
+      const candidate = value as Round;
+      if (candidate?.id === ctx.roundId) {
+        roundReads += 1;
+        if (roundReads >= 2) candidate.date = "2019-06-16";
+      }
+      return value;
+    });
+    vi.mocked(scoreIgc).mockResolvedValueOnce(scored(101, ["IGC_DATE_MISMATCH"])).mockResolvedValueOnce(scored(202));
+    const job = await seedQueuedJob(ctx.roundId, ctx.admin);
+
+    await getRegisteredQueueHandler("rescoreWorker").handler(rescoreMessage(job), invocationContext("rescoreWorker"));
+
+    const persisted = (await realReadBlob(getPrivateBlobClient(path))) as Round;
+    expect(persisted.date).toBe("2019-06-16");
+    expect(persisted.teams[0]?.pilots[0]?.flight?.validation).toEqual({ signature: "valid", date: "valid" });
+  });
+
   it("preserves a concurrent Allow recorded on the leased round", async () => {
     const ctx = await seedMixedRound();
     const path = `rounds/${ctx.roundId}.json`;
