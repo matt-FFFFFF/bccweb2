@@ -222,7 +222,7 @@ describe("CoordIgcTable", () => {
   it("renders NO Resubmit and NO Allow buttons for a manual flight with stale validation", () => {
     const round = makeRound();
     round.teams[0].pilots = [
-      slot(1, "p-man", flight({ id: "f-man", distance: 30, isManualLog: true, validation: { signature: "unverified", date: "invalid" } }))
+      slot(1, "p-man", flight({ id: "f-man", distance: 30, isManualLog: true, igcPath: "some/path.igc", validation: { signature: "unverified", date: "invalid" } }))
     ];
 
     mockIdentity = ADMIN;
@@ -242,6 +242,24 @@ describe("CoordIgcTable", () => {
     render(<CoordIgcTable round={round} onChanged={vi.fn()} />);
     expect(screen.queryByTestId("revalidate-igc-btn")).toBeNull();
     expect(screen.queryByTestId("allow-igc-btn")).toBeNull();
+  });
+
+  it("shows Resubmit for a non-manual flight with an igcPath but NO validation.signature, and hides it for manual flights or no igcPath", () => {
+    const round = makeRound();
+    round.teams[0].pilots = [
+      slot(1, "p-up1", flight({ id: "f-up1", distance: 40, isManualLog: false, igcPath: "flight-igcs/r1/p-up1.igc" })),
+      slot(2, "p-man", flight({ id: "f-man", distance: 30, isManualLog: true, igcPath: "flight-igcs/r1/p-man.igc" })),
+      slot(3, "p-up2", flight({ id: "f-up2", distance: 20, isManualLog: false }))
+    ];
+
+    mockIdentity = ADMIN;
+    render(<CoordIgcTable round={round} onChanged={vi.fn()} />);
+
+    const resubmitBtns = screen.getAllByTestId("revalidate-igc-btn");
+    expect(resubmitBtns).toHaveLength(1);
+
+    fireEvent.click(resubmitBtns[0]);
+    expect(api.post).toHaveBeenCalledWith("rounds/r1/teams/t1/pilots/1/igc/revalidate", {});
   });
 
   it("renders one row per slot with the correct IGC status string (Admin)", () => {

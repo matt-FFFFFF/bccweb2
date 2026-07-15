@@ -322,9 +322,9 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
                           Delete flight
                         </button>
                       )}
-                      {flight?.validation && !flight.isManualLog && (
+                      {flight?.igcPath && !flight.isManualLog && (
                         <>
-                          {(flight.validation.signature === "unverified" || flight.validation.signature === "pending") && (isAdmin || isScopedCoord) && (
+                          {(!flight.validation?.signature || flight.validation.signature === "unverified" || flight.validation.signature === "pending") && (isAdmin || isScopedCoord) && (
                             <button
                               type="button"
                               className="bcc-btn bcc-btn--outline"
@@ -336,7 +336,7 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
                               {revBusy ? "Resubmitting…" : "Resubmit"}
                             </button>
                           )}
-                          {(flight.validation.signature === "invalid" || flight.validation.date === "invalid") && !flight.validation.overridden && isAdmin && (
+                          {(flight.validation?.signature === "invalid" || flight.validation?.date === "invalid") && !flight.validation?.overridden && isAdmin && (
                             <button
                               type="button"
                               className="bcc-btn bcc-btn--outline"
