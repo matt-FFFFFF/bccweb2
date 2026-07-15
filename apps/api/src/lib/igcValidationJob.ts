@@ -89,6 +89,12 @@ export async function releaseIgcValidationGuard(leaseId: string): Promise<void> 
     .releaseLease();
 }
 
+export async function renewIgcValidationGuard(leaseId: string): Promise<void> {
+  await getPrivateBlockBlobClient(GUARD_PATH)
+    .getBlobLeaseClient(leaseId)
+    .renewLease();
+}
+
 export async function withIgcValidationGuard<T>(
   fn: (leaseId: string) => Promise<T>,
   options: IgcValidationGuardOptions = {},

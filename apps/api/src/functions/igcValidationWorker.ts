@@ -20,6 +20,7 @@ import {
   IGC_VALIDATION_QUEUE_NAME,
   readValidationResult,
   recordFaiCallStart,
+  renewIgcValidationGuard,
   waitForPace,
   withIgcValidationGuard,
   writeValidationResult,
@@ -118,10 +119,15 @@ async function createValidationResult(
       if (currentFlight === null || currentFlight.isManualLog === true) {
         return { kind: "stale" };
       }
+      const terminal = terminalResult(currentFlight);
+      if (terminal !== null) return { kind: "result", validation: terminal };
       const config = await loadConfig();
       let result: FlightValidation;
       if (config.flightSignatureValidationEnabled) {
         assertFaiValiTimeoutWithinGuard();
+        // Refresh immediately before egress. The capped FAI timeout is 10s shorter
+        // than this fresh lease, so the request cannot outlive this lease window.
+        await renewIgcValidationGuard(leaseId);
         await recordFaiCallStart(leaseId);
         result = await validateIgcSignature(
           igc,

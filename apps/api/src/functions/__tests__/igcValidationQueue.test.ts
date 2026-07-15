@@ -7,9 +7,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 const faiMock = vi.hoisted(() => ({ validate: vi.fn() }));
 const jobMock = vi.hoisted(() => ({
   actualRecord: vi.fn(),
+  actualRenew: vi.fn(),
   actualWait: vi.fn(),
   enqueue: vi.fn(),
   record: vi.fn(),
+  renew: vi.fn(),
   wait: vi.fn(),
 }));
 const recomputeMock = vi.hoisted(() => ({ recompute: vi.fn() }));
@@ -19,11 +21,13 @@ vi.mock("../../lib/faiVali.js", () => ({ validateIgcSignature: faiMock.validate 
 vi.mock("../../lib/igcValidationJob.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/igcValidationJob.js")>();
   jobMock.actualRecord.mockImplementation(actual.recordFaiCallStart);
+  jobMock.actualRenew.mockImplementation(actual.renewIgcValidationGuard);
   jobMock.actualWait.mockImplementation(actual.waitForPace);
   return {
     ...actual,
     enqueueIgcValidation: jobMock.enqueue,
     recordFaiCallStart: jobMock.record,
+    renewIgcValidationGuard: jobMock.renew,
     waitForPace: jobMock.wait,
   };
 });
@@ -150,6 +154,7 @@ function currentValidation(round: Round): FlightValidation | undefined {
 beforeEach(() => {
   vi.clearAllMocks();
   jobMock.record.mockResolvedValue(new Date("2026-07-14T12:00:00.000Z"));
+  jobMock.renew.mockResolvedValue(undefined);
   jobMock.wait.mockResolvedValue(undefined);
   jobMock.enqueue.mockResolvedValue(undefined);
   faiMock.validate.mockResolvedValue({ signature: "valid", faiStatus: "PASSED" });
@@ -292,6 +297,61 @@ describe("igcValidationWorker queue transaction", () => {
     expect(jobMock.record).not.toHaveBeenCalled();
     expect(await persistedRound(seed)).toEqual(converted);
     expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
+  });
+
+  it("ACKs when another worker commits a terminal verdict before FAI egress", async () => {
+    // Given
+    const seed = await seedValidation();
+    let committed: Round | null = null;
+    const realGetPrivateBlobClient = blobModule.getPrivateBlobClient;
+    vi.spyOn(blobModule, "getPrivateBlobClient").mockImplementation((path) => {
+      const client = realGetPrivateBlobClient(path);
+      if (path !== seed.igcPath) return client;
+      const download = client.download.bind(client);
+      vi.spyOn(client, "download").mockImplementation(async () => {
+        const response = await download();
+        const concurrent = await persistedRound(seed);
+        const validation = currentValidation(concurrent);
+        if (validation === undefined) {
+          throw new Error("Validation fixture has no validation state");
+        }
+        validation.signature = "invalid";
+        validation.faiStatus = "FAILED";
+        committed = concurrent;
+        await writePrivateJson(seed.path, concurrent);
+        return response;
+      });
+      return client;
+    });
+
+    // When
+    await invokeQueue("igcValidationWorker", seed.job);
+
+    // Then
+    expect(faiMock.validate).not.toHaveBeenCalled();
+    expect(jobMock.record).not.toHaveBeenCalled();
+    expect(currentValidation(await persistedRound(seed))).toMatchObject({
+      signature: "invalid",
+      faiStatus: "FAILED",
+    });
+    expect(committed).not.toBeNull();
+    expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
+  });
+
+  it("does not start FAI when the guard cannot be renewed before egress", async () => {
+    // Given
+    const seed = await seedValidation();
+    const renewalFailure = new Error("simulated guard renewal failure");
+    jobMock.renew.mockRejectedValueOnce(renewalFailure);
+
+    // When
+    const delivery = invokeQueue("igcValidationWorker", seed.job);
+
+    // Then
+    await expect(delivery).rejects.toBe(renewalFailure);
+    expect(jobMock.record).not.toHaveBeenCalled();
+    expect(faiMock.validate).not.toHaveBeenCalled();
+    expect(currentValidation(await persistedRound(seed))?.signature).toBe("pending");
   });
 
   it("replays an already-terminal Complete attempt without FAI and recomputes results", async () => {
