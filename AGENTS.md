@@ -185,7 +185,9 @@ test-isolation gotchas: [apps/api/AGENTS.md](apps/api/AGENTS.md). Handler conven
 **Env** ([local.settings.example.json](apps/api/local.settings.example.json)):
 `AzureWebJobsStorage`, `BLOB_CONNECTION_STRING`, `BLOB_CONTAINER_NAME` (`data`),
 `BLOB_PRIVATE_CONTAINER_NAME` (`data-private`), `JWT_SECRET` (≥32 chars),
-`ACS_CONNECTION_STRING`, `ACS_SENDER_ADDRESS`, `PURETRACK_*`. Copy the example →
+`ACS_CONNECTION_STRING`, `ACS_SENDER_ADDRESS`, `PURETRACK_*`, `FAI_VALI_ENABLED`
+(process-level kill switch for FAI signature validation), `FAI_VALI_BASE_URL`,
+`FAI_VALI_TIMEOUT_MS`. Copy the example →
 `local.settings.json`. Round-brief recipients are no
 longer an env var — they live in `config.json`'s `roundBriefRecipients` (admin-editable);
 leave it empty to disable brief email.
