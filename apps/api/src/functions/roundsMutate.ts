@@ -340,6 +340,7 @@ async function updateRound(
 
   const path = `rounds/${id}.json`;
   let updated: Round;
+  let dateChanged = false;
 
   try {
     updated = await withPrivateLease(path, async (leaseId) => {
@@ -354,6 +355,7 @@ async function updateRound(
       }
 
       if (body.date && body.date !== r.date) {
+        dateChanged = true;
         r.date = body.date;
         for (const team of r.teams) {
           for (const slot of team.pilots) {
@@ -406,6 +408,14 @@ async function updateRound(
         }
       }
 
+      if (dateChanged) {
+        const { round: scored, derivation } = scoreRoundEnforcingValidation(
+          r,
+          await loadConfig(),
+        );
+        scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
+      }
+
       await writePrivateJson(path, RoundSchema, r, leaseId);
       return r;
     });
@@ -417,6 +427,9 @@ async function updateRound(
   }
 
   await updateRoundsIndex(updated);
+  if (dateChanged && updated.status === "Complete") {
+    await recomputeSeason(updated.season.year);
+  }
   return { status: 200, jsonBody: updated };
 }
 

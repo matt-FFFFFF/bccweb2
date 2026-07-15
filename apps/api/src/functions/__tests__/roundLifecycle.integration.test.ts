@@ -368,6 +368,60 @@ describe("round lifecycle integration", () => {
     expect(updated?.teams[0]?.pilots[0]?.flight?.sanityFlags).toEqual(["GPS_SPIKE"]);
   });
 
+  it("updateRound re-scores a Complete round after clearing stale flight date validation", async () => {
+    const ctx = await seedLockedScorableRound({ complete: true });
+    await makeConfig({ flightDateValidationEnabled: true });
+    const path = `rounds/${ctx.roundId}.json`;
+    const round = await readPrivateJson<Round>(path);
+    const team = round?.teams[0];
+    const dateInvalidSlot = team?.pilots[0];
+    if (!round || !team || !dateInvalidSlot?.flight) throw new Error("Expected seeded flight");
+    const validPilotId = randomUUID();
+    dateInvalidSlot.flight.validation = { date: "invalid" };
+    dateInvalidSlot.flight.sanityFlags = ["IGC_DATE_MISMATCH", "GPS_SPIKE"];
+    dateInvalidSlot.flight.score = 0;
+    dateInvalidSlot.flight.wingFactor = 0;
+    dateInvalidSlot.pilotPoints = 0;
+    team.pilots.push({
+      ...structuredClone(dateInvalidSlot),
+      placeInTeam: 2,
+      pilotId: validPilotId,
+      pilotPoints: 200,
+      flight: {
+        ...structuredClone(dateInvalidSlot.flight),
+        id: randomUUID(),
+        score: 42,
+        wingFactor: 1,
+        validation: { signature: "valid" },
+        sanityFlags: ["GPS_SPIKE"],
+      },
+    });
+    team.score = 200;
+    await writePrivateJson(path, round);
+
+    const res = await updateRoundMeta(ctx, { date: `${ctx.year}-06-10` });
+
+    expect(res.status).toBe(200);
+    const updated = await readPrivateJson<Round>(path);
+    if (!updated) throw new Error("Expected updated round");
+    expect(updated.teams[0]?.pilots[0]?.flight?.validation).toEqual({});
+    expect(updated.teams[0]?.pilots[0]?.flight?.sanityFlags).toEqual(["GPS_SPIKE"]);
+    expect(updated.teams[0]?.pilots[0]?.pilotPoints).toBe(200);
+    expect(updated.teams[0]?.pilots[1]?.flight?.validation).toEqual({ signature: "valid" });
+    expect(updated.teams[0]?.pilots[1]?.flight?.sanityFlags).toEqual(["GPS_SPIKE"]);
+    expect(updated.teams[0]?.pilots[1]?.pilotPoints).toBe(200);
+    const season = await readPublicJson<Season>(`seasons/${ctx.year}.json`);
+    if (!season) throw new Error("Expected recomputed season");
+    expect(season.leagueTable[0]?.roundScores[ctx.roundId]).toBe(200);
+    const results = await readPublicJson<SeasonResults>(`results/${ctx.year}.json`);
+    if (!results) throw new Error("Expected recomputed season results");
+    const roundResult = results.find((result) => result.roundId === ctx.roundId);
+    expect(roundResult?.teamResults[0]?.pilots).toEqual(expect.arrayContaining([
+      expect.objectContaining({ pilotId: ctx.pilotId, score: 200 }),
+      expect.objectContaining({ pilotId: validPilotId, score: 200 }),
+    ]));
+  });
+
   it("updateRound with an unknown siteId returns 409 CONFLICT and leaves the site unchanged", async () => {
     const ctx = await seedLifecycleRound({ status: "Proposed" });
 
