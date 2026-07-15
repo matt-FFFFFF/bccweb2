@@ -214,6 +214,42 @@ describe("revalidateIgc", () => {
     });
   });
 
+  it("clears prior attempt metadata while preserving date and override state", async () => {
+    const seed = await seedRemediation();
+    const { user } = await bootstrapAdmin();
+    const round = await storedRound(seed);
+    storedFlight(round).validation = {
+      signature: "invalid",
+      date: "valid",
+      validationAttemptId: seed.attemptId,
+      checkedAt: "2026-07-14T12:00:00.000Z",
+      faiStatus: "FAILED",
+      faiServer: "vali.example.test",
+      faiMsg: "Previous attempt failed",
+      overridden: true,
+      overriddenBy: user.email,
+      overriddenAt: "2026-07-14T12:01:00.000Z",
+    };
+    await writePrivateJson(seed.path, round);
+
+    const res = await invoke("revalidateIgc", requestFor(seed, user));
+
+    expect(res.status).toBe(200);
+    const validation = storedFlight(await storedRound(seed)).validation;
+    expect(validation).toMatchObject({
+      signature: "pending",
+      date: "valid",
+      overridden: true,
+      overriddenBy: user.email,
+      overriddenAt: "2026-07-14T12:01:00.000Z",
+    });
+    expect(validation?.validationAttemptId).not.toBe(seed.attemptId);
+    expect(validation).not.toHaveProperty("checkedAt");
+    expect(validation).not.toHaveProperty("faiStatus");
+    expect(validation).not.toHaveProperty("faiServer");
+    expect(validation).not.toHaveProperty("faiMsg");
+  });
+
   it("allows a coordinator scoped to the organising club", async () => {
     const seed = await seedRemediation();
     const { user } = await makeUser({ roles: ["RoundsCoord"], clubId: seed.clubId });
@@ -272,15 +308,26 @@ describe("revalidateIgc", () => {
   it("marks only the failed current attempt unverified when enqueue fails", async () => {
     const seed = await seedRemediation();
     const { user } = await bootstrapAdmin();
+    const round = await storedRound(seed);
+    const validation = storedFlight(round).validation;
+    if (!validation) throw new Error("seeded validation missing");
+    validation.checkedAt = "2026-07-14T12:00:00.000Z";
+    validation.faiServer = "vali.example.test";
+    validation.faiMsg = "Previous attempt failed";
+    await writePrivateJson(seed.path, round);
     jobMock.enqueue.mockRejectedValueOnce(new Error("queue unavailable"));
 
     const res = await invoke("revalidateIgc", requestFor(seed, user));
 
     expect(res.status).toBe(200);
-    expect(storedFlight(await storedRound(seed)).validation).toMatchObject({
+    const failedValidation = storedFlight(await storedRound(seed)).validation;
+    expect(failedValidation).toMatchObject({
       signature: "unverified",
       faiStatus: "ENQUEUE_FAILED",
     });
+    expect(failedValidation).not.toHaveProperty("checkedAt");
+    expect(failedValidation).not.toHaveProperty("faiServer");
+    expect(failedValidation).not.toHaveProperty("faiMsg");
   });
 
   it("does not downgrade a newer attempt when an older enqueue fails", async () => {
@@ -361,7 +408,6 @@ describe("allowIgc", () => {
     ["unverified", { signature: "unverified", date: "valid" }, false],
     ["absent validation", undefined, false],
     ["manual invalid", { signature: "invalid", date: "valid" }, true],
-    ["already overridden", { signature: "invalid", date: "valid", overridden: true }, false],
   ] as const)("rejects a %s flight without rescore or mutation", async (_label, validation, manual) => {
     const seed = await seedRemediation();
     const { user } = await bootstrapAdmin();
@@ -380,6 +426,30 @@ describe("allowIgc", () => {
     expect(recomputeMock.recompute).not.toHaveBeenCalled();
   });
 
+  it("re-scores and republishes an already-overridden Complete round", async () => {
+    const seed = await seedRemediation({ status: "Complete" });
+    const { user } = await bootstrapAdmin();
+    const round = await storedRound(seed);
+    const validation = storedFlight(round).validation;
+    if (!validation) throw new Error("seeded validation missing");
+    validation.overridden = true;
+    validation.overriddenBy = user.email;
+    validation.overriddenAt = "2026-07-14T12:01:00.000Z";
+    await writePrivateJson(seed.path, round);
+
+    const res = await invoke("allowIgc", requestFor(seed, user));
+
+    expect(res.status).toBe(200);
+    expect(recomputeMock.recompute).toHaveBeenCalledWith(seed.year);
+    expect(storedFlight(await storedRound(seed)).validation).toMatchObject({
+      overridden: true,
+      overriddenBy: user.email,
+      overriddenAt: "2026-07-14T12:01:00.000Z",
+    });
+    const results = await readPublicJson<SeasonResults>(`results/${seed.year}.json`);
+    expect(results?.[0]?.teamResults[0]?.score).toBeGreaterThan(0);
+  });
+
   it("recomputes a Complete round into season results", async () => {
     const seed = await seedRemediation({ status: "Complete" });
     const { user } = await bootstrapAdmin();
@@ -392,7 +462,7 @@ describe("allowIgc", () => {
     expect(results?.[0]?.teamResults[0]?.score).toBeGreaterThan(0);
   });
 
-  it("returns 503 after a committed override and rejects an already-overridden retry", async () => {
+  it("returns 503 after a committed override and completes recompute on retry", async () => {
     const seed = await seedRemediation({ status: "Complete" });
     const { user } = await bootstrapAdmin();
     recomputeMock.recompute.mockRejectedValueOnce(new Error("derived publication failed"));
@@ -406,13 +476,14 @@ describe("allowIgc", () => {
     recomputeMock.recompute.mockClear();
     const retried = await invoke("allowIgc", requestFor(seed, user));
 
-    expect(retried.status).toBe(409);
-    expect((retried.jsonBody as { code: string }).code).toBe("FLIGHT_NOT_ALLOWABLE");
+    expect(retried.status).toBe(200);
     expect(storedFlight(await storedRound(seed)).validation).toMatchObject({
       overriddenBy: firstValidation?.overriddenBy,
       overriddenAt: firstValidation?.overriddenAt,
     });
-    expect(recomputeMock.recompute).not.toHaveBeenCalled();
+    expect(recomputeMock.recompute).toHaveBeenCalledWith(seed.year);
+    const results = await readPublicJson<SeasonResults>(`results/${seed.year}.json`);
+    expect(results?.[0]?.teamResults[0]?.score).toBeGreaterThan(0);
   });
 
   it("converges when an allow overlaps a terminal worker update on a Complete round", async () => {

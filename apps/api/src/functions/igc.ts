@@ -98,6 +98,15 @@ function canRemediateSlotIgc(caller: CallerIdentity, round: Round): boolean {
   return canDeleteSlotIgc(caller, round);
 }
 
+function preservedValidationState(validation: FlightValidation | undefined): FlightValidation {
+  return {
+    date: validation?.date,
+    overridden: validation?.overridden,
+    overriddenBy: validation?.overriddenBy,
+    overriddenAt: validation?.overriddenAt,
+  };
+}
+
 // ─── POST /api/rounds/{id}/teams/{teamId}/pilots/{place}/igc ─────────────────────
 
 async function uploadIgc(
@@ -438,7 +447,7 @@ async function revalidateIgc(
     }
     currentFlightId = flight.id;
     flight.validation = {
-      ...flight.validation,
+      ...preservedValidationState(flight.validation),
       signature: "pending",
       validationAttemptId,
     };
@@ -466,8 +475,9 @@ async function revalidateIgc(
         return;
       }
       flight.validation = {
-        ...flight.validation,
+        ...preservedValidationState(flight.validation),
         signature: "unverified",
+        validationAttemptId,
         faiStatus: "ENQUEUE_FAILED",
       };
       await writePrivateJson(roundPath, RoundSchema, current, leaseId);
@@ -477,8 +487,9 @@ async function revalidateIgc(
       savedFlight = {
         ...savedFlight,
         validation: {
-          ...savedFlight.validation,
+          ...preservedValidationState(savedFlight.validation),
           signature: "unverified",
+          validationAttemptId,
           faiStatus: "ENQUEUE_FAILED",
         },
       };
@@ -515,21 +526,22 @@ async function allowIgc(
       validation?.signature === "invalid" || validation?.date === "invalid";
     if (
       flight.isManualLog ||
-      validation?.overridden === true ||
-      !isDefinitivelyInvalid
+      (validation?.overridden !== true && !isDefinitivelyInvalid)
     ) {
       throw new HttpError(
         409,
         "FLIGHT_NOT_ALLOWABLE",
-        "Only a non-manual, non-overridden invalid flight can be allowed",
+        "Only a non-manual invalid flight can be allowed",
       );
     }
-    flight.validation = {
-      ...validation,
-      overridden: true,
-      overriddenBy: caller.email,
-      overriddenAt: new Date().toISOString(),
-    };
+    if (validation?.overridden !== true) {
+      flight.validation = {
+        ...validation,
+        overridden: true,
+        overriddenBy: caller.email,
+        overriddenAt: new Date().toISOString(),
+      };
+    }
     const { round: scored, derivation } = scoreRoundEnforcingValidation(
       current,
       config,
