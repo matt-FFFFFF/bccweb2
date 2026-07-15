@@ -192,6 +192,21 @@ describe("recomputeSeason", () => {
     expect(rounds?.map((round) => round.id)).toContain(newRound.id);
   });
 
+  test("the rounds index publish uses a renewing lease for a long critical section", async () => {
+    // Given: the lease hook records every blob protected by the renewing helper.
+    const { year } = await seedSeason();
+    const renewingPaths: string[] = [];
+    leaseHook.beforeRenewing = async (path) => {
+      renewingPaths.push(path);
+    };
+
+    // When: recompute rebuilds and publishes the global rounds index.
+    await recomputeSeason(year);
+
+    // Then: rounds.json uses the renewal path rather than a fixed 30-second lease.
+    expect(renewingPaths).toContain("rounds.json");
+  });
+
   test("a recompute waiting on another host's season lease reads the latest committed round score", async () => {
     // Given: another host holds the existing season lock and this host observes lease contention.
     const { year, roundId } = await seedSeason();
@@ -220,13 +235,15 @@ describe("recomputeSeason", () => {
   test("production retry policy outwaits acquisition contention beyond the old attempt window", async () => {
     // Given: acquisition remains contended for 30.5 simulated seconds, longer than the former retry budget.
     const { year } = await seedSeason();
+    const lockPath = `seasons/${year}.json.lock`;
     vi.useFakeTimers();
     const startedAt = Date.now();
     const firstConflict = Promise.withResolvers<void>();
     const acquisitionWindowElapsed = Promise.withResolvers<void>();
     const allowAcquisition = Promise.withResolvers<void>();
     let attempts = 0;
-    leaseHook.beforeRenewing = async () => {
+    leaseHook.beforeRenewing = async (path) => {
+      if (path !== lockPath) return;
       attempts += 1;
       if (Date.now() - startedAt < 30_500) {
         firstConflict.resolve();

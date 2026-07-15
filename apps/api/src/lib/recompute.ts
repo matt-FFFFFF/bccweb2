@@ -35,6 +35,9 @@ const STALE_RECOMPUTE_MARKER_MS = 5 * 60 * 1000;
 const RECOMPUTE_LEASE_RETRY_DEADLINE_MS = 45_000;
 const RECOMPUTE_LEASE_RETRY_BASE_MS = 25;
 const RECOMPUTE_LEASE_RETRY_CAP_MS = 250;
+const ROUNDS_INDEX_LEASE_RETRY_MAX_ATTEMPTS = 40;
+const ROUNDS_INDEX_LEASE_RETRY_BASE_MS = 25;
+const ROUNDS_INDEX_LEASE_RETRY_CAP_MS = 250;
 
 const recomputeInFlight = new Map<number, Promise<void>>();
 const recomputeDirty = new Set<number>();
@@ -181,7 +184,7 @@ async function recomputeSeasonUncached(seasonYear: number): Promise<void> {
       await swapJsonBlob(seasonPath, seasonPayload);
       await swapJsonBlob(`results/${seasonYear}.json`, results);
       await ensureJsonIndexBlob("rounds.json", stableStringify([]));
-      await withLeaseRetry("rounds.json", async (leaseId) => {
+      await withRoundsIndexLeaseRetry(async (leaseId) => {
         const roundsIndex = await buildRoundsIndex();
         await swapJsonBlob("rounds.json", roundsIndex, leaseId);
       });
@@ -189,6 +192,37 @@ async function recomputeSeasonUncached(seasonYear: number): Promise<void> {
       await deleteRecomputeMarker(seasonYear);
     }
   });
+}
+
+async function withRoundsIndexLeaseRetry(
+  fn: (leaseId: string) => Promise<void>,
+): Promise<void> {
+  for (
+    let attempt = 1;
+    attempt <= ROUNDS_INDEX_LEASE_RETRY_MAX_ATTEMPTS;
+    attempt += 1
+  ) {
+    let acquired = false;
+    try {
+      await withLeaseRenewing("rounds.json", async (leaseId) => {
+        acquired = true;
+        await fn(leaseId);
+      });
+      return;
+    } catch (err) {
+      if (acquired) throw err;
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      if (statusCode !== 409 && statusCode !== 412) throw err;
+      if (attempt === ROUNDS_INDEX_LEASE_RETRY_MAX_ATTEMPTS) throw err;
+      const exponentialBackoffMs = Math.min(
+        ROUNDS_INDEX_LEASE_RETRY_CAP_MS,
+        ROUNDS_INDEX_LEASE_RETRY_BASE_MS * 2 ** (attempt - 1),
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.random() * exponentialBackoffMs),
+      );
+    }
+  }
 }
 
 async function withRecomputeLeaseRetry(
