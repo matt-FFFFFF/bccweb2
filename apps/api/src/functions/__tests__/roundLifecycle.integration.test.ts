@@ -352,6 +352,7 @@ describe("round lifecycle integration", () => {
     const flight = locked.teams[0]?.pilots[0]?.flight;
     if (!flight) throw new Error("Expected seeded flight");
     flight.validation = { signature: "invalid", date: "valid", overridden: true };
+    flight.sanityFlags = ["IGC_DATE_MISMATCH", "GPS_SPIKE"];
     await writePrivateJson(path, locked);
     await expect(unlockRound(ctx)).resolves.toMatchObject({ status: 200 });
 
@@ -364,6 +365,7 @@ describe("round lifecycle integration", () => {
       signature: "invalid",
       overridden: true,
     });
+    expect(updated?.teams[0]?.pilots[0]?.flight?.sanityFlags).toEqual(["GPS_SPIKE"]);
   });
 
   it("updateRound with an unknown siteId returns 409 CONFLICT and leaves the site unchanged", async () => {

@@ -357,10 +357,18 @@ async function updateRound(
         r.date = body.date;
         for (const team of r.teams) {
           for (const slot of team.pilots) {
-            if (!slot.flight?.validation) continue;
-            const validation = { ...slot.flight.validation };
-            delete validation.date;
-            slot.flight.validation = validation;
+            const flight = slot.flight;
+            if (!flight) continue;
+            if (flight.validation) {
+              const validation = { ...flight.validation };
+              delete validation.date;
+              flight.validation = validation;
+            }
+            if (flight.sanityFlags) {
+              flight.sanityFlags = flight.sanityFlags.filter(
+                (flag) => flag !== "IGC_DATE_MISMATCH"
+              );
+            }
           }
         }
       }
