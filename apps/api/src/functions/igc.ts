@@ -254,6 +254,19 @@ async function uploadIgc(
           "Round date changed during IGC scoring; retry the upload",
         );
       }
+      const currentConfig = await loadConfig();
+      if (
+        currentConfig.flightSignatureValidationEnabled !==
+          config.flightSignatureValidationEnabled ||
+        currentConfig.flightDateValidationEnabled !==
+          config.flightDateValidationEnabled
+      ) {
+        throw new HttpError(
+          409,
+          "ROUND_CONFIG_CHANGED",
+          "Validation settings changed during upload; please retry",
+        );
+      }
       supersededIgcPath = currentSlot.flight?.igcPath;
       currentSlot.flight = flight;
       await writePrivateJson(roundPath, RoundSchema, current, leaseId);

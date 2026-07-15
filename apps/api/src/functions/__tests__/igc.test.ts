@@ -766,6 +766,42 @@ describe("uploadIgc — POST /rounds/{id}/teams/{teamId}/pilots/{place}/igc", ()
     expect(await listPrivateBlobNames(`flight-igcs/${r.roundId}/`)).toEqual([]);
   });
 
+  it("rejects signature validation enabled during scoring and removes the uncommitted IGC blob", async () => {
+    const r = await seedRound();
+    await writeConfig({ flightSignatureValidationEnabled: false });
+    const { user } = await bootstrapAdmin();
+    const scoring = deferred<Awaited<ReturnType<typeof scoreIgc>>>();
+    const started = deferred<void>();
+    vi.mocked(scoreIgc).mockImplementationOnce(async () => {
+      started.resolve();
+      return scoring.promise;
+    });
+
+    const upload = invoke(
+      "uploadIgc",
+      withFile(
+        makeAuthRequest(user.id, user.email, { method: "POST", params: paramsFor(r) }),
+        igcFile(D3P),
+      ),
+    );
+    await started.promise;
+    await writeConfig({ flightSignatureValidationEnabled: true });
+    scoring.resolve({
+      distance: 1,
+      sanityFlags: [],
+      scoredAt: new Date().toISOString(),
+      scoredByVersion: "test",
+      parserErrors: [],
+    });
+
+    const res = await upload;
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("ROUND_CONFIG_CHANGED");
+    expect(await listPrivateBlobNames(`flight-igcs/${r.roundId}/`)).toEqual([]);
+    expect(enqueueIgcValidation).not.toHaveBeenCalled();
+  });
+
   it("rejects a slot reassigned during scoring and removes the uncommitted IGC blob", async () => {
     const r = await seedRound();
     const { user } = await bootstrapAdmin();
