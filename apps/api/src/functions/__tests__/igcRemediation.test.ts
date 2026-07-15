@@ -222,6 +222,22 @@ describe("revalidateIgc", () => {
     });
   });
 
+  it("restores an invalid flight's score when a Complete round moves to pending", async () => {
+    const seed = await seedRemediation({ status: "Complete" });
+    const { user } = await bootstrapAdmin();
+
+    const res = await invoke("revalidateIgc", requestFor(seed, user));
+
+    expect(res.status).toBe(200);
+    const round = await storedRound(seed);
+    expect(storedFlight(round).validation?.signature).toBe("pending");
+    expect(round.teams[0]?.pilots[0]?.pilotPoints).toBeGreaterThan(0);
+    expect(round.teams[0]?.score).toBeGreaterThan(0);
+    expect(recomputeMock.recompute).toHaveBeenCalledWith(seed.year);
+    const results = await readPublicJson<SeasonResults>(`results/${seed.year}.json`);
+    expect(results?.[0]?.teamResults[0]?.score).toBeGreaterThan(0);
+  });
+
   it("rejects an IGC over the FAI size limit without mutation or enqueue", async () => {
     const seed = await seedRemediation({ igcBytes: 3_000_001 });
     const { user } = await bootstrapAdmin();

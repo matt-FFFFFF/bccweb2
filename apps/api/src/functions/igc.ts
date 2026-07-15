@@ -460,42 +460,58 @@ async function revalidateIgc(
   await mutationRateLimit(req, caller, "revalidateIgc", "flights");
   const validationAttemptId = randomUUID();
   let currentFlightId = "";
-  let savedFlight = await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
-    const current = (await readBlob(getPrivateBlobClient(roundPath))) as Round;
-    if (!canRemediateSlotIgc(caller, current)) {
-      throw new HttpError(403, "FORBIDDEN", "Not permitted to revalidate this IGC");
-    }
-    const flight = findSlot(current, teamId, place)?.flight;
-    if (!flight?.igcPath) {
-      throw new HttpError(404, "NOT_FOUND", "IGC not found");
-    }
-    if (flight.isManualLog) {
-      throw new HttpError(
-        409,
-        "MANUAL_FLIGHT_NOT_REVALIDATABLE",
-        "Manual flights cannot be signature revalidated",
+  const { round: scoredRound, flight: rescoredFlight } = await withPrivateLeaseRenewing(
+    roundPath,
+    async (leaseId) => {
+      const current = (await readBlob(getPrivateBlobClient(roundPath))) as Round;
+      if (!canRemediateSlotIgc(caller, current)) {
+        throw new HttpError(403, "FORBIDDEN", "Not permitted to revalidate this IGC");
+      }
+      const flight = findSlot(current, teamId, place)?.flight;
+      if (!flight?.igcPath) {
+        throw new HttpError(404, "NOT_FOUND", "IGC not found");
+      }
+      if (flight.isManualLog) {
+        throw new HttpError(
+          409,
+          "MANUAL_FLIGHT_NOT_REVALIDATABLE",
+          "Manual flights cannot be signature revalidated",
+        );
+      }
+      const properties = await getPrivateBlobClient(flight.igcPath).getProperties();
+      if (
+        properties.contentLength !== undefined &&
+        properties.contentLength > FAI_SIGNATURE_VALIDATION_MAX_BYTES
+      ) {
+        throw new HttpError(
+          413,
+          "IGC_TOO_LARGE_FOR_VALIDATION",
+          "This IGC exceeds the 3 MB FAI validation limit; upload a smaller/valid IGC to validate it",
+        );
+      }
+      currentFlightId = flight.id;
+      flight.validation = {
+        ...preservedValidationState(flight.validation),
+        signature: "pending",
+        validationAttemptId,
+      };
+      const { round: scored, derivation } = scoreRoundEnforcingValidation(
+        current,
+        await loadConfig(),
       );
-    }
-    const properties = await getPrivateBlobClient(flight.igcPath).getProperties();
-    if (
-      properties.contentLength !== undefined &&
-      properties.contentLength > FAI_SIGNATURE_VALIDATION_MAX_BYTES
-    ) {
-      throw new HttpError(
-        413,
-        "IGC_TOO_LARGE_FOR_VALIDATION",
-        "This IGC exceeds the 3 MB FAI validation limit; upload a smaller/valid IGC to validate it",
-      );
-    }
-    currentFlightId = flight.id;
-    flight.validation = {
-      ...preservedValidationState(flight.validation),
-      signature: "pending",
-      validationAttemptId,
-    };
-    await writePrivateJson(roundPath, RoundSchema, current, leaseId);
-    return flight;
-  });
+      scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
+      await writePrivateJson(roundPath, RoundSchema, scored, leaseId);
+      const rescoredFlight = findSlot(scored, teamId, place)?.flight;
+      if (!rescoredFlight) throw new HttpError(404, "NOT_FOUND", "Flight not found");
+      return { round: scored, flight: rescoredFlight };
+    },
+  );
+
+  let savedFlight = rescoredFlight;
+  await updateRoundsIndex(scoredRound);
+  if (scoredRound.status === "Complete") {
+    await recomputeSeason(scoredRound.season.year);
+  }
 
   try {
     await enqueueIgcValidation({
