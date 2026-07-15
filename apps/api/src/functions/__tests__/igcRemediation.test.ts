@@ -417,7 +417,7 @@ describe("allowIgc", () => {
     const flight = storedFlight(round);
     expect(flight.validation).toMatchObject({
       overridden: true,
-      overriddenBy: user.email,
+      overriddenBy: user.id,
       overriddenAt: expect.any(String),
     });
     expect(round.teams[0]?.pilots[0]?.pilotPoints).toBeGreaterThan(0);

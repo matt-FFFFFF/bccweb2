@@ -558,7 +558,7 @@ async function allowIgc(
       flight.validation = {
         ...validation,
         overridden: true,
-        overriddenBy: caller.email,
+        overriddenBy: caller.userId,
         overriddenAt: new Date().toISOString(),
       };
     }
