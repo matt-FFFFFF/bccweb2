@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MPL-2.0
 # REQUIRES ambient 'az login' AND backend init. Plan-only; NEVER 'apply'.
 # Run:
-#   terraform -chdir=iac/service init -backend-config=../env/<env>.backend.hcl
-#   terraform -chdir=iac/service test -test-directory=tests/integration -var-file=../env/<env>.tfvars
+#   terraform -chdir=iac/environment init -backend-config=../env/<env>.backend.hcl
+#   terraform -chdir=iac/environment test -test-directory=tests/integration -var-file=../env/<env>.tfvars
 #
 # This file is the INTEGRATION counterpart to tests/unit/stamp.tftest.hcl.
 # Unlike the unit tests (which mock_provider every provider for offline runs),
@@ -11,8 +11,8 @@
 # It only PLANs — it never APPLIES — so it is safe to run on a clean
 # subscription, but it still requires:
 #   * Ambient `az login` so azapi can authenticate.
-#   * A backend init (`-backend-config=env/<env>.backend.hcl`) so the test
-#     can read prior state when one exists.
+#   * A backend init (`-backend-config=../env/<env>.backend.hcl`) for the
+#     operator's selected environment.
 #   * A `-var-file` supplying the real `puretrack_*`, ACS, ops_email, etc.
 #
 # This file is intentionally excluded from default `terraform test` runs
@@ -26,11 +26,9 @@ variables {
   stamp_name = "integration-test"
   location   = "uksouth"
 
-  # The service stack reads the common stack's remote state from this SA.
-  # The plan only succeeds if `common-integration-test.tfstate` exists in it —
-  # apply the common stack with stamp_name=integration-test first (or pass a
-  # -var-file pointing stamp_name at an env whose common state exists).
-  tfstate_sa_name = "stbccwebtfstate813afe"
+  acs_email_domain = "mail.integration-test.example.invalid"
+  platform_rg_name = "rg-bccweb-platform-integration-test"
+  stamp_rg_name    = "rg-bccweb-integration-test"
 
   allowed_origins = ["https://integration-test.example.invalid"]
 
@@ -64,7 +62,7 @@ run "plan_against_real_backend" {
   # instances, planned_values.root_module.child_modules would be empty
   # and we'd silently pass on a degenerate no-op.
   assert {
-    condition     = length(run.plan_against_real_backend.planned_values.root_module.child_modules) > 0
-    error_message = "Stamp module produced no planned resources — module call may be misconfigured."
+    condition     = length(run.plan_against_real_backend.planned_values.root_module.child_modules) >= 2
+    error_message = "Root module must plan both platform and stamp child modules."
   }
 }
