@@ -5,9 +5,10 @@
 # Resources:
 #   azapi_resource.acs — ACS base resource (communicationServices)
 #
-# The email service and its DNS-verified domain live in the iac/common stack
-# (pets: registrar records + verification wait + sender reputation survive
-# stamp rebuilds). This stamp links the domain by ID via the `linkedDomains`
+# The email service and its DNS-verified domain live in the `platform` module
+# (a sibling child module under `iac/environment`, applied together with this
+# `stamp` module in the same plan/state — see iac/environment/main.tf). This
+# stamp links the domain by ID via the `linkedDomains`
 # property — cross-RG linking within the subscription. The access key grants
 # send rights on every linked domain, so the key-holding resource stays
 # per-stamp to preserve env blast-radius isolation.
@@ -21,11 +22,13 @@
 #     keyvault.tf. It is called against azapi_resource.acs.id and used
 #     ONLY to write the ACS primary connection string into Key Vault. The
 #     Function App reads it back via a Key Vault reference (see
-#     iac/service/modules/stamp/functions.tf). No non-ephemeral listKeys
+#     iac/environment/modules/stamp/functions.tf). No non-ephemeral listKeys
 #     action is declared here, so the raw connection string never lands in
 #     state.
-#   * Domain verification DNS records are an iac/common concern: run
-#     `terraform -chdir=iac/common output acs_dns_records_for_operator`.
+#   * Domain verification DNS records are a `platform`-module concern: run
+#     `terraform -chdir=iac/environment output acs_dns_records_for_operator`
+#     (re-exported by the root — the underlying resource lives in
+#     modules/platform, not this stamp module).
 
 locals {
   # Mirrors storage.tf's storage_prefix recomputation: the root module does
