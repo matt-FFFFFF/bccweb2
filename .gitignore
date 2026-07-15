@@ -22,11 +22,11 @@ local.settings.json
 
 # Terraform
 .terraform
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.backup
 *.tfvars
 *.tfvars.json
+*tfplan*
 # Non-sensitive tfvars are committed: common-stack values + the .example
 # templates. Real per-env service tfvars (dev.tfvars, prod.tfvars) hold
 # secrets and stay ignored.
