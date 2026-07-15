@@ -31,7 +31,7 @@ variable "tfstate_storage_account_name" {
   }
 }
 
-variable "tfstate_container_name" {
+variable "tfstate_container_prefix" {
   type        = string
   description = "Name of the blob container that holds tfstate files (one blob per environment, e.g. prod.tfstate)."
   default     = "tfstate"
@@ -53,7 +53,7 @@ variable "github_repo" {
 }
 
 variable "github_environments" {
-  type        = list(string)
+  type        = set(string)
   description = "GitHub environment names that receive the per-env Azure OIDC secrets. Every `terraform_umis` entry's `github_env` must appear in this list."
   default     = ["dev", "prod"]
 
