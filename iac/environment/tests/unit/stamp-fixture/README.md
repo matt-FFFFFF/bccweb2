@@ -1,12 +1,12 @@
 # stamp-fixture — Terraform test fixture for the stamp module
 
-A near-verbatim copy of `iac/service/modules/stamp/` used **only** by
-`iac/service/tests/unit/stamp.tftest.hcl`. Do not deploy this fixture to any
+A near-verbatim copy of `iac/environment/modules/stamp/` used **only** by
+`iac/environment/tests/unit/stamp.tftest.hcl`. Do not deploy this fixture to any
 environment.
 
 ## Why this fixture exists
 
-The real stamp module in `iac/service/modules/stamp/keyvault.tf` declares two
+The real stamp module in `iac/environment/modules/stamp/keyvault.tf` declares two
 `ephemeral` resources to seed Key Vault secrets without persisting plaintext
 into Terraform state:
 
@@ -23,7 +23,7 @@ state.
 
 ## What this fixture contains
 
-The directory mirrors `iac/service/modules/stamp/` 1:1 with two intentional
+The directory mirrors `iac/environment/modules/stamp/` 1:1 with two intentional
 exceptions:
 
 - `keyvault.tf` substitutes the ephemerals for ordinary resources / sentinel
@@ -37,13 +37,13 @@ byte-identical to the real module.
 
 ## Sync rule (diff-driven discipline)
 
-Whenever any `iac/service/modules/stamp/*.tf` file changes, update the matching
-`iac/service/tests/unit/stamp-fixture/*.tf` file in the same commit.
+Whenever any `iac/environment/modules/stamp/*.tf` file changes, update the matching
+`iac/environment/tests/unit/stamp-fixture/*.tf` file in the same commit.
 
 Quick check:
 
 ```sh
-diff -r iac/service/modules/stamp/ iac/service/tests/unit/stamp-fixture/
+diff -r iac/environment/modules/stamp/ iac/environment/tests/unit/stamp-fixture/
 ```
 
 The only expected differences are:
@@ -57,5 +57,5 @@ re-synced before merging.
 ## Future work
 
 When Terraform's `mock_provider` framework gains support for `ephemeral`
-resources, delete this fixture and point `iac/service/tests/unit/stamp.tftest.hcl`
-directly at `iac/service/modules/stamp/`.
+resources, delete this fixture and point `iac/environment/tests/unit/stamp.tftest.hcl`
+directly at `iac/environment/modules/stamp/`.

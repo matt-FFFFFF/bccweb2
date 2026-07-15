@@ -1,11 +1,11 @@
 # SPDX-FileCopyrightText: 2026 British Club Challenge authors
 # SPDX-License-Identifier: MPL-2.0
-# TEST FIXTURE ONLY — see iac/tests/unit/stamp-fixture/README.md.
+# TEST FIXTURE ONLY — see iac/environment/tests/unit/stamp-fixture/README.md.
 # This file substitutes the real module's `ephemeral` resources (random_password
 # and azapi_resource_action.acs_keys) with plain sentinel locals so that
 # `terraform test` plan runs succeed under mock_provider, which cannot satisfy
 # ephemerals. All other stamp-fixture/*.tf files must stay byte-identical to
-# iac/modules/stamp/*.tf.
+# iac/environment/modules/stamp/*.tf.
 #
 # First-apply may 403 on KV data-plane writes due to RBAC propagation lag. Re-apply to recover. data.azapi_client_config.current is module-local (declared here, reused by dns.tf and rg.tf in the same module).
 # kv_admin_role's principalType is switchable via var.terraform_principal_type — "User" for local az login applies, "ServicePrincipal" for UMI/SP applies (CI default).
