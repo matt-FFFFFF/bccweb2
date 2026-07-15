@@ -60,11 +60,11 @@ resource "azapi_resource" "tfstate_sa" {
       allowBlobPublicAccess    = false
       minimumTlsVersion        = "TLS1_2"
       supportsHttpsTrafficOnly = true
-      allowSharedKeyAccess     = true
+      allowSharedKeyAccess     = false
     }
   }
 
-  response_export_values = ["id", "name", "properties.primaryEndpoints.blob"]
+  response_export_values = ["properties.primaryEndpoints.blob"]
 }
 
 # ─── Blob service (soft delete) ──────────────────────────────────────────────
