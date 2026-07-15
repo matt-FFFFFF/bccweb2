@@ -10,6 +10,8 @@ import {
   getPrivateContainer,
   readJson,
 } from "../lib/blobSeed.mjs";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const IGC_PREFIX = "flight-igcs/";
 const ROUND_PREFIX = "rounds/";
@@ -29,7 +31,7 @@ Options:
   --help                     Show this help`);
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   let mode = "dry-run";
   let olderThanHours = DEFAULT_OLDER_THAN_HOURS;
 
@@ -63,7 +65,7 @@ function parseArgs(argv) {
   return { help: false, mode, olderThanHours };
 }
 
-async function collectReferencedIgcPaths(container) {
+export async function collectReferencedIgcPaths(container) {
   const referencedPaths = new Set();
   let roundsScanned = 0;
 
@@ -102,15 +104,8 @@ async function collectReferencedIgcPaths(container) {
   return { referencedPaths, roundsScanned };
 }
 
-async function main() {
-  const options = parseArgs(process.argv.slice(2));
-  if (options.help) {
-    printHelp();
-    return;
-  }
-
-  const container = getPrivateContainer();
-  const cutoff = Date.now() - options.olderThanHours * MILLISECONDS_PER_HOUR;
+export async function reconcileOrphanIgcs(container, options, now = Date.now()) {
+  const cutoff = now - options.olderThanHours * MILLISECONDS_PER_HOUR;
   const { referencedPaths, roundsScanned } =
     await collectReferencedIgcPaths(container);
   const candidates = [];
@@ -166,8 +161,31 @@ async function main() {
   console.log(`Deleted: ${deleted}`);
 }
 
-main().catch((error) => {
-  const message = error instanceof Error ? error.message : "Unknown error";
-  console.error(`[ERROR] IGC reconciliation failed: ${message}`);
-  process.exitCode = 1;
-});
+async function main() {
+  const options = parseArgs(process.argv.slice(2));
+  if (options.help) {
+    printHelp();
+    return;
+  }
+
+  await reconcileOrphanIgcs(getPrivateContainer(), options);
+}
+
+function invokedAsScript() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const self = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(entry) === realpathSync(self);
+  } catch {
+    return entry === self;
+  }
+}
+
+if (invokedAsScript()) {
+  main().catch((error) => {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error(`[ERROR] IGC reconciliation failed: ${message}`);
+    process.exitCode = 1;
+  });
+}

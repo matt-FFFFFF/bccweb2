@@ -6,6 +6,8 @@
  */
 
 import { QueueClient } from "@azure/storage-queue";
+import { realpathSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 import { getPrivateContainer, readJson } from "../lib/blobSeed.mjs";
 
@@ -17,8 +19,8 @@ const MILLISECONDS_PER_HOUR = 60 * 60 * 1000;
 const LOCAL_AZURITE_QUEUE_CONNECTION =
   "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://127.0.0.1:10000/devstoreaccount1;QueueEndpoint=http://127.0.0.1:10001/devstoreaccount1;TableEndpoint=http://127.0.0.1:10002/devstoreaccount1;";
 
-function printHelp() {
-  console.log(`Usage: node scripts/admin/redispatch-stuck-igc-validations.mjs [options]
+function printHelp(log = console.log) {
+  log(`Usage: node scripts/admin/redispatch-stuck-igc-validations.mjs [options]
 
 Find old, non-manual flights still pending IGC validation with no durable result.
 The default is dry-run. Redispatch reuses each flight's existing attempt ID.
@@ -30,7 +32,7 @@ Options:
   --help                     Show this help`);
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   let mode = "dry-run";
   let olderThanHours = DEFAULT_OLDER_THAN_HOURS;
 
@@ -64,7 +66,7 @@ function parseArgs(argv) {
   return { help: false, mode, olderThanHours };
 }
 
-function queueConnectionString() {
+export function queueConnectionString() {
   const configured = process.env.AzureWebJobsStorage;
   if (typeof configured === "string" && configured.length > 0) return configured;
 
@@ -95,7 +97,7 @@ function assertRoundShape(round, path) {
   }
 }
 
-function pendingJobs(round, roundId, path) {
+export function pendingJobs(round, roundId, path) {
   const jobs = [];
   for (const team of round.teams) {
     for (const pilot of team.pilots) {
@@ -135,15 +137,15 @@ function pendingJobs(round, roundId, path) {
   return jobs;
 }
 
-function resultPath(attemptId) {
+export function resultPath(attemptId) {
   return `${RESULT_PREFIX}${attemptId}.json`;
 }
 
-async function hasDurableResult(container, attemptId) {
+export async function hasDurableResult(container, attemptId) {
   return container.getBlobClient(resultPath(attemptId)).exists();
 }
 
-async function collectCandidates(container, cutoff) {
+export async function collectCandidates(container, cutoff) {
   const candidates = [];
   const summary = { roundsScanned: 0, pendingScanned: 0, recent: 0, results: 0 };
 
@@ -170,13 +172,13 @@ async function collectCandidates(container, cutoff) {
   return { candidates, summary };
 }
 
-function sameJob(left, right) {
+export function sameJob(left, right) {
   return left.roundId === right.roundId && left.teamId === right.teamId &&
     left.place === right.place && left.flightId === right.flightId &&
     left.validationAttemptId === right.validationAttemptId;
 }
 
-async function remainsEligible(container, candidate, cutoff) {
+export async function remainsEligible(container, candidate, cutoff) {
   const blob = container.getBlobClient(candidate.path);
   const properties = await blob.getProperties();
   if (!properties.lastModified || properties.lastModified.getTime() >= cutoff) return false;
@@ -192,54 +194,73 @@ function describe(job) {
     `flightId=${job.flightId} validationAttemptId=${job.validationAttemptId}`;
 }
 
-async function main() {
-  const options = parseArgs(process.argv.slice(2));
+export async function main({
+  argv = process.argv.slice(2),
+  container,
+  now = Date.now(),
+  queueFactory = (connectionString, queueName) => new QueueClient(connectionString, queueName),
+  log = console.log,
+} = {}) {
+  const options = parseArgs(argv);
   if (options.help) {
-    printHelp();
+    printHelp(log);
     return;
   }
 
-  const container = getPrivateContainer();
-  const cutoff = Date.now() - options.olderThanHours * MILLISECONDS_PER_HOUR;
-  const { candidates, summary } = await collectCandidates(container, cutoff);
+  const storageContainer = container ?? getPrivateContainer();
+  const cutoff = now - options.olderThanHours * MILLISECONDS_PER_HOUR;
+  const { candidates, summary } = await collectCandidates(storageContainer, cutoff);
   let redispatched = 0;
   let changed = 0;
   let queue;
 
   if (options.mode === "redispatch" && candidates.length > 0) {
-    queue = new QueueClient(queueConnectionString(), QUEUE_NAME);
+    queue = queueFactory(queueConnectionString(), QUEUE_NAME);
     await queue.createIfNotExists();
   }
 
   for (const candidate of candidates) {
     if (options.mode === "dry-run") {
-      console.log(`[DRY-RUN] ${describe(candidate.job)}`);
+      log(`[DRY-RUN] ${describe(candidate.job)}`);
       continue;
     }
-    if (!(await remainsEligible(container, candidate, cutoff))) {
+    if (!(await remainsEligible(storageContainer, candidate, cutoff))) {
       changed += 1;
       continue;
     }
     const message = Buffer.from(JSON.stringify(candidate.job), "utf8").toString("base64");
     await queue.sendMessage(message);
     redispatched += 1;
-    console.log(`[REDISPATCH] ${describe(candidate.job)}`);
+    log(`[REDISPATCH] ${describe(candidate.job)}`);
   }
 
-  console.log("");
-  console.log(`Mode: ${options.mode}`);
-  console.log(`Safety threshold: ${options.olderThanHours} hours`);
-  console.log(`Authoritative rounds scanned: ${summary.roundsScanned}`);
-  console.log(`Pending validations scanned: ${summary.pendingScanned}`);
-  console.log(`Recent pending validations protected: ${summary.recent}`);
-  console.log(`Pending validations with durable results skipped: ${summary.results}`);
-  console.log(`Eligible pending validations: ${candidates.length - changed}`);
-  console.log(`Changed before redispatch and protected: ${changed}`);
-  console.log(`Redispatched: ${redispatched}`);
+  log("");
+  log(`Mode: ${options.mode}`);
+  log(`Safety threshold: ${options.olderThanHours} hours`);
+  log(`Authoritative rounds scanned: ${summary.roundsScanned}`);
+  log(`Pending validations scanned: ${summary.pendingScanned}`);
+  log(`Recent pending validations protected: ${summary.recent}`);
+  log(`Pending validations with durable results skipped: ${summary.results}`);
+  log(`Eligible pending validations: ${candidates.length - changed}`);
+  log(`Changed before redispatch and protected: ${changed}`);
+  log(`Redispatched: ${redispatched}`);
 }
 
-main().catch((error) => {
-  const message = error instanceof Error ? error.message : "Unknown error";
-  console.error(`[ERROR] IGC validation redispatch failed: ${message}`);
-  process.exitCode = 1;
-});
+function invokedAsScript() {
+  const entry = process.argv[1];
+  if (!entry) return false;
+  const self = fileURLToPath(import.meta.url);
+  try {
+    return realpathSync(entry) === realpathSync(self);
+  } catch {
+    return entry === self;
+  }
+}
+
+if (invokedAsScript()) {
+  main().catch((error) => {
+    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error(`[ERROR] IGC validation redispatch failed: ${message}`);
+    process.exitCode = 1;
+  });
+}
