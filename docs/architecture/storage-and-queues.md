@@ -183,9 +183,22 @@ reading the round or `config.json`, reading the IGC bytes, writing the durable r
 record, committing the round under its private lease, `updateRoundsIndex`, or deleting
 the durable result record all throw and are retried by the host. Any such retry replays
 from the top of the message handler; because `readValidationResult` finds the durable
-`writeValidationResult` record already in place, it skips FAI again rather than making
-a duplicate call. After `maxDequeueCount:5` such retries dead-letter to
-`igc-validation-poison` as a host-crash safety net.
+`writeValidationResult` record already in place *once that write has succeeded*, it
+skips FAI again rather than making a duplicate call. The no-duplicate-egress guarantee
+only holds from that point on: if `writeValidationResult` itself fails, or the worker
+crashes after the FAI response but before the durable write lands, no record exists yet,
+so the next dequeue calls FAI again. That is at most one repeated upload per such
+failure, not an unbounded loop, since later retries do find the (now-written) record.
+After
+`maxDequeueCount:5` such retries dead-letter to `igc-validation-poison`.
+
+The `igc-validation-poison` queue has a dedicated consumer (unlike `rescore-jobs`, which
+has none): on dequeue it marks the flight `signature: "unverified"`, `faiStatus:
+"WORKER_FAILED"` so the flight is no longer stuck `pending` after retries exhaust, GCs
+the orphaned durable result record for that attempt, and emits redacted telemetry (no
+IGC bytes, no pilot PII). A flight left in this `unverified/WORKER_FAILED` state is
+remediable by the operator via the normal Resubmit action, which stamps a fresh
+`validationAttemptId` and re-enqueues onto `igc-validation`.
 
 ## Related runbooks
 

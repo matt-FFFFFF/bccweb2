@@ -145,3 +145,10 @@ service outside our control.
   sending the IGC to FAI. A call already past that final check remains in flight and can
   still complete; disabling the toggle does not cancel an outbound request that has
   already started.
+- **Changing a round's date**: `updateRound` clears any stale `IGC_DATE_MISMATCH`
+  sanity flag and drops the flight's stored date verdict when the round date changes, but
+  it does not re-parse the IGC file. It only re-scores existing distances against the new
+  date verdicts that already exist. A flight that becomes newly mismatched against the
+  new date is not detected until you explicitly rescore the round
+  (`POST /api/rounds/{id}/rescore`). After editing a round's date, rescore the round so
+  IGC date validation is checked against the new date.
