@@ -30,7 +30,7 @@ export async function validateIgcSignature(
   faiServer?: string;
   faiMsg?: string;
 }> {
-  if (process.env["FAI_VALI_ENABLED"] === "false") {
+  if (process.env["FAI_VALI_ENABLED"] !== "true") {
     return { signature: "unverified", faiStatus: "DISABLED" };
   }
   if (buffer.length > MAX_IGC_BYTES) {

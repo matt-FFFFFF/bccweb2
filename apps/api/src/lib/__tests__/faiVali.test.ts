@@ -17,6 +17,7 @@ describe("validateIgcSignature", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     vi.stubGlobal("fetch", fetchMock);
+    process.env["FAI_VALI_ENABLED"] = "true";
     process.env["FAI_VALI_BASE_URL"] = "https://vali.example.test";
     process.env["FAI_VALI_TIMEOUT_MS"] = "1234";
   });
@@ -28,7 +29,7 @@ describe("validateIgcSignature", () => {
     delete process.env["FAI_VALI_TIMEOUT_MS"];
   });
 
-  it("returns valid and sends the IGC multipart upload when FAI passes it", async () => {
+  it("fetches and returns valid when FAI validation is explicitly enabled", async () => {
     // Given
     fetchMock.mockResolvedValue(jsonResponse({
       result: "PASSED",
@@ -171,6 +172,30 @@ describe("validateIgcSignature", () => {
   it("does not fetch when FAI validation is disabled", async () => {
     // Given
     process.env["FAI_VALI_ENABLED"] = "false";
+
+    // When
+    const result = await validateIgcSignature(igcBuffer, "flight.igc");
+
+    // Then
+    expect(result).toEqual({ signature: "unverified", faiStatus: "DISABLED" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch when the FAI validation setting is missing", async () => {
+    // Given
+    delete process.env["FAI_VALI_ENABLED"];
+
+    // When
+    const result = await validateIgcSignature(igcBuffer, "flight.igc");
+
+    // Then
+    expect(result).toEqual({ signature: "unverified", faiStatus: "DISABLED" });
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("does not fetch when the FAI validation setting has an arbitrary value", async () => {
+    // Given
+    process.env["FAI_VALI_ENABLED"] = "yes";
 
     // When
     const result = await validateIgcSignature(igcBuffer, "flight.igc");

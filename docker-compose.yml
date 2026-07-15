@@ -65,6 +65,7 @@ services:
       BLOB_CONNECTION_STRING: "DefaultEndpointsProtocol=http;AccountName=devstoreaccount1;AccountKey=Eby8vdM02xNOcqFlqUwJPLlmEtlCDXJ1OUzFT50uSRZ6IFsuFq2UVErCz4I6tq/K1SZFPTOtr/KBHBeksoGMGw==;BlobEndpoint=http://azurite:10000/devstoreaccount1;"
       BLOB_CONTAINER_NAME: data
       BLOB_PRIVATE_CONTAINER_NAME: data-private
+      FAI_VALI_ENABLED: "false"
       PURETRACK_ENABLED: "false"
       JWT_SECRET: dev-secret-change-in-production
       FUNCTIONS_WORKER_RUNTIME: node
