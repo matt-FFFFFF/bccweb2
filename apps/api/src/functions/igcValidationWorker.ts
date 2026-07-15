@@ -169,11 +169,18 @@ async function applyValidationResult(
     const flight = matchingFlight(round, job);
     if (flight === null || flight.isManualLog === true) return;
     if (flight.validation?.faiStatus === "WORKER_FAILED") return;
+    const leased = flight.validation ?? {};
+    const alreadyTerminal = leased.validationAttemptId === job.validationAttemptId
+      && leased.signature !== undefined
+      && leased.signature !== "pending";
     flight.validation = {
-      ...flight.validation,
-      ...result,
+      ...leased,
+      signature: result.signature,
+      faiStatus: result.faiStatus,
+      faiServer: result.faiServer,
+      faiMsg: result.faiMsg,
       validationAttemptId: job.validationAttemptId,
-      checkedAt: new Date().toISOString(),
+      checkedAt: alreadyTerminal ? leased.checkedAt : new Date().toISOString(),
     };
     const config = await loadConfig();
     const { round: scored, derivation } = scoreRoundEnforcingValidation(round, config);

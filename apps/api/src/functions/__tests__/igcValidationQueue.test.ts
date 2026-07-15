@@ -373,6 +373,68 @@ describe("igcValidationWorker queue transaction", () => {
     expect(results?.[0]?.teamResults[0]?.score).toBe(0);
   });
 
+  it("preserves leased date and override state when replaying a terminal durable result", async () => {
+    // Given
+    const seed = await seedValidation();
+    const committedCheckedAt = "2026-07-14T12:00:00.000Z";
+    await writeValidationResult(seed.job.validationAttemptId, {
+      signature: "valid",
+      date: "valid",
+      checkedAt: "2026-07-14T11:00:00.000Z",
+      faiStatus: "PASSED",
+      faiServer: "vali-1",
+      faiMsg: "ok",
+    });
+    const resultPath = `igc-validation/results/${seed.job.validationAttemptId}.json`;
+    const realGetPrivateBlobClient = blobModule.getPrivateBlobClient;
+    let interceptedResultRead = false;
+    vi.spyOn(blobModule, "getPrivateBlobClient").mockImplementation((path) => {
+      const client = realGetPrivateBlobClient(path);
+      if (path !== resultPath || interceptedResultRead) return client;
+      const download = client.download.bind(client);
+      vi.spyOn(client, "download").mockImplementation(async () => {
+        const response = await download();
+        interceptedResultRead = true;
+        const concurrentlyEdited = await persistedRound(seed);
+        const validation = currentValidation(concurrentlyEdited);
+        if (validation === undefined) {
+          throw new Error("Validation fixture has no validation state");
+        }
+        validation.signature = "valid";
+        validation.faiStatus = "PASSED";
+        validation.faiServer = "vali-1";
+        validation.faiMsg = "ok";
+        validation.checkedAt = committedCheckedAt;
+        validation.overridden = true;
+        validation.overriddenBy = "admin-1";
+        validation.overriddenAt = "2026-07-14T11:30:00.000Z";
+        delete validation.date;
+        await writePrivateJson(seed.path, concurrentlyEdited);
+        return response;
+      });
+      return client;
+    });
+
+    // When
+    await invokeQueue("igcValidationWorker", seed.job);
+
+    // Then
+    const validation = currentValidation(await persistedRound(seed));
+    expect(validation).toMatchObject({
+      signature: "valid",
+      faiStatus: "PASSED",
+      faiServer: "vali-1",
+      faiMsg: "ok",
+      overridden: true,
+      overriddenBy: "admin-1",
+      overriddenAt: "2026-07-14T11:30:00.000Z",
+      checkedAt: committedCheckedAt,
+      validationAttemptId: seed.job.validationAttemptId,
+    });
+    expect(validation).not.toHaveProperty("date");
+    expect(faiMock.validate).not.toHaveBeenCalled();
+  });
+
   it("persists the FAI result before a failed apply and reuses it on retry", async () => {
     const seed = await seedValidation();
     faiMock.validate.mockResolvedValueOnce({ signature: "invalid", faiStatus: "FAILED" });
@@ -655,6 +717,7 @@ describe("igcValidationWorker queue transaction", () => {
     if (validation === undefined) throw new Error("Validation fixture has no validation state");
     validation.signature = "valid";
     validation.faiStatus = "PASSED";
+    validation.checkedAt = "2026-07-14T12:00:00.000Z";
     await writePrivateJson(seed.path, committed);
     await writeValidationResult(seed.job.validationAttemptId, validation);
 
@@ -662,7 +725,6 @@ describe("igcValidationWorker queue transaction", () => {
 
     expect(currentValidation(await persistedRound(seed))).toMatchObject({
       ...validation,
-      checkedAt: expect.any(String),
     });
     expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
     expect(recomputeMock.recompute).toHaveBeenCalledWith(2026);
