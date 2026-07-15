@@ -13,7 +13,9 @@ import {
   IGC_VALIDATION_QUEUE_NAME,
   paceBeforeFaiCall,
   readValidationResult,
+  recordFaiCallStart,
   releaseIgcValidationGuard,
+  waitForPace,
   withIgcValidationGuard,
   writeValidationResult,
 } from "../igcValidationJob.js";
@@ -168,7 +170,7 @@ describe("IGC validation guard", () => {
     await releaseIgcValidationGuard(nextGuard.leaseId);
   });
 
-  test("persists start times and spaces calls by at least two seconds", async () => {
+  test("waits without recording, then persists the actual call start", async () => {
     // Given
     const firstGuard = await acquireIgcValidationGuard();
     const firstStartedAt = await paceBeforeFaiCall(firstGuard.leaseId);
@@ -176,10 +178,17 @@ describe("IGC validation guard", () => {
 
     // When
     const secondGuard = await acquireIgcValidationGuard();
-    const secondStartedAt = await paceBeforeFaiCall(secondGuard.leaseId);
+    await waitForPace(secondGuard.leaseId);
+    const waitingProperties = await getPrivateContainer()
+      .getBlobClient("igc-validation/active.json")
+      .getProperties();
+    const secondStartedAt = await recordFaiCallStart(secondGuard.leaseId);
     await releaseIgcValidationGuard(secondGuard.leaseId);
 
     // Then
+    expect(waitingProperties.metadata?.["lastcallstartedat"]).toBe(
+      firstStartedAt.toISOString(),
+    );
     expect(secondStartedAt.getTime() - firstStartedAt.getTime()).toBeGreaterThanOrEqual(
       2_000,
     );

@@ -129,7 +129,7 @@ export function assertFaiValiTimeoutWithinGuard(): void {
   }
 }
 
-export async function paceBeforeFaiCall(leaseId: string): Promise<Date> {
+export async function waitForPace(leaseId: string): Promise<void> {
   const client = getPrivateBlockBlobClient(GUARD_PATH);
   const properties = await client.getProperties({ conditions: { leaseId } });
   const previousValue = properties.metadata?.["lastCallStartedAt"]
@@ -145,12 +145,21 @@ export async function paceBeforeFaiCall(leaseId: string): Promise<Date> {
       );
     }
   }
+}
+
+export async function recordFaiCallStart(leaseId: string): Promise<Date> {
+  const client = getPrivateBlockBlobClient(GUARD_PATH);
   const startedAt = new Date();
   await client.setMetadata(
     { lastCallStartedAt: startedAt.toISOString() },
     { conditions: { leaseId } },
   );
   return startedAt;
+}
+
+export async function paceBeforeFaiCall(leaseId: string): Promise<Date> {
+  await waitForPace(leaseId);
+  return recordFaiCallStart(leaseId);
 }
 
 export async function writeValidationResult(

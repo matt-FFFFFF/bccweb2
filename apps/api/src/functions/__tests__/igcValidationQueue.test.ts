@@ -6,20 +6,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const faiMock = vi.hoisted(() => ({ validate: vi.fn() }));
 const jobMock = vi.hoisted(() => ({
-  actualPace: vi.fn(),
+  actualRecord: vi.fn(),
+  actualWait: vi.fn(),
   enqueue: vi.fn(),
-  pace: vi.fn(),
+  record: vi.fn(),
+  wait: vi.fn(),
 }));
 const recomputeMock = vi.hoisted(() => ({ recompute: vi.fn() }));
 
 vi.mock("../../lib/faiVali.js", () => ({ validateIgcSignature: faiMock.validate }));
 vi.mock("../../lib/igcValidationJob.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/igcValidationJob.js")>();
-  jobMock.actualPace.mockImplementation(actual.paceBeforeFaiCall);
+  jobMock.actualRecord.mockImplementation(actual.recordFaiCallStart);
+  jobMock.actualWait.mockImplementation(actual.waitForPace);
   return {
     ...actual,
     enqueueIgcValidation: jobMock.enqueue,
-    paceBeforeFaiCall: jobMock.pace,
+    recordFaiCallStart: jobMock.record,
+    waitForPace: jobMock.wait,
   };
 });
 vi.mock("../../lib/recompute.js", async (importOriginal) => {
@@ -139,7 +143,8 @@ function currentValidation(round: Round): FlightValidation | undefined {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  jobMock.pace.mockResolvedValue(new Date("2026-07-14T12:00:00.000Z"));
+  jobMock.record.mockResolvedValue(new Date("2026-07-14T12:00:00.000Z"));
+  jobMock.wait.mockResolvedValue(undefined);
   jobMock.enqueue.mockResolvedValue(undefined);
   faiMock.validate.mockResolvedValue({ signature: "valid", faiStatus: "PASSED" });
 });
@@ -183,7 +188,8 @@ describe("igcValidationWorker queue transaction", () => {
       expect.arrayContaining([expect.objectContaining({ id: seed.job.roundId })]),
     );
     expect(faiMock.validate).toHaveBeenCalledWith(Buffer.from("immutable-igc"), seed.igcPath.split("/").at(-1));
-    expect(jobMock.pace).toHaveBeenCalledTimes(1);
+    expect(jobMock.wait).toHaveBeenCalledTimes(1);
+    expect(jobMock.record).toHaveBeenCalledTimes(1);
     const guard = await acquireIgcValidationGuard();
     await releaseIgcValidationGuard(guard.leaseId);
   });
@@ -206,7 +212,8 @@ describe("igcValidationWorker queue transaction", () => {
 
       expect(await persistedRound(seed)).toEqual(before);
       expect(faiMock.validate).not.toHaveBeenCalled();
-      expect(jobMock.pace).not.toHaveBeenCalled();
+      expect(jobMock.wait).not.toHaveBeenCalled();
+      expect(jobMock.record).not.toHaveBeenCalled();
     },
   );
 
@@ -232,7 +239,8 @@ describe("igcValidationWorker queue transaction", () => {
     await invokeQueue("igcValidationWorker", seed.job);
 
     expect(faiMock.validate).not.toHaveBeenCalled();
-    expect(jobMock.pace).not.toHaveBeenCalled();
+    expect(jobMock.wait).not.toHaveBeenCalled();
+    expect(jobMock.record).not.toHaveBeenCalled();
     expect(readPaths).toEqual([seed.path]);
     clientSpy.mockRestore();
     expect(await persistedRound(seed)).toEqual(before);
@@ -264,7 +272,8 @@ describe("igcValidationWorker queue transaction", () => {
     await invokeQueue("igcValidationWorker", seed.job);
 
     expect(faiMock.validate).not.toHaveBeenCalled();
-    expect(jobMock.pace).not.toHaveBeenCalled();
+    expect(jobMock.wait).toHaveBeenCalledTimes(1);
+    expect(jobMock.record).not.toHaveBeenCalled();
     expect(await persistedRound(seed)).toEqual(converted);
     expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
   });
@@ -342,6 +351,25 @@ describe("igcValidationWorker queue transaction", () => {
     expect(faiMock.validate).not.toHaveBeenCalled();
   });
 
+  it("skips FAI when validation is disabled during the pace wait", async () => {
+    // Given
+    const seed = await seedValidation();
+    jobMock.wait.mockImplementationOnce(async () => {
+      await writePrivateJson("config.json", config(false));
+    });
+
+    // When
+    await invokeQueue("igcValidationWorker", seed.job);
+
+    // Then
+    expect(faiMock.validate).not.toHaveBeenCalled();
+    expect(jobMock.record).not.toHaveBeenCalled();
+    expect(currentValidation(await persistedRound(seed))).toMatchObject({
+      signature: "unverified",
+      faiStatus: "DISABLED",
+    });
+  });
+
   it("spaces actual FAI calls after slow guarded preparation", async () => {
     // Given
     const first = await seedValidation();
@@ -359,7 +387,8 @@ describe("igcValidationWorker queue transaction", () => {
       });
       return client;
     });
-    jobMock.pace.mockImplementation(jobMock.actualPace);
+    jobMock.record.mockImplementation(jobMock.actualRecord);
+    jobMock.wait.mockImplementation(jobMock.actualWait);
     faiMock.validate.mockImplementation(async () => {
       faiCallTimes.push(Date.now());
       return { signature: "valid", faiStatus: "PASSED" };

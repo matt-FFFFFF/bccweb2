@@ -18,8 +18,9 @@ import {
   enqueueIgcValidation,
   IgcValidationGuardContendedError,
   IGC_VALIDATION_QUEUE_NAME,
-  paceBeforeFaiCall,
   readValidationResult,
+  recordFaiCallStart,
+  waitForPace,
   withIgcValidationGuard,
   writeValidationResult,
 } from "../lib/igcValidationJob.js";
@@ -102,6 +103,7 @@ async function createValidationResult(
       if (existing !== null) return existing;
       const igcPath = igcPathFor(flight);
       const igc = await readIgc(igcPath);
+      await waitForPace(leaseId);
       const currentFlight = matchingFlight(
         await readRound(`rounds/${job.roundId}.json`),
         job,
@@ -111,7 +113,7 @@ async function createValidationResult(
       let result: FlightValidation;
       if (config.flightSignatureValidationEnabled) {
         assertFaiValiTimeoutWithinGuard();
-        await paceBeforeFaiCall(leaseId);
+        await recordFaiCallStart(leaseId);
         result = await validateIgcSignature(
           igc,
           igcPath.split("/").at(-1) ?? "flight.igc",
