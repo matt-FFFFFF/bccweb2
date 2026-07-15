@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import { randomUUID } from "crypto";
-import { BlobClient } from "@azure/storage-blob";
+import { BlobClient, BlobLeaseClient } from "@azure/storage-blob";
 import type { Round, Season, SeasonResults } from "@bccweb/types";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { getPublicContainer } from "../../__tests__/helpers/azurite.js";
@@ -41,7 +41,7 @@ vi.mock("../blob.js", async (importOriginal) => {
   };
 });
 
-import { recomputeSeason } from "../recompute.js";
+import { recomputeSeason, updateRoundsIndex } from "../recompute.js";
 
 const restoredSpies: Array<() => void> = [];
 
@@ -133,6 +133,63 @@ describe("recomputeSeason", () => {
     // Then: the pending pass is not erased by the failure and publishes the latest score.
     expect(seasonCopies).toBe(2);
     await expectPublishedScore(year, latestScore);
+  });
+
+  test("a round added after the rounds index snapshot survives the recompute swap", async () => {
+    // Given: recompute has built rounds.json and is paused before publishing that index.
+    const { year } = await seedSeason();
+    const roundsSwapEntered = Promise.withResolvers<void>();
+    const releaseRoundsSwap = Promise.withResolvers<void>();
+    const roundsLeaseContended = Promise.withResolvers<void>();
+    const originalCopy = BlobClient.prototype.beginCopyFromURL;
+    vi.spyOn(BlobClient.prototype, "beginCopyFromURL").mockImplementation(async function (
+      this: BlobClient,
+      copySource,
+      options,
+    ) {
+      if (this.name === "rounds.json") {
+        roundsSwapEntered.resolve();
+        await releaseRoundsSwap.promise;
+      }
+      return originalCopy.call(this, copySource, options);
+    });
+    const originalAcquire = BlobLeaseClient.prototype.acquireLease;
+    let observeRoundsLeaseConflict = false;
+    vi.spyOn(BlobLeaseClient.prototype, "acquireLease").mockImplementation(async function (
+      this: BlobLeaseClient,
+      duration,
+      options,
+    ) {
+      try {
+        return await originalAcquire.call(this, duration, options);
+      } catch (err: unknown) {
+        const statusCode = (err as { statusCode?: number }).statusCode;
+        if (observeRoundsLeaseConflict && (statusCode === 409 || statusCode === 412)) {
+          roundsLeaseContended.resolve();
+        }
+        throw err;
+      }
+    });
+    const recompute = recomputeSeason(year);
+    await roundsSwapEntered.promise;
+    const newRound = makeCompleteRound(year);
+    observeRoundsLeaseConflict = true;
+
+    // When: a global-index update interleaves before recompute's rounds.json swap.
+    const indexUpdate = updateRoundsIndex(newRound);
+    await Promise.race([
+      indexUpdate,
+      roundsLeaseContended.promise,
+      recompute.then(() => {
+        throw new Error("recompute completed before the interleaved index update");
+      }),
+    ]);
+    releaseRoundsSwap.resolve();
+    await Promise.all([recompute, indexUpdate]);
+
+    // Then: both operations finish and recompute does not erase the newly inserted ID.
+    const rounds = await readPublicJson<Array<{ id: string }>>("rounds.json");
+    expect(rounds?.map((round) => round.id)).toContain(newRound.id);
   });
 
   test("a recompute waiting on another host's season lease reads the latest committed round score", async () => {

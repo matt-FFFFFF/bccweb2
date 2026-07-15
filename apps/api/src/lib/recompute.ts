@@ -22,7 +22,8 @@ import {
   getBlobClient,
   getBlockBlobClient,
   getPrivateBlobClient,
-  withLease,
+  ensureJsonIndexBlob,
+  withLeaseRetry,
   withLeaseRenewing,
 } from "./blob.js";
 import { readJson, writeJson } from "./blobJson.js";
@@ -42,11 +43,11 @@ const recomputeDirty = new Set<number>();
 
 /**
  * Upsert a round summary into rounds.json.
- * Uses a blob lease for atomic read-modify-write; falls back to an
- * un-leased write if rounds.json does not yet exist.
+ * Creates the index if needed, then uses a blob lease for atomic read-modify-write.
  */
 export async function updateRoundsIndex(round: Round): Promise<void> {
   const path = "rounds.json";
+  await ensureJsonIndexBlob(path, stableStringify([]));
 
   const summary: RoundSummary = {
     id: round.id,
@@ -71,18 +72,9 @@ export async function updateRoundsIndex(round: Round): Promise<void> {
     await writeJson(path, RoundSummariesSchema, rounds, leaseId);
   };
 
-  try {
-    await withLease(path, async (leaseId) => {
-      await applyUpdate(leaseId);
-    });
-  } catch (err: unknown) {
-    // acquireLease throws 404 when the blob doesn't exist yet
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      await applyUpdate();
-    } else {
-      throw err;
-    }
-  }
+  await withLeaseRetry(path, async (leaseId) => {
+    await applyUpdate(leaseId);
+  });
 }
 
 // ─── recomputeSeason ──────────────────────────────────────────────────────────
@@ -184,13 +176,15 @@ async function recomputeSeasonUncached(seasonYear: number): Promise<void> {
 
     // Compute and persist per-round results
     const results = stableSeasonResults(buildSeasonResults(normalizedRounds, pilotNameMap));
-    const roundsIndex = await buildRoundsIndex();
-
     await createRecomputeMarker(seasonYear);
     try {
       await swapJsonBlob(seasonPath, seasonPayload);
       await swapJsonBlob(`results/${seasonYear}.json`, results);
-      await swapJsonBlob("rounds.json", roundsIndex);
+      await ensureJsonIndexBlob("rounds.json", stableStringify([]));
+      await withLeaseRetry("rounds.json", async (leaseId) => {
+        const roundsIndex = await buildRoundsIndex();
+        await swapJsonBlob("rounds.json", roundsIndex, leaseId);
+      });
     } finally {
       await deleteRecomputeMarker(seasonYear);
     }
@@ -390,7 +384,11 @@ async function deleteRecomputeMarker(seasonYear: number): Promise<void> {
   await getBlobClient(`seasons/${seasonYear}.recompute.lock`).deleteIfExists();
 }
 
-async function swapJsonBlob(path: string, payload: unknown): Promise<void> {
+async function swapJsonBlob(
+  path: string,
+  payload: unknown,
+  leaseId?: string,
+): Promise<void> {
   const bytes = Buffer.from(stableStringify(payload));
   const tmpPath = `${path}.tmp`;
   const tmp = getBlockBlobClient(tmpPath);
@@ -401,7 +399,10 @@ async function swapJsonBlob(path: string, payload: unknown): Promise<void> {
   });
 
   try {
-    const poller = await finalBlob.beginCopyFromURL(tmp.url, { intervalInMs: 100 });
+    const poller = await finalBlob.beginCopyFromURL(tmp.url, {
+      intervalInMs: 100,
+      conditions: leaseId ? { leaseId } : undefined,
+    });
     await poller.pollUntilDone();
   } catch (err) {
     // Leave .tmp for forensics if the final copy/swap fails.
