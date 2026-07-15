@@ -326,6 +326,18 @@ run "storage_queues_planned" {
 
   assert {
     condition = (
+      azapi_resource.queue_igc_validation.name == "igc-validation" &&
+      azapi_resource.queue_igc_validation.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
+      azapi_resource.queue_igc_validation.parent_id == azapi_resource.queue_service.id &&
+      azapi_resource.queue_igc_validation_poison.name == "igc-validation-poison" &&
+      azapi_resource.queue_igc_validation_poison.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
+      azapi_resource.queue_igc_validation_poison.parent_id == azapi_resource.queue_service.id
+    )
+    error_message = "The igc-validation queue and its poison queue must plan under the queue service with the exact expected names, types, and parent linkage."
+  }
+
+  assert {
+    condition = (
       length(azapi_resource.storage_lifecycle.body.properties.policy.rules) == 2 &&
       azapi_resource.storage_lifecycle.body.properties.policy.rules[0].name == "gc-auth-tokens" &&
       azapi_resource.storage_lifecycle.body.properties.policy.rules[1].name == "gc-rescore-status" &&
