@@ -13,6 +13,12 @@ const FaiResponseSchema = z.looseObject({
   msg: z.string().optional(),
 });
 
+function isTimeoutError(error: unknown): boolean {
+  return (error instanceof Error && error.name === "AbortError")
+    || (error instanceof DOMException
+      && (error.name === "AbortError" || error.name === "TimeoutError"));
+}
+
 export type SignatureResult = "valid" | "invalid" | "unverified";
 
 export async function validateIgcSignature(
@@ -56,7 +62,11 @@ export async function validateIgcSignature(
     } catch (error: unknown) {
       return {
         signature: "unverified",
-        faiStatus: error instanceof SyntaxError ? "NON_JSON" : "ERROR",
+        faiStatus: isTimeoutError(error)
+          ? "TIMEOUT"
+          : error instanceof SyntaxError
+            ? "NON_JSON"
+            : "ERROR",
       };
     }
 
@@ -76,11 +86,9 @@ export async function validateIgcSignature(
       ...(parsed.data.msg === undefined ? {} : { faiMsg: parsed.data.msg }),
     };
   } catch (error: unknown) {
-    const timedOut = error instanceof DOMException
-      && (error.name === "AbortError" || error.name === "TimeoutError");
     return {
       signature: "unverified",
-      faiStatus: timedOut ? "TIMEOUT" : "ERROR",
+      faiStatus: isTimeoutError(error) ? "TIMEOUT" : "ERROR",
     };
   }
 }

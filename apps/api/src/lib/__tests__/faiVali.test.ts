@@ -110,6 +110,24 @@ describe("validateIgcSignature", () => {
     expect(result).toEqual({ signature: "unverified", faiStatus: "NON_JSON" });
   });
 
+  it("resolves unverified with TIMEOUT when response body consumption aborts", async () => {
+    // Given
+    const response = new Response(null, { status: 200 });
+    vi.spyOn(response, "json").mockRejectedValue(
+      new DOMException("timed out", "AbortError"),
+    );
+    fetchMock.mockResolvedValue(response);
+
+    // When
+    const resultPromise = validateIgcSignature(igcBuffer, "flight.igc");
+
+    // Then
+    await expect(resultPromise).resolves.toEqual({
+      signature: "unverified",
+      faiStatus: "TIMEOUT",
+    });
+  });
+
   it("resolves unverified when fetch rejects", async () => {
     // Given
     fetchMock.mockRejectedValue(new TypeError("network unavailable"));
