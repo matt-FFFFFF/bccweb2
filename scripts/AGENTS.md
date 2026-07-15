@@ -82,4 +82,7 @@ against a non-local target.
 
 `admin/move-manufacturers-to-public.mjs` performs the one-time, idempotent promotion of
 `manufacturers.json`; follow [the runbook](../docs/runbooks/manufacturers-move.md).
+`admin/reconcile-orphan-igcs.mjs` scans private `rounds/*.json` as the authoritative
+IGC reference set, then reports unreferenced `flight-igcs/**` blobs older than 24 hours;
+it is dry-run by default and deletes only with explicit `--delete` (see the privacy runbook).
 `devtools/seed-qa-users.mjs` is test-user tooling, not production seeding.

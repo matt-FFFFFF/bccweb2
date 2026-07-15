@@ -110,6 +110,17 @@ exit fails the workflow and blocks the merge.
 
 See `docs/runbooks/gdpr-erasure.md` for the full GDPR right-to-erasure procedure.
 
+### Orphaned IGC Retention
+
+A hard process termination after an IGC upload but before its round commit can leave an
+unreferenced raw GPS-track blob under `flight-igcs/`. Periodically, and after a suspected
+upload incident, run `node scripts/admin/reconcile-orphan-igcs.mjs` to review private IGC
+blobs that no authoritative `rounds/*.json` blob references and that are older than the
+default 24-hour safety threshold. Review the dry-run output first, then rerun with
+`--delete`; use `--older-than-hours <hours>` only when a different safety window is
+operationally justified. The script never deletes a referenced blob and refreshes the
+round reference set immediately before deletion.
+
 ## FAI Signature Validation: Outbound PII Egress
 
 `apps/api/src/lib/faiVali.ts` (`validateIgcSignature`) uploads the raw IGC file for a
