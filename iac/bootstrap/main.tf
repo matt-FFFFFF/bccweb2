@@ -256,23 +256,6 @@ resource "azapi_resource" "tf_tfstate_blob_role" {
   }
 }
 
-# For read only access to other state filed, we assign storage blob data reader to each UMI at the account level.
-resource "azapi_resource" "tf_tfstate_blob_account_reader" {
-  for_each = var.terraform_umis
-
-  type      = "Microsoft.Authorization/roleAssignments@2022-04-01"
-  name      = uuidv5("url", "bccweb-tf-tfstate-blob-account-${each.key}-${azapi_resource.tfstate_sa.id}")
-  parent_id = azapi_resource.tfstate_sa.id
-
-  body = {
-    properties = {
-      roleDefinitionId = "/subscriptions/${data.azapi_client_config.current.subscription_id}/providers/Microsoft.Authorization/roleDefinitions/2a2b9908-6ea1-4ae2-8e65-a410df84e7d1"
-      principalId      = azapi_resource.tf_umi[each.key].output.properties.principalId
-      principalType    = "ServicePrincipal"
-    }
-  }
-}
-
 # ─── GitHub repo environments + Azure OIDC secrets ───────────────────────────
 #
 # Closes the OIDC loop: instead of an operator manually pasting three values
