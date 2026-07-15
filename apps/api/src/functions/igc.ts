@@ -508,11 +508,14 @@ async function revalidateIgc(
   );
 
   let savedFlight = rescoredFlight;
-  await updateRoundsIndex(scoredRound);
-  if (scoredRound.status === "Complete") {
-    await recomputeSeason(scoredRound.season.year);
-  }
 
+  // Enqueue BEFORE the derived index/season publication: the committed `pending`
+  // attempt must always get a worker. If publication (a derived artifact) were to
+  // run first and throw, the request would exit with a persisted `pending` attempt
+  // and no queued worker — stranded until bulk recovery. Enqueue-first guarantees
+  // the worker exists; a later publication failure only needs a recompute, not
+  // stuck-pending recovery.
+  let enqueued = true;
   try {
     await enqueueIgcValidation({
       roundId: id,
@@ -522,6 +525,7 @@ async function revalidateIgc(
       validationAttemptId,
     });
   } catch {
+    enqueued = false;
     const fallbackRound = await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
       const current = (await readBlob(getPrivateBlobClient(roundPath))) as Round;
       const flight = findSlot(current, teamId, place)?.flight;
@@ -559,6 +563,13 @@ async function revalidateIgc(
       if (fallbackRound.status === "Complete") {
         await recomputeSeason(fallbackRound.season.year);
       }
+    }
+  }
+
+  if (enqueued) {
+    await updateRoundsIndex(scoredRound);
+    if (scoredRound.status === "Complete") {
+      await recomputeSeason(scoredRound.season.year);
     }
   }
 

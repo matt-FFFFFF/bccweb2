@@ -238,6 +238,16 @@ describe("revalidateIgc", () => {
     expect(results?.[0]?.teamResults[0]?.score).toBeGreaterThan(0);
   });
 
+  it("enqueues validation before publishing a Complete round", async () => {
+    const seed = await seedRemediation({ status: "Complete" });
+    const { user } = await bootstrapAdmin();
+
+    const res = await invoke("revalidateIgc", requestFor(seed, user));
+
+    expect(res.status).toBe(200);
+    expect(jobMock.enqueue).toHaveBeenCalledBefore(recomputeMock.recompute);
+  });
+
   it("rejects an IGC over the FAI size limit without mutation or enqueue", async () => {
     const seed = await seedRemediation({ igcBytes: 3_000_001 });
     const { user } = await bootstrapAdmin();
