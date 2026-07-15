@@ -21,7 +21,7 @@ apps/web/         @bccweb/web      — React 19 SPA (Vite 8, React Router v8, TS
 packages/types/   @bccweb/types    — Shared TS interfaces (no runtime deps)
 packages/schemas/ @bccweb/schemas  — Zod schemas, one per blob family (the schema layer)
 packages/scoring/ @bccweb/scoring  — Pure scoring: scoreRound(), computeLeague()
-iac/              Terraform (Azure), 3 stacks   scripts/  Admin/migration/privacy-scan
+iac/              Terraform (Azure), 2 stacks   scripts/  Admin/migration/privacy-scan
 tests/e2e/        Playwright E2E (`npm run e2e`)  dist/web/ Vite build output (→ SWA)
 docs/architecture/ Human-facing design docs (storage-and-queues.md)
 docs/runbooks/    Operational runbooks (alerts, cutover, privacy, load-testing, ...)
@@ -35,7 +35,9 @@ first. `make clean` deletes `dist/` + `*.tsbuildinfo` (stops stale incremental b
 
 ## Toolchain (pinned in `.mise.toml`)
 
-Node 24.16.0, Terraform `latest` (workflows expect 1.10.x), `azure-functions-core-tools`
+Node 24.16.0, Terraform `latest` (`.mise.toml`; all `iac/` roots/modules pin
+`required_version = "~> 1.11"`, and CI's `hashicorp/setup-terraform` step
+constrains to `<2.0.0`), `azure-functions-core-tools`
 4.12.0, npm 11 (ships with Node 24). `mise install` brings these up.
 
 ## Dependency management
@@ -217,19 +219,22 @@ needed). **E2E**: Playwright vs `E2E_BASE_URL` (default `:5173`); CI: 2 retries,
 
 ## Infra / Deploy (`iac/`)
 
-Terraform, 3 stacks (see `iac/README.md`): `bootstrap/` (tfstate storage, per-env UMIs/RGs,
-GitHub OIDC secrets) → `common/` (LAW + App Insights + ACS email domain) → `service/`
-(storage, Function App, SWA, ACS, Key Vault — the stamp). `jwt-secret` is generated
-declaratively (ephemeral `random_password` → KV write-only), rotated via `jwt_secret_version`.
-KV seeding may 403 on first apply during RBAC propagation — re-apply to recover.
+Terraform, 2 stacks (see `iac/README.md`): `bootstrap/` (one-shot: tfstate storage, per-env
+Terraform UMIs, the two per-env resource groups, GitHub OIDC secrets, and the published
+`TF_VAR_PLATFORM_RG_NAME`/`TF_VAR_STAMP_RG_NAME` GitHub environment variables) → `environment/`
+(the per-env application stamp: platform module — LAW, App Insights, ACS email domain — plus
+stamp module — storage, Function App, SWA, ACS, Key Vault — applied together in one state,
+`<env>.tfstate`). `jwt-secret` is generated declaratively (ephemeral `random_password` → KV
+write-only), rotated via `jwt_secret_version`. KV seeding may 403 on first apply during RBAC
+propagation — re-apply to recover.
 
 CI (`.github/workflows/`): `ci.yml` (every PR/push to `main`: typecheck, lint, full build,
 Vitest incl. heavy tests with Azurite, `docker compose build`); `deploy-dev.yml` (push to
 `main` → dev: drift gate → Function App + SWA in parallel, each smoke-tested `/api/health`,
 `/api/seasons`, web root; **no auto-rollback**); `deploy-prod.yml` (GitHub release → prod:
-release-ancestry check on `main` → same gate + jobs); `terraform.yml` (manual plan/apply
-per stack × env; also drift-reconcile); `privacy-scan.yml` (Azurite + seed + `privacy-scan.mjs`,
-fails on PII leak). Prod SPA: Static Web App + routes in
+release-ancestry check on `main` → same gate + jobs); `terraform.yml` (manual plan/apply of the
+`environment` stack, per env; also drift-reconcile); `privacy-scan.yml` (Azurite + seed +
+`privacy-scan.mjs`, fails on PII leak). Prod SPA: Static Web App + routes in
 [`staticwebapp.config.json`](apps/web/public/staticwebapp.config.json)
 (kept in `apps/web/public/` so Vite copies it to the `dist/web` output-location root the SWA
 deploy uploads — SPA fallback, security headers, `/api/*` → Function App); local Docker uses Caddy with the

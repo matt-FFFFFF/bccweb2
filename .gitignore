@@ -27,10 +27,8 @@ local.settings.json
 *.tfvars
 *.tfvars.json
 *tfplan*
-# Non-sensitive tfvars are committed: common-stack values + the .example
-# templates. Real per-env service tfvars (dev.tfvars, prod.tfvars) hold
-# secrets and stay ignored.
-!iac/env/common-*.tfvars
+# Non-sensitive .example templates are committed. Real per-env tfvars
+# (dev.tfvars, prod.tfvars) hold secrets and stay ignored.
 !iac/env/*.tfvars.example
 
 # Playwright
