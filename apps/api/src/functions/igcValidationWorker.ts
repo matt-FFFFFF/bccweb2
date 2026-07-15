@@ -13,14 +13,14 @@ import { readJson, writePrivateJson } from "../lib/blobJson.js";
 import { validateIgcSignature } from "../lib/faiVali.js";
 import { findSlot, streamToBuffer } from "../lib/flightHelpers.js";
 import {
-  acquireIgcValidationGuard,
   assertFaiValiTimeoutWithinGuard,
   deleteValidationResult,
   enqueueIgcValidation,
+  IgcValidationGuardContendedError,
   IGC_VALIDATION_QUEUE_NAME,
   paceBeforeFaiCall,
   readValidationResult,
-  releaseIgcValidationGuard,
+  withIgcValidationGuard,
   writeValidationResult,
 } from "../lib/igcValidationJob.js";
 import { recomputeSeason, updateRoundsIndex } from "../lib/recompute.js";
@@ -85,10 +85,6 @@ function terminalResult(flight: Flight): FlightValidation | null {
     : null;
 }
 
-function isGuardContention(error: unknown): boolean {
-  return hasStatusCode(error, 409) || hasStatusCode(error, 412);
-}
-
 function hasStatusCode(error: unknown, expected: number): boolean {
   return typeof error === "object"
     && error !== null
@@ -100,41 +96,36 @@ async function createValidationResult(
   job: IgcValidationJob,
   flight: Flight,
 ): Promise<FlightValidation | null> {
-  let leaseId: string;
   try {
-    ({ leaseId } = await acquireIgcValidationGuard());
+    return await withIgcValidationGuard(async (leaseId) => {
+      const existing = await readValidationResult(job.validationAttemptId);
+      if (existing !== null) return existing;
+      const igcPath = igcPathFor(flight);
+      const igc = await readIgc(igcPath);
+      const currentFlight = matchingFlight(
+        await readRound(`rounds/${job.roundId}.json`),
+        job,
+      );
+      if (currentFlight === null || currentFlight.isManualLog === true) return null;
+      const config = await loadConfig();
+      let result: FlightValidation;
+      if (config.flightSignatureValidationEnabled) {
+        assertFaiValiTimeoutWithinGuard();
+        await paceBeforeFaiCall(leaseId);
+        result = await validateIgcSignature(
+          igc,
+          igcPath.split("/").at(-1) ?? "flight.igc",
+        );
+      } else {
+        result = { signature: "unverified", faiStatus: "DISABLED" };
+      }
+      await writeValidationResult(job.validationAttemptId, result);
+      return result;
+    });
   } catch (error: unknown) {
-    if (!isGuardContention(error)) throw error;
+    if (!(error instanceof IgcValidationGuardContendedError)) throw error;
     await enqueueIgcValidation(job, { visibilityTimeoutSeconds: GUARD_RETRY_SECONDS });
     return null;
-  }
-
-  try {
-    const existing = await readValidationResult(job.validationAttemptId);
-    if (existing !== null) return existing;
-    await paceBeforeFaiCall(leaseId);
-    const igcPath = igcPathFor(flight);
-    const igc = await readIgc(igcPath);
-    const currentFlight = matchingFlight(
-      await readRound(`rounds/${job.roundId}.json`),
-      job,
-    );
-    if (currentFlight === null || currentFlight.isManualLog === true) return null;
-    const config = await loadConfig();
-    let result: FlightValidation;
-    if (config.flightSignatureValidationEnabled) {
-      assertFaiValiTimeoutWithinGuard();
-      result = await validateIgcSignature(
-        igc,
-        igcPath.split("/").at(-1) ?? "flight.igc",
-      );
-    } else {
-      result = { signature: "unverified", faiStatus: "DISABLED" };
-    }
-    await writeValidationResult(job.validationAttemptId, result);
-    return result;
-  } finally {
-    await releaseIgcValidationGuard(leaseId);
   }
 }
 

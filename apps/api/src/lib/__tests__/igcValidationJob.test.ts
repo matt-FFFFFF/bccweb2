@@ -14,6 +14,7 @@ import {
   paceBeforeFaiCall,
   readValidationResult,
   releaseIgcValidationGuard,
+  withIgcValidationGuard,
   writeValidationResult,
 } from "../igcValidationJob.js";
 
@@ -122,6 +123,32 @@ describe("IGC validation guard", () => {
       await releaseIgcValidationGuard(guard.leaseId);
     }
   });
+
+  test("renews the guard while work outlives the base lease duration", async () => {
+    // Given
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const guardedWork = withIgcValidationGuard(async () => {
+      started.resolve();
+      await finish.promise;
+    }, {
+      leaseDurationSec: 15,
+      renewIntervalMs: 5_000,
+    });
+    await started.promise;
+
+    try {
+      // When
+      await new Promise((resolve) => setTimeout(resolve, 16_000));
+      const contender = acquireIgcValidationGuard();
+
+      // Then
+      await expect(contender).rejects.toMatchObject({ statusCode: 409 });
+    } finally {
+      finish.resolve();
+      await guardedWork;
+    }
+  }, 20_000);
 
   test("releases in finally after failure so the next worker can acquire", async () => {
     // Given

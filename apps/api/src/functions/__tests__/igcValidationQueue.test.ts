@@ -5,12 +5,17 @@ import type { FlightValidation, IgcValidationJob, Round, SeasonResults } from "@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const faiMock = vi.hoisted(() => ({ validate: vi.fn() }));
-const jobMock = vi.hoisted(() => ({ enqueue: vi.fn(), pace: vi.fn() }));
+const jobMock = vi.hoisted(() => ({
+  actualPace: vi.fn(),
+  enqueue: vi.fn(),
+  pace: vi.fn(),
+}));
 const recomputeMock = vi.hoisted(() => ({ recompute: vi.fn() }));
 
 vi.mock("../../lib/faiVali.js", () => ({ validateIgcSignature: faiMock.validate }));
 vi.mock("../../lib/igcValidationJob.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/igcValidationJob.js")>();
+  jobMock.actualPace.mockImplementation(actual.paceBeforeFaiCall);
   return {
     ...actual,
     enqueueIgcValidation: jobMock.enqueue,
@@ -236,19 +241,30 @@ describe("igcValidationWorker queue transaction", () => {
   it("ACKs when the matching flight becomes manual after the initial guard check", async () => {
     const seed = await seedValidation();
     let converted: Round | null = null;
-    jobMock.pace.mockImplementationOnce(async () => {
-      const concurrent = await persistedRound(seed);
-      const flight = concurrent.teams[0]?.pilots[0]?.flight;
-      if (flight === null || flight === undefined) throw new Error("Validation fixture has no flight");
-      flight.isManualLog = true;
-      converted = concurrent;
-      await writePrivateJson(seed.path, concurrent);
-      return new Date();
+    const realGetPrivateBlobClient = blobModule.getPrivateBlobClient;
+    vi.spyOn(blobModule, "getPrivateBlobClient").mockImplementation((path) => {
+      const client = realGetPrivateBlobClient(path);
+      if (path !== seed.igcPath) return client;
+      const download = client.download.bind(client);
+      vi.spyOn(client, "download").mockImplementation(async () => {
+        const response = await download();
+        const concurrent = await persistedRound(seed);
+        const flight = concurrent.teams[0]?.pilots[0]?.flight;
+        if (flight === null || flight === undefined) {
+          throw new Error("Validation fixture has no flight");
+        }
+        flight.isManualLog = true;
+        converted = concurrent;
+        await writePrivateJson(seed.path, concurrent);
+        return response;
+      });
+      return client;
     });
 
     await invokeQueue("igcValidationWorker", seed.job);
 
     expect(faiMock.validate).not.toHaveBeenCalled();
+    expect(jobMock.pace).not.toHaveBeenCalled();
     expect(await persistedRound(seed)).toEqual(converted);
     expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
   });
@@ -325,6 +341,46 @@ describe("igcValidationWorker queue transaction", () => {
     });
     expect(faiMock.validate).not.toHaveBeenCalled();
   });
+
+  it("spaces actual FAI calls after slow guarded preparation", async () => {
+    // Given
+    const first = await seedValidation();
+    const second = await seedValidation();
+    const faiCallTimes: number[] = [];
+    const realGetPrivateBlobClient = blobModule.getPrivateBlobClient;
+    vi.spyOn(blobModule, "getPrivateBlobClient").mockImplementation((path) => {
+      const client = realGetPrivateBlobClient(path);
+      if (path !== first.igcPath) return client;
+      const download = client.download.bind(client);
+      vi.spyOn(client, "download").mockImplementation(async () => {
+        const response = await download();
+        await new Promise((resolve) => setTimeout(resolve, 2_100));
+        return response;
+      });
+      return client;
+    });
+    jobMock.pace.mockImplementation(jobMock.actualPace);
+    faiMock.validate.mockImplementation(async () => {
+      faiCallTimes.push(Date.now());
+      return { signature: "valid", faiStatus: "PASSED" };
+    });
+
+    // When
+    await invokeQueue("igcValidationWorker", first.job);
+    await invokeQueue("igcValidationWorker", second.job);
+
+    // Then
+    expect(faiCallTimes).toHaveLength(2);
+    expect((faiCallTimes[1] ?? 0) - (faiCallTimes[0] ?? 0)).toBeGreaterThanOrEqual(2_000);
+    const properties = await getPrivateContainer()
+      .getBlobClient("igc-validation/active.json")
+      .getProperties();
+    const persistedStartedAt = Date.parse(
+      properties.metadata?.["lastcallstartedat"] ?? "",
+    );
+    expect(persistedStartedAt).toBeLessThanOrEqual(faiCallTimes[1] ?? 0);
+    expect((faiCallTimes[1] ?? 0) - persistedStartedAt).toBeLessThan(1_000);
+  }, 10_000);
 
   it("throws on a config storage failure instead of finalizing the attempt as DISABLED", async () => {
     const seed = await seedValidation();

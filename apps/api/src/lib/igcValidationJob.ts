@@ -8,6 +8,7 @@ import {
   getPrivateBlobClient,
   getPrivateBlockBlobClient,
   readBlob,
+  withPrivateLeaseRenewing,
   writePrivateBlob,
 } from "./blob.js";
 import { queueConnectionString } from "./queue.js";
@@ -19,6 +20,7 @@ const GUARD_LEASE_SECONDS = 60;
 const MIN_CALL_INTERVAL_MS = 2_000;
 const GUARD_COMPLETION_MARGIN_MS = 8_000;
 const DEFAULT_FAI_VALI_TIMEOUT_MS = 20_000;
+const GUARD_RENEW_INTERVAL_MS = 15_000;
 const MAX_FAI_VALI_TIMEOUT_MS = GUARD_LEASE_SECONDS * 1_000
   - MIN_CALL_INTERVAL_MS
   - GUARD_COMPLETION_MARGIN_MS;
@@ -37,6 +39,19 @@ const ValidationResultSchema = z
     faiMsg: z.string().optional(),
   })
   .strict() satisfies z.ZodType<FlightValidation>;
+
+type IgcValidationGuardOptions = {
+  readonly leaseDurationSec?: number;
+  readonly renewIntervalMs?: number;
+};
+
+export class IgcValidationGuardContendedError extends Error {
+  readonly name = "IgcValidationGuardContendedError";
+
+  constructor(options: ErrorOptions) {
+    super("IGC validation guard is owned by another worker", options);
+  }
+}
 
 export async function enqueueIgcValidation(
   job: IgcValidationJob,
@@ -72,6 +87,32 @@ export async function releaseIgcValidationGuard(leaseId: string): Promise<void> 
   await getPrivateBlockBlobClient(GUARD_PATH)
     .getBlobLeaseClient(leaseId)
     .releaseLease();
+}
+
+export async function withIgcValidationGuard<T>(
+  fn: (leaseId: string) => Promise<T>,
+  options: IgcValidationGuardOptions = {},
+): Promise<T> {
+  await ensureIgcValidationGuardBlob();
+  let enteredGuard = false;
+  try {
+    return await withPrivateLeaseRenewing(
+      GUARD_PATH,
+      async (leaseId) => {
+        enteredGuard = true;
+        return fn(leaseId);
+      },
+      {
+        leaseDurationSec: options.leaseDurationSec ?? GUARD_LEASE_SECONDS,
+        renewIntervalMs: options.renewIntervalMs ?? GUARD_RENEW_INTERVAL_MS,
+      },
+    );
+  } catch (error: unknown) {
+    if (!enteredGuard && isLeaseContention(error)) {
+      throw new IgcValidationGuardContendedError({ cause: error });
+    }
+    throw error;
+  }
 }
 
 export function assertFaiValiTimeoutWithinGuard(): void {
@@ -155,4 +196,9 @@ function statusCodeOf(error: unknown): number | undefined {
   return error instanceof Object && "statusCode" in error
     ? Number(error.statusCode)
     : undefined;
+}
+
+function isLeaseContention(error: unknown): boolean {
+  const statusCode = statusCodeOf(error);
+  return statusCode === 409 || statusCode === 412;
 }
