@@ -219,6 +219,31 @@ describe("CoordIgcTable", () => {
     expect(screen.queryByTestId("allow-igc-btn")).toBeNull();
   });
 
+  it("renders NO Resubmit and NO Allow buttons for a manual flight with stale validation", () => {
+    const round = makeRound();
+    round.teams[0].pilots = [
+      slot(1, "p-man", flight({ id: "f-man", distance: 30, isManualLog: true, validation: { signature: "unverified", date: "invalid" } }))
+    ];
+
+    mockIdentity = ADMIN;
+    render(<CoordIgcTable round={round} onChanged={vi.fn()} />);
+    expect(screen.getByText("Sig: unverified")).toBeInTheDocument();
+    expect(screen.queryByTestId("revalidate-igc-btn")).toBeNull();
+    expect(screen.queryByTestId("allow-igc-btn")).toBeNull();
+    cleanup();
+
+    mockIdentity = {
+      userId: "u",
+      email: "c@x",
+      roles: ["RoundsCoord"],
+      pilotId: null,
+      clubId: "cA",
+    };
+    render(<CoordIgcTable round={round} onChanged={vi.fn()} />);
+    expect(screen.queryByTestId("revalidate-igc-btn")).toBeNull();
+    expect(screen.queryByTestId("allow-igc-btn")).toBeNull();
+  });
+
   it("renders one row per slot with the correct IGC status string (Admin)", () => {
     mockIdentity = ADMIN;
     render(<CoordIgcTable round={makeRound()} onChanged={vi.fn()} />);

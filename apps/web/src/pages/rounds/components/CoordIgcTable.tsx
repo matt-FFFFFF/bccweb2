@@ -322,7 +322,7 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
                           Delete flight
                         </button>
                       )}
-                      {flight?.validation && (
+                      {flight?.validation && !flight.isManualLog && (
                         <>
                           {(flight.validation.signature === "unverified" || flight.validation.signature === "pending") && (isAdmin || isScopedCoord) && (
                             <button
