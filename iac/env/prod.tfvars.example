@@ -3,29 +3,29 @@
 # COMMITTED TEMPLATE. Copy to prod.tfvars (gitignored) and fill in:
 #   cp iac/env/prod.tfvars.example iac/env/prod.tfvars
 # Use with:
-#   terraform -chdir=iac/service init -backend-config=../env/prod.backend.hcl && terraform -chdir=iac/service apply -var-file=../env/prod.tfvars
+#   terraform -chdir=iac/environment init -backend-config=../env/prod.backend.hcl && terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars
 # DO NOT COMMIT REAL SECRETS. Set via env vars: TF_VAR_puretrack_api_key=... etc., or pipeline secrets.
 # CI does not use this file directly — deploy workflows generate prod.tfvars at
 # runtime from GitHub env-scoped vars + TF_VAR_* secrets (see .github/workflows).
 
 stamp_name = "prod"
-location    = "uksouth"
+location   = "uksouth"
 
-# Name of the tfstate storage account (bootstrap output storage_account_name) —
-# the service stack reads the common stack's remote state from it.
-tfstate_sa_name = "<REQUIRED: bootstrap output storage_account_name>"
+# Local applies only. CI sources these values from the TF_VAR_* GitHub environment vars.
+acs_email_domain = "<REQUIRED: operator must replace before apply>"
+platform_rg_name = "rg-bccweb-platform-prod"
+stamp_rg_name    = "rg-bccweb-prod"
 
 # CORS: replace with the real production hostname before apply.
 allowed_origins = ["https://<your-prod-hostname>"]
 
 ops_email = "<REQUIRED: operator must replace before apply>" # REQUIRED
 
-# The sending domain itself lives in the common stack (iac/env/common-prod.tfvars);
-# this address must be on that domain.
+# This address must be on the configured ACS sending domain.
 acs_sender_address = "<REQUIRED: operator must replace before apply>" # REQUIRED
 
-puretrack_api_key  = "<REQUIRED: see TF_VAR_puretrack_api_key>" # REQUIRED
-puretrack_email    = "<REQUIRED: see TF_VAR_puretrack_email>" # REQUIRED
+puretrack_api_key  = "<REQUIRED: see TF_VAR_puretrack_api_key>"  # REQUIRED
+puretrack_email    = "<REQUIRED: see TF_VAR_puretrack_email>"    # REQUIRED
 puretrack_password = "<REQUIRED: see TF_VAR_puretrack_password>" # REQUIRED
 
 jwt_secret_version = "1"
