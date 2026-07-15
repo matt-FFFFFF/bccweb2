@@ -4,7 +4,7 @@
 # acs_email_domain_id, terraform_principal_object_id.
 #
 # This is the stamp module's input schema. The root module declares the same
-# user-facing variable names in iac/variables.tf and forwards them into the
+# user-facing variable names in iac/environment/variables.tf and forwards them into the
 # module call (intentional duplicate per Terraform module practice). Plaintext
 # secret values (e.g. jwt_secret) MUST NOT be declared here — they are seeded
 # into Key Vault out-of-band; rotation triggers are passed as version inputs.
@@ -66,7 +66,7 @@ variable "dns_zone_resource_group_name" {
 }
 
 variable "acs_email_domain_id" {
-  description = "Resource ID of the ACS email domain owned by the iac/common stack (REQUIRED INPUT from root, sourced from common's remote state). Linked to the stamp's communicationServices via linkedDomains."
+  description = "Resource ID of the ACS email domain owned by the platform module (REQUIRED INPUT from root — the platform and stamp modules are both applied in one iac/environment apply, so this is a plain module-output pass-through, not a remote-state lookup). Linked to the stamp's communicationServices via linkedDomains."
   type        = string
   nullable    = false
 }
@@ -129,7 +129,7 @@ variable "tags" {
 
 # ─── Required inputs from root ────────────────────────────────────────────────
 #
-# These four are produced by the root module (shared cross-stamp observability
+# These four are produced by the root module (per-environment observability
 # + the Terraform principal identity) and forwarded into every stamp instance.
 # They have no sensible defaults — the module must refuse to plan without them.
 
