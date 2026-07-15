@@ -240,7 +240,7 @@ resource "azapi_resource" "queue_puretrack_group_poison" {
 #
 # Used to construct the connection string for the Function App.
 # NON-ephemeral: the resulting connection string is consumed by Function App
-# app settings via local.storage_primary_connection_string (iac/modules/stamp/functions.tf),
+# app settings via local.storage_primary_connection_string (iac/environment/modules/stamp/functions.tf),
 # which must be available at plan time.
 
 resource "azapi_resource_action" "storage_keys" {
