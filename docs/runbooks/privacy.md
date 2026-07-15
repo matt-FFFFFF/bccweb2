@@ -139,11 +139,9 @@ service outside our control.
   (`apps/api/src/functions/admin.ts`).
 - **Queued jobs and the toggle**: disabling `flightSignatureValidationEnabled` does not
   purge jobs already sitting on the `igc-validation` queue. The `igcValidationWorker`
-  re-reads `config.json` immediately before each FAI call and skips the call if the
-  toggle has since been switched off, so most already-queued jobs land as
-  `unverified`/`DISABLED` rather than reaching FAI. There is a documented sub-second
-  TOCTOU window: a job that has already passed that config re-check when the toggle
-  flips off can still complete its in-flight FAI call. This is accepted; coupling
-  config writes to the FAI call guard would be disproportionate to a window measured in
-  single-digit seconds at worst, bounded by the global pace guard's 2-second FAI call
-  interval.
+  re-reads `config.json` immediately before each FAI call, after acquiring the global
+  guard, pacing, downloading the IGC, and re-checking the current flight attempt. If the
+  toggle has since been switched off, the worker records `unverified`/`DISABLED` without
+  sending the IGC to FAI. A call already past that final check remains in flight and can
+  still complete; disabling the toggle does not cancel an outbound request that has
+  already started.
