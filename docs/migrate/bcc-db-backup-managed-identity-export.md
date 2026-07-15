@@ -170,5 +170,5 @@ DROP LOGIN [umi-sqlexpo];
 …and remove the server identity assignment / storage role assignment.
 
 If backups become **recurring**, codify this instead of leaving it as manual steps:
-the identity assignment + storage role in Terraform (`iac/service`), and the SQL
+the identity assignment + storage role in Terraform (`iac/environment`), and the SQL
 logins/users/grants as an idempotent script — so they survive a server rebuild.
