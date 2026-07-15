@@ -133,10 +133,14 @@ service outside our control.
 - **Feature toggle** (`config.json` → `flightSignatureValidationEnabled`, admin-editable
   via the Config page): turning this off does not retroactively re-score already-Complete
   rounds: a round's published score only changes on an explicit rescore
-  (`POST /api/rounds/{id}/rescore`) or recompute. To apply a toggle flip to a round's
-  score, rescore it; to repair the derived league table after a validation-driven score
-  change on a `Complete` round, use `POST /api/manage/rounds/{id}/recompute`
-  (`apps/api/src/functions/admin.ts`).
+  (`POST /api/rounds/{id}/rescore`), which re-runs `scoreRoundEnforcingValidation`. To
+  apply a toggle flip to a round's score, rescore it. `POST /api/manage/rounds/{id}/recompute`
+  (`apps/api/src/functions/admin.ts`, backed by `apps/api/src/lib/recompute.ts`) does NOT
+  re-score anything: it only republishes `rounds.json` and the season/results blobs from
+  the round's already-persisted `team.score` values, so it cannot apply a toggle flip on
+  its own. Use recompute only to recover from a failed publish, for example a season
+  recompute that errored after a rescore had already correctly persisted the new score;
+  running recompute again then republishes that already-correct score.
 - **Queued jobs and the toggle**: disabling `flightSignatureValidationEnabled` does not
   purge jobs already sitting on the `igc-validation` queue. The `igcValidationWorker`
   re-reads `config.json` immediately before each FAI call, after acquiring the global
