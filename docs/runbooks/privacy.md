@@ -160,6 +160,16 @@ service outside our control.
   sending the IGC to FAI. A call already past that final check remains in flight and can
   still complete; disabling the toggle does not cancel an outbound request that has
   already started.
+- **Recovering a stuck pending validation**: a hard process termination after the round
+  commits `signature: "pending"` but before the queue send can leave a flight with no
+  worker. Recover one flight with the operator **Resubmit** action, which creates a fresh
+  attempt and enqueues it. For bulk recovery, first review the dry run with
+  `node scripts/admin/redispatch-stuck-igc-validations.mjs`, then run
+  `node scripts/admin/redispatch-stuck-igc-validations.mjs --redispatch`. The script
+  protects rounds modified within the default two-hour window, skips terminal signatures
+  and attempts that already have a durable result, and reuses each eligible flight's
+  existing attempt ID. Per the approved policy, a `pending` flight continues to score in
+  the interim, including if the round completes before recovery.
 - **Changing a round's date**: `updateRound` clears any stale `IGC_DATE_MISMATCH`
   sanity flag and drops the flight's stored date verdict when the round date changes, but
   it does not re-parse the IGC file. It only re-scores existing distances against the new

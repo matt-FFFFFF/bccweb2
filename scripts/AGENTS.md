@@ -85,4 +85,8 @@ against a non-local target.
 `admin/reconcile-orphan-igcs.mjs` scans private `rounds/*.json` as the authoritative
 IGC reference set, then reports unreferenced `flight-igcs/**` blobs older than 24 hours;
 it is dry-run by default and deletes only with explicit `--delete` (see the privacy runbook).
+`admin/redispatch-stuck-igc-validations.mjs` reports pending, non-manual IGC validation
+attempts whose round has been unchanged for at least two hours and has no durable result;
+it is dry-run by default and reuses the committed attempt ID only with explicit
+`--redispatch` (see the privacy runbook).
 `devtools/seed-qa-users.mjs` is test-user tooling, not production seeding.
