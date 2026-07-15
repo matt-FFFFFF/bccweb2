@@ -57,6 +57,7 @@ import {
   writePrivateJson,
   writePublicJson,
 } from "../../__tests__/helpers/seed.js";
+import { getPrivateBlockBlobClient } from "../../lib/blob.js";
 import { writeValidationResult } from "../../lib/igcValidationJob.js";
 import "../igc.js";
 import "../igcValidationWorker.js";
@@ -122,6 +123,7 @@ function makeRound(seed: SeededRemediation, status: Round["status"]): Round {
 async function seedRemediation(
   options: {
     readonly enabled?: boolean;
+    readonly igcBytes?: number;
     readonly status?: Round["status"];
   } = {},
 ): Promise<SeededRemediation> {
@@ -140,6 +142,12 @@ async function seedRemediation(
   };
   const round = makeRound(seed, options.status ?? "Locked");
   await writePrivateJson(seed.path, round);
+  const igcPath = storedFlight(round).igcPath;
+  if (!igcPath) throw new Error("seeded IGC path missing");
+  await getPrivateBlockBlobClient(igcPath).uploadData(
+    Buffer.alloc(options.igcBytes ?? 1, 0x41),
+    { blobHTTPHeaders: { blobContentType: "text/plain; charset=utf-8" } },
+  );
   await writePrivateJson(
     "config.json",
     ConfigSchema.parse({
@@ -195,8 +203,8 @@ beforeEach(() => {
 });
 
 describe("revalidateIgc", () => {
-  it("allows an Admin to mint and enqueue a fresh validation attempt", async () => {
-    const seed = await seedRemediation();
+  it("revalidates an IGC at the FAI size limit with a fresh queued attempt", async () => {
+    const seed = await seedRemediation({ igcBytes: 3_000_000 });
     const { user } = await bootstrapAdmin();
 
     const res = await invoke("revalidateIgc", requestFor(seed, user));
@@ -212,6 +220,22 @@ describe("revalidateIgc", () => {
       flightId: seed.flightId,
       validationAttemptId: flight.validation?.validationAttemptId,
     });
+  });
+
+  it("rejects an IGC over the FAI size limit without mutation or enqueue", async () => {
+    const seed = await seedRemediation({ igcBytes: 3_000_001 });
+    const { user } = await bootstrapAdmin();
+    const before = await storedRound(seed);
+
+    const res = await invoke("revalidateIgc", requestFor(seed, user));
+
+    expect(res.status).toBe(413);
+    expect((res.jsonBody as { code: string }).code).toBe("IGC_TOO_LARGE_FOR_VALIDATION");
+    expect((res.jsonBody as { detail: string }).detail).toBe(
+      "This IGC exceeds the 3 MB FAI validation limit; upload a smaller/valid IGC to validate it",
+    );
+    expect(await storedRound(seed)).toEqual(before);
+    expect(jobMock.enqueue).not.toHaveBeenCalled();
   });
 
   it("clears prior attempt metadata while preserving date and override state", async () => {
@@ -291,8 +315,10 @@ describe("revalidateIgc", () => {
       if (path !== seed.path) return;
       const round = await storedRound(seed);
       const flight = storedFlight(round);
+      const replacementIgcPath = `flight-igcs/${seed.roundId}/${seed.pilotId}/${replacementFlightId}.igc`;
+      await getPrivateBlockBlobClient(replacementIgcPath).uploadData(Buffer.from("A"));
       flight.id = replacementFlightId;
-      flight.igcPath = `flight-igcs/${seed.roundId}/${seed.pilotId}/${replacementFlightId}.igc`;
+      flight.igcPath = replacementIgcPath;
       await writePrivateJson(seed.path, round);
     };
 

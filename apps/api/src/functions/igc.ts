@@ -463,6 +463,17 @@ async function revalidateIgc(
         "Manual flights cannot be signature revalidated",
       );
     }
+    const properties = await getPrivateBlobClient(flight.igcPath).getProperties();
+    if (
+      properties.contentLength !== undefined &&
+      properties.contentLength > FAI_SIGNATURE_VALIDATION_MAX_BYTES
+    ) {
+      throw new HttpError(
+        413,
+        "IGC_TOO_LARGE_FOR_VALIDATION",
+        "This IGC exceeds the 3 MB FAI validation limit; upload a smaller/valid IGC to validate it",
+      );
+    }
     currentFlightId = flight.id;
     flight.validation = {
       ...preservedValidationState(flight.validation),
