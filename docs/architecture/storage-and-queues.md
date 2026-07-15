@@ -187,10 +187,11 @@ from the top of the message handler; because `readValidationResult` finds the du
 skips FAI again rather than making a duplicate call. The no-duplicate-egress guarantee
 only holds from that point on: if `writeValidationResult` itself fails, or the worker
 crashes after the FAI response but before the durable write lands, no record exists yet,
-so the next dequeue calls FAI again. That is at most one repeated upload per such
-failure, not an unbounded loop, since later retries do find the (now-written) record.
-After
-`maxDequeueCount:5` such retries dead-letter to `igc-validation-poison`.
+so the next dequeue calls FAI again. If that failure is transient, at most one repeated
+upload happens before a later retry finds the (now-written) record. If it is persistent
+(writeValidationResult fails on every dequeue), no durable record is ever written, so the
+same IGC can be uploaded to FAI on every retry, up to `maxDequeueCount` (5) times, before
+the message dead-letters to `igc-validation-poison`.
 
 The `igc-validation-poison` queue has a dedicated consumer (unlike `rescore-jobs`, which
 has none): on dequeue it marks the flight `signature: "unverified"`, `faiStatus:

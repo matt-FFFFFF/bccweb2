@@ -412,7 +412,7 @@ export interface Flight {
   wingFactor: number;
   isManualLog: boolean;
   manualLogJustification?: string;
-  /** Blob path under data-private: flight-igcs/{roundId}/{pilotId}.igc */
+  /** Blob path under data-private: flight-igcs/{roundId}/{pilotId}/{flightId}.igc */
   igcPath?: string;
   /** Advisory tags from IGC scoring; non-fatal warnings */
   sanityFlags?: string[];
