@@ -239,7 +239,7 @@ resource "azapi_resource" "tf_tfstate_blob_role" {
 
   type      = "Microsoft.Authorization/roleAssignments@2022-04-01"
   name      = uuidv5("url", "bccweb-tf-tfstate-blob-${each.key}-${azapi_resource.tfstate_sa.id}")
-  parent_id = azapi_resource.tfstate_container[each.key].id
+  parent_id = azapi_resource.tfstate_container[each.value.github_env].id
 
   body = {
     properties = {
