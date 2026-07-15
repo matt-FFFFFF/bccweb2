@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Flight, Round } from "@bccweb/types";
 import { CoordIgcTable } from "../CoordIgcTable.js";
-import { api } from "../../../../lib/api.js";
+import { api, ApiError } from "../../../../lib/api.js";
 
 vi.mock("../../../../lib/api.js", async () => {
   const actual = await vi.importActual("../../../../lib/api.js");
@@ -164,6 +164,19 @@ describe("CoordIgcTable", () => {
     expect(onChanged).toHaveBeenCalledTimes(1);
   });
 
+  it("surfaces ApiError detail string when Resubmit fails", async () => {
+    mockIdentity = ADMIN;
+    const errorWithDetail = new ApiError(409, "CONFLICT", "Conflict", "req-1", "IGC signature validation is disabled.");
+    vi.mocked(api.post).mockRejectedValueOnce(errorWithDetail);
+
+    render(<CoordIgcTable round={makeRound()} onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("revalidate-igc-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByText("IGC signature validation is disabled.")).toBeInTheDocument();
+    });
+  });
+
   it("posts to allow endpoint when Allow is clicked", async () => {
     mockIdentity = ADMIN;
     const onChanged = vi.fn();
@@ -177,6 +190,19 @@ describe("CoordIgcTable", () => {
       expect(api.post).toHaveBeenCalledWith("rounds/r1/teams/t1/pilots/1/igc/allow", {});
     });
     expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces ApiError detail string when Allow fails", async () => {
+    mockIdentity = ADMIN;
+    const errorWithDetail = new ApiError(409, "CONFLICT", "Conflict", "req-1", "Allow logic blocked.");
+    vi.mocked(api.post).mockRejectedValueOnce(errorWithDetail);
+
+    render(<CoordIgcTable round={makeRound()} onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("allow-igc-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Allow logic blocked.")).toBeInTheDocument();
+    });
   });
 
   it("shows Resubmit to scoped coord but hides Allow", () => {

@@ -5,7 +5,7 @@ import { useState } from "react";
 import type { Round, PilotSlot, PilotSummary, Team } from "@bccweb/types";
 import { useAuth } from "../../../hooks/useAuth.js";
 import { useBlob } from "../../../hooks/useBlob.js";
-import { api } from "../../../lib/api.js";
+import { api, ApiError } from "../../../lib/api.js";
 import { ManualFlightModal } from "./ManualFlightModal.js";
 import { StatusBadge } from "../../../components/StatusBadge.js";
 
@@ -137,7 +137,7 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
       await api.post(`rounds/${round.id}/teams/${team.id}/pilots/${slot.placeInTeam}/igc/revalidate`, {});
       onChanged();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Resubmit failed");
+      setErrorMsg(err instanceof ApiError ? (err.detail ?? err.message) : err instanceof Error ? err.message : "Resubmit failed");
     } finally {
       setBusyKey((cur) => (cur === key ? null : cur));
     }
@@ -151,7 +151,7 @@ export function CoordIgcTable({ round, onChanged }: CoordIgcTableProps) {
       await api.post(`rounds/${round.id}/teams/${team.id}/pilots/${slot.placeInTeam}/igc/allow`, {});
       onChanged();
     } catch (err) {
-      setErrorMsg(err instanceof Error ? err.message : "Allow failed");
+      setErrorMsg(err instanceof ApiError ? (err.detail ?? err.message) : err instanceof Error ? err.message : "Allow failed");
     } finally {
       setBusyKey((cur) => (cur === key ? null : cur));
     }
