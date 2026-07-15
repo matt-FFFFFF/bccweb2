@@ -109,6 +109,21 @@ export const FlightSchema = z
     manualLogJustification: lenientOptional(z.string()),
     igcPath: lenientOptional(z.string()),
     sanityFlags: lenientOptional(z.array(z.string())),
+    validation: lenientOptional(
+      z.object({
+        signature: lenientOptional(z.enum(["valid", "invalid", "unverified", "pending"])),
+        date: lenientOptional(z.enum(["valid", "invalid"])),
+        overridden: lenientOptional(z.boolean()),
+        overriddenBy: lenientOptional(z.string()),
+        overriddenAt: lenientOptional(z.string()),
+        checkedAt: lenientOptional(z.string()),
+        validationAttemptId: lenientOptional(z.string()),
+        faiStatus: lenientOptional(z.string()),
+        faiServer: lenientOptional(z.string()),
+        faiMsg: lenientOptional(z.string()),
+      })
+        .strip(),
+    ),
     scoredAt: lenientOptional(z.string()),
     scoredByVersion: lenientOptional(z.string()),
     isFirstXC: lenientOptional(z.boolean()),

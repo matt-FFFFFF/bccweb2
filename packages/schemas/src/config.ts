@@ -81,6 +81,7 @@ export const ConfigSchema = z
     maxPilotScoresCountedPerTeam: healed(z.number(), 4).default(4),
     leagueRoundScoresCounted: healed(z.number(), 6).default(6),
     flightDateValidationEnabled: healed(z.boolean(), true).default(true),
+    flightSignatureValidationEnabled: healed(z.boolean(), false).default(false),
     roundBriefRecipients: healingArray(z.email()).default([]),
     wingFactors: WingFactorsSchema.default({
       "EN A": 1.0,
@@ -183,6 +184,7 @@ export const ConfigPatchSchema = z
     maxPilotScoresCountedPerTeam: z.number().optional(),
     leagueRoundScoresCounted: z.number().optional(),
     flightDateValidationEnabled: z.boolean().optional(),
+    flightSignatureValidationEnabled: z.boolean().optional(),
     roundBriefRecipients: z.array(z.email()).optional(),
     wingFactors: WingFactorsPatchSchema.optional(),
     taskMaxPoints: z.number().optional(),

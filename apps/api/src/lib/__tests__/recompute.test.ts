@@ -1,7 +1,7 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
 import { randomUUID } from "crypto";
-import { BlobClient } from "@azure/storage-blob";
+import { BlobClient, BlobLeaseClient } from "@azure/storage-blob";
 import type { Round, Season, SeasonResults } from "@bccweb/types";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { getPublicContainer } from "../../__tests__/helpers/azurite.js";
@@ -12,37 +12,285 @@ import {
   writePrivateJson,
   writePublicJson,
 } from "../../__tests__/helpers/seed.js";
-import { recomputeSeason } from "../recompute.js";
+
+const leaseHook = vi.hoisted(() => ({
+  beforeRenewing: null as null | ((path: string) => Promise<void>),
+  onRenewingConflict: null as null | ((path: string) => Promise<void>),
+}));
+
+vi.mock("../blob.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../blob.js")>();
+  return {
+    ...actual,
+    withLeaseRenewing: async <T>(
+      path: string,
+      fn: (leaseId: string) => Promise<T>,
+      opts: Parameters<typeof actual.withLeaseRenewing>[2] = {},
+    ) => {
+      const beforeRenewing = leaseHook.beforeRenewing;
+      if (beforeRenewing) await beforeRenewing(path);
+      try {
+        return await actual.withLeaseRenewing(path, fn, opts);
+      } catch (err) {
+        const statusCode = (err as { statusCode?: number }).statusCode;
+        const hook = leaseHook.onRenewingConflict;
+        if (hook && (statusCode === 409 || statusCode === 412)) await hook(path);
+        throw err;
+      }
+    },
+  };
+});
+
+import { recomputeSeason, updateRoundsIndex } from "../recompute.js";
 
 const restoredSpies: Array<() => void> = [];
 
 afterEach(() => {
+  leaseHook.beforeRenewing = null;
+  leaseHook.onRenewingConflict = null;
   while (restoredSpies.length) restoredSpies.pop()?.();
+  vi.restoreAllMocks();
+  vi.useRealTimers();
 });
 
 describe("recomputeSeason", () => {
-  test("concurrent recomputes share one final season write", async () => {
-    const { year, seasonPath } = await seedSeason();
+  test("a request arriving before the first swap triggers a second pass that publishes the latest round score", async () => {
+    // Given: recompute A has snapshotted score X and is paused immediately before its first season swap.
+    const { year, seasonPath, roundId } = await seedSeason();
+    const firstSeasonSwapEntered = Promise.withResolvers<void>();
+    const releaseFirstSeasonSwap = Promise.withResolvers<void>();
     let seasonCopies = 0;
     const original = BlobClient.prototype.beginCopyFromURL;
-    vi.spyOn(BlobClient.prototype, "beginCopyFromURL").mockImplementation(function (
+    vi.spyOn(BlobClient.prototype, "beginCopyFromURL").mockImplementation(async function (
       this: BlobClient,
       copySource,
       options
     ) {
-      if (this.name === seasonPath) seasonCopies += 1;
+      if (this.name === seasonPath) {
+        seasonCopies += 1;
+        if (seasonCopies === 1) {
+          firstSeasonSwapEntered.resolve();
+          await releaseFirstSeasonSwap.promise;
+        }
+      }
       return original.call(this, copySource, options);
     });
     restoredSpies.push(() => vi.restoreAllMocks());
 
-    const settled = await Promise.allSettled(
-      Array.from({ length: 5 }, () => recomputeSeason(year))
-    );
+    const recomputeA = recomputeSeason(year);
+    await Promise.race([
+      firstSeasonSwapEntered.promise,
+      recomputeA.then(() => {
+        throw new Error("recompute A completed before reaching the season swap");
+      }),
+    ]);
+    const latestScore = 222;
+    await writeRoundScore(roundId, latestScore);
 
-    expect(settled.every((result) => result.status === "fulfilled")).toBe(true);
+    // When: recompute B arrives while A is still in flight, then A is allowed to publish.
+    const recomputeB = recomputeSeason(year);
+    releaseFirstSeasonSwap.resolve();
+    await Promise.all([recomputeA, recomputeB]);
+
+    // Then: B was not dropped; its second pass publishes score Y to both derived blobs.
+    expect(seasonCopies).toBe(2);
+    await expectPublishedScore(year, latestScore);
+  });
+
+  test("a dirty request runs a second pass after the in-flight pass fails", async () => {
+    // Given: recompute A is paused before a season swap that will fail.
+    const { year, seasonPath, roundId } = await seedSeason();
+    const firstSeasonSwapEntered = Promise.withResolvers<void>();
+    const releaseFirstSeasonSwap = Promise.withResolvers<void>();
+    let seasonCopies = 0;
+    const original = BlobClient.prototype.beginCopyFromURL;
+    vi.spyOn(BlobClient.prototype, "beginCopyFromURL").mockImplementation(async function (
+      this: BlobClient,
+      copySource,
+      options,
+    ) {
+      if (this.name === seasonPath) {
+        seasonCopies += 1;
+        if (seasonCopies === 1) {
+          firstSeasonSwapEntered.resolve();
+          await releaseFirstSeasonSwap.promise;
+          throw new Error("first pass swap failed");
+        }
+      }
+      return original.call(this, copySource, options);
+    });
+
+    const recomputeA = recomputeSeason(year);
+    await firstSeasonSwapEntered.promise;
+    const latestScore = 244;
+    await writeRoundScore(roundId, latestScore);
+
+    // When: recompute B marks the failed in-flight pass dirty before it rejects.
+    const recomputeB = recomputeSeason(year);
+    releaseFirstSeasonSwap.resolve();
+    await Promise.all([recomputeA, recomputeB]);
+
+    // Then: the pending pass is not erased by the failure and publishes the latest score.
+    expect(seasonCopies).toBe(2);
+    await expectPublishedScore(year, latestScore);
+  });
+
+  test("a round added after the rounds index snapshot survives the recompute swap", async () => {
+    // Given: recompute has built rounds.json and is paused before publishing that index.
+    const { year } = await seedSeason();
+    const roundsSwapEntered = Promise.withResolvers<void>();
+    const releaseRoundsSwap = Promise.withResolvers<void>();
+    const roundsLeaseContended = Promise.withResolvers<void>();
+    const originalCopy = BlobClient.prototype.beginCopyFromURL;
+    vi.spyOn(BlobClient.prototype, "beginCopyFromURL").mockImplementation(async function (
+      this: BlobClient,
+      copySource,
+      options,
+    ) {
+      if (this.name === "rounds.json") {
+        roundsSwapEntered.resolve();
+        await releaseRoundsSwap.promise;
+      }
+      return originalCopy.call(this, copySource, options);
+    });
+    const originalAcquire = BlobLeaseClient.prototype.acquireLease;
+    let observeRoundsLeaseConflict = false;
+    vi.spyOn(BlobLeaseClient.prototype, "acquireLease").mockImplementation(async function (
+      this: BlobLeaseClient,
+      duration,
+      options,
+    ) {
+      try {
+        return await originalAcquire.call(this, duration, options);
+      } catch (err: unknown) {
+        const statusCode = (err as { statusCode?: number }).statusCode;
+        if (observeRoundsLeaseConflict && (statusCode === 409 || statusCode === 412)) {
+          roundsLeaseContended.resolve();
+        }
+        throw err;
+      }
+    });
+    const recompute = recomputeSeason(year);
+    await roundsSwapEntered.promise;
+    const newRound = makeCompleteRound(year);
+    observeRoundsLeaseConflict = true;
+
+    // When: a global-index update interleaves before recompute's rounds.json swap.
+    const indexUpdate = updateRoundsIndex(newRound);
+    await Promise.race([
+      indexUpdate,
+      roundsLeaseContended.promise,
+      recompute.then(() => {
+        throw new Error("recompute completed before the interleaved index update");
+      }),
+    ]);
+    releaseRoundsSwap.resolve();
+    await Promise.all([recompute, indexUpdate]);
+
+    // Then: both operations finish and recompute does not erase the newly inserted ID.
+    const rounds = await readPublicJson<Array<{ id: string }>>("rounds.json");
+    expect(rounds?.map((round) => round.id)).toContain(newRound.id);
+  });
+
+  test("the rounds index publish uses a renewing lease for a long critical section", async () => {
+    // Given: the lease hook records every blob protected by the renewing helper.
+    const { year } = await seedSeason();
+    const renewingPaths: string[] = [];
+    leaseHook.beforeRenewing = async (path) => {
+      renewingPaths.push(path);
+    };
+
+    // When: recompute rebuilds and publishes the global rounds index.
+    await recomputeSeason(year);
+
+    // Then: rounds.json uses the renewal path rather than a fixed 30-second lease.
+    expect(renewingPaths).toContain("rounds.json");
+  });
+
+  test("a recompute waiting on another host's season lease reads the latest committed round score", async () => {
+    // Given: another host holds the existing season lock and this host observes lease contention.
+    const { year, roundId } = await seedSeason();
+    const lockPath = `seasons/${year}.json.lock`;
+    await writePublicJson(lockPath, { purpose: "recompute-lock" });
+    const leaseClient = getPublicContainer().getBlockBlobClient(lockPath).getBlobLeaseClient();
+    const lease = await leaseClient.acquireLease(15);
+    expect(lease.leaseId).toBeTruthy();
+    const firstConflict = Promise.withResolvers<void>();
+    leaseHook.onRenewingConflict = async (path) => {
+      if (path === lockPath) firstConflict.resolve();
+    };
+
+    // When: recompute conflicts, score Y commits while it waits, and the other host releases the lock.
+    const waitingRecompute = recomputeSeason(year);
+    await firstConflict.promise;
+    const latestScore = 333;
+    await writeRoundScore(roundId, latestScore);
+    await leaseClient.releaseLease();
+    await waitingRecompute;
+
+    // Then: the waiting pass snapshots after lease acquisition and publishes score Y.
+    await expectPublishedScore(year, latestScore);
+  });
+
+  test("production retry policy outwaits acquisition contention beyond the old attempt window", async () => {
+    // Given: acquisition remains contended for 30.5 simulated seconds, longer than the former retry budget.
+    const { year } = await seedSeason();
+    const lockPath = `seasons/${year}.json.lock`;
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const firstConflict = Promise.withResolvers<void>();
+    const acquisitionWindowElapsed = Promise.withResolvers<void>();
+    const allowAcquisition = Promise.withResolvers<void>();
+    let attempts = 0;
+    leaseHook.beforeRenewing = async (path) => {
+      if (path !== lockPath) return;
+      attempts += 1;
+      if (Date.now() - startedAt < 30_500) {
+        firstConflict.resolve();
+        throw Object.assign(new Error("lease held"), { statusCode: 409 });
+      }
+      acquisitionWindowElapsed.resolve();
+      await allowAcquisition.promise;
+    };
+
+    // When: the production retry loop advances beyond a normal 30-second lease lifetime.
+    const recompute = recomputeSeason(year);
+    await firstConflict.promise;
+    for (let elapsedMs = 0; elapsedMs <= 30_500; elapsedMs += 250) {
+      await vi.advanceTimersByTimeAsync(250);
+    }
+    await Promise.race([
+      acquisitionWindowElapsed.promise,
+      recompute.then(
+        () => { throw new Error("recompute completed before the simulated lease expired"); },
+        (err: unknown) => { throw err; },
+      ),
+    ]);
+    vi.useRealTimers();
+    allowAcquisition.resolve();
+    await recompute;
+
+    // Then: acquisition was still retried after the old 40-attempt window and eventually succeeded.
+    expect(attempts).toBeGreaterThan(40);
+  });
+
+  test("a callback-originated lease-shaped conflict propagates without reacquiring", async () => {
+    // Given: lease acquisition succeeds, but the first publish callback throws an unrelated 409.
+    const { year, seasonPath } = await seedSeason();
+    let seasonCopies = 0;
+    vi.spyOn(BlobClient.prototype, "beginCopyFromURL").mockImplementationOnce(function (
+      this: BlobClient,
+    ) {
+      if (this.name === seasonPath) seasonCopies += 1;
+      throw Object.assign(new Error("callback conflict"), { statusCode: 409 });
+    });
+
+    // When: recompute reaches the publish callback.
+    const recompute = recomputeSeason(year);
+
+    // Then: the callback error propagates immediately and the callback executes only once.
+    await expect(recompute).rejects.toThrow("callback conflict");
     expect(seasonCopies).toBe(1);
-    const season = await readPublicJson<Season>(seasonPath);
-    expect(season?.leagueTable).toHaveLength(1);
   });
 
   test("crash mid-recompute leaves prior final blob intact and tmp present", async () => {
@@ -172,7 +420,7 @@ describe("recomputeSeason", () => {
   });
 });
 
-async function seedSeason(): Promise<{ year: number; seasonPath: string }> {
+async function seedSeason(): Promise<{ year: number; seasonPath: string; roundId: string }> {
   const year = 2600 + Math.floor(Math.random() * 7_000);
   const round = makeCompleteRound(year);
   const seasonPath = `seasons/${year}.json`;
@@ -197,7 +445,21 @@ async function seedSeason(): Promise<{ year: number; seasonPath: string }> {
   ]);
   await writePublicJson("pilots.json", [{ id: "pilot-a", name: "Pilot A" }]);
   await writePrivateJson(`rounds/${round.id}.json`, round);
-  return { year, seasonPath };
+  return { year, seasonPath, roundId: round.id };
+}
+
+async function writeRoundScore(roundId: string, score: number): Promise<void> {
+  const round = (await readPrivateJson<Round>(`rounds/${roundId}.json`))!;
+  round.teams[0].score = score;
+  round.teams[0].pilots[0].pilotPoints = score;
+  await writePrivateJson(`rounds/${roundId}.json`, round);
+}
+
+async function expectPublishedScore(year: number, score: number): Promise<void> {
+  const season = (await readPublicJson<Season>(`seasons/${year}.json`))!;
+  const results = (await readPublicJson<SeasonResults>(`results/${year}.json`))!;
+  expect(season.leagueTable[0].totalScore).toBe(score);
+  expect(results[0].teamResults[0].score).toBe(score);
 }
 
 function makeCompleteRound(year: number): Round {

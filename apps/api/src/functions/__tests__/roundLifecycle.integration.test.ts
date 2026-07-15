@@ -38,6 +38,24 @@ import * as pureTrack from "../../lib/puretrack.js";
 const leaseHook = vi.hoisted(() => ({
   beforePrivateRenewing: null as null | ((path: string) => Promise<void>),
 }));
+const blobJsonHook = vi.hoisted(() => ({
+  configReadError: null as null | Error,
+}));
+
+vi.mock("../../lib/blobJson.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/blobJson.js")>();
+  return {
+    ...actual,
+    readJson: async <T>(...args: Parameters<typeof actual.readJson<T>>): Promise<T> => {
+      const error = blobJsonHook.configReadError;
+      if (args[2] === "config.json" && error) {
+        blobJsonHook.configReadError = null;
+        throw error;
+      }
+      return actual.readJson(...args);
+    },
+  };
+});
 
 vi.mock("../../lib/blob.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/blob.js")>();
@@ -102,6 +120,7 @@ describe("round lifecycle integration", () => {
   const restoredSpies: Array<() => void> = [];
 
   beforeEach(() => {
+    blobJsonHook.configReadError = null;
     vi.clearAllMocks();
     pdfMock.generateBriefPdf.mockResolvedValue(Buffer.from("%PDF-1.4 lifecycle"));
     vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
@@ -109,6 +128,7 @@ describe("round lifecycle integration", () => {
   });
 
   afterEach(() => {
+    blobJsonHook.configReadError = null;
     leaseHook.beforePrivateRenewing = null;
     while (restoredSpies.length) restoredSpies.pop()?.();
     vi.restoreAllMocks();
@@ -226,6 +246,20 @@ describe("round lifecycle integration", () => {
     await recomputeSeason(ctx.year);
   });
 
+  it("completeRound fails and leaves the round Locked when config storage is unavailable", async () => {
+    const ctx = await seedLockedScorableRound();
+    blobJsonHook.configReadError = Object.assign(new Error("transient config read failure"), {
+      statusCode: 503,
+    });
+
+    const res = await completeRound(ctx);
+
+    expect(res.status).toBe(500);
+    const persisted = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
+    expect(persisted).toMatchObject({ status: "Locked", isLocked: true });
+    expect(persisted?.teams[0]?.pilots[0]?.pilotPoints).toBe(0);
+  });
+
   it("lockRound when status is not BriefComplete returns 409 INVALID_STATE-style conflict", async () => {
     const ctx = await seedLifecycleRound({ status: "Confirmed" });
 
@@ -309,6 +343,122 @@ describe("round lifecycle integration", () => {
     expect((res.jsonBody as { code?: string; error?: string }).code).toBe("CONFLICT");
     expect((res.jsonBody as { error?: string }).error).toBe("Conflict");
     expect((await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))?.maxTeams).toBe(8);
+  });
+
+  it("updateRound clears stale flight date validation after unlock while preserving signature and override", async () => {
+    const ctx = await seedLockedScorableRound();
+    const path = `rounds/${ctx.roundId}.json`;
+    const locked = (await readPrivateJson<Round>(path))!;
+    const flight = locked.teams[0]?.pilots[0]?.flight;
+    if (!flight) throw new Error("Expected seeded flight");
+    flight.validation = { signature: "invalid", date: "valid", overridden: true };
+    flight.sanityFlags = ["IGC_DATE_MISMATCH", "GPS_SPIKE"];
+    await writePrivateJson(path, locked);
+    await expect(unlockRound(ctx)).resolves.toMatchObject({ status: 200 });
+
+    const res = await updateRoundMeta(ctx, { date: `${ctx.year}-06-10` });
+
+    expect(res.status).toBe(200);
+    const updated = await readPrivateJson<Round>(path);
+    expect(updated?.date).toBe(`${ctx.year}-06-10`);
+    expect(updated?.teams[0]?.pilots[0]?.flight?.validation).toEqual({
+      signature: "invalid",
+      overridden: true,
+    });
+    expect(updated?.teams[0]?.pilots[0]?.flight?.sanityFlags).toEqual(["GPS_SPIKE"]);
+  });
+
+  it("updateRound re-scores a Complete round after clearing stale flight date validation", async () => {
+    const ctx = await seedLockedScorableRound({ complete: true });
+    await makeConfig({ flightDateValidationEnabled: true });
+    const path = `rounds/${ctx.roundId}.json`;
+    const round = await readPrivateJson<Round>(path);
+    const team = round?.teams[0];
+    const dateInvalidSlot = team?.pilots[0];
+    if (!round || !team || !dateInvalidSlot?.flight) throw new Error("Expected seeded flight");
+    const validPilotId = randomUUID();
+    dateInvalidSlot.flight.validation = { date: "invalid" };
+    dateInvalidSlot.flight.sanityFlags = ["IGC_DATE_MISMATCH", "GPS_SPIKE"];
+    dateInvalidSlot.flight.score = 0;
+    dateInvalidSlot.flight.wingFactor = 0;
+    dateInvalidSlot.pilotPoints = 0;
+    team.pilots.push({
+      ...structuredClone(dateInvalidSlot),
+      placeInTeam: 2,
+      pilotId: validPilotId,
+      pilotPoints: 200,
+      flight: {
+        ...structuredClone(dateInvalidSlot.flight),
+        id: randomUUID(),
+        score: 42,
+        wingFactor: 1,
+        validation: { signature: "valid" },
+        sanityFlags: ["GPS_SPIKE"],
+      },
+    });
+    team.score = 200;
+    await writePrivateJson(path, round);
+
+    const res = await updateRoundMeta(ctx, { date: `${ctx.year}-06-10` });
+
+    expect(res.status).toBe(200);
+    const updated = await readPrivateJson<Round>(path);
+    if (!updated) throw new Error("Expected updated round");
+    expect(updated.teams[0]?.pilots[0]?.flight?.validation).toEqual({});
+    expect(updated.teams[0]?.pilots[0]?.flight?.sanityFlags).toEqual(["GPS_SPIKE"]);
+    expect(updated.teams[0]?.pilots[0]?.pilotPoints).toBe(200);
+    expect(updated.teams[0]?.pilots[1]?.flight?.validation).toEqual({ signature: "valid" });
+    expect(updated.teams[0]?.pilots[1]?.flight?.sanityFlags).toEqual(["GPS_SPIKE"]);
+    expect(updated.teams[0]?.pilots[1]?.pilotPoints).toBe(200);
+    await recomputeSeason(ctx.year);
+    const season = await readPublicJson<Season>(`seasons/${ctx.year}.json`);
+    if (!season) throw new Error("Expected recomputed season");
+    expect(season.leagueTable[0]?.roundScores[ctx.roundId]).toBe(200);
+    const results = await readPublicJson<SeasonResults>(`results/${ctx.year}.json`);
+    if (!results) throw new Error("Expected recomputed season results");
+    const roundResult = results.find((result) => result.roundId === ctx.roundId);
+    expect(roundResult?.teamResults[0]?.pilots).toEqual(expect.arrayContaining([
+      expect.objectContaining({ pilotId: ctx.pilotId, score: 200 }),
+      expect.objectContaining({ pilotId: validPilotId, score: 200 }),
+    ]));
+  });
+
+  it("updateRound keeps a Complete round date change successful when season recompute fails", async () => {
+    // Given: publishing the re-scored Complete round fails after its private score is committed.
+    const ctx = await seedLockedScorableRound({ complete: true });
+    const original = BlobClient.prototype.beginCopyFromURL;
+    const publishSpy = vi.spyOn(BlobClient.prototype, "beginCopyFromURL")
+      .mockImplementationOnce(function (this: BlobClient, source, options) {
+        if (this.name === `seasons/${ctx.year}.json`) throw new Error("transient season publish failure");
+        return original.call(this, source, options);
+      });
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+
+    // When: the round date changes and triggers re-scoring plus a best-effort season recompute.
+    const res = await updateRoundMeta(ctx, { date: `${ctx.year}-06-10` });
+
+    // Then: the PUT succeeds with the private score committed, and an admin recompute can publish it.
+    expect(res.status).toBe(200);
+    expect(res.jsonBody).toMatchObject({
+      date: `${ctx.year}-06-10`,
+      teams: [expect.objectContaining({ score: 100 })],
+    });
+    const updated = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
+    expect(updated?.date).toBe(`${ctx.year}-06-10`);
+    expect(updated?.teams[0]?.score).toBe(100);
+    await vi.waitFor(() => {
+      expect(errorSpy).toHaveBeenCalledWith(
+        `[updateRound] recomputeSeason(${ctx.year}) failed:`,
+        expect.objectContaining({ message: "transient season publish failure" }),
+      );
+    });
+
+    publishSpy.mockRestore();
+    await recomputeSeason(ctx.year);
+    const season = await readPublicJson<Season>(`seasons/${ctx.year}.json`);
+    expect(season?.leagueTable[0]?.roundScores[ctx.roundId]).toBe(100);
+    const results = await readPublicJson<SeasonResults>(`results/${ctx.year}.json`);
+    expect(results?.find((result) => result.roundId === ctx.roundId)?.teamResults[0]?.score).toBe(100);
   });
 
   it("updateRound with an unknown siteId returns 409 CONFLICT and leaves the site unchanged", async () => {
@@ -708,6 +858,13 @@ function lockRound(ctx: LifecycleContext) {
 
 function completeRound(ctx: LifecycleContext) {
   return invoke("completeRound", makeAuthRequest(ctx.adminUserId, ctx.adminEmail, {
+    method: "POST",
+    params: { id: ctx.roundId },
+  }));
+}
+
+function unlockRound(ctx: LifecycleContext) {
+  return invoke("unlockRound", makeAuthRequest(ctx.adminUserId, ctx.adminEmail, {
     method: "POST",
     params: { id: ctx.roundId },
   }));

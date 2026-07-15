@@ -49,6 +49,7 @@ interface FormState {
   leagueRoundScoresCounted: string;
   taskMaxPoints: string;
   flightDateValidationEnabled: boolean;
+  flightSignatureValidationEnabled: boolean;
   roundBriefRecipients: string[];
   wingFactors: Record<WingClass, string>;
   pilotFactors: Record<PilotRatingValue, string>;
@@ -96,6 +97,7 @@ function configToForm(c: Partial<Config> | null | undefined): FormState {
     leagueRoundScoresCounted: String(safe.leagueRoundScoresCounted ?? 6),
     taskMaxPoints: String(safe.taskMaxPoints ?? 1000),
     flightDateValidationEnabled: safe.flightDateValidationEnabled ?? true,
+    flightSignatureValidationEnabled: safe.flightSignatureValidationEnabled ?? false,
     roundBriefRecipients: safe.roundBriefRecipients ?? [],
     wingFactors: Object.fromEntries(
       WING_CLASSES.map((wc) => [wc, String(wf[wc] ?? WING_FACTOR_DEFAULTS[wc])])
@@ -263,6 +265,7 @@ export default function AdminConfig() {
         leagueRoundScoresCounted: Number(form.leagueRoundScoresCounted),
         taskMaxPoints: Number(form.taskMaxPoints),
         flightDateValidationEnabled: form.flightDateValidationEnabled,
+        flightSignatureValidationEnabled: form.flightSignatureValidationEnabled,
         roundBriefRecipients: form.roundBriefRecipients.map(r => r.trim()),
         wingFactors: Object.fromEntries(
           WING_CLASSES.map((wc) => [wc, Number(form.wingFactors[wc])])
@@ -322,14 +325,27 @@ export default function AdminConfig() {
               <input type="number" min={1} style={fi} value={form.maxScoringPilotsInTeam} onChange={(e) => setF("maxScoringPilotsInTeam", e.target.value)} />
             </div>
           </div>
-          <label style={{ display: "flex", gap: "0.4rem", alignItems: "center", marginTop: "0.75rem", fontSize: "0.85rem" }}>
-            <input
-              type="checkbox"
-              checked={form.flightDateValidationEnabled}
-              onChange={(e) => setF("flightDateValidationEnabled", e.target.checked)}
-            />
-            Flight date validation enabled
-          </label>
+          <div style={{ marginTop: "1.5rem" }}>
+            <h3 style={{ fontSize: "0.9rem", margin: "0 0 0.5rem", color: "#333" }}>Flight validation</h3>
+            <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+              <label style={{ display: "flex", gap: "0.4rem", alignItems: "center", fontSize: "0.85rem" }}>
+                <input
+                  type="checkbox"
+                  checked={form.flightDateValidationEnabled}
+                  onChange={(e) => setF("flightDateValidationEnabled", e.target.checked)}
+                />
+                Flight date validation enabled
+              </label>
+              <label style={{ display: "flex", gap: "0.4rem", alignItems: "center", fontSize: "0.85rem" }}>
+                <input
+                  type="checkbox"
+                  checked={form.flightSignatureValidationEnabled}
+                  onChange={(e) => setF("flightSignatureValidationEnabled", e.target.checked)}
+                />
+                FAI CIVL Validation
+              </label>
+            </div>
+          </div>
         </div>
 
         <div style={{ border: "1px solid #dee2e6", borderRadius: "0.5rem", padding: "1rem", marginBottom: "1.5rem" }}>

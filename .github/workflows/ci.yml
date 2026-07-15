@@ -121,6 +121,9 @@ jobs:
       - name: Run fixture transaction tests
         run: npm run fixtures:test
 
+      - name: Run admin script tests
+        run: npm run admin:test
+
       # The three heavy/slow API lib tests are excluded from `make test`; CI can
       # afford the extra minute, so cover them here while Azurite is already up.
       - name: Run heavy tests

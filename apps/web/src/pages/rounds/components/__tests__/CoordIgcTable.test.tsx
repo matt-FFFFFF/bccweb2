@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { Flight, Round } from "@bccweb/types";
 import { CoordIgcTable } from "../CoordIgcTable.js";
-import { api } from "../../../../lib/api.js";
+import { api, ApiError } from "../../../../lib/api.js";
 
 vi.mock("../../../../lib/api.js", async () => {
   const actual = await vi.importActual("../../../../lib/api.js");
@@ -84,7 +84,7 @@ function makeRound(): Round {
         club: { id: "cA", name: "Club A" },
         score: 0,
         pilots: [
-          // Uploaded IGC (igcPath set, not manual) + a sanity flag
+          // Uploaded IGC (igcPath set, not manual) + a sanity flag + validation
           slot(
             1,
             "p-up",
@@ -94,10 +94,11 @@ function makeRound(): Round {
               igcPath: "flight-igcs/r1/p-up.igc",
               isManualLog: false,
               sanityFlags: ["GPS_SPIKE"],
+              validation: { signature: "unverified", date: "invalid" },
             }),
           ),
           // Manual log
-          slot(2, "p-man", flight({ id: "f-man", distance: 30, isManualLog: true })),
+          slot(2, "p-man", flight({ id: "f-man", distance: 30, isManualLog: true, validation: { signature: "invalid", date: "valid", overridden: true } })),
           // Empty — no flight / no IGC
           slot(3, "p-none", null),
         ],
@@ -126,6 +127,141 @@ afterEach(() => {
 });
 
 describe("CoordIgcTable", () => {
+  it("renders validation badges and actions correctly (Admin)", () => {
+    mockIdentity = ADMIN;
+    render(<CoordIgcTable round={makeRound()} onChanged={vi.fn()} />);
+
+    // p-up: unverified signature, invalid date. Should have Resubmit, no Allow (since date is invalid but not overridden... wait, Allow shows when invalid AND not overridden. Let's check: date invalid => Allow should be there.)
+    // Wait, the test config:
+    // p-up: signature unverified, date invalid. Allow should show (due to date invalid). Resubmit should show (due to unverified).
+    expect(screen.getByText("Sig: unverified")).toBeInTheDocument();
+    expect(screen.getByText("Date: invalid")).toBeInTheDocument();
+
+    // Check buttons
+    expect(screen.getByTestId("revalidate-igc-btn")).toBeInTheDocument();
+    expect(screen.getByTestId("allow-igc-btn")).toBeInTheDocument();
+
+    // p-man: signature invalid, date valid, overridden.
+    expect(screen.getByText("Sig: invalid")).toBeInTheDocument();
+    expect(screen.getByText("Date: valid")).toBeInTheDocument();
+    expect(screen.getByText("Overridden")).toBeInTheDocument();
+    // Overridden => no Allow button for p-man. We can query all Allow buttons and there should be 1.
+    expect(screen.getAllByTestId("allow-igc-btn")).toHaveLength(1);
+  });
+
+  it("posts to revalidate endpoint when Resubmit is clicked", async () => {
+    mockIdentity = ADMIN;
+    const onChanged = vi.fn();
+    vi.mocked(api.post).mockResolvedValue(undefined);
+
+    render(<CoordIgcTable round={makeRound()} onChanged={onChanged} />);
+
+    fireEvent.click(screen.getByTestId("revalidate-igc-btn"));
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith("rounds/r1/teams/t1/pilots/1/igc/revalidate", {});
+    });
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces ApiError detail string when Resubmit fails", async () => {
+    mockIdentity = ADMIN;
+    const errorWithDetail = new ApiError(409, "CONFLICT", "Conflict", "req-1", "IGC signature validation is disabled.");
+    vi.mocked(api.post).mockRejectedValueOnce(errorWithDetail);
+
+    render(<CoordIgcTable round={makeRound()} onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("revalidate-igc-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByText("IGC signature validation is disabled.")).toBeInTheDocument();
+    });
+  });
+
+  it("posts to allow endpoint when Allow is clicked", async () => {
+    mockIdentity = ADMIN;
+    const onChanged = vi.fn();
+    vi.mocked(api.post).mockResolvedValue(undefined);
+
+    render(<CoordIgcTable round={makeRound()} onChanged={onChanged} />);
+
+    fireEvent.click(screen.getByTestId("allow-igc-btn"));
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith("rounds/r1/teams/t1/pilots/1/igc/allow", {});
+    });
+    expect(onChanged).toHaveBeenCalledTimes(1);
+  });
+
+  it("surfaces ApiError detail string when Allow fails", async () => {
+    mockIdentity = ADMIN;
+    const errorWithDetail = new ApiError(409, "CONFLICT", "Conflict", "req-1", "Allow logic blocked.");
+    vi.mocked(api.post).mockRejectedValueOnce(errorWithDetail);
+
+    render(<CoordIgcTable round={makeRound()} onChanged={vi.fn()} />);
+    fireEvent.click(screen.getByTestId("allow-igc-btn"));
+
+    await waitFor(() => {
+      expect(screen.getByText("Allow logic blocked.")).toBeInTheDocument();
+    });
+  });
+
+  it("shows Resubmit to scoped coord but hides Allow", () => {
+    mockIdentity = {
+      userId: "u",
+      email: "c@x",
+      roles: ["RoundsCoord"],
+      pilotId: null,
+      clubId: "cA",
+    };
+    render(<CoordIgcTable round={makeRound()} onChanged={vi.fn()} />);
+
+    expect(screen.getByTestId("revalidate-igc-btn")).toBeInTheDocument();
+    expect(screen.queryByTestId("allow-igc-btn")).toBeNull();
+  });
+
+  it("renders NO Resubmit and NO Allow buttons for a manual flight with stale validation", () => {
+    const round = makeRound();
+    round.teams[0].pilots = [
+      slot(1, "p-man", flight({ id: "f-man", distance: 30, isManualLog: true, igcPath: "some/path.igc", validation: { signature: "unverified", date: "invalid" } }))
+    ];
+
+    mockIdentity = ADMIN;
+    render(<CoordIgcTable round={round} onChanged={vi.fn()} />);
+    expect(screen.getByText("Sig: unverified")).toBeInTheDocument();
+    expect(screen.queryByTestId("revalidate-igc-btn")).toBeNull();
+    expect(screen.queryByTestId("allow-igc-btn")).toBeNull();
+    cleanup();
+
+    mockIdentity = {
+      userId: "u",
+      email: "c@x",
+      roles: ["RoundsCoord"],
+      pilotId: null,
+      clubId: "cA",
+    };
+    render(<CoordIgcTable round={round} onChanged={vi.fn()} />);
+    expect(screen.queryByTestId("revalidate-igc-btn")).toBeNull();
+    expect(screen.queryByTestId("allow-igc-btn")).toBeNull();
+  });
+
+  it("shows Resubmit for a non-manual flight with an igcPath but NO validation.signature, and hides it for manual flights or no igcPath", () => {
+    const round = makeRound();
+    round.teams[0].pilots = [
+      slot(1, "p-up1", flight({ id: "f-up1", distance: 40, isManualLog: false, igcPath: "flight-igcs/r1/p-up1.igc" })),
+      slot(2, "p-man", flight({ id: "f-man", distance: 30, isManualLog: true, igcPath: "flight-igcs/r1/p-man.igc" })),
+      slot(3, "p-up2", flight({ id: "f-up2", distance: 20, isManualLog: false }))
+    ];
+
+    mockIdentity = ADMIN;
+    render(<CoordIgcTable round={round} onChanged={vi.fn()} />);
+
+    const resubmitBtns = screen.getAllByTestId("revalidate-igc-btn");
+    expect(resubmitBtns).toHaveLength(1);
+
+    fireEvent.click(resubmitBtns[0]);
+    expect(api.post).toHaveBeenCalledWith("rounds/r1/teams/t1/pilots/1/igc/revalidate", {});
+  });
+
   it("renders one row per slot with the correct IGC status string (Admin)", () => {
     mockIdentity = ADMIN;
     render(<CoordIgcTable round={makeRound()} onChanged={vi.fn()} />);

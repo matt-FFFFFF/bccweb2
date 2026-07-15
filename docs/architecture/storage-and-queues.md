@@ -53,8 +53,8 @@ valid for non-JSON artifacts and explicitly justified lease/index operations.
 
 ## Storage Queues
 
-Eight queues, same storage account as the blobs, created by `init-storage.mjs` — across
-four families, each a main queue plus a `-poison` dead-letter queue
+Ten queues, same storage account as the blobs, created by `init-storage.mjs` — across
+five families, each a main queue plus a `-poison` dead-letter queue
 (`maxDequeueCount=5` in `host.json`):
 
 | Family | Main queue | Poison queue |
@@ -63,30 +63,33 @@ four families, each a main queue plus a `-poison` dead-letter queue
 | Sign-to-fly reflect | `signtofly-reflect` | `signtofly-reflect-poison` |
 | Rescore | `rescore-jobs` | `rescore-jobs-poison` |
 | PureTrack group | `round-puretrack-group` | `round-puretrack-group-poison` |
+| IGC validation | `igc-validation` | `igc-validation-poison` |
 
 The Functions host dead-letters only messages whose final invocation still throws.
 Workers normally catch terminal domain failures and record status/telemetry instead, so
 poison queues are fallbacks for uncaught host/handler failures rather than a complete
 inventory of jobs that exhausted ordinary retries.
 
-`init-storage.mjs` creates all eight uniformly and fatally: if the Queue service is
+`init-storage.mjs` creates all ten uniformly and fatally: if the Queue service is
 unreachable the script throws and exits non-zero. Blob containers are created earlier in
 the same run, so a queue-service outage still surfaces as a hard failure rather than a
 partial success.
 
-**Connection invariant**: every producer (`apps/api/src/lib/queue.ts` and
-`apps/api/src/lib/rescoreJob.ts`) and every `app.storageQueue` trigger uses the
+**Connection invariant**: every producer (`apps/api/src/lib/queue.ts`,
+`apps/api/src/lib/rescoreJob.ts`, and `apps/api/src/lib/igcValidationJob.ts`) and every
+`app.storageQueue` trigger uses the
 `AzureWebJobsStorage` connection setting — the only setting carrying a `QueueEndpoint` in
 local/Docker. `BLOB_CONNECTION_STRING` is blob-only; using it would silently break queueing.
 
 **Queue privacy**: `privacy-scan.mjs` does not cover Storage Queues. The compensating
-control is strict, `.strict()` job schemas in `apps/api/src/lib/queue.ts` and
-`apps/api/src/lib/rescoreJob.ts`:
+control is strict, `.strict()` job schemas in `apps/api/src/lib/queue.ts`,
+`apps/api/src/lib/rescoreJob.ts`, and `packages/schemas/src/igcValidationJob.ts`:
 
 - `BriefPdfJobSchema` — only `{roundId, briefVersion, pdfAttemptId}`.
 - `SignToFlyReflectJobSchema` — only `{roundId}`.
 - `PureTrackGroupJobSchema` — only `{roundId, attemptId}`.
 - `RescoreJobMessageSchema` — only `{jobId, roundId, requestedAt}`.
+- `IgcValidationJobSchema` — only `{roundId, teamId, place, flightId, validationAttemptId}`.
 
 Any extra key is rejected at serialisation time, so PII can never enter these messages.
 
@@ -138,6 +141,65 @@ owner-token compare-and-set `commitPureTrackReady`
 (`apps/api/src/lib/puretrackStatus.ts`), which flips `pureTrack.status` to `ready` only
 while it is still `processing`. Status values: `pending | processing | ready | failed`.
 Only failures that escape the worker after the final dequeue reach the poison queue.
+
+### IGC validation flow
+
+IGC upload and revalidation (`apps/api/src/functions/igc.ts`) set the flight's
+`validation.signature = "pending"`, stamp a fresh `validationAttemptId`, and enqueue
+`{roundId, teamId, place, flightId, validationAttemptId}` onto `igc-validation`. The
+`igcValidationWorker` queue-trigger consumer
+(`apps/api/src/functions/igcValidationWorker.ts`) re-reads the round, drops the message
+(ACK, no-op) if the flight or its `validationAttemptId` has since moved on: a newer
+upload or re-validation supersedes it, and reuses a durable
+`readValidationResult(validationAttemptId)` record instead of re-calling FAI if one
+already exists for this attempt.
+
+Otherwise it acquires a single global blob-lease guard
+(`igc-validation/active.json`, `acquireIgcValidationGuard`/`releaseIgcValidationGuard`
+in `apps/api/src/lib/igcValidationJob.ts`) so at most one call to the FAI validator runs
+at a time, then runs the pacing/staleness sequence deliberately split into three steps:
+`waitForPace(leaseId)` first blocks until at least 2 seconds have passed since the
+previous call recorded under this guard; the worker then re-reads the round and
+re-checks the flight's identity and `isManualLog` state, and re-reads `config.json` for
+`flightSignatureValidationEnabled`, immediately before egress, closing the window
+between the pace wait and the outbound call. If validation has since been disabled, the
+worker records `signature: "unverified", faiStatus: "DISABLED"` and skips the FAI call
+entirely; see `docs/runbooks/privacy.md` for the accepted sub-second TOCTOU window this
+leaves. Otherwise, right before the fetch, it calls `recordFaiCallStart(leaseId)` to
+stamp the call-start timestamp that paces the next call, then calls
+`validateIgcSignature` (`apps/api/src/lib/faiVali.ts`) against the flight's immutable
+`igcPath` bytes, persists the outcome via `writeValidationResult` (create-only,
+durable) before releasing the guard, then commits the result onto the round under a
+private lease, re-scores via `scoreRoundEnforcingValidation`, and, for a `Complete`
+round, it calls `recomputeSeason`. If the `recomputeSeason` step fails it is logged and
+ACKed rather than retried, since the terminal validation result and round score are
+already committed; an operator repairs the published league via
+`POST /api/manage/rounds/{id}/recompute` (see `docs/runbooks/privacy.md` for the
+outbound-egress and toggle implications of this flow).
+
+Transport failures talking to FAI (timeout, 5xx, non-JSON, oversized file) are mapped to
+a terminal `unverified` result and ACKed; they never retry the FAI call. Failures
+reading the round or `config.json`, reading the IGC bytes, writing the durable result
+record, committing the round under its private lease, `updateRoundsIndex`, or deleting
+the durable result record all throw and are retried by the host. Any such retry replays
+from the top of the message handler; because `readValidationResult` finds the durable
+`writeValidationResult` record already in place *once that write has succeeded*, it
+skips FAI again rather than making a duplicate call. The no-duplicate-egress guarantee
+only holds from that point on: if `writeValidationResult` itself fails, or the worker
+crashes after the FAI response but before the durable write lands, no record exists yet,
+so the next dequeue calls FAI again. If that failure is transient, at most one repeated
+upload happens before a later retry finds the (now-written) record. If it is persistent
+(writeValidationResult fails on every dequeue), no durable record is ever written, so the
+same IGC can be uploaded to FAI on every retry, up to `maxDequeueCount` (5) times, before
+the message dead-letters to `igc-validation-poison`.
+
+The `igc-validation-poison` queue has a dedicated consumer (unlike `rescore-jobs`, which
+has none): on dequeue it marks the flight `signature: "unverified"`, `faiStatus:
+"WORKER_FAILED"` so the flight is no longer stuck `pending` after retries exhaust, GCs
+the orphaned durable result record for that attempt, and emits redacted telemetry (no
+IGC bytes, no pilot PII). A flight left in this `unverified/WORKER_FAILED` state is
+remediable by the operator via the normal Resubmit action, which stamps a fresh
+`validationAttemptId` and re-enqueues onto `igc-validation`.
 
 ## Related runbooks
 

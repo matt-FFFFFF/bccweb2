@@ -22,9 +22,9 @@ checks. Docker Desktop root-owned mounts still satisfy the normal current-owner 
 
 ## `init-storage.mjs` — fatal, uniform provisioning
 
-Creates the two blob containers and all eight Storage Queues (see the architecture doc)
+Creates the two blob containers and all ten Storage Queues (see the architecture doc)
 in Azurite, using only Node built-ins (Shared Key auth against the Blob/Queue REST APIs —
-no SDK). All eight queues are created uniformly **fatally**: if the Queue service is
+no SDK). All ten queues are created uniformly **fatally**: if the Queue service is
 unreachable the script throws and exits non-zero, exactly like `round-brief-pdf`. Blob
 containers are created earlier in the same run, so a queue-service outage still surfaces
 as a hard failure rather than a silent partial success.
@@ -34,7 +34,9 @@ as a hard failure rather than a silent partial success.
 Fails CI if PII leaks into public blobs, the SPA bundle, or telemetry/log fixtures. Its
 storage scan covers public **blob storage** only — it does **not** cover Storage Queues (see the
 architecture doc's "Queue privacy" section for the compensating control: strict `.strict()`
-job schemas in `apps/api/src/lib/queue.ts` and `rescoreJob.ts`). PII field list lives in
+job schemas in `apps/api/src/lib/{queue,rescoreJob}.ts` and
+`packages/schemas/src/igcValidationJob.ts`, including the IGC-validation family's
+`IgcValidationJobSchema`). PII field list lives in
 [`scripts/lib/pii.mjs`](lib/pii.mjs) and must stay in sync with
 `apps/api/src/lib/telemetryRedactor.ts`'s `PII_FIELDS`.
 
@@ -80,4 +82,11 @@ against a non-local target.
 
 `admin/move-manufacturers-to-public.mjs` performs the one-time, idempotent promotion of
 `manufacturers.json`; follow [the runbook](../docs/runbooks/manufacturers-move.md).
+`admin/reconcile-orphan-igcs.mjs` scans private `rounds/*.json` as the authoritative
+IGC reference set, then reports unreferenced `flight-igcs/**` blobs older than 24 hours;
+it is dry-run by default and deletes only with explicit `--delete` (see the privacy runbook).
+`admin/redispatch-stuck-igc-validations.mjs` reports pending, non-manual IGC validation
+attempts whose round has been unchanged for at least two hours and has no durable result;
+it is dry-run by default and reuses the committed attempt ID only with explicit
+`--redispatch` (see the privacy runbook).
 `devtools/seed-qa-users.mjs` is test-user tooling, not production seeding.

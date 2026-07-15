@@ -34,7 +34,6 @@ import type {
   Signature,
 } from "@bccweb/types";
 import { normalizeStatus } from "@bccweb/types";
-import { scoreRound } from "@bccweb/scoring";
 import {
   BriefSchema,
   ConfigSchema,
@@ -45,6 +44,7 @@ import {
   SiteSchema,
 } from "@bccweb/schemas";
 import * as z from "zod/v4";
+import { scoreRoundEnforcingValidation } from "../lib/scoreRoundValidated.js";
 import {
   getBlobClient,
   getPrivateBlobClient,
@@ -119,10 +119,16 @@ async function loadConfig(): Promise<Config> {
       ConfigSchema,
       "config.json",
     );
-  } catch {
-    // Virgin store: ConfigSchema.parse({}) yields the canonical defaults that
-    // Task 20 centralised on the schema.
-    return ConfigSchema.parse({});
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      error.statusCode === 404
+    ) {
+      return ConfigSchema.parse({});
+    }
+    throw error;
   }
 }
 
@@ -334,6 +340,7 @@ async function updateRound(
 
   const path = `rounds/${id}.json`;
   let updated: Round;
+  let dateChanged = false;
 
   try {
     updated = await withPrivateLease(path, async (leaseId) => {
@@ -347,7 +354,26 @@ async function updateRound(
         throw new HttpError(409, "ROUND_CANCELLED", "Round is cancelled — uncancel before editing");
       }
 
-      if (body.date) r.date = body.date;
+      if (body.date && body.date !== r.date) {
+        dateChanged = true;
+        r.date = body.date;
+        for (const team of r.teams) {
+          for (const slot of team.pilots) {
+            const flight = slot.flight;
+            if (!flight) continue;
+            if (flight.validation) {
+              const validation = { ...flight.validation };
+              delete validation.date;
+              flight.validation = validation;
+            }
+            if (flight.sanityFlags) {
+              flight.sanityFlags = flight.sanityFlags.filter(
+                (flag) => flag !== "IGC_DATE_MISMATCH"
+              );
+            }
+          }
+        }
+      }
       if (body.maxTeams !== undefined) r.maxTeams = body.maxTeams;
       if (body.minimumScore !== undefined) r.minimumScore = body.minimumScore;
 
@@ -382,6 +408,14 @@ async function updateRound(
         }
       }
 
+      if (dateChanged) {
+        const { round: scored, derivation } = scoreRoundEnforcingValidation(
+          r,
+          await loadConfig(),
+        );
+        scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
+      }
+
       await writePrivateJson(path, RoundSchema, r, leaseId);
       return r;
     });
@@ -393,6 +427,14 @@ async function updateRound(
   }
 
   await updateRoundsIndex(updated);
+  if (dateChanged && updated.status === "Complete") {
+    recomputeSeason(updated.season.year).catch((err) => {
+      console.error(
+        `[updateRound] recomputeSeason(${updated.season.year}) failed:`,
+        err
+      );
+    });
+  }
   return { status: 200, jsonBody: updated };
 }
 
@@ -1343,7 +1385,7 @@ async function completeRound(
       }
 
       const config = await loadConfig();
-      const { round: scored, derivation } = scoreRound(r, config);
+      const { round: scored, derivation } = scoreRoundEnforcingValidation(r, config);
       scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
       scored.status = "Complete";
       scored.isLocked = false;

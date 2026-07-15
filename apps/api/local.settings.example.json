@@ -12,7 +12,10 @@
     "ACS_SENDER_ADDRESS": "noreply@localhost",
     "PURETRACK_API_KEY": "dev",
     "PURETRACK_EMAIL": "dev@localhost",
-    "PURETRACK_PASSWORD": "dev"
+    "PURETRACK_PASSWORD": "dev",
+    "FAI_VALI_ENABLED": "false",
+    "FAI_VALI_BASE_URL": "https://vali.fai-civl.org",
+    "FAI_VALI_TIMEOUT_MS": "20000"
   },
   "Host": {
     "LocalHttpPort": 7071,

@@ -33,6 +33,9 @@ FooSchema satisfies z.ZodType<Foo>;                  // keep schema ⇄ type in 
   `healingArray()`, `normalizeEnum()`. Use these instead of bare optionals so bad blobs heal
   in `observe` mode rather than throwing.
 - `.strip()` drops unknown keys (what `enforce` relies on). Identity fields hard-fail.
+- Queue-message schemas (`BriefPdfJobSchema`, `SignToFlyReflectJobSchema`,
+  `PureTrackGroupJobSchema`, `RescoreJobMessageSchema`, `IgcValidationJobSchema`) are
+  `.strict()` so unknown fields, including PII, can never enter queue messages.
 
 ## Module → blob family
 

@@ -6,8 +6,8 @@
  * (`rescoreRound.ts`) handlers. Extracted verbatim so a future change (the 404
  * code, pilot-name resolution, slot lookup) is made in exactly one place.
  */
-import type { PilotSlot, Round } from "@bccweb/types";
-import { PilotSchema, RoundSchema } from "@bccweb/schemas";
+import type { Config, PilotSlot, Round } from "@bccweb/types";
+import { ConfigSchema, PilotSchema, RoundSchema } from "@bccweb/schemas";
 import { getPrivateBlobClient } from "./blob.js";
 import { readJson } from "./blobJson.js";
 import { HttpError } from "./http.js";
@@ -27,6 +27,26 @@ export async function readRoundOr404(roundPath: string): Promise<Round> {
       throw new HttpError(404, "NOT_FOUND", "Round not found");
     }
     throw err;
+  }
+}
+
+export async function loadConfig(): Promise<Config> {
+  try {
+    return await readJson(
+      getPrivateBlobClient("config.json"),
+      ConfigSchema,
+      "config.json",
+    );
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      error.statusCode === 404
+    ) {
+      return ConfigSchema.parse({});
+    }
+    throw error;
   }
 }
 

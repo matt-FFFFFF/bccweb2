@@ -5,6 +5,7 @@ export * from "./config.js";
 export * from "./club.js";
 export * from "./clubTeam.js";
 export * from "./helpers.js";
+export * from "./igcValidationJob.js";
 export * from "./manufacturer.js";
 export * from "./pilot.js";
 export * from "./puretrack.js";

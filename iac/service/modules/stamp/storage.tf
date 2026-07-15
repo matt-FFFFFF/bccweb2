@@ -203,6 +203,20 @@ resource "azapi_resource" "queue_rescore_jobs_poison" {
   parent_id = azapi_resource.queue_service.id
 }
 
+# ─── IGC Validation Queues ───────────────────────────────────────────────────
+
+resource "azapi_resource" "queue_igc_validation" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "igc-validation"
+  parent_id = azapi_resource.queue_service.id
+}
+
+resource "azapi_resource" "queue_igc_validation_poison" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "igc-validation-poison"
+  parent_id = azapi_resource.queue_service.id
+}
+
 # ─── PureTrack Group Queues ───────────────────────────────────────────────────
 #
 # `round-puretrack-group` carries PureTrack group jobs for a round.

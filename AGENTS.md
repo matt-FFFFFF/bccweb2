@@ -141,19 +141,20 @@ holds PII). `withLease()` / `withPrivateLease()` in
 [privacy scanner](scripts/privacy-scan.mjs) fails CI if PII leaks into the public
 container.
 
-**Storage Queues**: eight queues (same storage account), across four families —
-brief PDF, sign-to-fly reflect, rescore, PureTrack group — each a main queue plus a
-`-poison` dead-letter. Rescore normally records failures on its job-status blob; its
-poison queue remains a host-failure safety net rather than an HTTP-visible retry path. All
-producers/triggers use the `AzureWebJobsStorage` connection only; never
-`BLOB_CONNECTION_STRING`. Queue job schemas (`BriefPdfJobSchema`,
-`SignToFlyReflectJobSchema`, `PureTrackGroupJobSchema`, `RescoreJobMessageSchema`) are
-all `.strict()` so PII can never enter a queue message — `privacy-scan.mjs` does not
-cover queues, so these schemas are the compensating control.
+**Storage Queues**: ten queues (same storage account), across five families —
+brief PDF, sign-to-fly reflect, rescore, PureTrack group, IGC signature/date
+validation — each a main queue plus a `-poison` dead-letter. Rescore normally records
+failures on its job-status blob; its poison queue remains a host-failure safety net
+rather than an HTTP-visible retry path. All producers/triggers use the
+`AzureWebJobsStorage` connection only; never `BLOB_CONNECTION_STRING`. Queue job
+schemas (`BriefPdfJobSchema`, `SignToFlyReflectJobSchema`, `PureTrackGroupJobSchema`,
+`RescoreJobMessageSchema`, `IgcValidationJobSchema`) are all `.strict()` so PII can
+never enter a queue message — `privacy-scan.mjs` does not cover queues, so these
+schemas are the compensating control.
 
-Full container/family/flow reference (containers, all eight queues, brief PDF/sign
-reflect/rescore/PureTrack flows, CAS/attempt semantics, poison behavior):
-[docs/architecture/storage-and-queues.md](docs/architecture/storage-and-queues.md).
+Full container/family/flow reference (containers, all ten queues, brief PDF/sign
+reflect/rescore/PureTrack/IGC-validation flows, CAS/attempt semantics, poison
+behavior): [docs/architecture/storage-and-queues.md](docs/architecture/storage-and-queues.md).
 
 ### Schema layer
 
@@ -184,7 +185,9 @@ test-isolation gotchas: [apps/api/AGENTS.md](apps/api/AGENTS.md). Handler conven
 **Env** ([local.settings.example.json](apps/api/local.settings.example.json)):
 `AzureWebJobsStorage`, `BLOB_CONNECTION_STRING`, `BLOB_CONTAINER_NAME` (`data`),
 `BLOB_PRIVATE_CONTAINER_NAME` (`data-private`), `JWT_SECRET` (≥32 chars),
-`ACS_CONNECTION_STRING`, `ACS_SENDER_ADDRESS`, `PURETRACK_*`. Copy the example →
+`ACS_CONNECTION_STRING`, `ACS_SENDER_ADDRESS`, `PURETRACK_*`, `FAI_VALI_ENABLED`
+(process-level kill switch for FAI signature validation), `FAI_VALI_BASE_URL`,
+`FAI_VALI_TIMEOUT_MS`. Copy the example →
 `local.settings.json`. Round-brief recipients are no
 longer an env var — they live in `config.json`'s `roundBriefRecipients` (admin-editable);
 leave it empty to disable brief email.

@@ -76,6 +76,55 @@ test("shows spinner, calls api, and displays success distance", async () => {
   const distanceMsg = screen.getByTestId("flight-distance");
   expect(distanceMsg.textContent).toBe("Scored distance: 42.5 km");
   expect(screen.getByText(/GPS_SPIKE/)).toBeInTheDocument();
+  expect(screen.queryByTestId("flight-validation")).not.toBeInTheDocument();
+});
+
+test("shows validation result on success", async () => {
+  const onUploaded = vi.fn();
+
+  const mockFlight = {
+    id: "flight-124",
+    distance: 100.0,
+    score: 100.0,
+    scoringType: "XC" as const,
+    wingFactor: 1.0,
+    isManualLog: false,
+    igcPath: "flights/124.igc",
+    sanityFlags: [],
+    validation: {
+      date: "invalid",
+      signature: "pending",
+    },
+  };
+
+  (globalThis.fetch as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+    ok: true,
+    json: async () => mockFlight,
+  });
+
+  render(
+    <IgcUploadButton
+      roundId="round-1"
+      teamId="team-A"
+      place={1}
+      currentFlight={null}
+      onUploaded={onUploaded}
+    />
+  );
+
+  const input = screen.getByTestId("upload-igc-input");
+  const file = new File(["dummy content"], "test.igc", { type: "text/plain" });
+
+  fireEvent.change(input, { target: { files: [file] } });
+
+  await waitFor(() => {
+    expect(screen.queryByTestId("upload-spinner")).not.toBeInTheDocument();
+  });
+
+  const validationEl = screen.getByTestId("flight-validation");
+  expect(validationEl).toBeInTheDocument();
+  expect(screen.getByText("Date: invalid")).toBeInTheDocument();
+  expect(screen.getByText("checking… (coordinator will see final result)")).toBeInTheDocument();
 });
 
 test("shows error message on 413", async () => {

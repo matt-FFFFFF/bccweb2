@@ -3,7 +3,6 @@
 import { app, HttpRequest, HttpResponseInit, InvocationContext } from "@azure/functions";
 import { randomUUID } from "node:crypto";
 import type { Config, Flight, PilotSlot, RescoreJob, Round } from "@bccweb/types";
-import { scoreRound } from "@bccweb/scoring";
 import { ConfigSchema, RoundSchema } from "@bccweb/schemas";
 
 import { getPrivateBlobClient, readBlob, withPrivateLeaseRenewing, writePrivateBlob } from "../lib/blob.js";
@@ -14,6 +13,7 @@ import { mutationRateLimit } from "../lib/rateLimit.js";
 import { scoreIgc } from "../lib/igcScoring.js";
 import { readRoundOr404, resolveExpectedPilotName, streamToBuffer } from "../lib/flightHelpers.js";
 import { acquireActiveGuard, enqueueRescore, readJobStatus, releaseActiveGuard, writeJobStatus } from "../lib/rescoreJob.js";
+import { scoreRoundEnforcingValidation } from "../lib/scoreRoundValidated.js";
 
 const BUDGET_MS = 8 * 60_000;
 
@@ -24,13 +24,24 @@ type RescoreCounters = {
 
 type RescoreError = { teamId: string; place: number; error: string };
 
-type FlightUpdate = { teamId: string; place: number; flightId: string; flightPatch: Partial<Flight> };
+type FlightUpdate = {
+  teamId: string; place: number; flightId: string; flightPatch: Partial<Flight>;
+  expectedRoundDate: string; dateMismatch: boolean;
+};
 
 async function loadConfig(): Promise<Config> {
   try {
     return await readJson(getPrivateBlobClient("config.json"), ConfigSchema, "config.json");
-  } catch {
-    return ConfigSchema.parse({});
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      error.statusCode === 404
+    ) {
+      return ConfigSchema.parse({});
+    }
+    throw error;
   }
 }
 
@@ -43,7 +54,7 @@ function matchingSlot(round: Round, update: FlightUpdate): PilotSlot | undefined
   return team?.pilots.find((slot) => slot.placeInTeam === update.place);
 }
 
-function applyUpdates(round: Round, updates: readonly FlightUpdate[]): number {
+function applyUpdates(round: Round, updates: readonly FlightUpdate[], config: Config): number {
   let skippedStale = 0;
   for (const update of updates) {
     const slot = matchingSlot(round, update);
@@ -57,7 +68,18 @@ function applyUpdates(round: Round, updates: readonly FlightUpdate[]): number {
       skippedStale += 1;
       continue;
     }
-    slot.flight = { ...slot.flight, ...update.flightPatch };
+    const roundDateMatches = round.date === update.expectedRoundDate;
+    const flightPatch = roundDateMatches
+      ? update.flightPatch
+      : {
+          ...update.flightPatch,
+          sanityFlags: update.flightPatch.sanityFlags?.filter((flag) => flag !== "IGC_DATE_MISMATCH"),
+        };
+    slot.flight = { ...slot.flight, ...flightPatch };
+    const validation = { ...slot.flight.validation };
+    if (!config.flightDateValidationEnabled) delete validation.date;
+    else if (roundDateMatches) validation.date = update.dateMismatch ? "invalid" : "valid";
+    slot.flight.validation = validation;
   }
   return skippedStale;
 }
@@ -117,6 +139,8 @@ async function buildRescoreUpdates(round: Round, startedAt: number): Promise<{
           teamId: team.id,
           place: slot.placeInTeam,
           flightId: flight.id,
+          expectedRoundDate: round.date,
+          dateMismatch: result.sanityFlags.includes("IGC_DATE_MISMATCH"),
           flightPatch: {
             distance: result.distance,
             sanityFlags: result.sanityFlags,
@@ -156,7 +180,8 @@ export async function runRescoreJob(
 
   await withPrivateLeaseRenewing(path, async (leaseId) => {
     const leasedRound = (await readBlob(getPrivateBlobClient(path))) as Round;
-    const skippedStale = applyUpdates(leasedRound, updates);
+    const config = await loadConfig();
+    const skippedStale = applyUpdates(leasedRound, updates, config);
     if (skippedStale > 0) {
       // A manual override / IGC re-upload landed on these slots during the
       // unlocked scoring window; they were NOT rescored. Reclassify from
@@ -165,8 +190,7 @@ export async function runRescoreJob(
       counters.rescoredCount -= skippedStale;
       counters.skippedManualCount += skippedStale;
     }
-    const config = await loadConfig();
-    const { round: scored, derivation } = scoreRound(leasedRound, config);
+    const { round: scored, derivation } = scoreRoundEnforcingValidation(leasedRound, config);
     scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
     await writePrivateJson(path, RoundSchema, scored, leaseId);
   });

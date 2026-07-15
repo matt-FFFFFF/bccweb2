@@ -22,7 +22,8 @@ import {
   getBlobClient,
   getBlockBlobClient,
   getPrivateBlobClient,
-  withLease,
+  ensureJsonIndexBlob,
+  withLeaseRetry,
   withLeaseRenewing,
 } from "./blob.js";
 import { readJson, writeJson } from "./blobJson.js";
@@ -31,18 +32,25 @@ const RoundSummariesSchema = z.array(RoundSummarySchema);
 const PilotIndexEntrySchema = z.array(PilotSummarySchema);
 
 const STALE_RECOMPUTE_MARKER_MS = 5 * 60 * 1000;
+const RECOMPUTE_LEASE_RETRY_DEADLINE_MS = 45_000;
+const RECOMPUTE_LEASE_RETRY_BASE_MS = 25;
+const RECOMPUTE_LEASE_RETRY_CAP_MS = 250;
+const ROUNDS_INDEX_LEASE_RETRY_MAX_ATTEMPTS = 40;
+const ROUNDS_INDEX_LEASE_RETRY_BASE_MS = 25;
+const ROUNDS_INDEX_LEASE_RETRY_CAP_MS = 250;
 
 const recomputeInFlight = new Map<number, Promise<void>>();
+const recomputeDirty = new Set<number>();
 
 // ─── updateRoundsIndex ────────────────────────────────────────────────────────
 
 /**
  * Upsert a round summary into rounds.json.
- * Uses a blob lease for atomic read-modify-write; falls back to an
- * un-leased write if rounds.json does not yet exist.
+ * Creates the index if needed, then uses a blob lease for atomic read-modify-write.
  */
 export async function updateRoundsIndex(round: Round): Promise<void> {
   const path = "rounds.json";
+  await ensureJsonIndexBlob(path, stableStringify([]));
 
   const summary: RoundSummary = {
     id: round.id,
@@ -67,18 +75,9 @@ export async function updateRoundsIndex(round: Round): Promise<void> {
     await writeJson(path, RoundSummariesSchema, rounds, leaseId);
   };
 
-  try {
-    await withLease(path, async (leaseId) => {
-      await applyUpdate(leaseId);
-    });
-  } catch (err: unknown) {
-    // acquireLease throws 404 when the blob doesn't exist yet
-    if ((err as { statusCode?: number }).statusCode === 404) {
-      await applyUpdate();
-    } else {
-      throw err;
-    }
-  }
+  await withLeaseRetry(path, async (leaseId) => {
+    await applyUpdate(leaseId);
+  });
 }
 
 // ─── recomputeSeason ──────────────────────────────────────────────────────────
@@ -94,13 +93,35 @@ export async function updateRoundsIndex(round: Round): Promise<void> {
  */
 export async function recomputeSeason(seasonYear: number): Promise<void> {
   const existing = recomputeInFlight.get(seasonYear);
-  if (existing) return existing;
+  if (existing) {
+    recomputeDirty.add(seasonYear);
+    return existing;
+  }
 
-  const promise = recomputeSeasonUncached(seasonYear).finally(() => {
-    recomputeInFlight.delete(seasonYear);
-  });
+  const promise = runRecomputePasses(seasonYear);
   recomputeInFlight.set(seasonYear, promise);
   return promise;
+}
+
+async function runRecomputePasses(seasonYear: number): Promise<void> {
+  let passError: Error | null = null;
+  try {
+    do {
+      recomputeDirty.delete(seasonYear);
+      try {
+        await recomputeSeasonUncached(seasonYear);
+        passError = null;
+      } catch (err) {
+        passError = err instanceof Error
+          ? err
+          : new Error("Season recompute failed", { cause: err });
+      }
+    } while (recomputeDirty.has(seasonYear));
+    if (passError) throw passError;
+  } finally {
+    recomputeInFlight.delete(seasonYear);
+    recomputeDirty.delete(seasonYear);
+  }
 }
 
 async function loadConfig(): Promise<Config> {
@@ -117,60 +138,122 @@ async function loadConfig(): Promise<Config> {
 
 async function recomputeSeasonUncached(seasonYear: number): Promise<void> {
   const seasonPath = `seasons/${seasonYear}.json`;
-  const season = await readJson(getBlobClient(seasonPath), SeasonSchema, seasonPath);
-
-  // Load all rounds in parallel; skip rounds that fail to load
-  const maybeRounds = await Promise.all(
-    season.rounds.map((id) => {
-      const path = `rounds/${id}.json`;
-      return readJson(getPrivateBlobClient(path), RoundSchema, path).catch(() => null);
-    })
-  );
-  const normalizedRounds: Round[] = [];
-  for (const round of maybeRounds) {
-    if (round !== null) normalizedRounds.push(normalizeRoundForRecompute(round));
-  }
-  normalizedRounds.sort(compareRounds);
-
-  // Compute league table. D13: the league RE-derives from persisted per-round
-  // team.score aggregates under the CURRENT config, so editing
-  // leagueRoundScoresCounted intentionally re-windows the league. The
-  // "immutable to config edits" guarantee scopes to per-round scores + the
-  // Round.scoring snapshot, NOT to the league table.
-  const config = await loadConfig();
-  const leagueTable = stableLeagueTable(computeLeague(normalizedRounds, config));
-  const seasonPayload: Season = stableSeason({ ...season, leagueTable });
-
-  // Load pilot index for name resolution in results
-  let pilotNameMap: Record<string, string> = {};
-  try {
-    const idx = await readJson(
-      getBlobClient("pilots.json"),
-      PilotIndexEntrySchema,
-      "pilots.json",
-    );
-    pilotNameMap = Object.fromEntries(idx.map((p) => [p.id, p.name]));
-  } catch {
-    // pilots.json may not exist yet — names will fall back to IDs
-  }
-
-  // Compute and persist per-round results
-  const results = stableSeasonResults(buildSeasonResults(normalizedRounds, pilotNameMap));
-  const roundsIndex = await buildRoundsIndex();
-
   await ensureRecomputeLockBlob(seasonYear);
-  await withLeaseRenewing(`seasons/${seasonYear}.json.lock`, async () => {
+  await withRecomputeLeaseRetry(seasonYear, async () => {
+    const season = await readJson(getBlobClient(seasonPath), SeasonSchema, seasonPath);
+
+    // Load all rounds in parallel; skip rounds that fail to load
+    const maybeRounds = await Promise.all(
+      season.rounds.map((id) => {
+        const path = `rounds/${id}.json`;
+        return readJson(getPrivateBlobClient(path), RoundSchema, path).catch(() => null);
+      })
+    );
+    const normalizedRounds: Round[] = [];
+    for (const round of maybeRounds) {
+      if (round !== null) normalizedRounds.push(normalizeRoundForRecompute(round));
+    }
+    normalizedRounds.sort(compareRounds);
+
+    // Compute league table. D13: the league RE-derives from persisted per-round
+    // team.score aggregates under the CURRENT config, so editing
+    // leagueRoundScoresCounted intentionally re-windows the league. The
+    // "immutable to config edits" guarantee scopes to per-round scores + the
+    // Round.scoring snapshot, NOT to the league table.
+    const config = await loadConfig();
+    const leagueTable = stableLeagueTable(computeLeague(normalizedRounds, config));
+    const seasonPayload: Season = stableSeason({ ...season, leagueTable });
+
+    // Load pilot index for name resolution in results
+    let pilotNameMap: Record<string, string> = {};
+    try {
+      const idx = await readJson(
+        getBlobClient("pilots.json"),
+        PilotIndexEntrySchema,
+        "pilots.json",
+      );
+      pilotNameMap = Object.fromEntries(idx.map((p) => [p.id, p.name]));
+    } catch {
+      // pilots.json may not exist yet — names will fall back to IDs
+    }
+
+    // Compute and persist per-round results
+    const results = stableSeasonResults(buildSeasonResults(normalizedRounds, pilotNameMap));
     await createRecomputeMarker(seasonYear);
     try {
       await swapJsonBlob(seasonPath, seasonPayload);
       await swapJsonBlob(`results/${seasonYear}.json`, results);
-      await swapJsonBlob("rounds.json", roundsIndex);
+      await ensureJsonIndexBlob("rounds.json", stableStringify([]));
+      await withRoundsIndexLeaseRetry(async (leaseId) => {
+        const roundsIndex = await buildRoundsIndex();
+        await swapJsonBlob("rounds.json", roundsIndex, leaseId);
+      });
     } finally {
       await deleteRecomputeMarker(seasonYear);
     }
-  }, {
-    renewIntervalMs: 10_000,
   });
+}
+
+async function withRoundsIndexLeaseRetry(
+  fn: (leaseId: string) => Promise<void>,
+): Promise<void> {
+  for (
+    let attempt = 1;
+    attempt <= ROUNDS_INDEX_LEASE_RETRY_MAX_ATTEMPTS;
+    attempt += 1
+  ) {
+    let acquired = false;
+    try {
+      await withLeaseRenewing("rounds.json", async (leaseId) => {
+        acquired = true;
+        await fn(leaseId);
+      });
+      return;
+    } catch (err) {
+      if (acquired) throw err;
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      if (statusCode !== 409 && statusCode !== 412) throw err;
+      if (attempt === ROUNDS_INDEX_LEASE_RETRY_MAX_ATTEMPTS) throw err;
+      const exponentialBackoffMs = Math.min(
+        ROUNDS_INDEX_LEASE_RETRY_CAP_MS,
+        ROUNDS_INDEX_LEASE_RETRY_BASE_MS * 2 ** (attempt - 1),
+      );
+      await new Promise((resolve) =>
+        setTimeout(resolve, Math.random() * exponentialBackoffMs),
+      );
+    }
+  }
+}
+
+async function withRecomputeLeaseRetry(
+  seasonYear: number,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const path = `seasons/${seasonYear}.json.lock`;
+  const deadline = Date.now() + RECOMPUTE_LEASE_RETRY_DEADLINE_MS;
+  while (true) {
+    let acquired = false;
+    try {
+      await withLeaseRenewing(path, async () => {
+        acquired = true;
+        await fn();
+      }, { renewIntervalMs: 10_000 });
+      return;
+    } catch (err) {
+      if (acquired) throw err;
+      const statusCode = (err as { statusCode?: number }).statusCode;
+      if (statusCode !== 409 && statusCode !== 412) throw err;
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) throw err;
+      const backoffMs = Math.min(
+        remainingMs,
+        RECOMPUTE_LEASE_RETRY_CAP_MS,
+        RECOMPUTE_LEASE_RETRY_BASE_MS
+          + Math.random() * (RECOMPUTE_LEASE_RETRY_CAP_MS - RECOMPUTE_LEASE_RETRY_BASE_MS),
+      );
+      await new Promise((resolve) => setTimeout(resolve, backoffMs));
+    }
+  }
 }
 
 // ─── buildSeasonResults ───────────────────────────────────────────────────────
@@ -335,7 +418,11 @@ async function deleteRecomputeMarker(seasonYear: number): Promise<void> {
   await getBlobClient(`seasons/${seasonYear}.recompute.lock`).deleteIfExists();
 }
 
-async function swapJsonBlob(path: string, payload: unknown): Promise<void> {
+async function swapJsonBlob(
+  path: string,
+  payload: unknown,
+  leaseId?: string,
+): Promise<void> {
   const bytes = Buffer.from(stableStringify(payload));
   const tmpPath = `${path}.tmp`;
   const tmp = getBlockBlobClient(tmpPath);
@@ -346,7 +433,10 @@ async function swapJsonBlob(path: string, payload: unknown): Promise<void> {
   });
 
   try {
-    const poller = await finalBlob.beginCopyFromURL(tmp.url, { intervalInMs: 100 });
+    const poller = await finalBlob.beginCopyFromURL(tmp.url, {
+      intervalInMs: 100,
+      conditions: leaseId ? { leaseId } : undefined,
+    });
     await poller.pollUntilDone();
   } catch (err) {
     // Leave .tmp for forensics if the final copy/swap fails.

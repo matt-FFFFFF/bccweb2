@@ -17,6 +17,9 @@ locals {
     { name = "PURETRACK_API_KEY", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/puretrack-api-key/)" },
     { name = "PURETRACK_EMAIL", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/puretrack-email/)" },
     { name = "PURETRACK_PASSWORD", value = "@Microsoft.KeyVault(SecretUri=${azapi_resource.kv.output.properties.vaultUri}secrets/puretrack-password/)" },
+    { name = "FAI_VALI_ENABLED", value = "true" },
+    { name = "FAI_VALI_BASE_URL", value = "https://vali.fai-civl.org" },
+    { name = "FAI_VALI_TIMEOUT_MS", value = "20000" },
   ]
 }
 

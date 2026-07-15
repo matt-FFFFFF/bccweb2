@@ -109,3 +109,71 @@ exit fails the workflow and blocks the merge.
 | `user-index.json` email entry | Removed at GDPR erasure time |
 
 See `docs/runbooks/gdpr-erasure.md` for the full GDPR right-to-erasure procedure.
+
+### Orphaned IGC Retention
+
+A hard process termination after an IGC upload but before its round commit can leave an
+unreferenced raw GPS-track blob under `flight-igcs/`. Periodically, and after a suspected
+upload incident, run `node scripts/admin/reconcile-orphan-igcs.mjs` to review private IGC
+blobs that no authoritative `rounds/*.json` blob references and that are older than the
+default 24-hour safety threshold. Review the dry-run output first, then rerun with
+`--delete`; use `--older-than-hours <hours>` only when a different safety window is
+operationally justified. The script never deletes a referenced blob and refreshes the
+round reference set immediately before deletion.
+
+## FAI Signature Validation: Outbound PII Egress
+
+`apps/api/src/lib/faiVali.ts` (`validateIgcSignature`) uploads the raw IGC file for a
+flight to the FAI online validator (`https://vali.fai-civl.org` by default, overridable
+via `FAI_VALI_BASE_URL`) whenever `flightSignatureValidationEnabled` is on and a pilot
+uploads or revalidates an IGC track. This is a genuine outbound PII egress: an IGC file's
+`HFPLT` header carries the pilot's name, and its `B`-record track log is the pilot's GPS
+flight path for that round. Both leave BCC's infrastructure and reach a third-party
+service outside our control.
+
+- **Scanner limitation**: `scripts/privacy-scan.mjs` only scans blobs written into the
+  `data` (public) container. It has no visibility into this outbound HTTP call, so it
+  cannot catch a regression that widens what gets sent to FAI or that sends flights that
+  should have been exempted. Any change to `faiVali.ts` or its callers needs a manual
+  privacy review; it is not covered by CI.
+- **Disable controls**: setting the app setting `FAI_VALI_ENABLED=false` makes
+  `validateIgcSignature` return `{signature: "unverified", faiStatus: "DISABLED"}`
+  immediately, without any network call, regardless of the `config.json` toggle below.
+  This is the hard kill switch for the outbound call itself (see
+  `apps/api/local.settings.example.json`).
+- **Feature toggle** (`config.json` → `flightSignatureValidationEnabled`, admin-editable
+  via the Config page): turning this off does not retroactively re-score already-Complete
+  rounds: a round's published score only changes on an explicit rescore
+  (`POST /api/rounds/{id}/rescore`), which re-runs `scoreRoundEnforcingValidation`. To
+  apply a toggle flip to a round's score, rescore it. `POST /api/manage/rounds/{id}/recompute`
+  (`apps/api/src/functions/admin.ts`, backed by `apps/api/src/lib/recompute.ts`) does NOT
+  re-score anything: it only republishes `rounds.json` and the season/results blobs from
+  the round's already-persisted `team.score` values, so it cannot apply a toggle flip on
+  its own. Use recompute only to recover from a failed publish, for example a season
+  recompute that errored after a rescore had already correctly persisted the new score;
+  running recompute again then republishes that already-correct score.
+- **Queued jobs and the toggle**: disabling `flightSignatureValidationEnabled` does not
+  purge jobs already sitting on the `igc-validation` queue. The `igcValidationWorker`
+  re-reads `config.json` immediately before each FAI call, after acquiring the global
+  guard, pacing, downloading the IGC, and re-checking the current flight attempt. If the
+  toggle has since been switched off, the worker records `unverified`/`DISABLED` without
+  sending the IGC to FAI. A call already past that final check remains in flight and can
+  still complete; disabling the toggle does not cancel an outbound request that has
+  already started.
+- **Recovering a stuck pending validation**: a hard process termination after the round
+  commits `signature: "pending"` but before the queue send can leave a flight with no
+  worker. Recover one flight with the operator **Resubmit** action, which creates a fresh
+  attempt and enqueues it. For bulk recovery, first review the dry run with
+  `node scripts/admin/redispatch-stuck-igc-validations.mjs`, then run
+  `node scripts/admin/redispatch-stuck-igc-validations.mjs --redispatch`. The script
+  protects rounds modified within the default two-hour window, skips terminal signatures
+  and attempts that already have a durable result, and reuses each eligible flight's
+  existing attempt ID. Per the approved policy, a `pending` flight continues to score in
+  the interim, including if the round completes before recovery.
+- **Changing a round's date**: `updateRound` clears any stale `IGC_DATE_MISMATCH`
+  sanity flag and drops the flight's stored date verdict when the round date changes, but
+  it does not re-parse the IGC file. It only re-scores existing distances against the new
+  date verdicts that already exist. A flight that becomes newly mismatched against the
+  new date is not detected until you explicitly rescore the round
+  (`POST /api/rounds/{id}/rescore`). After editing a round's date, rescore the round so
+  IGC date validation is checked against the new date.
