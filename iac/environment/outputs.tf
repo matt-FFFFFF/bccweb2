@@ -39,3 +39,28 @@ output "production_dns_managed_by_terraform" {
   description = "Whether Terraform manages the production DNS record."
   value       = module.stamp.production_dns_managed_by_terraform
 }
+
+output "app_insights_id" {
+  description = "Resource ID of the Application Insights component."
+  value       = module.platform.app_insights_id
+}
+
+output "log_analytics_workspace_id" {
+  description = "Resource ID of the Log Analytics workspace."
+  value       = module.platform.log_analytics_workspace_id
+}
+
+output "platform_rg_name" {
+  description = "Name of the pre-created platform resource group."
+  value       = module.platform.platform_rg_name
+}
+
+output "acs_email_domain_verification_records" {
+  description = "Raw ACS domain verification records as returned by Azure."
+  value       = module.platform.acs_email_domain_verification_records
+}
+
+output "acs_dns_records_for_operator" {
+  description = "ACS DNS records formatted for operator registrar setup."
+  value       = module.platform.acs_dns_records_for_operator
+}

@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 British Club Challenge authors
 # SPDX-License-Identifier: MPL-2.0
-# All variables flow into module "stamp" in main.tf. Per-env values live in ../env/<env>.tfvars.
+# Root inputs flow into the platform and stamp modules in main.tf. Per-env values live in ../env/<env>.tfvars.
 
 variable "stamp_name" {
   description = "Environment/stamp name used as the suffix in resource names."
@@ -8,16 +8,28 @@ variable "stamp_name" {
   nullable    = false
 }
 
-variable "tfstate_rg_name" {
-  description = "Resource group holding the tfstate storage account (bootstrap output resource_group_name)."
-  type        = string
-  default     = "rg-bccweb-tfstate"
-}
-
-variable "tfstate_sa_name" {
-  description = "Storage account hosting the tfstate blobs (bootstrap output storage_account_name). Used to read the common stack's remote state."
+variable "acs_email_domain" {
+  description = "ACS email sending domain for this environment."
   type        = string
   nullable    = false
+}
+
+variable "platform_rg_name" {
+  description = "Name of the pre-created platform resource group."
+  type        = string
+  nullable    = false
+}
+
+variable "stamp_rg_name" {
+  description = "Name of the pre-created stamp resource group."
+  type        = string
+  nullable    = false
+}
+
+variable "tags" {
+  description = "Additional tags merged with the canonical project tags."
+  type        = map(string)
+  default     = {}
 }
 
 variable "terraform_principal_type" {
@@ -125,9 +137,9 @@ variable "blob_schema_mode" {
 
 locals {
   prefix = "bccweb-${var.stamp_name}"
-  tags = {
+  tags = merge(var.tags, {
     project     = "bccweb"
     environment = var.stamp_name
     managed_by  = "terraform"
-  }
+  })
 }

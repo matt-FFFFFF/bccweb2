@@ -1,25 +1,20 @@
 # SPDX-FileCopyrightText: 2026 British Club Challenge authors
 # SPDX-License-Identifier: MPL-2.0
-# Service stack root assembly. Run: terraform -chdir=iac/service init -backend-config=../env/<env>.backend.hcl && terraform -chdir=iac/service apply -var-file=../env/<env>.tfvars
+# Service stack root assembly. Run: terraform -chdir=iac/environment init -backend-config=../env/<env>.backend.hcl && terraform -chdir=iac/environment apply -var-file=../env/<env>.tfvars
 #
-# Observability (LAW + App Insights) lives in the sibling iac/common stack;
-# this stack reads its outputs via remote state. The stamp resource group is
-# pre-created by iac/bootstrap and consumed inside the stamp module via a
-# interpolated ID — this stack creates no resource groups.
-
 data "azapi_client_config" "current" {}
 
-# ─── Common stack outputs (per-env LAW + App Insights) ────────────────────────
+# ─── Platform module (per-env LAW + App Insights + ACS email domain) ─────────
 
-data "terraform_remote_state" "common" {
-  backend = "azurerm"
-  config = {
-    resource_group_name  = var.tfstate_rg_name
-    storage_account_name = var.tfstate_sa_name
-    container_name       = "tfstate"
-    key                  = "common-${var.stamp_name}.tfstate"
-    use_azuread_auth     = true
-  }
+module "platform" {
+  source = "./modules/platform"
+
+  stamp_name       = var.stamp_name
+  location         = var.location
+  acs_email_domain = var.acs_email_domain
+  platform_rg_name = var.platform_rg_name
+  tags             = local.tags
+  subscription_id  = data.azapi_client_config.current.subscription_id
 }
 
 # ─── Stamp module (single instance — single-stamp by user decision) ───────────
@@ -28,7 +23,7 @@ module "stamp" {
   source = "./modules/stamp"
 
   stamp_name                   = var.stamp_name
-  stamp_rg_name                = "rg-bccweb-${var.stamp_name}"
+  stamp_rg_name                = var.stamp_rg_name
   location                     = var.location
   allowed_origins              = var.allowed_origins
   ops_email                    = var.ops_email
@@ -36,7 +31,7 @@ module "stamp" {
   production_hostname          = var.production_hostname
   dns_zone_name                = var.dns_zone_name
   dns_zone_resource_group_name = var.dns_zone_resource_group_name
-  acs_email_domain_id          = data.terraform_remote_state.common.outputs.acs_email_domain_id
+  acs_email_domain_id          = module.platform.acs_email_domain_id
   acs_sender_address           = var.acs_sender_address
   puretrack_api_key            = var.puretrack_api_key
   puretrack_email              = var.puretrack_email
@@ -46,8 +41,8 @@ module "stamp" {
   blob_schema_mode             = var.blob_schema_mode
   tags                         = local.tags
 
-  app_insights_id                = data.terraform_remote_state.common.outputs.app_insights_id
-  app_insights_connection_string = data.terraform_remote_state.common.outputs.app_insights_connection_string
+  app_insights_id                = module.platform.app_insights_id
+  app_insights_connection_string = module.platform.app_insights_connection_string
   terraform_principal_object_id  = data.azapi_client_config.current.object_id
   terraform_principal_type       = var.terraform_principal_type
 }
