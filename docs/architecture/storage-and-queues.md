@@ -157,12 +157,16 @@ already exists for this attempt.
 Otherwise it acquires a single global blob-lease guard
 (`igc-validation/active.json`, `acquireIgcValidationGuard`/`releaseIgcValidationGuard`
 in `apps/api/src/lib/igcValidationJob.ts`) so at most one call to the FAI validator runs
-at a time, paces itself to at least 2 seconds since the last call
-(`paceBeforeFaiCall`), and only then re-reads `config.json`. If
-`flightSignatureValidationEnabled` has been switched off since the message was queued,
-the worker records `signature: "unverified", faiStatus: "DISABLED"` and skips the FAI
-call entirely; see `docs/runbooks/privacy.md` for the accepted sub-second TOCTOU window
-this leaves. Otherwise it calls
+at a time, then runs the pacing/staleness sequence deliberately split into three steps:
+`waitForPace(leaseId)` first blocks until at least 2 seconds have passed since the
+previous call recorded under this guard; the worker then re-reads the round and
+re-checks the flight's identity and `isManualLog` state, and re-reads `config.json` for
+`flightSignatureValidationEnabled`, immediately before egress, closing the window
+between the pace wait and the outbound call. If validation has since been disabled, the
+worker records `signature: "unverified", faiStatus: "DISABLED"` and skips the FAI call
+entirely; see `docs/runbooks/privacy.md` for the accepted sub-second TOCTOU window this
+leaves. Otherwise, right before the fetch, it calls `recordFaiCallStart(leaseId)` to
+stamp the call-start timestamp that paces the next call, then calls
 `validateIgcSignature` (`apps/api/src/lib/faiVali.ts`) against the flight's immutable
 `igcPath` bytes, persists the outcome via `writeValidationResult` (create-only,
 durable) before releasing the guard, then commits the result onto the round under a
@@ -174,10 +178,14 @@ already committed; an operator repairs the published league via
 outbound-egress and toggle implications of this flow).
 
 Transport failures talking to FAI (timeout, 5xx, non-JSON, oversized file) are mapped to
-a terminal `unverified` result and ACKed; they never retry the FAI call. Only a failure
-in the commit-phase lease write throws, so the host retries; that retry finds the
-durable `writeValidationResult` record and skips FAI again. After `maxDequeueCount:5`
-such retries dead-letter to `igc-validation-poison` as a host-crash safety net.
+a terminal `unverified` result and ACKed; they never retry the FAI call. Failures
+reading the round or `config.json`, reading the IGC bytes, writing the durable result
+record, committing the round under its private lease, `updateRoundsIndex`, or deleting
+the durable result record all throw and are retried by the host. Any such retry replays
+from the top of the message handler; because `readValidationResult` finds the durable
+`writeValidationResult` record already in place, it skips FAI again rather than making
+a duplicate call. After `maxDequeueCount:5` such retries dead-letter to
+`igc-validation-poison` as a host-crash safety net.
 
 ## Related runbooks
 
