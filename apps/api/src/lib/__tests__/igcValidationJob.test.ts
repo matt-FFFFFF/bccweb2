@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test } from "vitest";
 import { getPrivateContainer } from "../../__tests__/helpers/azurite.js";
 import {
   acquireIgcValidationGuard,
+  assertFaiValiTimeoutWithinGuard,
   deleteValidationResult,
   enqueueIgcValidation,
   IGC_VALIDATION_QUEUE_NAME,
@@ -76,6 +77,23 @@ describe("IGC validation queue", () => {
 });
 
 describe("IGC validation guard", () => {
+  test("rejects a FAI timeout that can outlive the guard lease budget", () => {
+    // Given
+    const previousTimeout = process.env["FAI_VALI_TIMEOUT_MS"];
+    process.env["FAI_VALI_TIMEOUT_MS"] = "60000";
+
+    try {
+      // When
+      const validateTimeout = () => assertFaiValiTimeoutWithinGuard();
+
+      // Then
+      expect(validateTimeout).toThrow("FAI_VALI_TIMEOUT_MS must be at most 50000ms");
+    } finally {
+      if (previousTimeout === undefined) delete process.env["FAI_VALI_TIMEOUT_MS"];
+      else process.env["FAI_VALI_TIMEOUT_MS"] = previousTimeout;
+    }
+  });
+
   test("acquires and releases a real finite lease", async () => {
     // Given
     const guard = await acquireIgcValidationGuard();

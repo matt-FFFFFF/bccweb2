@@ -17,6 +17,11 @@ export const IGC_VALIDATION_QUEUE_NAME = "igc-validation";
 const GUARD_PATH = "igc-validation/active.json";
 const GUARD_LEASE_SECONDS = 60;
 const MIN_CALL_INTERVAL_MS = 2_000;
+const GUARD_COMPLETION_MARGIN_MS = 8_000;
+const DEFAULT_FAI_VALI_TIMEOUT_MS = 20_000;
+const MAX_FAI_VALI_TIMEOUT_MS = GUARD_LEASE_SECONDS * 1_000
+  - MIN_CALL_INTERVAL_MS
+  - GUARD_COMPLETION_MARGIN_MS;
 
 const ValidationResultSchema = z
   .object({
@@ -67,6 +72,20 @@ export async function releaseIgcValidationGuard(leaseId: string): Promise<void> 
   await getPrivateBlockBlobClient(GUARD_PATH)
     .getBlobLeaseClient(leaseId)
     .releaseLease();
+}
+
+export function assertFaiValiTimeoutWithinGuard(): void {
+  const timeoutMs = Number(
+    process.env["FAI_VALI_TIMEOUT_MS"] ?? DEFAULT_FAI_VALI_TIMEOUT_MS,
+  );
+  if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
+    throw new Error("FAI_VALI_TIMEOUT_MS must be a positive finite number");
+  }
+  if (timeoutMs > MAX_FAI_VALI_TIMEOUT_MS) {
+    throw new Error(
+      `FAI_VALI_TIMEOUT_MS must be at most ${MAX_FAI_VALI_TIMEOUT_MS}ms`,
+    );
+  }
 }
 
 export async function paceBeforeFaiCall(leaseId: string): Promise<Date> {

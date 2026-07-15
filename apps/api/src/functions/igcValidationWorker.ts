@@ -14,6 +14,7 @@ import { validateIgcSignature } from "../lib/faiVali.js";
 import { findSlot, streamToBuffer } from "../lib/flightHelpers.js";
 import {
   acquireIgcValidationGuard,
+  assertFaiValiTimeoutWithinGuard,
   deleteValidationResult,
   enqueueIgcValidation,
   IGC_VALIDATION_QUEUE_NAME,
@@ -112,14 +113,24 @@ async function createValidationResult(
     const existing = await readValidationResult(job.validationAttemptId);
     if (existing !== null) return existing;
     await paceBeforeFaiCall(leaseId);
-    const config = await loadConfig();
     const igcPath = igcPathFor(flight);
-    const result: FlightValidation = config.flightSignatureValidationEnabled
-      ? await validateIgcSignature(
-          await readIgc(igcPath),
-          igcPath.split("/").at(-1) ?? "flight.igc",
-        )
-      : { signature: "unverified", faiStatus: "DISABLED" };
+    const igc = await readIgc(igcPath);
+    const currentFlight = matchingFlight(
+      await readRound(`rounds/${job.roundId}.json`),
+      job,
+    );
+    if (currentFlight === null || currentFlight.isManualLog === true) return null;
+    const config = await loadConfig();
+    let result: FlightValidation;
+    if (config.flightSignatureValidationEnabled) {
+      assertFaiValiTimeoutWithinGuard();
+      result = await validateIgcSignature(
+        igc,
+        igcPath.split("/").at(-1) ?? "flight.igc",
+      );
+    } else {
+      result = { signature: "unverified", faiStatus: "DISABLED" };
+    }
     await writeValidationResult(job.validationAttemptId, result);
     return result;
   } finally {

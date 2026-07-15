@@ -233,6 +233,26 @@ describe("igcValidationWorker queue transaction", () => {
     expect(await persistedRound(seed)).toEqual(before);
   });
 
+  it("ACKs when the matching flight becomes manual after the initial guard check", async () => {
+    const seed = await seedValidation();
+    let converted: Round | null = null;
+    jobMock.pace.mockImplementationOnce(async () => {
+      const concurrent = await persistedRound(seed);
+      const flight = concurrent.teams[0]?.pilots[0]?.flight;
+      if (flight === null || flight === undefined) throw new Error("Validation fixture has no flight");
+      flight.isManualLog = true;
+      converted = concurrent;
+      await writePrivateJson(seed.path, concurrent);
+      return new Date();
+    });
+
+    await invokeQueue("igcValidationWorker", seed.job);
+
+    expect(faiMock.validate).not.toHaveBeenCalled();
+    expect(await persistedRound(seed)).toEqual(converted);
+    expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
+  });
+
   it("replays an already-terminal Complete attempt without FAI and recomputes results", async () => {
     const seed = await seedValidation({ status: "Complete" });
     const round = await persistedRound(seed);
@@ -282,11 +302,19 @@ describe("igcValidationWorker queue transaction", () => {
     expect(ctx.error).toHaveBeenCalledWith(expect.stringContaining("recomputeSeason(2026) failed"), expect.any(Error));
   });
 
-  it("re-reads a toggled-off config under the paced guard and records DISABLED", async () => {
+  it("re-reads a toggled-off config after IGC download and records DISABLED", async () => {
     const seed = await seedValidation();
-    jobMock.pace.mockImplementationOnce(async () => {
-      await writePrivateJson("config.json", config(false));
-      return new Date();
+    const realGetPrivateBlobClient = blobModule.getPrivateBlobClient;
+    vi.spyOn(blobModule, "getPrivateBlobClient").mockImplementation((path) => {
+      const client = realGetPrivateBlobClient(path);
+      if (path !== seed.igcPath) return client;
+      const download = client.download.bind(client);
+      vi.spyOn(client, "download").mockImplementation(async () => {
+        const response = await download();
+        await writePrivateJson("config.json", config(false));
+        return response;
+      });
+      return client;
     });
 
     await invokeQueue("igcValidationWorker", seed.job);
