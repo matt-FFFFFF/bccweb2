@@ -38,6 +38,24 @@ import * as pureTrack from "../../lib/puretrack.js";
 const leaseHook = vi.hoisted(() => ({
   beforePrivateRenewing: null as null | ((path: string) => Promise<void>),
 }));
+const blobJsonHook = vi.hoisted(() => ({
+  configReadError: null as null | Error,
+}));
+
+vi.mock("../../lib/blobJson.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../lib/blobJson.js")>();
+  return {
+    ...actual,
+    readJson: async <T>(...args: Parameters<typeof actual.readJson<T>>): Promise<T> => {
+      const error = blobJsonHook.configReadError;
+      if (args[2] === "config.json" && error) {
+        blobJsonHook.configReadError = null;
+        throw error;
+      }
+      return actual.readJson(...args);
+    },
+  };
+});
 
 vi.mock("../../lib/blob.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../lib/blob.js")>();
@@ -102,6 +120,7 @@ describe("round lifecycle integration", () => {
   const restoredSpies: Array<() => void> = [];
 
   beforeEach(() => {
+    blobJsonHook.configReadError = null;
     vi.clearAllMocks();
     pdfMock.generateBriefPdf.mockResolvedValue(Buffer.from("%PDF-1.4 lifecycle"));
     vi.mocked(enqueueBriefPdf).mockResolvedValue(undefined);
@@ -109,6 +128,7 @@ describe("round lifecycle integration", () => {
   });
 
   afterEach(() => {
+    blobJsonHook.configReadError = null;
     leaseHook.beforePrivateRenewing = null;
     while (restoredSpies.length) restoredSpies.pop()?.();
     vi.restoreAllMocks();
@@ -226,6 +246,20 @@ describe("round lifecycle integration", () => {
     await recomputeSeason(ctx.year);
   });
 
+  it("completeRound fails and leaves the round Locked when config storage is unavailable", async () => {
+    const ctx = await seedLockedScorableRound();
+    blobJsonHook.configReadError = Object.assign(new Error("transient config read failure"), {
+      statusCode: 503,
+    });
+
+    const res = await completeRound(ctx);
+
+    expect(res.status).toBe(500);
+    const persisted = await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`);
+    expect(persisted).toMatchObject({ status: "Locked", isLocked: true });
+    expect(persisted?.teams[0]?.pilots[0]?.pilotPoints).toBe(0);
+  });
+
   it("lockRound when status is not BriefComplete returns 409 INVALID_STATE-style conflict", async () => {
     const ctx = await seedLifecycleRound({ status: "Confirmed" });
 
@@ -309,6 +343,27 @@ describe("round lifecycle integration", () => {
     expect((res.jsonBody as { code?: string; error?: string }).code).toBe("CONFLICT");
     expect((res.jsonBody as { error?: string }).error).toBe("Conflict");
     expect((await readPrivateJson<Round>(`rounds/${ctx.roundId}.json`))?.maxTeams).toBe(8);
+  });
+
+  it("updateRound clears stale flight date validation after unlock while preserving signature and override", async () => {
+    const ctx = await seedLockedScorableRound();
+    const path = `rounds/${ctx.roundId}.json`;
+    const locked = (await readPrivateJson<Round>(path))!;
+    const flight = locked.teams[0]?.pilots[0]?.flight;
+    if (!flight) throw new Error("Expected seeded flight");
+    flight.validation = { signature: "invalid", date: "valid", overridden: true };
+    await writePrivateJson(path, locked);
+    await expect(unlockRound(ctx)).resolves.toMatchObject({ status: 200 });
+
+    const res = await updateRoundMeta(ctx, { date: `${ctx.year}-06-10` });
+
+    expect(res.status).toBe(200);
+    const updated = await readPrivateJson<Round>(path);
+    expect(updated?.date).toBe(`${ctx.year}-06-10`);
+    expect(updated?.teams[0]?.pilots[0]?.flight?.validation).toEqual({
+      signature: "invalid",
+      overridden: true,
+    });
   });
 
   it("updateRound with an unknown siteId returns 409 CONFLICT and leaves the site unchanged", async () => {
@@ -708,6 +763,13 @@ function lockRound(ctx: LifecycleContext) {
 
 function completeRound(ctx: LifecycleContext) {
   return invoke("completeRound", makeAuthRequest(ctx.adminUserId, ctx.adminEmail, {
+    method: "POST",
+    params: { id: ctx.roundId },
+  }));
+}
+
+function unlockRound(ctx: LifecycleContext) {
+  return invoke("unlockRound", makeAuthRequest(ctx.adminUserId, ctx.adminEmail, {
     method: "POST",
     params: { id: ctx.roundId },
   }));

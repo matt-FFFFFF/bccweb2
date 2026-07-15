@@ -119,10 +119,16 @@ async function loadConfig(): Promise<Config> {
       ConfigSchema,
       "config.json",
     );
-  } catch {
-    // Virgin store: ConfigSchema.parse({}) yields the canonical defaults that
-    // Task 20 centralised on the schema.
-    return ConfigSchema.parse({});
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      error.statusCode === 404
+    ) {
+      return ConfigSchema.parse({});
+    }
+    throw error;
   }
 }
 
@@ -347,7 +353,17 @@ async function updateRound(
         throw new HttpError(409, "ROUND_CANCELLED", "Round is cancelled — uncancel before editing");
       }
 
-      if (body.date) r.date = body.date;
+      if (body.date && body.date !== r.date) {
+        r.date = body.date;
+        for (const team of r.teams) {
+          for (const slot of team.pilots) {
+            if (!slot.flight?.validation) continue;
+            const validation = { ...slot.flight.validation };
+            delete validation.date;
+            slot.flight.validation = validation;
+          }
+        }
+      }
       if (body.maxTeams !== undefined) r.maxTeams = body.maxTeams;
       if (body.minimumScore !== undefined) r.minimumScore = body.minimumScore;
 

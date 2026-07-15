@@ -32,8 +32,16 @@ type FlightUpdate = {
 async function loadConfig(): Promise<Config> {
   try {
     return await readJson(getPrivateBlobClient("config.json"), ConfigSchema, "config.json");
-  } catch {
-    return ConfigSchema.parse({});
+  } catch (error: unknown) {
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "statusCode" in error &&
+      error.statusCode === 404
+    ) {
+      return ConfigSchema.parse({});
+    }
+    throw error;
   }
 }
 

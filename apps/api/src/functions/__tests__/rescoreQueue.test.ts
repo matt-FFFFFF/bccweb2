@@ -407,6 +407,31 @@ describe("rescore enqueue/status/worker async chain", () => {
     expect(persisted.teams[0]?.pilots[0]?.pilotPoints).toBe(0);
   });
 
+  it("fails without persisting rescore updates when config storage is unavailable", async () => {
+    vi.mocked(scoreIgc).mockResolvedValueOnce(scored(101)).mockResolvedValueOnce(scored(202));
+    const ctx = await seedMixedRound();
+    const path = `rounds/${ctx.roundId}.json`;
+    const before = (await readBlob(getPrivateBlobClient(path))) as Round;
+    const beforeDistance = before.teams[0]?.pilots[0]?.flight?.distance;
+    const job = await seedQueuedJob(ctx.roundId, ctx.admin);
+    const realReadBlob = blobModule.readBlob;
+    vi.spyOn(blobModule, "readBlob").mockImplementation(async (client) => {
+      if (client.name === "config.json") {
+        throw Object.assign(new Error("transient config read failure"), { statusCode: 503 });
+      }
+      return realReadBlob(client);
+    });
+
+    await getRegisteredQueueHandler("rescoreWorker").handler(rescoreMessage(job), invocationContext("rescoreWorker"));
+
+    const finished = await readJobStatus(job.jobId);
+    expect(finished?.status).toBe("failed");
+    expect(finished?.errors?.[0]?.error).toContain("transient config read failure");
+    const persisted = (await realReadBlob(getPrivateBlobClient(path))) as Round;
+    expect(persisted.teams[0]?.pilots[0]?.flight?.distance).toBe(beforeDistance);
+    expect(await auditBlobCount(ctx.roundId)).toBe(0);
+  });
+
   it("does not call FAI validation or enqueue an IGC validation job", async () => {
     const ctx = await seedMixedRound();
     const validateSpy = vi.spyOn(faiValidationModule, "validateIgcSignature");
