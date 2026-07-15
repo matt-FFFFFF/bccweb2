@@ -729,6 +729,43 @@ describe("uploadIgc — POST /rounds/{id}/teams/{teamId}/pilots/{place}/igc", ()
     expect(await listPrivateBlobNames(`flight-igcs/${r.roundId}/`)).toEqual([]);
   });
 
+  it("rejects a round date changed during scoring and removes the uncommitted IGC blob", async () => {
+    const r = await seedRound();
+    const { user } = await bootstrapAdmin();
+    const scoring = deferred<Awaited<ReturnType<typeof scoreIgc>>>();
+    const started = deferred<void>();
+    vi.mocked(scoreIgc).mockImplementationOnce(async () => {
+      started.resolve();
+      return scoring.promise;
+    });
+
+    const upload = invoke(
+      "uploadIgc",
+      withFile(
+        makeAuthRequest(user.id, user.email, { method: "POST", params: paramsFor(r) }),
+        igcFile(D3P),
+      ),
+    );
+    await started.promise;
+    const current = await readPrivateJson<Round>(`rounds/${r.roundId}.json`);
+    if (!current) throw new Error("round fixture missing");
+    current.date = "2019-06-16";
+    await writePrivateJson(`rounds/${r.roundId}.json`, current);
+    scoring.resolve({
+      distance: 1,
+      sanityFlags: [],
+      scoredAt: new Date().toISOString(),
+      scoredByVersion: "test",
+      parserErrors: [],
+    });
+
+    const res = await upload;
+
+    expect(res.status).toBe(409);
+    expect((res.jsonBody as { code: string }).code).toBe("ROUND_DATE_CHANGED");
+    expect(await listPrivateBlobNames(`flight-igcs/${r.roundId}/`)).toEqual([]);
+  });
+
   it("rejects a slot reassigned during scoring and removes the uncommitted IGC blob", async () => {
     const r = await seedRound();
     const { user } = await bootstrapAdmin();

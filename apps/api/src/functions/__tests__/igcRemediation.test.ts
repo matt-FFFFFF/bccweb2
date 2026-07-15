@@ -350,6 +350,36 @@ describe("revalidateIgc", () => {
     expect(results?.[0]?.teamResults[0]?.score).toBeGreaterThan(0);
   });
 
+  it("re-scores an enqueue failure using the current config", async () => {
+    const seed = await seedRemediation();
+    const { user } = await bootstrapAdmin();
+    const round = await storedRound(seed);
+    const validation = storedFlight(round).validation;
+    if (!validation) throw new Error("seeded validation missing");
+    validation.date = "invalid";
+    await writePrivateJson(seed.path, round);
+    jobMock.enqueue.mockImplementationOnce(async () => {
+      await writePrivateJson(
+        "config.json",
+        ConfigSchema.parse({
+          flightSignatureValidationEnabled: true,
+          flightDateValidationEnabled: false,
+        }),
+      );
+      throw new Error("queue unavailable");
+    });
+
+    const res = await invoke("revalidateIgc", requestFor(seed, user));
+
+    expect(res.status).toBe(200);
+    expect(storedFlight(await storedRound(seed)).validation).toMatchObject({
+      signature: "unverified",
+      date: "invalid",
+      faiStatus: "ENQUEUE_FAILED",
+    });
+    expect((await storedRound(seed)).teams[0]?.pilots[0]?.pilotPoints).toBeGreaterThan(0);
+  });
+
   it("does not downgrade a newer attempt when an older enqueue fails", async () => {
     const seed = await seedRemediation();
     const { user } = await bootstrapAdmin();
@@ -423,6 +453,50 @@ describe("allowIgc", () => {
     expect(round.teams[0]?.pilots[0]?.pilotPoints).toBeGreaterThan(0);
     expect(round.teams[0]?.score).toBeGreaterThan(0);
     expect(round.scoring?.scoredAt).toEqual(expect.any(String));
+  });
+
+  it("scores an override using the config current inside the lease", async () => {
+    const seed = await seedRemediation();
+    const { user } = await bootstrapAdmin();
+    const round = await storedRound(seed);
+    const team = round.teams[0];
+    if (!team) throw new Error("seeded team missing");
+    team.pilots.push({
+      placeInTeam: 2,
+      isScoring: true,
+      status: "Filled",
+      accountedFor: false,
+      signToFly: true,
+      noScore: false,
+      pilotPoints: 0,
+      pilotId: randomUUID(),
+      snapshot: { wingClass: "EN A", pilotRating: "Pilot" },
+      flight: {
+        id: randomUUID(),
+        distance: 21,
+        scoringType: "XC",
+        score: 0,
+        wingFactor: 0,
+        isManualLog: false,
+        validation: { signature: "invalid", date: "valid" },
+      },
+    });
+    await writePrivateJson(seed.path, round);
+    leaseHook.beforePrivateRenewing = async (path) => {
+      if (path !== seed.path) return;
+      await writePrivateJson(
+        "config.json",
+        ConfigSchema.parse({
+          flightSignatureValidationEnabled: false,
+          flightDateValidationEnabled: true,
+        }),
+      );
+    };
+
+    const res = await invoke("allowIgc", requestFor(seed, user));
+
+    expect(res.status).toBe(200);
+    expect((await storedRound(seed)).teams[0]?.pilots[1]?.pilotPoints).toBeGreaterThan(0);
   });
 
   it.each(["RoundsCoord", "Pilot"] as const)("rejects a %s override", async (role) => {

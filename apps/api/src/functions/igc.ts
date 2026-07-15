@@ -247,6 +247,13 @@ async function uploadIgc(
       if (!canWriteSlotIgc(caller, current, currentSlot)) {
         throw new HttpError(403, "FORBIDDEN", "Not permitted to upload this IGC");
       }
+      if (current.date !== round.date) {
+        throw new HttpError(
+          409,
+          "ROUND_DATE_CHANGED",
+          "Round date changed during IGC scoring; retry the upload",
+        );
+      }
       supersededIgcPath = currentSlot.flight?.igcPath;
       currentSlot.flight = flight;
       await writePrivateJson(roundPath, RoundSchema, current, leaseId);
@@ -492,7 +499,7 @@ async function revalidateIgc(
       };
       const { round: scored, derivation } = scoreRoundEnforcingValidation(
         current,
-        config,
+        await loadConfig(),
       );
       scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
       await writePrivateJson(roundPath, RoundSchema, scored, leaseId);
@@ -534,7 +541,6 @@ async function allowIgc(
   }
 
   await mutationRateLimit(req, caller, "allowIgc", "flights");
-  const config = await loadConfig();
   const roundPath = `rounds/${id}.json`;
   await readRoundOr404(roundPath);
   const saved = await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
@@ -564,7 +570,7 @@ async function allowIgc(
     }
     const { round: scored, derivation } = scoreRoundEnforcingValidation(
       current,
-      config,
+      await loadConfig(),
     );
     scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
     await writePrivateJson(roundPath, RoundSchema, scored, leaseId);
