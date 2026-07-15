@@ -293,14 +293,14 @@ async function uploadIgc(
   }
 
   if (supersededIgcPath && supersededIgcPath !== igcPath) {
-    void getPrivateBlockBlobClient(supersededIgcPath)
-      .deleteIfExists()
-      .catch((error: unknown) => {
-        _ctx.warn(
-          `[uploadIgc:${id}] Superseded IGC cleanup failed`,
-          error instanceof Error ? error.name : "UnknownError",
-        );
-      });
+    try {
+      await getPrivateBlockBlobClient(supersededIgcPath).deleteIfExists();
+    } catch (error: unknown) {
+      _ctx.warn(
+        "Superseded IGC cleanup failed",
+        error instanceof Error ? error.name : "UnknownError",
+      );
+    }
   }
 
   return { status: 200, jsonBody: saved };

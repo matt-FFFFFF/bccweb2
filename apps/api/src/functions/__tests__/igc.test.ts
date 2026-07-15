@@ -473,13 +473,45 @@ describe("uploadIgc — POST /rounds/{id}/teams/{teamId}/pilots/{place}/igc", ()
     expect(firstPath).toBe(`flight-igcs/${r.roundId}/${r.pilotId}/${firstFlight.id}.igc`);
     expect((await downloadPrivate(firstPath ?? "")).equals(Buffer.from(first))).toBe(true);
 
-    const up2 = await invoke(
+    if (!firstPath) throw new Error("first upload path missing");
+    const cleanupStarted = deferred<void>();
+    const allowCleanup = deferred<void>();
+    const originalDelete = BlockBlobClient.prototype.deleteIfExists;
+    const deleteSpy = vi
+      .spyOn(BlockBlobClient.prototype, "deleteIfExists")
+      .mockImplementation(async function (
+        this: BlockBlobClient,
+        options: Parameters<BlockBlobClient["deleteIfExists"]>[0],
+      ) {
+        if (this.name === firstPath) {
+          cleanupStarted.resolve();
+          await allowCleanup.promise;
+        }
+        return originalDelete.call(this, options);
+      });
+
+    const secondUpload = invoke(
       "uploadIgc",
       withFile(
         makeAuthRequest(user.id, user.email, { method: "POST", params: paramsFor(r) }),
         igcFile(second),
       ),
     );
+    let up2;
+    try {
+      await cleanupStarted.promise;
+      const completion = await Promise.race([
+        secondUpload.then(() => "returned" as const),
+        new Promise<"pending">((resolve) => setImmediate(() => resolve("pending"))),
+      ]);
+      expect(completion).toBe("pending");
+      allowCleanup.resolve();
+      up2 = await secondUpload;
+    } finally {
+      allowCleanup.resolve();
+      deleteSpy.mockRestore();
+    }
+
     expect(up2.status).toBe(200);
     const secondFlight = up2.jsonBody as Flight;
     const secondPath = secondFlight.igcPath;
@@ -535,7 +567,7 @@ describe("uploadIgc — POST /rounds/{id}/teams/{teamId}/pilots/{place}/igc", ()
       const persisted = await readPrivateJson<Round>(`rounds/${r.roundId}.json`);
       expect(persisted?.teams[0]?.pilots[0]?.flight).toEqual(flight);
       expect(warnSpy).toHaveBeenCalledWith(
-        `[uploadIgc:${r.roundId}] Superseded IGC cleanup failed`,
+        "Superseded IGC cleanup failed",
         "Error",
       );
       expect(JSON.stringify(warnSpy.mock.calls)).not.toContain(firstPath);
