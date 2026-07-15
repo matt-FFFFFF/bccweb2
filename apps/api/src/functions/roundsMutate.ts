@@ -428,7 +428,12 @@ async function updateRound(
 
   await updateRoundsIndex(updated);
   if (dateChanged && updated.status === "Complete") {
-    await recomputeSeason(updated.season.year);
+    recomputeSeason(updated.season.year).catch((err) => {
+      console.error(
+        `[updateRound] recomputeSeason(${updated.season.year}) failed:`,
+        err
+      );
+    });
   }
   return { status: 200, jsonBody: updated };
 }
