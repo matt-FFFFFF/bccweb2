@@ -50,6 +50,7 @@ const fixture = (name: string): Buffer =>
   readFileSync(new URL(`../../lib/__tests__/fixtures/igc/${name}`, import.meta.url));
 
 const D3P = fixture("d3p.igc"); // real track, ~60.8 km open-distance, first byte 'A'
+const FAI_SIGNATURE_VALIDATION_MAX_BYTES = 3_000_000;
 
 function igcFile(bytes: Uint8Array, name = "track.igc"): File {
   // Copy into a fresh ArrayBuffer-backed view so the bytes satisfy BlobPart
@@ -304,6 +305,85 @@ describe("uploadIgc — POST /rounds/{id}/teams/{teamId}/pilots/{place}/igc", ()
 
     expect(res.status).toBe(413);
     expect((res.jsonBody as { code: string }).code).toBe("PAYLOAD_TOO_LARGE");
+  });
+
+  it("rejects an IGC over the FAI limit without persisting or enqueueing when signature validation is enabled", async () => {
+    const r = await seedRound();
+    await writeConfig({ flightSignatureValidationEnabled: true });
+    const { user } = await bootstrapAdmin();
+    const bytes = new Uint8Array(FAI_SIGNATURE_VALIDATION_MAX_BYTES + 1);
+    bytes[0] = 0x41;
+    const req = withFile(
+      makeAuthRequest(user.id, user.email, { method: "POST", params: paramsFor(r) }),
+      igcFile(bytes, "over-fai-limit.igc"),
+    );
+
+    const res = await invoke("uploadIgc", req);
+
+    expect(res.status).toBe(413);
+    expect((res.jsonBody as { code: string }).code).toBe("IGC_TOO_LARGE_FOR_VALIDATION");
+    expect(await listPrivateBlobNames(`flight-igcs/${r.roundId}/`)).toEqual([]);
+    expect((await readPrivateJson<Round>(`rounds/${r.roundId}.json`))?.teams[0]?.pilots[0]?.flight)
+      .toBeNull();
+    expect(enqueueIgcValidation).not.toHaveBeenCalled();
+  });
+
+  it("accepts an IGC over the FAI limit when signature validation is disabled", async () => {
+    const r = await seedRound();
+    await writeConfig({ flightSignatureValidationEnabled: false });
+    const { user } = await bootstrapAdmin();
+    const bytes = new Uint8Array(FAI_SIGNATURE_VALIDATION_MAX_BYTES + 1);
+    bytes[0] = 0x41;
+    vi.mocked(scoreIgc).mockResolvedValueOnce({
+      distance: 42,
+      sanityFlags: [],
+      scoredAt: new Date().toISOString(),
+      scoredByVersion: "test",
+      parserErrors: [],
+    });
+    const req = withFile(
+      makeAuthRequest(user.id, user.email, { method: "POST", params: paramsFor(r) }),
+      igcFile(bytes, "over-fai-limit.igc"),
+    );
+
+    const res = await invoke("uploadIgc", req);
+
+    expect(res.status).toBe(200);
+    const flight = res.jsonBody as Flight;
+    expect(await privateBlobExists(flight.igcPath ?? "")).toBe(true);
+    expect(enqueueIgcValidation).not.toHaveBeenCalled();
+  });
+
+  it("uploads and enqueues an IGC at the FAI limit when signature validation is enabled", async () => {
+    const r = await seedRound();
+    await writeConfig({ flightSignatureValidationEnabled: true });
+    const { user } = await bootstrapAdmin();
+    const bytes = new Uint8Array(FAI_SIGNATURE_VALIDATION_MAX_BYTES);
+    bytes[0] = 0x41;
+    vi.mocked(scoreIgc).mockResolvedValueOnce({
+      distance: 42,
+      sanityFlags: [],
+      scoredAt: new Date().toISOString(),
+      scoredByVersion: "test",
+      parserErrors: [],
+    });
+    const req = withFile(
+      makeAuthRequest(user.id, user.email, { method: "POST", params: paramsFor(r) }),
+      igcFile(bytes, "at-fai-limit.igc"),
+    );
+
+    const res = await invoke("uploadIgc", req);
+
+    expect(res.status).toBe(200);
+    const flight = res.jsonBody as Flight;
+    expect(await privateBlobExists(flight.igcPath ?? "")).toBe(true);
+    expect(enqueueIgcValidation).toHaveBeenCalledWith({
+      roundId: r.roundId,
+      teamId: r.teamId,
+      place: r.place,
+      flightId: flight.id,
+      validationAttemptId: flight.validation?.validationAttemptId,
+    });
   });
 
   it("415 UNSUPPORTED_MEDIA_TYPE when the first byte is not 'A'", async () => {

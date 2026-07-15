@@ -55,6 +55,7 @@ import { scoreRoundEnforcingValidation } from "../lib/scoreRoundValidated.js";
 
 // Raw IGC uploads are plain-text B-record logs; a real track is a few hundred KB.
 const MAX_IGC_BYTES = 15 * 1024 * 1024;
+const FAI_SIGNATURE_VALIDATION_MAX_BYTES = 3_000_000;
 // Every valid IGC file begins with an "A" (manufacturer) record — byte 'A' (0x41).
 const IGC_FIRST_BYTE = 0x41;
 
@@ -163,6 +164,16 @@ async function uploadIgc(
 
   const expectedPilotName = await resolveExpectedPilotName(slot.pilotId);
   const config = await loadConfig();
+  if (
+    config.flightSignatureValidationEnabled &&
+    buffer.length > FAI_SIGNATURE_VALIDATION_MAX_BYTES
+  ) {
+    throw new HttpError(
+      413,
+      "IGC_TOO_LARGE_FOR_VALIDATION",
+      "IGC exceeds the 3 MB FAI signature-validation limit",
+    );
+  }
 
   let scored: Awaited<ReturnType<typeof scoreIgc>>;
   try {
@@ -464,15 +475,14 @@ async function revalidateIgc(
       validationAttemptId,
     });
   } catch {
-    let fallbackApplied = false;
-    await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
+    const fallbackRound = await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
       const current = (await readBlob(getPrivateBlobClient(roundPath))) as Round;
       const flight = findSlot(current, teamId, place)?.flight;
       if (
         flight?.id !== currentFlightId ||
         flight.validation?.validationAttemptId !== validationAttemptId
       ) {
-        return;
+        return null;
       }
       flight.validation = {
         ...preservedValidationState(flight.validation),
@@ -480,10 +490,15 @@ async function revalidateIgc(
         validationAttemptId,
         faiStatus: "ENQUEUE_FAILED",
       };
-      await writePrivateJson(roundPath, RoundSchema, current, leaseId);
-      fallbackApplied = true;
+      const { round: scored, derivation } = scoreRoundEnforcingValidation(
+        current,
+        config,
+      );
+      scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
+      await writePrivateJson(roundPath, RoundSchema, scored, leaseId);
+      return scored;
     });
-    if (fallbackApplied) {
+    if (fallbackRound) {
       savedFlight = {
         ...savedFlight,
         validation: {
@@ -493,6 +508,10 @@ async function revalidateIgc(
           faiStatus: "ENQUEUE_FAILED",
         },
       };
+      await updateRoundsIndex(fallbackRound);
+      if (fallbackRound.status === "Complete") {
+        await recomputeSeason(fallbackRound.season.year);
+      }
     }
   }
 
@@ -517,6 +536,7 @@ async function allowIgc(
   await mutationRateLimit(req, caller, "allowIgc", "flights");
   const config = await loadConfig();
   const roundPath = `rounds/${id}.json`;
+  await readRoundOr404(roundPath);
   const saved = await withPrivateLeaseRenewing(roundPath, async (leaseId) => {
     const current = (await readBlob(getPrivateBlobClient(roundPath))) as Round;
     const flight = findSlot(current, teamId, place)?.flight;

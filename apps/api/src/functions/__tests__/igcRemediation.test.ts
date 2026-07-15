@@ -330,6 +330,26 @@ describe("revalidateIgc", () => {
     expect(failedValidation).not.toHaveProperty("faiMsg");
   });
 
+  it("re-scores and republishes a Complete round when enqueue failure makes the flight unverified", async () => {
+    const seed = await seedRemediation({ status: "Complete" });
+    const { user } = await bootstrapAdmin();
+    jobMock.enqueue.mockRejectedValueOnce(new Error("queue unavailable"));
+
+    const res = await invoke("revalidateIgc", requestFor(seed, user));
+
+    expect(res.status).toBe(200);
+    const round = await storedRound(seed);
+    expect(storedFlight(round).validation).toMatchObject({
+      signature: "unverified",
+      faiStatus: "ENQUEUE_FAILED",
+    });
+    expect(round.teams[0]?.pilots[0]?.pilotPoints).toBeGreaterThan(0);
+    expect(round.teams[0]?.score).toBeGreaterThan(0);
+    expect(recomputeMock.recompute).toHaveBeenCalledWith(seed.year);
+    const results = await readPublicJson<SeasonResults>(`results/${seed.year}.json`);
+    expect(results?.[0]?.teamResults[0]?.score).toBeGreaterThan(0);
+  });
+
   it("does not downgrade a newer attempt when an older enqueue fails", async () => {
     const seed = await seedRemediation();
     const { user } = await bootstrapAdmin();
@@ -373,6 +393,19 @@ describe("revalidateIgc", () => {
 });
 
 describe("allowIgc", () => {
+  it("returns NOT_FOUND when the round does not exist", async () => {
+    const { user } = await bootstrapAdmin();
+    const req = makeAuthRequest(user.id, user.email, {
+      method: "POST",
+      params: { id: randomUUID(), teamId: randomUUID(), place: "1" },
+    });
+
+    const res = await invoke("allowIgc", req);
+
+    expect(res.status).toBe(404);
+    expect((res.jsonBody as { code: string }).code).toBe("NOT_FOUND");
+  });
+
   it("allows an Admin to override an invalid flight and restore its score", async () => {
     const seed = await seedRemediation();
     const { user } = await bootstrapAdmin();
