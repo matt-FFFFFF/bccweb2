@@ -1,17 +1,38 @@
 # iac — Terraform Infrastructure
 
-This directory manages the Azure resources for bccweb2 using a multi-stamp, declarative approach, split into three stacks: `bootstrap/` (state backend + identities + resource groups), `common/` (per-env observability + email domain), and `service/` (per-env application stamp).
+This directory manages the Azure resources for bccweb2 using a declarative,
+two-root layout: `bootstrap/` (one-shot state backend + identities + resource
+groups) and `environment/` (the per-environment application stamp, including
+observability and email).
 
 All infrastructure is provisioned using **AzAPI v2.10** with HCL-native bodies.
 
 ## Layout
 
-- `bootstrap/`: One-shot config provisioning the remote state storage account, the per-env Terraform UMIs (GitHub OIDC, RG-scoped Owner), the per-env resource groups, and the GitHub environment secrets. See [bootstrap/README.md](bootstrap/README.md).
-- `common/`: Per-env Log Analytics workspace + Application Insights + ACS email service/domain, deployed into the bootstrap-created platform RG. See [common/README.md](common/README.md).
-- `service/`: Per-env application stamp (storage, Function App, SWA, Key Vault, ACS, alerts, optional DNS), instantiating `service/modules/stamp/` once per environment. Reads common's outputs via remote state. See [service/README.md](service/README.md).
-- `env/`: Environment-specific configuration (`<env>.tfvars` + `<env>.backend.hcl` for service; `common-<env>.tfvars` + `common-<env>.backend.hcl` for common).
+- `bootstrap/`: One-shot config provisioning the remote state storage account, the per-env Terraform UMIs (GitHub OIDC, RG-scoped Owner), the two per-env resource groups (platform + stamp), and the GitHub environment secrets/variables. Uses **local state** (it provisions its own remote-state target, so it cannot live there itself). See [bootstrap/README.md](bootstrap/README.md).
+- `environment/`: Per-env application stack, composed of two child modules — `modules/platform` (Log Analytics workspace, Application Insights, ACS email service/domain) and `modules/stamp` (storage, Function App, SWA, Key Vault, alerts, optional DNS). One `terraform apply` provisions both for a given environment. See [environment/README.md](environment/README.md).
+- `env/`: Environment-specific configuration — `<env>.backend.hcl` (committed) and `<env>.tfvars` (gitignored; copy from the committed `<env>.tfvars.example`).
 
-State ownership: bootstrap owns ALL resource groups; common owns LAW + App Insights + the ACS email service/domain; service owns everything inside the stamp RG. Common and service never create RGs — they reference bootstrap's by interpolated name/ID.
+**Known drift (out of scope for this change, do not "fix" by substituting files)**:
+bootstrap's `local_file.backend_config` resource currently writes generated
+backend snippets to `iac/<env>.backend.hcl` (repo root, e.g.
+`iac/dev.backend.hcl`), using a per-env container name (`tfstate-<env>`) and
+storage account `stbccweb13afe`. The **authoritative** files every command
+and workflow in this repo actually use are the committed
+`iac/env/<env>.backend.hcl`, which instead point at a single shared
+`tfstate` container in storage account `stbccwebtfstate813afe` (from commit
+`810b5a1`, before the per-env-container change landed in bootstrap). The two
+disagree. This is a known branch-level inconsistency between bootstrap's
+current output and the committed `iac/env/` files — it is **not** resolved
+by this docs change. Keep using `iac/env/<env>.backend.hcl` as-is for every
+command below; do not copy `iac/<env>.backend.hcl` over it.
+
+## State ownership
+
+- **Bootstrap**: local state only, by design — it creates the storage account that everything else's remote state lives in.
+- **Environment**: one remote state per environment, `<env>.tfstate`, in the storage account bootstrap creates. There is no shared "common" state anymore — the platform and stamp modules are both planned and applied together, in one state file, by one `terraform apply` against `iac/environment`.
+
+Bootstrap owns every environment's two resource groups (platform + stamp). The environment stack never creates or discovers them itself — it consumes their names as inputs (`platform_rg_name`, `stamp_rg_name`), which bootstrap publishes as GitHub Actions environment **variables** (`TF_VAR_PLATFORM_RG_NAME`, `TF_VAR_STAMP_RG_NAME`) so CI applies pick them up automatically.
 
 ## First-time Setup
 
@@ -22,70 +43,144 @@ Follow these steps to provision a new environment from scratch.
     See [bootstrap/README.md](bootstrap/README.md) for detailed steps.
     ```bash
     cp iac/bootstrap/terraform.tfvars.example iac/bootstrap/terraform.tfvars
-    terraform -chdir=iac/bootstrap init && terraform -chdir=iac/bootstrap apply
+    export GITHUB_TOKEN=<a token with Actions/Environments/Secrets: write>
+    terraform -chdir=iac/bootstrap init -backend=false
+    terraform -chdir=iac/bootstrap apply
     ```
-    This creates the env's UMI, two RGs, GitHub environment, and OIDC secrets.
-3.  **Prepare Environment Config**:
-    Backend files (`iac/env/<env>.backend.hcl`, `iac/env/common-<env>.backend.hcl`) and common tfvars (`iac/env/common-<env>.tfvars`) are committed. For local service applies, create your variables file from the template:
+    With the default `manage_github_secrets = true`, this apply creates each
+    env's UMI, its two resource groups, its GitHub environment, the three
+    Azure OIDC secrets (`AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID`),
+    and the two RG-name variables (`TF_VAR_PLATFORM_RG_NAME`/`TF_VAR_STAMP_RG_NAME`).
+    Without a `GITHUB_TOKEN`, set `manage_github_secrets = false` and wire
+    those five values into GitHub manually — see
+    [bootstrap/README.md](bootstrap/README.md).
+
+    **Already-bootstrapped `dev`/`prod` environments (pre-collapse)**: if
+    this environment was bootstrapped before the `common`/`service` merge,
+    its `terraform_umis` entry predates the `TF_VAR_PLATFORM_RG_NAME`/
+    `TF_VAR_STAMP_RG_NAME` GitHub variable publication added by this
+    change. Before the first merged-stack deployment, save and review an
+    `iac/bootstrap` plan, then apply the reviewed plan so those two variables
+    get published. Publication is the required outcome, but it may not be the
+    sole change: current state can also reconcile
+    `allowSharedKeyAccess = false` and other pending bootstrap drift. Then
+    continue with step 3 below to set `TF_VAR_ACS_EMAIL_DOMAIN`.
+3.  **Set the ACS email domain (operator-set, not published by bootstrap)**:
+    Bootstrap does not know your intended email domain, so it cannot publish
+    it. Add a GitHub environment variable named `TF_VAR_ACS_EMAIL_DOMAIN` for
+    the target environment (repo Settings → Environments → `<env>` → Variables)
+    with the real sending domain, e.g. `mail.example.com`. Local applies set
+    the same value via `acs_email_domain` in `iac/env/<env>.tfvars`.
+4.  **Prepare Environment Config**: the backend file
+    (`iac/env/<env>.backend.hcl`) is committed (see the drift note under
+    "Layout" above — use this file, not the bootstrap-generated
+    `iac/<env>.backend.hcl`). For local applies, create your variables file
+    from the committed template:
     ```bash
     cp iac/env/dev.tfvars.example iac/env/dev.tfvars
     ```
-    Fill in the required placeholders (marked `# REQUIRED`), including `tfstate_sa_name` (the bootstrap `storage_account_name` output). CI does not need this file — the deploy workflows generate it at runtime from GitHub env-scoped vars + secrets.
-4.  **Set Sensitive Environment Variables** (local applies only):
-    ```bash
-    export TF_VAR_puretrack_api_key="your-key"
-    export TF_VAR_puretrack_password="your-password"
-    # ... and others as defined in dev.tfvars.example
-    ```
+    Fill in the required placeholders (marked `# REQUIRED`), including
+    `acs_email_domain`, `puretrack_api_key`, `puretrack_email`, and
+    `puretrack_password` — the example template already has entries for
+    all of them. CI does not need this file — the `terraform.yml` workflow
+    generates it at runtime from GitHub environment vars/secrets.
+5.  **Sensitive values — pick one path, don't mix them**: `-var-file`
+    assignments always win over `TF_VAR_*` environment variables (Terraform
+    applies `-var`/`-var-file` after environment variables), so setting both
+    for the same variable silently ignores the exported value. For local
+    applies:
+    - **Recommended**: just fill the placeholders directly in
+      `iac/env/dev.tfvars` from step 4 (`puretrack_api_key`,
+      `puretrack_email`, `puretrack_password`, `acs_email_domain`,
+      `platform_rg_name`, `stamp_rg_name`) and skip exporting anything.
+    - **If you intentionally want to exercise the `TF_VAR_*` path** (e.g. to
+      mirror how CI supplies secrets), comment out or delete those specific
+      keys from your local `dev.tfvars` first, then export the matching
+      `TF_VAR_*` values:
+      ```bash
+      export TF_VAR_puretrack_api_key="your-key"
+      export TF_VAR_puretrack_email="your-email"
+      export TF_VAR_puretrack_password="your-password"
+      ```
 
-    **Principal type**: `terraform_principal_type` defaults to `"ServicePrincipal"` because CI (GitHub Actions → per-env Terraform UMI via OIDC, see [bootstrap/README.md](bootstrap/README.md#github-actions-oidc-setup)) is the primary apply path. If you are applying locally as yourself (`az login` as a user), override to `"User"` so the Key Vault Secrets Officer role assignment uses the correct principal type:
+    **Principal type**: `terraform_principal_type` defaults to
+    `"ServicePrincipal"` because CI (GitHub Actions → per-env Terraform UMI
+    via OIDC, see
+    [bootstrap/README.md](bootstrap/README.md#github-actions-oidc-setup)) is
+    the primary apply path. Local applies as yourself (`az login` as a
+    user) MUST override to `"User"` — the Key Vault Secrets Officer role
+    assignment (`keyvault.tf`) uses this to pick the correct
+    `principalType`, and it will be wrong for a human principal otherwise.
+    Every local `apply`/`plan` command in this document includes
+    `-var 'terraform_principal_type=User'` for that reason.
+6.  **Deploy the environment stack**:
+    ```bash
+    gh workflow run terraform.yml -f env=dev -f action=apply
+    # or locally:
+    terraform -chdir=iac/environment init -backend-config=../env/dev.backend.hcl
+    terraform -chdir=iac/environment apply -var-file=../env/dev.tfvars -var 'terraform_principal_type=User'
+    ```
+    This single apply provisions the platform module (LAW, App Insights, ACS
+    email domain) and the stamp module (storage, Function App, SWA, Key
+    Vault, alerts) together, in the same plan and the same state.
 
-    ```bash
-    terraform -chdir=iac/service apply -var-file=../env/dev.tfvars -var 'terraform_principal_type=User'
-    ```
-5.  **Deploy the common stack** (preferred: via workflow; local shown for completeness). First set the real `acs_email_domain` in `iac/env/common-<env>.tfvars`; after the apply, add the registrar DNS records printed by `terraform -chdir=iac/common output acs_dns_records_for_operator`:
-    ```bash
-    gh workflow run terraform.yml -f stack=common -f env=dev -f mode=apply
-    # or locally:
-    terraform -chdir=iac/common init -backend-config=../env/common-dev.backend.hcl
-    terraform -chdir=iac/common apply -var-file=../env/common-dev.tfvars
-    ```
-6.  **Deploy the service stack**:
-    ```bash
-    gh workflow run terraform.yml -f stack=service -f env=dev -f mode=apply
-    # or locally:
-    terraform -chdir=iac/service init -backend-config=../env/dev.backend.hcl
-    terraform -chdir=iac/service apply -var-file=../env/dev.tfvars
-    ```
-    **Note on RBAC Propagation**: On the very first apply, you might encounter a `403 Forbidden` error when writing secrets to Key Vault. This is caused by Azure RBAC propagation lag. Simply re-run the `apply` to resolve it.
+    After the apply, register the registrar DNS records printed by
+    `terraform -chdir=iac/environment output acs_dns_records_for_operator` so
+    Azure Communication Services can verify the email domain — see
+    [environment/README.md](environment/README.md#acs-domain-verification).
+
+    **Note on RBAC Propagation**: On the very first apply, you might
+    encounter a `403 Forbidden` error when writing secrets to Key Vault.
+    This is caused by Azure RBAC propagation lag. Simply re-run the apply
+    to resolve it.
 
 ## Secret Rotation
 
-Secrets are managed declaratively. Rotating them involves updating the version variables and re-applying the **service** stack.
+Secrets are managed declaratively. Rotating them involves updating the version
+variables in `iac/env/<env>.tfvars` (or the equivalent GitHub environment
+variable for CI) and re-applying `iac/environment`.
 
--   **JWT Secret**: Bump the `jwt_secret_version` in `env/<env>.tfvars` (e.g., `"1"` → `"2"`). Terraform will generate a new random password and update Key Vault.
--   **ACS Connection String**: Rotate the access key in the Azure portal, then bump `acs_secret_version` in `env/<env>.tfvars`. Terraform will fetch the new key and update Key Vault.
--   **App Insights Connection String**: This string does not rotate. It flows from the common stack's outputs into the service stack via remote state.
+-   **JWT Secret**: Bump `jwt_secret_version` (e.g., `"1"` → `"2"`). Terraform generates a new random password and updates Key Vault.
+-   **ACS Connection String**: Rotate the access key in the Azure portal, then bump `acs_secret_version`. Terraform fetches the new key and updates Key Vault.
+-   **App Insights Connection String**: This string does not rotate. It flows from the environment stack's own `platform` module output into the `stamp` module's Key Vault copy — both inside the same apply, no cross-stack lookup involved.
 
-## Adding a New Stamp
+## Adding a New Environment
 
 To add a new environment (e.g., `staging`):
 
-1.  Add a `terraform_umis` entry (+ `github_environments` name) in `iac/bootstrap/terraform.tfvars` and re-apply bootstrap — this creates the env's UMI, both RGs, and GitHub secrets.
-2.  Create `iac/env/common-staging.tfvars`, `iac/env/common-staging.backend.hcl`, `iac/env/staging.backend.hcl` (commit all three) and a local `iac/env/staging.tfvars` from the example template.
-3.  Run `gh workflow run terraform.yml -f stack=common -f env=staging -f mode=apply`, then the same with `-f stack=service`.
+1.  Add a `terraform_umis` entry (+ the matching `github_environments` name) in `iac/bootstrap/terraform.tfvars` and re-apply bootstrap — this creates the env's UMI, both resource groups, its GitHub environment, and the OIDC secrets + `TF_VAR_PLATFORM_RG_NAME`/`TF_VAR_STAMP_RG_NAME` variables.
+2.  Add a GitHub environment variable `TF_VAR_ACS_EMAIL_DOMAIN` for the new environment (see "First-time Setup" step 3 — bootstrap never publishes this one).
+3.  Select the new environment's string from the list-valued bootstrap output, then paste it into a committed `iac/env/staging.backend.hcl`:
+    ```bash
+    env=staging
+    terraform -chdir=iac/bootstrap output -json backend_config_hcl |
+      jq -er --arg env "$env" '.[] | select(contains("iac/env/\($env).backend.hcl"))'
+    ```
+    Also commit an `iac/env/staging.tfvars.example` template and create a local `iac/env/staging.tfvars` from it for local applies.
+4.  **`terraform.yml`'s `env` input is currently a fixed `[dev, prod]` choice list** (see `.github/workflows/terraform.yml`) — it does not yet support arbitrary environment names. Do NOT try `gh workflow run terraform.yml -f env=staging`; it will be rejected. Adding a third environment to the manual-workflow path requires a workflow-file change (out of scope here — see the deploy workflows' `AGENTS.md`/CI docs). Until that change lands, apply the new environment locally only:
+    ```bash
+    terraform -chdir=iac/environment init -backend-config=../env/staging.backend.hcl
+    terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars -var 'terraform_principal_type=User'
+    ```
 
-State is isolated per stack × environment within the bootstrap storage account (`common-staging.tfstate`, `staging.tfstate`).
+State is isolated per environment within the bootstrap storage account
+(`staging.tfstate`, `dev.tfstate`, `prod.tfstate`, ...) — there is no shared
+state to merge or migrate. This is state-file separation, not a current
+confidentiality boundary: every environment UMI has account-level Storage
+Blob Data Reader through bootstrap's known unresolved
+`tf_tfstate_blob_account_reader` grant and can therefore read other
+environments' state. Its Owner writes remain limited to its own workload RGs.
 
 ## Tests
 
 -   **Unit Tests**: Mocked provider tests that run quickly without Azure access.
     ```bash
-    terraform -chdir=iac/service test -test-directory=tests/unit
+    terraform -chdir=iac/environment test -test-directory=tests/unit
     ```
--   **Integration Tests**: Plan-only tests that run against a real subscription.
+-   **Integration Tests**: Plan-only tests that run against a real subscription (requires `az login` and a backend init for the target environment).
     ```bash
-    terraform -chdir=iac/service test -test-directory=tests/integration -var-file=../env/prod.tfvars
+    terraform -chdir=iac/environment init -backend-config=../env/<env>.backend.hcl
+    terraform -chdir=iac/environment test -test-directory=tests/integration
     ```
 
 ## Provider Note
