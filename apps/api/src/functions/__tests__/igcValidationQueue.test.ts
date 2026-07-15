@@ -639,6 +639,33 @@ describe("igcValidationWorker queue transaction", () => {
     });
   });
 
+  it("ACKs and GCs a durable poison result when its round was deleted", async () => {
+    // Given
+    const seed = await seedValidation();
+    await writeValidationResult(seed.job.validationAttemptId, {
+      signature: "invalid",
+      faiStatus: "FAILED",
+    });
+    await getPrivateContainer().getBlobClient(seed.path).delete();
+
+    // When
+    const delivery = invokeQueue("igcValidationPoison", seed.job);
+
+    // Then
+    await expect(delivery).resolves.toBeUndefined();
+    expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
+    expect(telemetryMock.trackEvent).toHaveBeenCalledWith({
+      name: "igcValidation.poisonStale",
+      properties: {
+        roundId: seed.job.roundId,
+        teamId: seed.job.teamId,
+        place: seed.job.place,
+        flightId: seed.job.flightId,
+        validationAttemptId: seed.job.validationAttemptId,
+      },
+    });
+  });
+
   it("marks a pending attempt WORKER_FAILED when poison has no durable verdict", async () => {
     const seed = await seedValidation();
 
@@ -662,6 +689,47 @@ describe("igcValidationWorker queue transaction", () => {
         validationAttemptId: seed.job.validationAttemptId,
       },
     });
+  });
+
+  it("ACKs a poison message with no durable result when its round was deleted", async () => {
+    // Given
+    const seed = await seedValidation();
+    await getPrivateContainer().getBlobClient(seed.path).delete();
+
+    // When
+    const delivery = invokeQueue("igcValidationPoison", seed.job);
+
+    // Then
+    await expect(delivery).resolves.toBeUndefined();
+    expect(await readValidationResult(seed.job.validationAttemptId)).toBeNull();
+    expect(telemetryMock.trackEvent).toHaveBeenCalledWith({
+      name: "igcValidation.poisonStale",
+      properties: {
+        roundId: seed.job.roundId,
+        teamId: seed.job.teamId,
+        place: seed.job.place,
+        flightId: seed.job.flightId,
+        validationAttemptId: seed.job.validationAttemptId,
+      },
+    });
+  });
+
+  it("rethrows a non-404 poison lease failure for host retry", async () => {
+    // Given
+    const seed = await seedValidation();
+    await writeValidationResult(seed.job.validationAttemptId, {
+      signature: "invalid",
+      faiStatus: "FAILED",
+    });
+    const storageError = Object.assign(new Error("round storage unavailable"), { statusCode: 503 });
+    vi.spyOn(blobModule, "withPrivateLeaseRenewing").mockRejectedValueOnce(storageError);
+
+    // When
+    const delivery = invokeQueue("igcValidationPoison", seed.job);
+
+    // Then
+    await expect(delivery).rejects.toBe(storageError);
+    expect(telemetryMock.trackEvent).not.toHaveBeenCalled();
   });
 
   it("keeps poison failure terminal when an in-flight worker later finishes validation", async () => {

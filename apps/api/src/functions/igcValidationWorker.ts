@@ -164,30 +164,34 @@ async function applyValidationResult(
   result: FlightValidation,
 ): Promise<ApplyResult> {
   let committed: Round | null = null;
-  await withPrivateLeaseRenewing(path, async (leaseId) => {
-    const round = RoundSchema.parse(await readBlob(getPrivateBlobClient(path)));
-    const flight = matchingFlight(round, job);
-    if (flight === null || flight.isManualLog === true) return;
-    if (flight.validation?.faiStatus === "WORKER_FAILED") return;
-    const leased = flight.validation ?? {};
-    const alreadyTerminal = leased.validationAttemptId === job.validationAttemptId
-      && leased.signature !== undefined
-      && leased.signature !== "pending";
-    flight.validation = {
-      ...leased,
-      signature: result.signature,
-      faiStatus: result.faiStatus,
-      faiServer: result.faiServer,
-      faiMsg: result.faiMsg,
-      validationAttemptId: job.validationAttemptId,
-      checkedAt: alreadyTerminal ? leased.checkedAt : new Date().toISOString(),
-    };
-    const config = await loadConfig();
-    const { round: scored, derivation } = scoreRoundEnforcingValidation(round, config);
-    scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
-    await writePrivateJson(path, RoundSchema, scored, leaseId);
-    committed = scored;
-  });
+  try {
+    await withPrivateLeaseRenewing(path, async (leaseId) => {
+      const round = RoundSchema.parse(await readBlob(getPrivateBlobClient(path)));
+      const flight = matchingFlight(round, job);
+      if (flight === null || flight.isManualLog === true) return;
+      if (flight.validation?.faiStatus === "WORKER_FAILED") return;
+      const leased = flight.validation ?? {};
+      const alreadyTerminal = leased.validationAttemptId === job.validationAttemptId
+        && leased.signature !== undefined
+        && leased.signature !== "pending";
+      flight.validation = {
+        ...leased,
+        signature: result.signature,
+        faiStatus: result.faiStatus,
+        faiServer: result.faiServer,
+        faiMsg: result.faiMsg,
+        validationAttemptId: job.validationAttemptId,
+        checkedAt: alreadyTerminal ? leased.checkedAt : new Date().toISOString(),
+      };
+      const config = await loadConfig();
+      const { round: scored, derivation } = scoreRoundEnforcingValidation(round, config);
+      scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
+      await writePrivateJson(path, RoundSchema, scored, leaseId);
+      committed = scored;
+    });
+  } catch (error: unknown) {
+    if (!hasStatusCode(error, 404)) throw error;
+  }
   if (committed === null) return { kind: "stale" };
   await updateRoundsIndex(committed);
   await deleteValidationResult(job.validationAttemptId);
@@ -263,27 +267,44 @@ export async function igcValidationPoison(message: unknown): Promise<void> {
     });
     return;
   }
-  const poisonResult = await withPrivateLeaseRenewing(path, async (leaseId) => {
-    const round = RoundSchema.parse(await readBlob(getPrivateBlobClient(path)));
-    const flight = matchingFlight(round, job);
-    if (flight === null || flight.isManualLog === true) return null;
-    if (flight.validation?.faiStatus === "WORKER_FAILED") {
-      return { round, failed: true };
-    }
-    if (flight.validation?.signature !== "pending") {
-      return { round, failed: false };
-    }
-    flight.validation = {
-      ...flight.validation,
-      signature: "unverified",
-      faiStatus: "WORKER_FAILED",
-    };
-    const config = await loadConfig();
-    const { round: scored, derivation } = scoreRoundEnforcingValidation(round, config);
-    scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
-    await writePrivateJson(path, RoundSchema, scored, leaseId);
-    return { round: scored, failed: true };
-  });
+  let poisonResult: { readonly round: Round; readonly failed: boolean } | null;
+  try {
+    poisonResult = await withPrivateLeaseRenewing(path, async (leaseId) => {
+      const round = RoundSchema.parse(await readBlob(getPrivateBlobClient(path)));
+      const flight = matchingFlight(round, job);
+      if (flight === null || flight.isManualLog === true) return null;
+      if (flight.validation?.faiStatus === "WORKER_FAILED") {
+        return { round, failed: true };
+      }
+      if (flight.validation?.signature !== "pending") {
+        return { round, failed: false };
+      }
+      flight.validation = {
+        ...flight.validation,
+        signature: "unverified",
+        faiStatus: "WORKER_FAILED",
+      };
+      const config = await loadConfig();
+      const { round: scored, derivation } = scoreRoundEnforcingValidation(round, config);
+      scored.scoring = { scoredAt: new Date().toISOString(), ...derivation };
+      await writePrivateJson(path, RoundSchema, scored, leaseId);
+      return { round: scored, failed: true };
+    });
+  } catch (error: unknown) {
+    if (!hasStatusCode(error, 404)) throw error;
+    await deleteValidationResult(job.validationAttemptId);
+    getTelemetryClient()?.trackEvent({
+      name: "igcValidation.poisonStale",
+      properties: redactObject({
+        roundId: job.roundId,
+        teamId: job.teamId,
+        place: job.place,
+        flightId: job.flightId,
+        validationAttemptId: job.validationAttemptId,
+      }) as Record<string, unknown>,
+    });
+    return;
+  }
   await deleteValidationResult(job.validationAttemptId);
   if (poisonResult !== null) {
     await updateRoundsIndex(poisonResult.round);
