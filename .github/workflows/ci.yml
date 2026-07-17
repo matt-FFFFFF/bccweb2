@@ -54,9 +54,6 @@ jobs:
       - name: SPDX header unit tests
         run: node --test scripts/__tests__/spdx-header.test.mjs
 
-      - name: Check platform Terraform resource contract
-        run: npm run iac:platform-contract
-
       - name: Run load-test contract tests
         run: npm run loadtest:test
 
@@ -102,6 +99,37 @@ jobs:
       # afford the extra minute, so cover them here while Azurite is already up.
       - name: Run heavy tests
         run: make test-heavy
+
+  # ── Terraform contracts ────────────────────────────────────────────────────────
+  # Offline-only: mocked unit suites, fixture parity, and static resource contracts.
+  # Authenticated plan-only integration tests remain an operator-invoked check.
+  terraform-contracts:
+    name: Terraform contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Terraform with mise
+        uses: ./.github/actions/setup-node-mise
+
+      - name: Check stamp fixture sync
+        run: diff -r --exclude=keyvault.tf --exclude=variables.tf --exclude=README.md iac/environment/modules/stamp iac/environment/tests/unit/stamp-fixture
+
+      - name: Run environment Terraform unit tests
+        run: |
+          terraform -chdir=iac/environment init -backend=false -test-directory=tests/unit
+          terraform -chdir=iac/environment test -test-directory=tests/unit
+
+      - name: Run shared Terraform unit tests
+        run: |
+          terraform -chdir=iac/shared init -backend=false -test-directory=tests/unit
+          terraform -chdir=iac/shared test -test-directory=tests/unit
+
+      - name: Check shared Terraform resource contract
+        run: bash scripts/iac/check-shared-resource-contract.sh
+
+      - name: Check stamp storage split contract
+        run: bash scripts/iac/check-stamp-storage-split.sh
 
   # ── 2. Docker builds ────────────────────────────────────────────────────────────
   # Build every image that docker-compose builds locally (apps/api/Dockerfile.dev

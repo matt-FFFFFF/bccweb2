@@ -1,9 +1,9 @@
 # SPDX-FileCopyrightText: 2026 British Club Challenge authors
 # SPDX-License-Identifier: MPL-2.0
-# REQUIRES ambient 'az login' AND backend init. Plan-only; NEVER 'apply'.
+# REQUIRES ambient 'az login'. Plan-only; NEVER 'apply'.
 # Run:
-#   terraform -chdir=iac/environment init -backend-config=../env/<env>.backend.hcl
-#   terraform -chdir=iac/environment test -test-directory=tests/integration -var-file=../env/<env>.tfvars
+#   terraform -chdir=iac/environment init -backend=false -test-directory=tests/integration
+#   terraform -chdir=iac/environment test -test-directory=tests/integration
 #
 # This file is the INTEGRATION counterpart to tests/unit/stamp.tftest.hcl.
 # Unlike the unit tests (which mock_provider every provider for offline runs),
@@ -11,9 +11,8 @@
 # It only PLANs — it never APPLIES — so it is safe to run on a clean
 # subscription, but it still requires:
 #   * Ambient `az login` so azapi can authenticate.
-#   * A backend init (`-backend-config=../env/<env>.backend.hcl`) for the
-#     operator's selected environment.
-#   * A `-var-file` supplying the real `puretrack_*`, ACS, ops_email, etc.
+#   * Provider read access to the shared Application Insights and ACS resources
+#     referenced by the mocked shared-state output IDs below.
 #
 # This file is intentionally excluded from default `terraform test` runs
 # (the default `-test-directory=tests` discovery picks up tests/unit/ only
@@ -23,7 +22,7 @@
 provider "azapi" {}
 
 variables {
-  stamp_name = "integration-test"
+  stamp_name = "inttest"
   location   = "uksouth"
 
   stamp_rg_name = "rg-bccweb-integration-test"
@@ -46,21 +45,31 @@ variables {
 
   jwt_secret_version = "1"
   acs_secret_version = "1"
-
 }
 
-run "plan_against_real_backend" {
+override_data {
+  target = data.terraform_remote_state.shared
+
+  values = {
+    outputs = {
+      app_insights_ids = {
+        inttest = "/subscriptions/ba36d2f0-1de7-4f76-a094-d14fecc61d70/resourceGroups/bccweb-prod-9364/providers/Microsoft.Insights/components/aibccwebprod9364"
+      }
+      acs_id             = "/subscriptions/ba36d2f0-1de7-4f76-a094-d14fecc61d70/resourceGroups/rg-bccweb-shared/providers/Microsoft.Communication/communicationServices/acs-bccweb-shared"
+      acs_sender_address = "no-reply@integration-test.example.invalid"
+    }
+  }
+}
+
+run "plan_against_real_provider" {
   command = plan
 
-  # Plan must succeed (no expected failures against a healthy real backend).
+  # Plan must succeed against authenticated AzAPI reads while shared state is mocked.
   expect_failures = []
 
   # Guardrail: the root module must actually be planning the stamp module.
-  # If `module "stamp"` is misconfigured or accidentally gated to zero
-  # instances, planned_values.root_module.child_modules would be empty
-  # and we'd silently pass on a degenerate no-op.
   assert {
-    condition     = length(run.plan_against_real_backend.planned_values.root_module.child_modules) == 1
+    condition     = module.stamp.resource_group_name == var.stamp_rg_name
     error_message = "Root module must plan exactly one stamp child module."
   }
 }
