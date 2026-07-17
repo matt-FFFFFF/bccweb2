@@ -7,30 +7,48 @@ This runbook covers two intertwined DNS changes that ship together at production
 
 The two changes are independent in DNS but conventionally done in the same operator session. The TTL strategy below applies to both.
 
+> **Known caveat (not yet fixed):** `iac/shared/dns.tf`'s record-name computation strips
+> the DNS zone as a prefix (`trimprefix(var.production_hostname, "${var.dns_zone_name}.")`)
+> rather than as a suffix. For a hostname like `www.example.com` under zone
+> `example.com`, this leaves the record name unchanged (`www.example.com`) instead of
+> reducing it to `www`, which would make Azure DNS create the CNAME at
+> `www.example.com.example.com` and fail SWA's `cname-delegation` validation. This is
+> latent and only exercised once both `production_hostname` and `dns_zone_name` are set
+> for a real cutover — verify the planned record name with `terraform -chdir=iac/shared
+> plan` before applying, and if it looks wrong, fix `dns.tf` to `trimsuffix(var.production_hostname,
+> ".${var.dns_zone_name}")` first.
+
 ## Pre-flight
 
-1. Run `terraform -chdir=iac/environment init -backend-config=../env/prod.backend.hcl` and `terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars -var 'terraform_principal_type=User'` (drop the `-var` override when this runs via the `terraform.yml` CI workflow instead of a local `az login`). This one apply provisions both the SWA (stamp module) and the ACS email domain (platform module) together. Terraform creates the public CNAME only when both `var.production_hostname` and `var.dns_zone_name` are non-empty.
-2. Read the operator-facing outputs:
+1. The prod custom domain and its CNAME now live in the **shared root** (`iac/shared`).
+   There is exactly one Static Web App (`swa-bccweb-shared`) shared across the whole
+   topology — it is not created separately for each environment. Run
+   `terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl` and
+   `terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'`
+   (drop the `-var` override when this runs via CI instead of a local `az login`). This
+   one apply provisions the SWA, the ACS email domain, and (when `production_hostname`
+   and `dns_zone_name` are both set) the production CNAME together.
+2. Read the operator-facing outputs from the shared root:
    ```bash
- terraform -chdir=iac/environment output acs_dns_records_for_operator
- terraform -chdir=iac/environment output -raw swa_url
- terraform -chdir=iac/environment output -raw production_hostname_target
- terraform -chdir=iac/environment output -raw production_dns_managed_by_terraform
+ terraform -chdir=iac/shared output acs_dns_records_for_operator
+ terraform -chdir=iac/shared output -raw swa_default_hostname
+ terraform -chdir=iac/shared output -raw swa_name
    ```
    `acs_dns_records_for_operator` exposes lowercase `domain_ownership`, `spf`,
    `dkim`, `dkim2`, and `dmarc` keys. Each value is Azure's record object;
    use its returned `type`, `name`, and `value` fields at the registrar. For
    automation, print tab-separated fields with:
    ```bash
-   terraform -chdir=iac/environment output -json acs_dns_records_for_operator |
+   terraform -chdir=iac/shared output -json acs_dns_records_for_operator |
      jq -r 'to_entries[] | [.key, .value.type, .value.name, .value.value] | @tsv'
    ```
-   The raw `acs_email_domain_verification_records` output instead uses Azure
-   keys `Domain`, `SPF`, `DKIM`, `DKIM2`, and `DMARC`. Terraform does not
-   expose a `dmarc_recommended_policy_value` output.
-3. `swa_url` is always the public SWA URL. Strip its `https://` prefix to obtain the stable default hostname (e.g. `nice-stone-0a1b2c3d4.azurestaticapps.net`) for validation in either DNS mode.
-4. `production_hostname_target` is non-empty only when Terraform does **not** manage the CNAME. It contains that same stable SWA default hostname for the manual registrar path; an empty value in managed mode is expected.
-5. `production_dns_managed_by_terraform` is `true` when both `var.dns_zone_name` and `var.production_hostname` are set; in that case Terraform owns the CNAME and you only have to touch the registrar for the ACS records. When it is `false`, the operator must create the production CNAME manually at the registrar.
+3. `swa_default_hostname` is the stable SWA default hostname (e.g.
+   `nice-stone-0a1b2c3d4.azurestaticapps.net`) to use as the CNAME target at the
+   registrar, or to compare against when Terraform manages the CNAME itself.
+4. The shared root manages the production custom domain and CNAME only when both
+   `var.production_hostname` and `var.dns_zone_name` are non-empty in `iac/env/shared.tfvars`.
+   When they are empty, the operator must create the production CNAME manually at the
+   registrar, pointed at `swa_default_hostname`.
 
 ## TTL strategy
 
@@ -44,13 +62,13 @@ DNS TTL controls how long resolvers cache the record. A high TTL is good for ste
 
 Apply the same TTL schedule to the ACS SPF / DKIM / DMARC TXT records during the email-verification window — if a wrong DKIM value gets published you want to be able to correct it in minutes, not hours.
 
-**Terraform path:** `iac/environment/modules/stamp/dns.tf` hard-codes `ttl = 3600`. To run the lower-TTL phase, manually `az network dns record-set cname update --ttl 300 ...` 24h before cutover, then re-run `terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars -var 'terraform_principal_type=User'` (local apply) after the stability window to let Terraform reassert 3600. Do **not** edit `ttl` in `dns.tf` during the cutover window — that would race with the operator's portal change.
+**Terraform path:** `iac/shared/dns.tf` hard-codes `ttl = 3600`. To run the lower-TTL phase, manually `az network dns record-set cname update --ttl 300 ...` 24h before cutover, then re-run `terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'` (local apply) after the stability window to let Terraform reassert 3600. Do **not** edit `ttl` in `dns.tf` during the cutover window — that would race with the operator's portal change.
 
 **Manual / registrar path:** lower the TTL on the existing record at the registrar 24h before cutover, change the target at cutover, raise the TTL 24h after stable traffic. Same schedule.
 
 ## ACS email domain verification
 
-For each record returned by `terraform -chdir=iac/environment output acs_dns_records_for_operator`:
+For each record returned by `terraform -chdir=iac/shared output acs_dns_records_for_operator`:
 
 1. **`domain_ownership`** — a TXT record proving you control the domain. Paste `name` and `value` at the registrar. Wait for the Azure portal under the Communication Services > Domains blade to mark the domain Verified.
 2. **`spf`** — TXT, value typically `v=spf1 include:azurecomm.net -all`. If the apex already has an SPF, merge the `include:azurecomm.net` clause rather than publishing a second SPF record (only one v=spf1 record is allowed per host).
@@ -71,14 +89,18 @@ For each record returned by `terraform -chdir=iac/environment output acs_dns_rec
 
 ## Production CNAME cutover
 
+The custom domain and CNAME are owned by the **shared root** (`iac/shared`), because
+there is a single Static Web App shared across the whole topology — it is not
+created separately per environment. There is no per-environment DNS record to manage.
+
 ### Terraform-managed path (production_hostname and dns_zone_name set)
 
 ```bash
-terraform -chdir=iac/environment init -backend-config=../env/prod.backend.hcl
-terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars -var 'terraform_principal_type=User'
+terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl
+terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'
 ```
 
-The plan should show one `module.stamp.azapi_resource.production_cname[0]` to add. After apply, the record exists in the Azure DNS zone with TTL 3600. To run the T-24h lower-TTL phase, run:
+The plan should show one `azapi_resource.production_cname[0]` to add. After apply, the record exists in the Azure DNS zone with TTL 3600. To run the T-24h lower-TTL phase, run:
 
 ```bash
 set -euo pipefail
@@ -90,10 +112,10 @@ DNS_ZONE_RESOURCE_GROUP_NAME=""
 
 DNS_ZONE_RG="${DNS_ZONE_RESOURCE_GROUP_NAME:-$DNS_ZONE_NAME}"
 DNS_RECORD_NAME="$({
-  terraform -chdir=iac/environment show -json |
+  terraform -chdir=iac/shared show -json |
     jq -er '
       [.. | objects
-       | select(.address? == "module.stamp.azapi_resource.production_cname[0]")
+       | select(.address? == "azapi_resource.production_cname[0]")
        | .values.name
        | select(type == "string" and length > 0)]
       | if length == 1 then .[0]
@@ -110,16 +132,16 @@ az network dns record-set cname update \
 ```
 
 `DNS_RECORD_NAME` comes directly from the single
-`module.stamp.azapi_resource.production_cname[0]` instance in current Terraform
+`azapi_resource.production_cname[0]` instance in the shared root's current Terraform
 state, so it mirrors the exact resource `name` Terraform manages and fails
 closed if that instance is absent, duplicated, or unnamed. `DNS_ZONE_NAME` and
 `DNS_ZONE_RESOURCE_GROUP_NAME` must match `dns_zone_name` and
-`dns_zone_resource_group_name` in `iac/env/prod.tfvars`. The resource group is
-deliberately **not** the stamp `resource_group_name`: `dns.tf` addresses the
+`dns_zone_resource_group_name` in `iac/env/shared.tfvars`. The resource group is
+deliberately **not** the shared `shared_rg_name`: `dns.tf` addresses the
 configured DNS-zone resource group, falling back to the zone name only when
 `dns_zone_resource_group_name` is empty.
 
-24h after stable traffic, run `terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars -var 'terraform_principal_type=User'` again to let Terraform reset the TTL to 3600.
+24h after stable traffic, run `terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'` again to let Terraform reset the TTL to 3600.
 
 ### Manual / registrar path (var.dns_zone_name empty)
 
@@ -128,7 +150,7 @@ When DNS is NOT hosted in Azure (e.g. domain at Gandi, Cloudflare, Namecheap):
 1. Log in to the registrar's DNS console.
 2. Locate the existing CNAME (or A record) for `<production_hostname>`.
 3. 24h before cutover: lower TTL to 300s. Do not change the target yet.
-4. At cutover: change the target to the value returned by `terraform -chdir=iac/environment output -raw production_hostname_target`. Keep TTL at 300s.
+4. At cutover: change the target to the value returned by `terraform -chdir=iac/shared output -raw swa_default_hostname`. Keep TTL at 300s.
 5. Wait for propagation. Run `bash scripts/iac/validate-dns.sh` (see below) to verify.
 6. After 24h of stable traffic and clean Application Insights metrics, raise TTL back to 3600s.
 
@@ -139,9 +161,7 @@ Do not delete the old target until the rollback window in `docs/runbooks/cutover
 Run the automated smoke script:
 
 ```bash
-SWA_URL="$(terraform -chdir=iac/environment output -raw swa_url)"
-SWA_HOST="${SWA_URL#https://}"
-SWA_HOST="${SWA_HOST%/}"
+SWA_HOST="$(terraform -chdir=iac/shared output -raw swa_default_hostname)"
 
 PROD_HOST=bcc.flyparagliding.org.uk \
 SWA_HOST="$SWA_HOST" \
@@ -150,9 +170,8 @@ ACS_EMAIL_DOMAIN=mail.flyparagliding.org.uk \
   bash scripts/iac/validate-dns.sh
 ```
 
-Deriving `SWA_HOST` from the unconditional `swa_url` output makes this command
-valid in both managed and manual modes; do not use the conditionally empty
-`production_hostname_target` for this shared validation step.
+Deriving `SWA_HOST` from the shared root's `swa_default_hostname` output makes this
+command valid in both managed and manual modes.
 
 The script:
 

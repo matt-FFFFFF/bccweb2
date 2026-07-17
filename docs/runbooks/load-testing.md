@@ -72,6 +72,21 @@ default (`127.0.0.1:10001`) when `AzureWebJobsStorage` is not exported in the sh
 Remote targets must provide `AzureWebJobsStorage`; `BLOB_CONNECTION_STRING` remains
 blob-only and is never used for queue verification.
 
+Each environment now provisions TWO storage accounts (see
+`docs/architecture/storage-and-queues.md`): Account A (`stbccweb<env>rt`, e.g.
+`stbccwebstagingrt`) is the `AzureWebJobsStorage` target — it holds all ten queues plus
+the Flex Consumption deployment package — while Account B (`stbccweb<env>data`, e.g.
+`stbccwebstagingdata`) is the `BLOB_CONNECTION_STRING` target holding `data`/`data-private`.
+The queue gate above (main/poison quiescence) always inspects Account A; register/sign/
+artifact HTTP traffic reads and writes Account B through the API. When targeting a real
+Azure stack, resolve each account name from its own Terraform output — do not assume a
+single combined account:
+
+```bash
+terraform -chdir=iac/environment output -raw storage_account_name_runtime  # Account A
+terraform -chdir=iac/environment output -raw storage_account_name_data     # Account B
+```
+
 These gates are user-approved release criteria. Do not downgrade them to advisory
 metrics to make a run pass.
 
@@ -131,8 +146,9 @@ unrelated fixtures/seed rounds survive.
 ## Azure configuration and cost controls
 
 Use `PURETRACK_ENABLED=false`, leave `config.json` `roundBriefRecipients` empty (the
-default) to disable brief email, a dedicated JWT secret and
-storage account, and non-production/omitted ACS. Warm the health endpoint if cold-start
+default) to disable brief email, a dedicated JWT secret and dedicated
+storage accounts (both Account A/runtime and Account B/data), and non-production/omitted
+ACS. Warm the health endpoint if cold-start
 behavior is not the subject. Azure scale, storage leases, and authentication topology
 differ from Azurite; record those differences with the result rather than weakening
 gates.

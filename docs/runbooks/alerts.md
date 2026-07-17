@@ -167,10 +167,12 @@ The storage account returned more than 5 transactions tagged `ServerBusyError` (
 
 ### Immediate response
 
-1. Confirm the storage account is healthy:
+1. Confirm the storage account is healthy (this alert scopes the storage server-error
+   Transactions metric to the DATA account — `data`/`data-private`, the account fronting
+   pilot-facing reads/writes — not the runtime/queue account):
    ```bash
    az storage account show \
-      --name "$(terraform -chdir=iac/environment output -raw storage_account_name)" \
+      --name "$(terraform -chdir=iac/environment output -raw storage_account_name_data)" \
       --resource-group "$(terraform -chdir=iac/environment output -raw resource_group_name)" \
      --query "{provisioning: provisioningState, status: statusOfPrimary, sku: sku.name}"
    ```
@@ -331,7 +333,7 @@ This is intentional — the alert resource is in place so that the emitter can b
    az storage blob show \
      --container data \
      --name "seasons/<year>.json" \
-      --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name)" \
+      --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name_data)" \
      --query "properties.lastModified"
    ```
 
@@ -375,7 +377,7 @@ not appear; the status blob (`rescore-jobs/{jobId}.json`) may be stuck at `runni
    az storage blob download \
      --container data-private \
      --name "rescore-jobs/<jobId>.json" \
-     --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name)" \
+     --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name_data)" \
      --file /tmp/rescore-job.json
    cat /tmp/rescore-job.json
    ```
@@ -430,16 +432,17 @@ PureTrack groups.
    az storage blob download \
      --container data-private \
      --name "rounds/<roundId>.json" \
-     --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name)" \
+     --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name_data)" \
      --file /tmp/round.json
    cat /tmp/round.json | jq .pureTrack
    ```
-2. Check whether the job is still in the main queue or already dead-lettered:
+2. Check whether the job is still in the main queue or already dead-lettered (queues live on
+   the RUNTIME account, not the data account):
    ```bash
    az storage message peek --queue-name round-puretrack-group --num-messages 32 \
-     --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name)"
+     --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name_runtime)"
    az storage message peek --queue-name round-puretrack-group-poison --num-messages 32 \
-     --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name)"
+     --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name_runtime)"
    ```
 3. If `failed` and the main queue is empty (the worker recorded the failure and ACKed the message), use the round's
    `Recreate Groups` action in the Admin UI (`POST /api/rounds/{id}/puretrack/create-groups`)
