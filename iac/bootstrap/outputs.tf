@@ -52,7 +52,7 @@ output "terraform_umi_client_ids" {
 
 output "terraform_umi_principal_ids" {
   description = "Map env → object (principal) ID of that env's Terraform UMI. Used for downstream RBAC role assignments."
-  value       = { for k, v in azapi_resource.tf_umi : k => v.output.properties.principalId }
+  value       = local.terraform_umi_principal_ids
 }
 
 output "terraform_umi_resource_ids" {
@@ -61,12 +61,12 @@ output "terraform_umi_resource_ids" {
 }
 
 output "pre_created_rg_names" {
-  description = "Map platform-<env>/stamp-<env> → resource group name. These RGs are owned by bootstrap; the iac/environment stack consumes them as plain inputs (platform_rg_name/stamp_rg_name), never creating or reading them itself."
+  description = "Map shared/stamp-<env> → resource group name. Bootstrap owns these RGs; downstream stacks consume their names as plain inputs."
   value       = { for k, v in azapi_resource.pre_created_rg : k => v.name }
 }
 
 output "pre_created_rg_ids" {
-  description = "Map platform-<env>/stamp-<env> → resource group Azure ID."
+  description = "Map shared/stamp-<env> → resource group Azure ID."
   value       = { for k, v in azapi_resource.pre_created_rg : k => v.id }
 }
 
@@ -81,14 +81,14 @@ output "subscription_id" {
 }
 
 output "github_actions_setup" {
-  description = "Copy-pasteable operator runbook for wiring GitHub Actions to the per-env Terraform UMIs via OIDC. None of these values are secret."
+  description = "Copy-pasteable operator runbook for wiring GitHub Actions to the downstream Terraform UMIs via OIDC. None of these values are secret."
   value       = <<-EOT
-    GitHub Actions OIDC setup for the per-env Terraform UMIs
-    ========================================================
+    GitHub Actions OIDC setup for the downstream Terraform UMIs
+    ============================================================
 
-    One UMI per environment; each owns ONLY its env's platform + stamp RGs
-    (RG-scoped Owner, never subscription scope) and can contribute only to its
-    own tfstate container. There is no account-level state-reader assignment.
+    One UMI per downstream stack; each owns ONLY its matching shared or stamp
+    RG (RG-scoped Owner, never subscription scope) and can contribute only to
+    its own tfstate container. There is no account-level state-reader assignment.
 
     1. GitHub environment secrets (3 per environment):
 %{if var.manage_github_secrets~}
@@ -105,11 +105,18 @@ output "github_actions_setup" {
          AZURE_TENANT_ID       = ${data.azapi_client_config.current.tenant_id}
          AZURE_SUBSCRIPTION_ID = ${data.azapi_client_config.current.subscription_id}
 
-       Terraform also publishes 2 GitHub environment variables per environment,
-       sourced from the resource groups actually created by bootstrap:
-%{for k, v in var.terraform_umis~}
-         ${v.github_env}: TF_VAR_PLATFORM_RG_NAME = ${azapi_resource.pre_created_rg["platform-${k}"].name}
-         ${v.github_env}: TF_VAR_STAMP_RG_NAME    = ${azapi_resource.pre_created_rg["stamp-${k}"].name}
+       Terraform also publishes deterministic GitHub environment variables:
+%{for k, v in local.application_umis~}
+         ${v.github_env}: TF_VAR_STAMP_RG_NAME = ${azapi_resource.pre_created_rg["stamp-${k}"].name}
+         ${v.github_env}: TF_VAR_stamp_name    = ${v.github_env}
+%{endfor~}
+         shared: TF_VAR_shared_rg_name         = ${azapi_resource.pre_created_rg["shared"].name}
+         shared: TF_VAR_env_umi_principal_ids  = ${jsonencode(local.terraform_umi_principal_ids)}
+%{for k, v in local.shared_state_consumers~}
+         ${v.github_env}: SHARED_RG_NAME = ${azapi_resource.pre_created_rg["shared"].name}
+         ${v.github_env}: AZURE_LOCATION = ${var.location}
+         ${v.github_env}: TF_VAR_tfstate_resource_group_name  = ${azapi_resource.bootstrap_rg.name}
+         ${v.github_env}: TF_VAR_tfstate_storage_account_name = ${azapi_resource.tfstate_sa.name}
 %{endfor~}
 %{else~}
        Automatic creation is disabled (manage_github_secrets = false).
@@ -122,12 +129,19 @@ output "github_actions_setup" {
          AZURE_TENANT_ID       = ${data.azapi_client_config.current.tenant_id}
          AZURE_SUBSCRIPTION_ID = ${data.azapi_client_config.current.subscription_id}
 
-       Automatic RG-variable publication is also disabled. Set these as GitHub
-       ENVIRONMENT-level variables manually, using the resource groups actually
-       created by bootstrap:
-%{for k, v in var.terraform_umis~}
-         ${v.github_env}: TF_VAR_PLATFORM_RG_NAME = ${azapi_resource.pre_created_rg["platform-${k}"].name}
-         ${v.github_env}: TF_VAR_STAMP_RG_NAME    = ${azapi_resource.pre_created_rg["stamp-${k}"].name}
+       Automatic variable publication is also disabled. Set the same GitHub
+       ENVIRONMENT-level variables manually:
+%{for k, v in local.application_umis~}
+         ${v.github_env}: TF_VAR_STAMP_RG_NAME = ${azapi_resource.pre_created_rg["stamp-${k}"].name}
+         ${v.github_env}: TF_VAR_stamp_name    = ${v.github_env}
+%{endfor~}
+         shared: TF_VAR_shared_rg_name        = ${azapi_resource.pre_created_rg["shared"].name}
+         shared: TF_VAR_env_umi_principal_ids = ${jsonencode(local.terraform_umi_principal_ids)}
+%{for k, v in local.shared_state_consumers~}
+         ${v.github_env}: SHARED_RG_NAME = ${azapi_resource.pre_created_rg["shared"].name}
+         ${v.github_env}: AZURE_LOCATION = ${var.location}
+         ${v.github_env}: TF_VAR_tfstate_resource_group_name  = ${azapi_resource.bootstrap_rg.name}
+         ${v.github_env}: TF_VAR_tfstate_storage_account_name = ${azapi_resource.tfstate_sa.name}
 %{endfor~}
 %{endif~}
 

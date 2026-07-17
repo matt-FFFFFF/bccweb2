@@ -6,7 +6,8 @@
 # names must be globally unique, so the operator must supply one (lowercase,
 # 3–24 chars, letters and digits only). `terraform_umis` has no default —
 # the operator supplies the canonical per-env map via terraform.tfvars
-# (see terraform.tfvars.example).
+# (see terraform.tfvars.example). The shared entry has no stamp RG; every
+# application environment entry names exactly one stamp RG.
 
 variable "location" {
   type        = string
@@ -39,8 +40,8 @@ variable "tfstate_container_prefix" {
 
 # ─── Terraform UMIs + GitHub OIDC federation ─────────────────────────────────
 #
-# One UMI per environment; each UMI gets Owner on its env's pre-created
-# platform RG and stamp RG (never subscription scope). Each UMI carries one
+# One UMI per downstream stack; each UMI gets Owner on exactly one pre-created
+# RG (never subscription scope). Each UMI carries one
 # federated identity credential scoped to
 # `repo:<github_repo>:environment:<github_env>`. Adding a new env is a new
 # `terraform_umis` map entry (plus the matching `github_environments` entry)
@@ -55,7 +56,7 @@ variable "github_repo" {
 variable "github_environments" {
   type        = set(string)
   description = "GitHub environment names that receive the per-env Azure OIDC secrets. Every `terraform_umis` entry's `github_env` must appear in this list."
-  default     = ["dev", "prod"]
+  default     = ["dev", "prod", "shared"]
 
   validation {
     condition     = alltrue([for e in var.github_environments : can(regex("^[a-z0-9-]+$", e))])
@@ -65,11 +66,10 @@ variable "github_environments" {
 
 variable "terraform_umis" {
   type = map(object({
-    platform_rg = string
-    stamp_rg    = string
-    github_env  = string
+    stamp_rg   = optional(string)
+    github_env = string
   }))
-  description = "Per-environment Terraform UMIs, keyed by env name (e.g. dev, prod). Each entry names the two pre-created RGs the UMI owns (platform + stamp) and the GitHub environment whose OIDC subject the UMI trusts. The UMI is named id-bccweb-terraform-<key>. No default — supply via terraform.tfvars (see terraform.tfvars.example)."
+  description = "Terraform UMIs keyed by stack name (dev, prod, shared). Application entries name their stamp RG; shared omits stamp_rg and owns rg-bccweb-shared. Each entry names the GitHub environment whose OIDC subject the UMI trusts. The UMI is named id-bccweb-terraform-<key>. No default — supply via terraform.tfvars (see terraform.tfvars.example)."
   nullable    = false
 
   validation {
@@ -78,8 +78,22 @@ variable "terraform_umis" {
   }
 
   validation {
-    condition     = alltrue([for k, v in var.terraform_umis : contains(var.github_environments, v.github_env)])
-    error_message = "Each terraform_umis entry's github_env must be listed in github_environments."
+    condition = (
+      length(var.terraform_umis) == length(var.github_environments) &&
+      toset([for k, v in var.terraform_umis : v.github_env]) == var.github_environments
+    )
+    error_message = "github_environments and the terraform_umis github_env values must match exactly."
+  }
+
+  validation {
+    condition = (
+      contains(keys(var.terraform_umis), "shared") &&
+      alltrue([
+        for k, v in var.terraform_umis :
+        k == "shared" ? v.stamp_rg == null : v.stamp_rg != null
+      ])
+    )
+    error_message = "terraform_umis must include shared without stamp_rg; every application environment must set stamp_rg."
   }
 }
 

@@ -8,11 +8,9 @@
 #   * Blob service with 30-day soft-delete
 #   * `tfstate-<env>` blob containers (private)
 #   * CanNotDelete management lock on the storage account
-#   * Per-environment RGs (platform + stamp) consumed by the `iac/environment`
-#     stack as plain inputs (platform_rg_name/stamp_rg_name) — never created
-#     or discovered by that stack itself
-#   * Per-environment Terraform UMIs with RG-scoped Owner + GitHub OIDC
-#     federation + per-env GitHub Actions secrets
+#   * One shared RG plus one stamp RG per application environment
+#   * Per-stack Terraform UMIs with RG-scoped Owner + GitHub OIDC federation
+#     + GitHub Actions secrets and deterministic Terraform input variables
 #
 # Local state is intentional — this config provisions its own remote-state
 # target, so it cannot itself live in that target. Re-running is safe; AzAPI
@@ -133,21 +131,19 @@ resource "azapi_resource" "tfstate_sa_lock" {
 
 # ─── Pre-created resource groups ─────────────────────────────────────────────
 #
-# Bootstrap owns every environment RG so `iac/environment` never needs
-# RG-create rights — it consumes these as plain inputs
-# (platform_rg_name/stamp_rg_name), published as GitHub environment
-# variables (see the env_rg_vars locals below).
-# Two RGs per env: the platform RG (observability home — LAW, App Insights,
-# ACS email domain) and the stamp RG (the app: storage, Function App, SWA,
-# Key Vault).
+# Bootstrap owns the shared RG and every application environment's stamp RG,
+# so downstream stacks never need RG-create rights. Shared services live in
+# `rg-bccweb-shared`; each application environment gets only `stamp-<env>`.
 
 locals {
-  pre_created_rgs = merge([
-    for env, cfg in var.terraform_umis : {
-      "platform-${env}" = cfg.platform_rg
-      "stamp-${env}"    = cfg.stamp_rg
+  shared_rg_name = "rg-bccweb-shared"
+  pre_created_rgs = merge(
+    { shared = local.shared_rg_name },
+    {
+      for env, cfg in var.terraform_umis :
+      "stamp-${env}" => cfg.stamp_rg if env != "shared"
     }
-  ]...)
+  )
 }
 
 resource "azapi_resource" "pre_created_rg" {
@@ -160,7 +156,7 @@ resource "azapi_resource" "pre_created_rg" {
   body = {
     tags = {
       project     = "bccweb"
-      environment = split("-", each.key)[1]
+      environment = each.key == "shared" ? "shared" : split("-", each.key)[1]
       managed_by  = "terraform"
     }
   }
@@ -170,11 +166,12 @@ resource "azapi_resource" "pre_created_rg" {
 
 # ─── Terraform UMIs + GitHub OIDC federated credentials ──────────────────────
 #
-# One user-assigned managed identity per environment that GitHub Actions
+# One user-assigned managed identity per downstream stack that GitHub Actions
 # assumes via OIDC (no client secrets stored anywhere). Each UMI carries one
 # federated credential scoped to `repo:<owner/repo>:environment:<github_env>`
-# and is granted Owner ONLY on its env's two pre-created RGs — never at
-# subscription scope.
+# and is granted Owner ONLY on its matching pre-created RG — never at
+# subscription scope. Application identities own their stamp RG; the shared
+# identity owns the shared RG.
 
 resource "azapi_resource" "tf_umi" {
   for_each = var.terraform_umis
@@ -205,16 +202,16 @@ resource "azapi_resource" "tf_umi_fed_cred" {
   }
 }
 
-# One Owner assignment per (UMI, RG) pair — 2 RGs per env. Role-assignment
+# One Owner assignment per (UMI, RG) pair. Role-assignment
 # names must be GUIDs; uuidv5 derives a stable one from the pair key so
 # re-applies are no-ops (no random provider state involved).
 locals {
-  umi_rg_owner_pairs = merge([
-    for env, cfg in var.terraform_umis : {
-      "${env}-platform" = { env = env, rg_key = "platform-${env}" }
-      "${env}-stamp"    = { env = env, rg_key = "stamp-${env}" }
+  umi_rg_owner_pairs = {
+    for env, cfg in var.terraform_umis : env => {
+      env    = env
+      rg_key = env == "shared" ? "shared" : "stamp-${env}"
     }
-  ]...)
+  }
 }
 
 # Owner role definition GUID is a well-known constant — see
@@ -286,6 +283,10 @@ locals {
     for k, cfg in var.terraform_umis :
     cfg.github_env => azapi_resource.tf_umi[k].output.properties.clientId
   }
+
+  terraform_umi_principal_ids = {
+    for k, v in azapi_resource.tf_umi : k => v.output.properties.principalId
+  }
 }
 
 resource "github_repository_environment" "envs" {
@@ -327,16 +328,40 @@ resource "github_actions_environment_secret" "azure" {
 }
 
 locals {
-  env_rg_vars = var.manage_github_secrets ? merge([
-    for k, cfg in var.terraform_umis : {
-      "${cfg.github_env}/TF_VAR_PLATFORM_RG_NAME" = { env = cfg.github_env, name = "TF_VAR_PLATFORM_RG_NAME", value = azapi_resource.pre_created_rg["platform-${k}"].name }
-      "${cfg.github_env}/TF_VAR_STAMP_RG_NAME"    = { env = cfg.github_env, name = "TF_VAR_STAMP_RG_NAME", value = azapi_resource.pre_created_rg["stamp-${k}"].name }
-    }
-  ]...) : {}
+  application_umis = {
+    for k, cfg in var.terraform_umis : k => cfg if k != "shared"
+  }
+
+  # T4 renames dev to staging. Excluding the transitional dev environment here
+  # publishes shared-state inputs to prod now and to staging after that rename.
+  shared_state_consumers = {
+    for k, cfg in local.application_umis : k => cfg if cfg.github_env != "dev"
+  }
+
+  github_environment_vars = var.manage_github_secrets ? merge(
+    merge([
+      for k, cfg in local.application_umis : {
+        "${cfg.github_env}/TF_VAR_STAMP_RG_NAME" = { env = cfg.github_env, name = "TF_VAR_STAMP_RG_NAME", value = azapi_resource.pre_created_rg["stamp-${k}"].name }
+        "${cfg.github_env}/TF_VAR_stamp_name"    = { env = cfg.github_env, name = "TF_VAR_stamp_name", value = cfg.github_env }
+      }
+    ]...),
+    {
+      "shared/TF_VAR_env_umi_principal_ids" = { env = "shared", name = "TF_VAR_env_umi_principal_ids", value = jsonencode(local.terraform_umi_principal_ids) }
+      "shared/TF_VAR_shared_rg_name"        = { env = "shared", name = "TF_VAR_shared_rg_name", value = azapi_resource.pre_created_rg["shared"].name }
+    },
+    merge([
+      for k, cfg in local.shared_state_consumers : {
+        "${cfg.github_env}/AZURE_LOCATION"                      = { env = cfg.github_env, name = "AZURE_LOCATION", value = var.location }
+        "${cfg.github_env}/SHARED_RG_NAME"                      = { env = cfg.github_env, name = "SHARED_RG_NAME", value = azapi_resource.pre_created_rg["shared"].name }
+        "${cfg.github_env}/TF_VAR_tfstate_resource_group_name"  = { env = cfg.github_env, name = "TF_VAR_tfstate_resource_group_name", value = azapi_resource.bootstrap_rg.name }
+        "${cfg.github_env}/TF_VAR_tfstate_storage_account_name" = { env = cfg.github_env, name = "TF_VAR_tfstate_storage_account_name", value = azapi_resource.tfstate_sa.name }
+      }
+    ]...)
+  ) : {}
 }
 
 resource "github_actions_environment_variable" "rg_names" {
-  for_each      = local.env_rg_vars
+  for_each      = local.github_environment_vars
   repository    = split("/", var.github_repo)[1]
   environment   = github_repository_environment.envs[each.value.env].environment
   variable_name = each.value.name
