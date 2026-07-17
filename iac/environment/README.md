@@ -1,29 +1,21 @@
 # iac/environment — per-env application stack
 
-The application infrastructure for one environment: a single `terraform
-apply` that provisions both the platform layer (observability + email) and
-the application stamp. See [../README.md](../README.md) for the overall
-layout.
+The application infrastructure for one environment: a single stamp module
+that consumes non-secret shared-resource IDs from the `iac/shared` remote
+state. See [../README.md](../README.md) for the overall layout.
 
 ## Purpose
 
-Composes two child modules in one plan/state:
+Composes one [`modules/stamp`](modules/stamp) child module containing the app's
+storage account, Function App, Key Vault (RBAC, 6 secrets), and alert rules.
+The shared root owns Application Insights, ACS, and the Static Web App. The
+environment root reads only `app_insights_ids` and `acs_id` from shared state;
+Key Vault fetches both connection strings directly from those resource IDs.
 
-- [`modules/platform`](modules/platform): per-env Log Analytics workspace,
-  Application Insights, and the ACS email service + DNS-verified domain.
-  Deployed into the bootstrap-created platform resource group
-  (`platform_rg_name`).
-- [`modules/stamp`](modules/stamp): the app's storage account, Function App
-  (Flex/Linux, UMI), Static Web App, Key Vault (RBAC, 6 secrets), ACS
-  `communicationServices` (linked to the platform module's email domain by
-  ID), 7 alert rules + ops action group, and an optional production DNS
-  CNAME. Deployed into the bootstrap-created stamp resource group
-  (`stamp_rg_name`).
-
-Both resource groups are pre-created by
-[`iac/bootstrap`](../bootstrap/README.md), which also grants the env's
-Terraform UMI Owner on each — neither module creates or reads a resource
-group itself.
+The stamp resource group is pre-created by
+[`iac/bootstrap`](../bootstrap/README.md), which grants the environment's
+Terraform UMI Owner on it. The module neither creates nor reads the resource
+group.
 
 ## Backend
 
@@ -53,24 +45,22 @@ vars/secrets in CI):
 | Variable | Source | Notes |
 |---|---|---|
 | `stamp_name` | tfvars / CI-generated | Environment name used as the resource-name suffix. |
-| `platform_rg_name` | `TF_VAR_PLATFORM_RG_NAME` | Published by bootstrap as a GitHub environment variable. |
 | `stamp_rg_name` | `TF_VAR_STAMP_RG_NAME` | Published by bootstrap as a GitHub environment variable. |
-| `acs_email_domain` | `TF_VAR_ACS_EMAIL_DOMAIN` | **Not** published by bootstrap — the operator sets this GitHub environment variable (or the local tfvars value) directly; see [../README.md](../README.md#first-time-setup). |
+| `tfstate_resource_group_name` | `TF_VAR_TFSTATE_RESOURCE_GROUP_NAME` | Resource group containing the canonical state account. |
+| `tfstate_storage_account_name` | `TF_VAR_TFSTATE_STORAGE_ACCOUNT_NAME` | Canonical state account containing `tfstate-shared/shared.tfstate`. |
 | `ops_email` | tfvars / `vars.OPS_EMAIL` | Alert recipient. |
-| `acs_sender_address` | tfvars / `vars.ACS_SENDER_ADDRESS` | Must be on the configured `acs_email_domain`. |
+| `acs_sender_address` | tfvars / `vars.ACS_SENDER_ADDRESS` | Sender address configured by the shared root. |
 | `puretrack_api_key`, `puretrack_email`, `puretrack_password` | `TF_VAR_*` secrets | Sensitive; never written to a tfvars file in CI. |
 
-Optional inputs (`allowed_origins`, `production_hostname`,
-`dns_zone_name`/`dns_zone_resource_group_name`, `slack_webhook_url`,
-`jwt_secret_version`, `acs_secret_version`, `blob_schema_mode`,
-`terraform_principal_type`) have defaults — see
+Optional inputs (`allowed_origins`, `slack_webhook_url`, `jwt_secret_version`,
+`acs_secret_version`, `blob_schema_mode`, `terraform_principal_type`) have defaults — see
 [`variables.tf`](variables.tf) and `../env/<env>.tfvars.example`.
 
 **Precedence note**: `-var-file` values always override `TF_VAR_*`
 environment variables for the same variable name. The committed
 `<env>.tfvars.example` already has placeholder entries for
-`platform_rg_name`, `stamp_rg_name`, `acs_email_domain`, and all three
-`puretrack_*` values, so a local apply that both fills those placeholders
+`stamp_rg_name`, the two `tfstate_*` values, and all three `puretrack_*`
+values, so a local apply that both fills those placeholders
 in `<env>.tfvars` AND exports the matching `TF_VAR_*` will silently use
 the tfvars value. Either fill the tfvars file directly (recommended for
 local applies) or remove/comment those specific keys from your local
@@ -102,53 +92,42 @@ terraform -chdir=iac/environment apply -var-file=../env/<env>.tfvars -var 'terra
 
 ## Outputs
 
-The stamp module's outputs are re-exported at the root: `function_app_name`,
-`swa_url`, `storage_account_name`, `key_vault_name`/`key_vault_uri`,
-`resource_group_name`, `production_hostname_target`,
-`production_dns_managed_by_terraform` — consumed by the app deploy jobs and
-operators for DNS cutover.
-
-The platform module's outputs are also re-exported at the root — five in
-total: `app_insights_id`, `log_analytics_workspace_id`, `platform_rg_name`,
-`acs_email_domain_verification_records`, and `acs_dns_records_for_operator`.
-The last two feed ACS domain verification (below); the sensitive
-`app_insights_connection_string` output stays internal to the module (it
-flows straight into the stamp module's Key Vault copy, never surfaced as a
-root output).
+The stamp module's outputs re-exported at the root are exactly
+`resource_group_name`, `function_app_name`, `storage_account_name`,
+`key_vault_name`, and `key_vault_uri`.
 
 ## ACS domain verification
 
-After the first apply for an environment, print the registrar records ACS
-needs to verify the sending domain:
+ACS and its email domain are owned by the shared root. After applying that
+root, print the registrar records ACS needs to verify the sending domain:
 
 ```sh
-terraform -chdir=iac/environment output acs_dns_records_for_operator
+terraform -chdir=iac/shared output acs_dns_records_for_operator
 ```
 
 Add the printed records — `domain_ownership`, `spf`, `dkim`, `dkim2`, and
-`dmarc` — at your DNS registrar for the domain set in `acs_email_domain`.
+`dmarc` — at your DNS registrar for the shared ACS email domain.
 Each value is Azure's record object, including its `type`, `name`, and `value`.
 The operator keys map to Azure's raw keys as follows:
 `domain_ownership` → `Domain`, `spf` → `SPF`, `dkim` → `DKIM`, `dkim2` →
 `DKIM2`, and `dmarc` → `DMARC`; there is no MX record here. Azure
 Communication Services polls for the records and flips the domain to
 "Verified" once they resolve — no further Terraform action is required.
-`acs_email_domain_verification_records` holds that raw Azure-keyed object,
-useful for scripting or diffing against a previous apply. There is no
-`dmarc_recommended_policy_value` output.
+The shared root's output contract is documented in
+[`../shared/OUTPUTS.md`](../shared/OUTPUTS.md).
 
 ## Secret rotation
 
-Key Vault secret copies are managed by Terraform — bump the version vars
-(`jwt_secret_version`, `acs_secret_version`) in the env tfvars (or the
-matching GitHub environment variable for CI) and re-apply. See
-[../README.md](../README.md#secret-rotation).
+Key Vault secret copies are managed by Terraform. The stamp reads the shared
+Application Insights component to obtain its connection string and calls
+`listKeys` ephemerally on the shared ACS resource, so neither value crosses the
+shared-state boundary. Bump `jwt_secret_version` or `acs_secret_version` and
+re-apply to rotate those copies. See [../README.md](../README.md#secret-rotation).
 
 ## Tests
 
 ```sh
 terraform -chdir=iac/environment test -test-directory=tests/unit          # mocked, offline
-npm run iac:platform-contract                                             # exact platform managed-resource set
 
 terraform -chdir=iac/environment init -backend-config=../env/<env>.backend.hcl
 terraform -chdir=iac/environment test -test-directory=tests/integration   # plan-only, real subscription

@@ -31,9 +31,8 @@ exceptions:
 - `variables.tf` redeclares the same variables as the real module. Terraform
   modules are independent units, so this duplication is required.
 
-Everything else (`acs.tf`, `alerts.tf`, `dns.tf`, `functions.tf`,
-`outputs.tf`, `rg.tf`, `storage.tf`, `swa.tf`, `versions.tf`) must remain
-byte-identical to the real module.
+Everything else (`alerts.tf`, `functions.tf`, `outputs.tf`, `rg.tf`,
+`storage.tf`, `versions.tf`) must remain byte-identical to the real module.
 
 ## Sync rule (diff-driven discipline)
 
@@ -43,13 +42,15 @@ Whenever any `iac/environment/modules/stamp/*.tf` file changes, update the match
 Quick check:
 
 ```sh
-diff -r iac/environment/modules/stamp/ iac/environment/tests/unit/stamp-fixture/
+diff -r --exclude=keyvault.tf --exclude=variables.tf --exclude=README.md \
+  iac/environment/modules/stamp iac/environment/tests/unit/stamp-fixture
 ```
 
-The only expected differences are:
+The excluded files differ for these intentional reasons:
 
 - this `README.md` (not present in the real module)
 - the ephemeral substitution inside `keyvault.tf`
+- the fixture-local redeclaration in `variables.tf`
 
 Anything else means the fixture has drifted from the real module and must be
 re-synced before merging.

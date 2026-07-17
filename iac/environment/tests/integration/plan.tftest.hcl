@@ -26,9 +26,10 @@ variables {
   stamp_name = "integration-test"
   location   = "uksouth"
 
-  acs_email_domain = "mail.integration-test.example.invalid"
-  platform_rg_name = "rg-bccweb-platform-integration-test"
-  stamp_rg_name    = "rg-bccweb-integration-test"
+  stamp_rg_name = "rg-bccweb-integration-test"
+
+  tfstate_resource_group_name  = "rg-bccweb-tfstate"
+  tfstate_storage_account_name = "stbccweb13afe"
 
   allowed_origins = ["https://integration-test.example.invalid"]
 
@@ -46,9 +47,6 @@ variables {
   jwt_secret_version = "1"
   acs_secret_version = "1"
 
-  production_hostname          = ""
-  dns_zone_name                = ""
-  dns_zone_resource_group_name = ""
 }
 
 run "plan_against_real_backend" {
@@ -62,7 +60,7 @@ run "plan_against_real_backend" {
   # instances, planned_values.root_module.child_modules would be empty
   # and we'd silently pass on a degenerate no-op.
   assert {
-    condition     = length(run.plan_against_real_backend.planned_values.root_module.child_modules) >= 2
-    error_message = "Root module must plan both platform and stamp child modules."
+    condition     = length(run.plan_against_real_backend.planned_values.root_module.child_modules) == 1
+    error_message = "Root module must plan exactly one stamp child module."
   }
 }

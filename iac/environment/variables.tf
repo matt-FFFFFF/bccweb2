@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 British Club Challenge authors
 # SPDX-License-Identifier: MPL-2.0
-# Root inputs flow into the platform and stamp modules in main.tf. Per-env values live in ../env/<env>.tfvars.
+# Root inputs flow into the stamp module and shared-state lookup in main.tf. Per-env values live in ../env/<env>.tfvars.
 
 variable "stamp_name" {
   description = "Environment/stamp name used as the suffix in resource names."
@@ -8,14 +8,14 @@ variable "stamp_name" {
   nullable    = false
 }
 
-variable "acs_email_domain" {
-  description = "ACS email sending domain for this environment."
+variable "tfstate_resource_group_name" {
+  description = "Resource group containing the canonical Terraform state storage account."
   type        = string
   nullable    = false
 }
 
-variable "platform_rg_name" {
-  description = "Name of the pre-created platform resource group."
+variable "tfstate_storage_account_name" {
+  description = "Name of the canonical Terraform state storage account."
   type        = string
   nullable    = false
 }
@@ -63,24 +63,6 @@ variable "ops_email" {
 
 variable "slack_webhook_url" {
   description = "Optional Slack webhook URL for alerts."
-  type        = string
-  default     = ""
-}
-
-variable "production_hostname" {
-  description = "Public hostname for DNS cutover."
-  type        = string
-  default     = ""
-}
-
-variable "dns_zone_name" {
-  description = "Azure DNS zone name for managed cutover."
-  type        = string
-  default     = ""
-}
-
-variable "dns_zone_resource_group_name" {
-  description = "Resource group containing the Azure DNS zone."
   type        = string
   default     = ""
 }

@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2026 British Club Challenge authors
 # SPDX-License-Identifier: MPL-2.0
-# Required inputs from root: app_insights_id, app_insights_connection_string,
-# acs_email_domain_id, terraform_principal_object_id.
+# Required inputs from root: app_insights_id, acs_id,
+# terraform_principal_object_id.
 #
 # This is the stamp module's input schema. The root module declares the same
 # user-facing variable names in iac/environment/variables.tf and forwards them into the
@@ -47,26 +47,8 @@ variable "slack_webhook_url" {
   default     = ""
 }
 
-variable "production_hostname" {
-  description = "Public hostname for DNS cutover."
-  type        = string
-  default     = ""
-}
-
-variable "dns_zone_name" {
-  description = "Azure DNS zone name for managed cutover."
-  type        = string
-  default     = ""
-}
-
-variable "dns_zone_resource_group_name" {
-  description = "Resource group containing the Azure DNS zone."
-  type        = string
-  default     = ""
-}
-
-variable "acs_email_domain_id" {
-  description = "Resource ID of the ACS email domain owned by the platform module (REQUIRED INPUT from root — the platform and stamp modules are both applied in one iac/environment apply, so this is a plain module-output pass-through, not a remote-state lookup). Linked to the stamp's communicationServices via linkedDomains."
+variable "acs_id" {
+  description = "Resource ID of the shared Azure Communication Service (REQUIRED INPUT from root)."
   type        = string
   nullable    = false
 }
@@ -129,20 +111,13 @@ variable "tags" {
 
 # ─── Required inputs from root ────────────────────────────────────────────────
 #
-# These four are produced by the root module (per-environment observability
-# + the Terraform principal identity) and forwarded into every stamp instance.
+# These three are selected by the root module from shared state or the active
+# Terraform principal and forwarded into the stamp instance.
 # They have no sensible defaults — the module must refuse to plan without them.
 
 variable "app_insights_id" {
   description = "Resource ID of the shared Application Insights component (REQUIRED INPUT from root)."
   type        = string
-  nullable    = false
-}
-
-variable "app_insights_connection_string" {
-  description = "Application Insights connection string forwarded from root into Key Vault via the ephemeral pipeline (REQUIRED INPUT from root)."
-  type        = string
-  sensitive   = true
   nullable    = false
 }
 

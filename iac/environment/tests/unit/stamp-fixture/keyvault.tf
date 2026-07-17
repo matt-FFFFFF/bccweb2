@@ -7,10 +7,16 @@
 # ephemerals. All other stamp-fixture/*.tf files must stay byte-identical to
 # iac/environment/modules/stamp/*.tf.
 #
-# First-apply may 403 on KV data-plane writes due to RBAC propagation lag. Re-apply to recover. data.azapi_client_config.current is module-local (declared here, reused by dns.tf and rg.tf in the same module).
+# First-apply may 403 on KV data-plane writes due to RBAC propagation lag. Re-apply to recover. data.azapi_client_config.current is module-local (declared here, reused by rg.tf in the same module).
 # kv_admin_role's principalType is switchable via var.terraform_principal_type — "User" for local az login applies, "ServicePrincipal" for UMI/SP applies (CI default).
 
 data "azapi_client_config" "current" {}
+
+data "azapi_resource" "app_insights" {
+  type                   = "Microsoft.Insights/components@2020-02-02"
+  resource_id            = var.app_insights_id
+  response_export_values = ["properties.ConnectionString"]
+}
 
 resource "azapi_resource" "kv" {
   type      = "Microsoft.KeyVault/vaults@2026-02-01"
@@ -69,15 +75,19 @@ resource "azapi_resource" "fn_kv_role" {
 }
 
 locals {
-  jwt_secret_test_value            = "TEST_JWT_SECRET_SENTINEL"
-  acs_connection_string_test_value = "endpoint=https://acs.example.test/;accesskey=TEST_ACS_KEY_SENTINEL"
+  jwt_secret_test_value = "TEST_JWT_SECRET_SENTINEL"
+  acs_keys_test_values = {
+    (var.acs_id) = {
+      primaryConnectionString = "endpoint=https://acs.example.test/;accesskey=TEST_ACS_KEY_SENTINEL"
+    }
+  }
 }
 
 locals {
   secrets = {
     "jwt-secret"                    = { value = local.jwt_secret_test_value, version = var.jwt_secret_version }
-    "acs-connection-string"         = { value = local.acs_connection_string_test_value, version = var.acs_secret_version }
-    "appinsights-connection-string" = { value = var.app_insights_connection_string, version = "1" }
+    "acs-connection-string"         = { value = local.acs_keys_test_values[var.acs_id].primaryConnectionString, version = var.acs_secret_version }
+    "appinsights-connection-string" = { value = data.azapi_resource.app_insights.output.properties.ConnectionString, version = "1" }
     "puretrack-api-key"             = { value = var.puretrack_api_key, version = "1" }
     "puretrack-email"               = { value = var.puretrack_email, version = "1" }
     "puretrack-password"            = { value = var.puretrack_password, version = "1" }

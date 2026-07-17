@@ -12,6 +12,16 @@ mock_provider "azapi" {
     }
   }
 
+  mock_data "azapi_resource" {
+    defaults = {
+      output = {
+        properties = {
+          ConnectionString = "InstrumentationKey=TEST_APPINSIGHTS_SENTINEL;IngestionEndpoint=https://example.test/"
+        }
+      }
+    }
+  }
+
   mock_resource "azapi_resource" {
     defaults = {
       id = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Mock/mockResources/mock"
@@ -90,26 +100,22 @@ override_resource {
 }
 
 variables {
-  stamp_name                     = "unit"
-  stamp_rg_name                  = "rg-bccweb-unit"
-  location                       = "uksouth"
-  allowed_origins                = ["https://unit.example.test"]
-  ops_email                      = "ops@example.test"
-  slack_webhook_url              = "https://hooks.example.test/unit"
-  production_hostname            = "www.example.test"
-  dns_zone_name                  = "example.test"
-  dns_zone_resource_group_name   = "dns-rg-test"
-  acs_email_domain_id            = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-bccweb-platform-unit/providers/Microsoft.Communication/emailServices/acs-email-bccweb-unit/domains/mail.example.test"
-  acs_sender_address             = "noreply@mail.example.test"
-  puretrack_api_key              = "TEST_PT_KEY_SENTINEL"
-  puretrack_email                = "TEST_PT_EMAIL@example.test"
-  puretrack_password             = "TEST_PT_PASSWORD_SENTINEL"
-  jwt_secret_version             = "1"
-  acs_secret_version             = "1"
-  tags                           = { environment = "unit", managed_by = "terraform" }
-  app_insights_id                = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Insights/components/test-ai"
-  app_insights_connection_string = "InstrumentationKey=TEST_APPINSIGHTS_SENTINEL;IngestionEndpoint=https://example.test/"
-  terraform_principal_object_id  = "00000000-0000-0000-0000-000000000005"
+  stamp_name                    = "unit"
+  stamp_rg_name                 = "rg-bccweb-unit"
+  location                      = "uksouth"
+  allowed_origins               = ["https://unit.example.test"]
+  ops_email                     = "ops@example.test"
+  slack_webhook_url             = "https://hooks.example.test/unit"
+  acs_id                        = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-bccweb-shared/providers/Microsoft.Communication/communicationServices/acs-bccweb-shared"
+  acs_sender_address            = "noreply@mail.example.test"
+  puretrack_api_key             = "TEST_PT_KEY_SENTINEL"
+  puretrack_email               = "TEST_PT_EMAIL@example.test"
+  puretrack_password            = "TEST_PT_PASSWORD_SENTINEL"
+  jwt_secret_version            = "1"
+  acs_secret_version            = "1"
+  tags                          = { environment = "unit", managed_by = "terraform" }
+  app_insights_id               = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/test-rg/providers/Microsoft.Insights/components/test-ai"
+  terraform_principal_object_id = "00000000-0000-0000-0000-000000000005"
 }
 
 run "module_plans_with_minimum_inputs" {
@@ -248,11 +254,9 @@ run "no_diagnostic_settings" {
         azapi_resource.kv.type,
         azapi_resource.kv_admin_role.type,
         azapi_resource.fn_kv_role.type,
-        azapi_resource.acs.type,
         azapi_resource.fn_umi.type,
         azapi_resource.service_plan.type,
         azapi_resource.function_app.type,
-        azapi_resource.swa.type,
         azapi_resource.ops.type,
         azapi_resource.api_5xx_rate.type,
         azapi_resource.function_execution_failures.type,
@@ -345,27 +349,5 @@ run "storage_queues_planned" {
       azapi_resource.storage_lifecycle.body.properties.policy.rules[1].definition.actions.baseBlob.delete.daysAfterModificationGreaterThan == 7
     )
     error_message = "The storage lifecycle policy must have exactly two rules (gc-auth-tokens, gc-rescore-status); gc-rescore-status must delete blockBlobs under data-private/rescore-jobs/ after 7 days."
-  }
-}
-
-run "dns_skipped_when_hostname_empty" {
-  command = plan
-
-  providers = {
-    azapi  = azapi.mock
-    random = random.mock
-  }
-
-  module {
-    source = "./tests/unit/stamp-fixture"
-  }
-
-  variables {
-    production_hostname = ""
-  }
-
-  assert {
-    condition     = length(azapi_resource.production_cname) == 0
-    error_message = "The production CNAME resource should have count = 0 when production_hostname is empty."
   }
 }

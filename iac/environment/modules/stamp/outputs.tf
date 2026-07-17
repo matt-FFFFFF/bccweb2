@@ -10,11 +10,6 @@ output "function_app_name" {
   value       = azapi_resource.function_app.name
 }
 
-output "swa_url" {
-  description = "Public HTTPS URL of the Static Web App."
-  value       = "https://${azapi_resource.swa.output.properties.defaultHostname}"
-}
-
 output "storage_account_name" {
   description = "Name of the storage account backing the stamp."
   value       = azapi_resource.storage.name
@@ -28,14 +23,4 @@ output "key_vault_name" {
 output "key_vault_uri" {
   description = "Vault URI for applications and bootstrap scripts that read secrets."
   value       = azapi_resource.kv.output.properties.vaultUri
-}
-
-output "production_hostname_target" {
-  description = "Target hostname for the production CNAME when DNS is not managed by Terraform."
-  value       = local.manage_dns_in_azure ? "" : azapi_resource.swa.output.properties.defaultHostname
-}
-
-output "production_dns_managed_by_terraform" {
-  description = "Whether Terraform manages the production CNAME record in Azure DNS."
-  value       = local.manage_dns_in_azure
 }
