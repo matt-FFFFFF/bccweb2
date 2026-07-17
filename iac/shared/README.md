@@ -5,19 +5,40 @@ and `prod` application environments. Bootstrap pre-creates
 `rg-bccweb-shared`; this root consumes that resource-group name and never
 creates the resource group itself.
 
-The scaffold intentionally contains no resources yet. Follow-on topology work
-adds the shared Log Analytics workspace and per-environment Application
-Insights components (T6), Azure Communication Services (T7), the Standard
-Static Web App and production DNS/custom domain (T8), and narrowly scoped
-cross-resource-group RBAC for environment identities (T23). Resource-specific
-files own their outputs; the complete non-secret output contract is frozen in
-T9.
+## Resources
+
+- **`monitoring.tf`**: one Log Analytics workspace (`log-bccweb-shared`,
+  `PerGB2018`, 30-day retention) plus one Application Insights component per
+  environment in `var.environments` (default `["staging", "prod"]`), each
+  attached to that workspace.
+- **`acs.tf`**: one Azure Communication Services email service + customer-managed
+  domain, plus one communication service (`acs-bccweb-shared`) linked to that
+  domain. `listKeys` stays ephemeral — `acs.tf` never exports a connection string.
+- **`swa.tf` + `dns.tf`**: one Standard-tier Static Web App (`swa-bccweb-shared`)
+  shared by every environment, plus (when `production_hostname`/`dns_zone_name`
+  are both set) the production custom-domain CNAME and `customDomains` child
+  resource, ordered so DNS is created before Azure validates the domain.
+- **`rbac.tf`**: leaf-scoped role assignments granting each environment's
+  Terraform UMI (from `var.env_umi_principal_ids`, intersected with
+  `var.environments`) Monitoring Reader on its own Application Insights
+  component, plus Contributor on the single shared ACS and SWA resources.
+  No DNS or Owner assignment is granted here.
+
+The complete non-secret output contract is **frozen at exactly nine outputs**
+(enforced by `scripts/iac/check-shared-resource-contract.sh`, run in CI as
+`npm run iac:platform-contract`): three stamp-consumed (`app_insights_ids`,
+`acs_id`, `acs_sender_address`) and six deploy-workflow/operator-consumed
+(`log_analytics_workspace_id`, `acs_email_domain_id`,
+`acs_dns_records_for_operator`, `swa_name`, `swa_default_hostname`, `swa_id`).
+None of the nine ever contain a `listKeys`, `ConnectionString`, or
+`primaryConnectionString` value — see [OUTPUTS.md](OUTPUTS.md) for the full
+contract.
 
 ## State and configuration
 
 Remote state uses the committed `../env/shared.backend.hcl` configuration:
 `shared.tfstate` in the `tfstate-shared` container of the canonical bootstrap
-state account. Initialize and validate the scaffold without connecting to that
+state account. Initialize and validate without connecting to that
 backend with:
 
 ```sh
@@ -39,3 +60,12 @@ the AzAPI client context. Its inputs are resource names, public host/domain
 configuration, tags, principal IDs, and principal type only; it reads no
 passwords, access keys, connection strings, or other secret values. Shared
 state must likewise expose resource identifiers and public metadata only.
+
+## Tests
+
+```sh
+terraform -chdir=iac/shared test -test-directory=tests/unit          # mocked, offline
+
+terraform -chdir=iac/shared init -backend=false
+terraform -chdir=iac/shared test -test-directory=tests/integration   # authenticated, plan-only
+```

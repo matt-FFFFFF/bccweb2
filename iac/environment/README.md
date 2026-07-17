@@ -21,13 +21,9 @@ group.
 ## Backend
 
 `../env/<env>.backend.hcl` (committed) — state key `<env>.tfstate` in the
-bootstrap storage account. **Known drift**: bootstrap's `local_file`
-resource currently generates `iac/<env>.backend.hcl` (repo root) with a
-different container/storage-account naming scheme than the committed
-`../env/<env>.backend.hcl` files actually reference. This is a known,
-out-of-scope branch inconsistency — see [../README.md](../README.md#layout)
-— always use `../env/<env>.backend.hcl`, never the root-level generated
-file.
+bootstrap storage account. Bootstrap's `local_file.backend_config` writes to
+this same authoritative path, so committed files and generated files agree —
+always use `../env/<env>.backend.hcl`.
 
 ## tfvars
 
@@ -71,14 +67,14 @@ tfvars before exporting `TF_VAR_*` to test the CI-style path — see
 ## How to run
 
 Preferred — via the manual workflow (uses the env's OIDC UMI). The
-workflow's `env` input is currently a fixed `[dev, prod]` choice list (see
-`.github/workflows/terraform.yml`) — adding another environment requires
-extending that choice list first (a workflow change, out of scope here; see
-[../README.md](../README.md#adding-a-new-environment)):
+workflow's `env` input is a `[shared, staging, prod]` choice list (see
+`.github/workflows/terraform.yml`) — adding another application environment
+requires extending that choice list first (a workflow change, out of scope
+here; see [../README.md](../README.md#adding-a-new-environment)):
 
 ```sh
-gh workflow run terraform.yml -f env=dev -f action=plan
-gh workflow run terraform.yml -f env=dev -f action=apply
+gh workflow run terraform.yml -f env=staging -f action=plan
+gh workflow run terraform.yml -f env=staging -f action=apply
 # (or -f env=prod)
 ```
 

@@ -28,6 +28,22 @@ Atomic read-modify-write on either container uses 30-second blob leases —
 `withLease()` (public) / `withPrivateLease()` (private) in
 [`apps/api/src/lib/blob.ts`](../../apps/api/src/lib/blob.ts).
 
+### Two storage accounts per environment
+
+`data`/`data-private` and the runtime/queue plane live in **two separate Azure Storage
+accounts per environment** — an infra-only split with no app-code change (the API still
+uses one shared `BlobServiceClient` per connection string, so the two containers still
+can't themselves be split across accounts):
+
+- **Account A** `stbccweb<env>rt` — backs `AzureWebJobsStorage`: the Functions host's
+  runtime storage, all ten queues below, and the Flex Consumption
+  `deploymentpackage` blob container the Function App deploys from. Always
+  `Standard_LRS`, public blob access disabled, no management lock.
+- **Account B** `stbccweb<env>data` — backs `BLOB_CONNECTION_STRING`: the `data`
+  (public) and `data-private` containers described above. Environment-derived
+  LRS/GRS replication, public blob access enabled (for `data`), and a prod-only
+  `CanNotDelete` lock.
+
 ## Schema layer
 
 Schema-backed domain blob families have canonical Zod schemas in `packages/schemas` and
@@ -53,7 +69,8 @@ valid for non-JSON artifacts and explicitly justified lease/index operations.
 
 ## Storage Queues
 
-Ten queues, same storage account as the blobs, created by `init-storage.mjs` — across
+Ten queues, all in Account A (`stbccweb<env>rt`, the `AzureWebJobsStorage` account — see
+"Two storage accounts per environment" above), created by `init-storage.mjs` — across
 five families, each a main queue plus a `-poison` dead-letter queue
 (`maxDequeueCount=5` in `host.json`):
 

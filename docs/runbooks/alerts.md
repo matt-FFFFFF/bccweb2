@@ -63,7 +63,7 @@ The Function App's HTTP 5xx response rate exceeded 1% of total requests over the
 - A regression in the latest Function App deployment (check the most recent CI deploy timestamp).
 - Storage account 5xx (correlate with `storage-server-errors`; if both are firing, fix storage first).
 - Key Vault access failure causing JWT/AI/ACS secret resolution to throw 500s on every authenticated request (correlate with the AI `exceptions` table for `KeyVaultReferenceException`).
-- Cold-start storms on the Y1 SKU after a long idle period — usually self-clears within one evaluation window.
+- Cold-start storms after a long idle period on Flex Consumption (FC1) — usually self-clears within one evaluation window.
 
 ### Immediate response
 
@@ -259,7 +259,7 @@ The p95 duration of the `lockRound` Function over the last 30 minutes exceeded 3
 
 - A large round's pilot-snapshot fan-out (parallel per-pilot blob reads before the lease is taken) or a large frozen brief download/hash-verify inside the round+brief lease.
 - Blob lease contention if multiple coordinators are locking adjacent rounds concurrently, or a slow `enqueueBriefPdf`/`enqueuePureTrackGroupJob` Storage Queue enqueue call (these only *enqueue* the PDF/PureTrack work — the PDF render and PureTrack group creation themselves run later in separate queue-triggered workers, outside `lockRound`'s own duration).
-- Memory pressure on the Y1 SKU from concurrent invocations, not from PDF generation itself (PDF rendering happens in the `briefPdf` worker, not inside `lockRound`).
+- Memory pressure on the Flex Consumption (FC1) plan from concurrent invocations, not from PDF generation itself (PDF rendering happens in the `briefPdf` worker, not inside `lockRound`).
 
 ### Immediate response
 
