@@ -173,7 +173,7 @@ resource "azapi_resource" "storage_server_errors" {
       description         = "Storage account returned more than 5 server-side errors (503 throttle or generic server error) in a 1-minute window. Triage via docs/runbooks/alerts.md#storage-server-errors."
       enabled             = true
       autoMitigate        = true
-      scopes              = [azapi_resource.storage.id]
+      scopes              = [azapi_resource.storage_data.id]
       severity            = 1
       evaluationFrequency = "PT1M"
       windowSize          = "PT5M"

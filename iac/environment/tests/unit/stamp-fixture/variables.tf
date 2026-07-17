@@ -35,6 +35,18 @@ variable "allowed_origins" {
   default     = []
 }
 
+variable "storage_sku" {
+  description = "Replication SKU for the application data storage account."
+  type        = string
+  nullable    = false
+}
+
+variable "enable_delete_lock" {
+  description = "Whether to apply a CanNotDelete management lock to the application data storage account."
+  type        = bool
+  default     = false
+}
+
 variable "ops_email" {
   description = "Alert recipient email address."
   type        = string

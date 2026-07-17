@@ -104,6 +104,7 @@ variables {
   stamp_rg_name                 = "rg-bccweb-unit"
   location                      = "uksouth"
   allowed_origins               = ["https://unit.example.test"]
+  storage_sku                   = "Standard_LRS"
   ops_email                     = "ops@example.test"
   slack_webhook_url             = "https://hooks.example.test/unit"
   acs_id                        = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-bccweb-shared/providers/Microsoft.Communication/communicationServices/acs-bccweb-shared"
@@ -179,6 +180,14 @@ run "function_app_settings_use_kv_references" {
     ]) >= 6
     error_message = "The Function App should use SecretUri Key Vault references for at least six app settings."
   }
+
+  assert {
+    condition = (
+      one([for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting.value if setting.name == "AzureWebJobsStorage"]) == "DefaultEndpointsProtocol=https;AccountName=stbccwebunitrt;AccountKey=TEST_STORAGE_KEY_SENTINEL;EndpointSuffix=core.windows.net" &&
+      one([for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting.value if setting.name == "BLOB_CONNECTION_STRING"]) == "DefaultEndpointsProtocol=https;AccountName=stbccwebunitdata;AccountKey=TEST_STORAGE_KEY_SENTINEL;EndpointSuffix=core.windows.net"
+    )
+    error_message = "AzureWebJobsStorage must use the runtime account and BLOB_CONNECTION_STRING must use the distinct data account."
+  }
 }
 
 run "no_plaintext_secrets_in_plan" {
@@ -224,9 +233,9 @@ run "alerts_use_passed_in_app_insights_id" {
       azapi_resource.lockround_p95_duration.body.properties.scopes == [var.app_insights_id] &&
       azapi_resource.recompute_marker_stale.body.properties.scopes == [var.app_insights_id] &&
       azapi_resource.blob_heal_storm.body.properties.scopes == [var.app_insights_id] &&
-      length(azapi_resource.storage_server_errors.body.properties.scopes) == 1
+      azapi_resource.storage_server_errors.body.properties.scopes == [azapi_resource.storage_data.id]
     )
-    error_message = "All scheduled-query alerts and the metric alert should scope to the passed-in App Insights ID sentinel."
+    error_message = "All scheduled-query alerts should scope to the passed-in App Insights ID, and the storage metric alert should scope to the data account."
   }
 }
 
@@ -245,9 +254,10 @@ run "no_diagnostic_settings" {
   assert {
     condition = length([
       for resource_type in [
-        azapi_resource.storage.type,
-        azapi_resource.storage_lock.type,
-        azapi_resource.blob_service.type,
+        azapi_resource.storage_runtime.type,
+        azapi_resource.storage_data.type,
+        azapi_resource.blob_service_runtime.type,
+        azapi_resource.blob_service_data.type,
         azapi_resource.storage_container_data.type,
         azapi_resource.storage_container_data_private.type,
         azapi_resource.storage_lifecycle.type,
@@ -272,7 +282,7 @@ run "no_diagnostic_settings" {
   }
 }
 
-run "storage_queues_planned" {
+run "storage_split_staging" {
   command = plan
 
   providers = {
@@ -286,8 +296,19 @@ run "storage_queues_planned" {
 
   assert {
     condition = (
+      azapi_resource.storage_runtime.name == "stbccwebunitrt" &&
+      azapi_resource.storage_runtime.body.kind == "StorageV2" &&
+      azapi_resource.storage_runtime.body.sku.name == "Standard_LRS" &&
+      azapi_resource.storage_runtime.body.properties.allowBlobPublicAccess == false &&
+      azapi_resource.storage_runtime.body.properties.supportsHttpsTrafficOnly == true &&
+      azapi_resource.storage_runtime.body.properties.minimumTlsVersion == "TLS1_2" &&
+      azapi_resource.blob_service_runtime.parent_id == azapi_resource.storage_runtime.id &&
+      azapi_resource.storage_container_deploy.name == "deploymentpackage" &&
+      azapi_resource.storage_container_deploy.parent_id == azapi_resource.blob_service_runtime.id &&
+      azapi_resource.storage_container_deploy.body.properties.publicAccess == "None" &&
       azapi_resource.queue_service.name == "default" &&
       azapi_resource.queue_service.type == "Microsoft.Storage/storageAccounts/queueServices@2025-06-01" &&
+      azapi_resource.queue_service.parent_id == azapi_resource.storage_runtime.id &&
       azapi_resource.queue_brief_pdf.name == "round-brief-pdf" &&
       azapi_resource.queue_brief_pdf.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
       azapi_resource.queue_brief_pdf_poison.name == "round-brief-pdf-poison" &&
@@ -301,7 +322,7 @@ run "storage_queues_planned" {
       azapi_resource.queue_signtofly_reflect.parent_id == azapi_resource.queue_service.id &&
       azapi_resource.queue_signtofly_reflect_poison.parent_id == azapi_resource.queue_service.id
     )
-    error_message = "The round-brief-pdf and sign-to-fly reflect queues plus their poison queues must plan under the queue service with the exact expected names, types, and parent linkage."
+    error_message = "The runtime account must be private, always LRS, and own deploymentpackage plus the round-brief and sign-to-fly queues."
   }
 
   assert {
@@ -342,12 +363,92 @@ run "storage_queues_planned" {
 
   assert {
     condition = (
+      azapi_resource.storage_data.name == "stbccwebunitdata" &&
+      azapi_resource.storage_data.body.kind == "StorageV2" &&
+      azapi_resource.storage_data.body.sku.name == var.storage_sku &&
+      azapi_resource.storage_data.body.properties.allowBlobPublicAccess == true &&
+      azapi_resource.blob_service_data.parent_id == azapi_resource.storage_data.id &&
+      azapi_resource.blob_service_data.body.properties.isVersioningEnabled == true &&
+      azapi_resource.blob_service_data.body.properties.changeFeed.enabled == true &&
+      azapi_resource.blob_service_data.body.properties.deleteRetentionPolicy.days == 7 &&
+      azapi_resource.blob_service_data.body.properties.containerDeleteRetentionPolicy.days == 7 &&
+      azapi_resource.blob_service_data.body.properties.cors.corsRules[0].allowedOrigins == var.allowed_origins &&
+      azapi_resource.storage_container_data.name == "data" &&
+      azapi_resource.storage_container_data.parent_id == azapi_resource.blob_service_data.id &&
+      azapi_resource.storage_container_data.body.properties.publicAccess == "Blob" &&
+      azapi_resource.storage_container_data_private.name == "data-private" &&
+      azapi_resource.storage_container_data_private.parent_id == azapi_resource.blob_service_data.id &&
+      azapi_resource.storage_container_data_private.body.properties.publicAccess == "None" &&
+      azapi_resource.storage_lifecycle.parent_id == azapi_resource.storage_data.id &&
+      length(azapi_resource.storage_lock) == 0 &&
       length(azapi_resource.storage_lifecycle.body.properties.policy.rules) == 2 &&
       azapi_resource.storage_lifecycle.body.properties.policy.rules[0].name == "gc-auth-tokens" &&
       azapi_resource.storage_lifecycle.body.properties.policy.rules[1].name == "gc-rescore-status" &&
       azapi_resource.storage_lifecycle.body.properties.policy.rules[1].definition.filters.prefixMatch == ["data-private/rescore-jobs/"] &&
       azapi_resource.storage_lifecycle.body.properties.policy.rules[1].definition.actions.baseBlob.delete.daysAfterModificationGreaterThan == 7
     )
-    error_message = "The storage lifecycle policy must have exactly two rules (gc-auth-tokens, gc-rescore-status); gc-rescore-status must delete blockBlobs under data-private/rescore-jobs/ after 7 days."
+    error_message = "The staging data account must be public-access enabled, LRS, unlocked, and own the full blob policy, both data containers, and lifecycle rules."
   }
+
+  assert {
+    condition = (
+      output.storage_account_name_runtime == "stbccwebunitrt" &&
+      output.storage_account_name_data == "stbccwebunitdata"
+    )
+    error_message = "The stamp module must export distinct runtime and data storage account names."
+  }
+}
+
+run "storage_split_prod" {
+  command = plan
+
+  providers = {
+    azapi  = azapi.mock
+    random = random.mock
+  }
+
+  module {
+    source = "./tests/unit/stamp-fixture"
+  }
+
+  variables {
+    stamp_name         = "prod"
+    storage_sku        = "Standard_GRS"
+    enable_delete_lock = true
+  }
+
+  assert {
+    condition = (
+      azapi_resource.storage_runtime.body.sku.name == "Standard_LRS" &&
+      azapi_resource.storage_runtime.body.properties.allowBlobPublicAccess == false &&
+      length(azapi_resource.storage_lock) == 1 &&
+      azapi_resource.storage_lock[0].parent_id == azapi_resource.storage_data.id &&
+      azapi_resource.storage_lock[0].body.properties.level == "CanNotDelete" &&
+      azapi_resource.storage_data.body.sku.name == "Standard_GRS" &&
+      azapi_resource.storage_data.body.properties.allowBlobPublicAccess == true
+    )
+    error_message = "Production must keep runtime storage LRS and unlocked while data storage is GRS with a CanNotDelete lock."
+  }
+}
+
+run "storage_names_reject_over_24_characters" {
+  command = plan
+
+  providers = {
+    azapi  = azapi.mock
+    random = random.mock
+  }
+
+  module {
+    source = "./tests/unit/stamp-fixture"
+  }
+
+  variables {
+    stamp_name = "this-stamp-name-is-way-too-long"
+  }
+
+  expect_failures = [
+    azapi_resource.storage_runtime,
+    azapi_resource.storage_data,
+  ]
 }

@@ -1,19 +1,21 @@
 # SPDX-FileCopyrightText: 2026 British Club Challenge authors
 # SPDX-License-Identifier: MPL-2.0
 locals {
-  # Storage account names: lowercase, no hyphens, ≤24 chars.
-  # Mirrors legacy iac/storage.tf naming (`replace("st${local.prefix}", "-", "")`)
-  # where `local.prefix = "bccweb-${var.stamp_name}"`. Recomputed inline here
-  # because the root module does not pass `prefix` into the stamp module.
-  storage_prefix       = "bccweb-${var.stamp_name}"
-  storage_account_name = replace("st${local.storage_prefix}", "-", "")
+  # Storage account names must be lowercase, contain no hyphens, and be no
+  # longer than 24 characters.
+  storage_account_name_runtime = replace("stbccweb${var.stamp_name}rt", "-", "")
+  storage_account_name_data    = replace("stbccweb${var.stamp_name}data", "-", "")
 }
 
-# ─── Storage Account ─────────────────────────────────────────────────────────
+# ─── Runtime Storage Account ─────────────────────────────────────────────────
+#
+# AzureWebJobsStorage targets this full StorageV2 account. Runtime state, queue
+# workloads, and deployment packages are reconstructible, so it is always LRS,
+# has no delete lock, and never permits public blob access.
 
-resource "azapi_resource" "storage" {
+resource "azapi_resource" "storage_runtime" {
   type      = "Microsoft.Storage/storageAccounts@2025-06-01"
-  name      = local.storage_account_name
+  name      = local.storage_account_name_runtime
   parent_id = local.stamp_rg_id
   location  = var.location
   tags      = var.tags
@@ -21,10 +23,153 @@ resource "azapi_resource" "storage" {
   body = {
     kind = "StorageV2"
     sku = {
-      name = "Standard_GRS"
+      name = "Standard_LRS"
     }
     properties = {
-      # Required to allow container-level and blob-level public access
+      allowBlobPublicAccess    = false
+      supportsHttpsTrafficOnly = true
+      minimumTlsVersion        = "TLS1_2"
+    }
+  }
+
+  response_export_values = ["name", "properties.primaryEndpoints.blob"]
+
+  lifecycle {
+    precondition {
+      condition     = length(local.storage_account_name_runtime) <= 24
+      error_message = "Runtime storage account name must not exceed 24 characters."
+    }
+  }
+}
+
+# The runtime blob service intentionally has no versioning, CORS, change feed,
+# or soft-delete policy. It exists only for Functions runtime state and the Flex
+# deployment package container used by the later Flex migration.
+resource "azapi_resource" "blob_service_runtime" {
+  type      = "Microsoft.Storage/storageAccounts/blobServices@2025-06-01"
+  name      = "default"
+  parent_id = azapi_resource.storage_runtime.id
+
+  body = {
+    properties = {}
+  }
+}
+
+resource "azapi_resource" "storage_container_deploy" {
+  type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2025-06-01"
+  name      = "deploymentpackage"
+  parent_id = azapi_resource.blob_service_runtime.id
+
+  body = {
+    properties = {
+      publicAccess = "None"
+    }
+  }
+}
+
+# ─── Queue Service ───────────────────────────────────────────────────────────
+#
+# All queue-triggered Functions and producers use AzureWebJobsStorage, so every
+# application queue belongs to the runtime account.
+
+resource "azapi_resource" "queue_service" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices@2025-06-01"
+  name      = "default"
+  parent_id = azapi_resource.storage_runtime.id
+
+  body = {
+    properties = {}
+  }
+}
+
+# ─── Round-Brief PDF Queues ──────────────────────────────────────────────────
+
+resource "azapi_resource" "queue_brief_pdf" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "round-brief-pdf"
+  parent_id = azapi_resource.queue_service.id
+}
+
+resource "azapi_resource" "queue_brief_pdf_poison" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "round-brief-pdf-poison"
+  parent_id = azapi_resource.queue_service.id
+}
+
+# ─── Sign-to-Fly Reflect Queues ──────────────────────────────────────────────
+
+resource "azapi_resource" "queue_signtofly_reflect" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "signtofly-reflect"
+  parent_id = azapi_resource.queue_service.id
+}
+
+resource "azapi_resource" "queue_signtofly_reflect_poison" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "signtofly-reflect-poison"
+  parent_id = azapi_resource.queue_service.id
+}
+
+# ─── Rescore Jobs Queues ─────────────────────────────────────────────────────
+
+resource "azapi_resource" "queue_rescore_jobs" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "rescore-jobs"
+  parent_id = azapi_resource.queue_service.id
+}
+
+resource "azapi_resource" "queue_rescore_jobs_poison" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "rescore-jobs-poison"
+  parent_id = azapi_resource.queue_service.id
+}
+
+# ─── IGC Validation Queues ───────────────────────────────────────────────────
+
+resource "azapi_resource" "queue_igc_validation" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "igc-validation"
+  parent_id = azapi_resource.queue_service.id
+}
+
+resource "azapi_resource" "queue_igc_validation_poison" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "igc-validation-poison"
+  parent_id = azapi_resource.queue_service.id
+}
+
+# ─── PureTrack Group Queues ──────────────────────────────────────────────────
+
+resource "azapi_resource" "queue_puretrack_group" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "round-puretrack-group"
+  parent_id = azapi_resource.queue_service.id
+}
+
+resource "azapi_resource" "queue_puretrack_group_poison" {
+  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name      = "round-puretrack-group-poison"
+  parent_id = azapi_resource.queue_service.id
+}
+
+# ─── Data Storage Account ────────────────────────────────────────────────────
+#
+# BLOB_CONNECTION_STRING targets this account. It owns both application blob
+# containers because the API accesses them through one BlobServiceClient.
+
+resource "azapi_resource" "storage_data" {
+  type      = "Microsoft.Storage/storageAccounts@2025-06-01"
+  name      = local.storage_account_name_data
+  parent_id = local.stamp_rg_id
+  location  = var.location
+  tags      = var.tags
+
+  body = {
+    kind = "StorageV2"
+    sku = {
+      name = var.storage_sku
+    }
+    properties = {
       allowBlobPublicAccess    = true
       supportsHttpsTrafficOnly = true
       minimumTlsVersion        = "TLS1_2"
@@ -32,17 +177,23 @@ resource "azapi_resource" "storage" {
   }
 
   response_export_values = ["name"]
+
+  lifecycle {
+    precondition {
+      condition     = length(local.storage_account_name_data) <= 24
+      error_message = "Data storage account name must not exceed 24 characters."
+    }
+  }
 }
 
-# ─── Management Lock ─────────────────────────────────────────────────────────
-#
-# Prevents accidental deletion of the storage account. Must be removed via a
-# deliberate operator action before any destroy is attempted.
-
+# Prevent accidental deletion of production data. Non-production environments
+# leave this resource absent so disposable stamps remain easy to tear down.
 resource "azapi_resource" "storage_lock" {
+  count = var.enable_delete_lock ? 1 : 0
+
   type      = "Microsoft.Authorization/locks@2020-05-01"
   name      = "storage-nodelete"
-  parent_id = azapi_resource.storage.id
+  parent_id = azapi_resource.storage_data.id
 
   body = {
     properties = {
@@ -51,18 +202,15 @@ resource "azapi_resource" "storage_lock" {
     }
   }
 
-  depends_on = [azapi_resource.storage]
+  depends_on = [azapi_resource.storage_data]
 }
 
-# ─── Blob Service ────────────────────────────────────────────────────────────
-#
-# Versioning, change feed, and soft-delete protect against data loss.
-# CORS is locked to var.allowed_origins (no wildcard).
-
-resource "azapi_resource" "blob_service" {
+# Versioning, change feed, and soft-delete protect application data. CORS is
+# locked to var.allowed_origins (no wildcard).
+resource "azapi_resource" "blob_service_data" {
   type      = "Microsoft.Storage/storageAccounts/blobServices@2025-06-01"
   name      = "default"
-  parent_id = azapi_resource.storage.id
+  parent_id = azapi_resource.storage_data.id
 
   body = {
     properties = {
@@ -93,15 +241,10 @@ resource "azapi_resource" "blob_service" {
   }
 }
 
-# ─── Blob Container ───────────────────────────────────────────────────────────
-#
-# Public blob-level access — anonymous GET for any blob in this container.
-# Functions still authenticate with the storage connection string for writes.
-
 resource "azapi_resource" "storage_container_data" {
   type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2025-06-01"
   name      = "data"
-  parent_id = azapi_resource.blob_service.id
+  parent_id = azapi_resource.blob_service_data.id
 
   body = {
     properties = {
@@ -110,15 +253,10 @@ resource "azapi_resource" "storage_container_data" {
   }
 }
 
-# ─── Private Blob Container ──────────────────────────────────────────────────
-#
-# No public access — only the Function App (via connection string) can read/write.
-# Stores credentials, PII, pilot details, round documents, and other sensitive data.
-
 resource "azapi_resource" "storage_container_data_private" {
   type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2025-06-01"
   name      = "data-private"
-  parent_id = azapi_resource.blob_service.id
+  parent_id = azapi_resource.blob_service_data.id
 
   body = {
     properties = {
@@ -127,125 +265,20 @@ resource "azapi_resource" "storage_container_data_private" {
   }
 }
 
-# ─── Queue Service ───────────────────────────────────────────────────────────
-#
-# Backs the async round-brief PDF, sign-to-fly reflect, rescore, and PureTrack
-# group pipelines. Queue-triggered Functions process jobs from the named queues.
-# The queue service is the parent for all named queues (name must be "default").
+# ─── Per-Account Keys ────────────────────────────────────────────────────────
 
-resource "azapi_resource" "queue_service" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices@2025-06-01"
-  name      = "default"
-  parent_id = azapi_resource.storage.id
-
-  body = {
-    properties = {}
-  }
-}
-
-# ─── Round-Brief PDF Queues ──────────────────────────────────────────────────
-#
-# `round-brief-pdf` carries BriefPdfJob messages (roundId, briefVersion,
-# pdfAttemptId — no PII). `round-brief-pdf-poison` collects messages that
-# exhaust the Functions host retry budget. Names MUST match the producer /
-# consumer AzureWebJobsStorage queue bindings — do not rename.
-
-resource "azapi_resource" "queue_brief_pdf" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "round-brief-pdf"
-  parent_id = azapi_resource.queue_service.id
-}
-
-resource "azapi_resource" "queue_brief_pdf_poison" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "round-brief-pdf-poison"
-  parent_id = azapi_resource.queue_service.id
-}
-
-# ─── Sign-to-Fly Reflect Queues ──────────────────────────────────────────────
-#
-# `signtofly-reflect` carries reflect-job messages ({ roundId } — no PII).
-# `signtofly-reflect-poison` collects messages that exhaust the Functions host
-# retry budget. Names MUST match the producer / consumer AzureWebJobsStorage
-# queue bindings — do not rename.
-
-resource "azapi_resource" "queue_signtofly_reflect" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "signtofly-reflect"
-  parent_id = azapi_resource.queue_service.id
-}
-
-resource "azapi_resource" "queue_signtofly_reflect_poison" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "signtofly-reflect-poison"
-  parent_id = azapi_resource.queue_service.id
-}
-
-# ─── Rescore Jobs Queues ─────────────────────────────────────────────────────
-#
-# `rescore-jobs` carries rescore-job messages (jobId, roundId, requestedAt —
-# no PII). A queue-triggered Function replays IGC scoring for the round.
-# `rescore-jobs-poison` collects messages that exhaust the Functions host retry
-# budget. Transient status/control blobs the worker writes under
-# `data-private/rescore-jobs/` are GC'd by the lifecycle policy below. Names
-# MUST match the producer / consumer AzureWebJobsStorage queue bindings — do
-# not rename.
-
-resource "azapi_resource" "queue_rescore_jobs" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "rescore-jobs"
-  parent_id = azapi_resource.queue_service.id
-}
-
-resource "azapi_resource" "queue_rescore_jobs_poison" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "rescore-jobs-poison"
-  parent_id = azapi_resource.queue_service.id
-}
-
-# ─── IGC Validation Queues ───────────────────────────────────────────────────
-
-resource "azapi_resource" "queue_igc_validation" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "igc-validation"
-  parent_id = azapi_resource.queue_service.id
-}
-
-resource "azapi_resource" "queue_igc_validation_poison" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "igc-validation-poison"
-  parent_id = azapi_resource.queue_service.id
-}
-
-# ─── PureTrack Group Queues ───────────────────────────────────────────────────
-#
-# `round-puretrack-group` carries PureTrack group jobs for a round.
-# `round-puretrack-group-poison` collects messages that exhaust the Functions
-# host retry budget. Names MUST match the producer / consumer
-# AzureWebJobsStorage queue bindings — do not rename.
-
-resource "azapi_resource" "queue_puretrack_group" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "round-puretrack-group"
-  parent_id = azapi_resource.queue_service.id
-}
-
-resource "azapi_resource" "queue_puretrack_group_poison" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "round-puretrack-group-poison"
-  parent_id = azapi_resource.queue_service.id
-}
-
-# ─── Storage Account Keys ────────────────────────────────────────────────────
-#
-# Used to construct the connection string for the Function App.
-# NON-ephemeral: the resulting connection string is consumed by Function App
-# app settings via local.storage_primary_connection_string (iac/environment/modules/stamp/functions.tf),
-# which must be available at plan time.
-
-resource "azapi_resource_action" "storage_keys" {
+resource "azapi_resource_action" "storage_runtime_keys" {
   type        = "Microsoft.Storage/storageAccounts@2025-06-01"
-  resource_id = azapi_resource.storage.id
+  resource_id = azapi_resource.storage_runtime.id
+  action      = "listKeys"
+  method      = "POST"
+
+  response_export_values = ["keys"]
+}
+
+resource "azapi_resource_action" "storage_data_keys" {
+  type        = "Microsoft.Storage/storageAccounts@2025-06-01"
+  resource_id = azapi_resource.storage_data.id
   action      = "listKeys"
   method      = "POST"
 
@@ -253,20 +286,20 @@ resource "azapi_resource_action" "storage_keys" {
 }
 
 locals {
-  storage_primary_key               = azapi_resource_action.storage_keys.output.keys[0].value
-  storage_primary_connection_string = "DefaultEndpointsProtocol=https;AccountName=${local.storage_account_name};AccountKey=${local.storage_primary_key};EndpointSuffix=core.windows.net"
+  storage_runtime_primary_key       = azapi_resource_action.storage_runtime_keys.output.keys[0].value
+  storage_data_primary_key          = azapi_resource_action.storage_data_keys.output.keys[0].value
+  storage_runtime_connection_string = "DefaultEndpointsProtocol=https;AccountName=${local.storage_account_name_runtime};AccountKey=${local.storage_runtime_primary_key};EndpointSuffix=core.windows.net"
+  storage_data_connection_string    = "DefaultEndpointsProtocol=https;AccountName=${local.storage_account_name_data};AccountKey=${local.storage_data_primary_key};EndpointSuffix=core.windows.net"
 }
 
 # ─── Blob Lifecycle Management Policy ────────────────────────────────────────
 #
-# GC short-lived control blobs from data-private after 7 days:
-#   - auth token blobs           (expired tokens that were never consumed)
-#   - rescore-jobs status blobs  (transient rescore control state)
+# GC short-lived control blobs from data-private after 7 days.
 
 resource "azapi_resource" "storage_lifecycle" {
   type      = "Microsoft.Storage/storageAccounts/managementPolicies@2023-01-01"
   name      = "default"
-  parent_id = azapi_resource.storage.id
+  parent_id = azapi_resource.storage_data.id
 
   body = {
     properties = {
@@ -313,5 +346,5 @@ resource "azapi_resource" "storage_lifecycle" {
     }
   }
 
-  depends_on = [azapi_resource.blob_service, azapi_resource.storage_container_data_private]
+  depends_on = [azapi_resource.blob_service_data, azapi_resource.storage_container_data_private]
 }

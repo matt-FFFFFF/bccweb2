@@ -10,9 +10,14 @@ output "function_app_name" {
   value       = module.stamp.function_app_name
 }
 
-output "storage_account_name" {
-  description = "Name of the storage account."
-  value       = module.stamp.storage_account_name
+output "storage_account_name_runtime" {
+  description = "Name of the runtime storage account."
+  value       = module.stamp.storage_account_name_runtime
+}
+
+output "storage_account_name_data" {
+  description = "Name of the application data storage account."
+  value       = module.stamp.storage_account_name_data
 }
 
 output "key_vault_name" {

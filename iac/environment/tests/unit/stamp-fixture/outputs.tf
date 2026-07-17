@@ -10,9 +10,14 @@ output "function_app_name" {
   value       = azapi_resource.function_app.name
 }
 
-output "storage_account_name" {
-  description = "Name of the storage account backing the stamp."
-  value       = azapi_resource.storage.name
+output "storage_account_name_runtime" {
+  description = "Name of the runtime storage account backing Azure Functions and queues."
+  value       = azapi_resource.storage_runtime.name
+}
+
+output "storage_account_name_data" {
+  description = "Name of the data storage account containing application blobs."
+  value       = azapi_resource.storage_data.name
 }
 
 output "key_vault_name" {

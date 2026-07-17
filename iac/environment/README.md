@@ -7,7 +7,8 @@ state. See [../README.md](../README.md) for the overall layout.
 ## Purpose
 
 Composes one [`modules/stamp`](modules/stamp) child module containing the app's
-storage account, Function App, Key Vault (RBAC, 6 secrets), and alert rules.
+runtime and data storage accounts, Function App, Key Vault (RBAC, 6 secrets),
+and alert rules.
 The shared root owns Application Insights, ACS, and the Static Web App. The
 environment root reads only `app_insights_ids` and `acs_id` from shared state;
 Key Vault fetches both connection strings directly from those resource IDs.
@@ -93,8 +94,8 @@ terraform -chdir=iac/environment apply -var-file=../env/<env>.tfvars -var 'terra
 ## Outputs
 
 The stamp module's outputs re-exported at the root are exactly
-`resource_group_name`, `function_app_name`, `storage_account_name`,
-`key_vault_name`, and `key_vault_uri`.
+`resource_group_name`, `function_app_name`, `storage_account_name_runtime`,
+`storage_account_name_data`, `key_vault_name`, and `key_vault_uri`.
 
 ## ACS domain verification
 
