@@ -2,11 +2,6 @@
 # SPDX-License-Identifier: MPL-2.0
 name: Terraform (manual)
 
-# Operator-invoked plan/apply for the environment stack.
-# Azure auth is OIDC via the per-env Terraform UMI (no static secrets) —
-# see iac/bootstrap/README.md. Also the drift-recovery path when a deploy
-# workflow's terraform-check fails: re-run here with action=apply.
-
 on:
   workflow_dispatch:
     inputs:
@@ -14,7 +9,7 @@ on:
         description: Target environment
         required: true
         type: choice
-        options: [dev, prod]
+        options: [shared, staging, prod]
       action:
         description: plan only, or plan then apply
         required: true
@@ -22,114 +17,16 @@ on:
         options: [plan, apply]
 
 permissions:
-  id-token: write # required for OIDC token issuance
+  id-token: write
   contents: read
 
-concurrency:
-  group: environment-${{ inputs.env }}
-  cancel-in-progress: false
+concurrency: environment-${{ inputs.env }}
 
 jobs:
   terraform:
-    name: ${{ inputs.action }} (${{ inputs.env }})
-    runs-on: ubuntu-latest
-    environment: ${{ inputs.env }}
-    env:
-      ARM_USE_OIDC: "true"
-      ARM_USE_AZUREAD: "true"
-      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      TF_IN_AUTOMATION: "true"
-      TARGET_ENV: ${{ inputs.env }}
-      TF_VAR_platform_rg_name: ${{ vars.TF_VAR_PLATFORM_RG_NAME }}
-      TF_VAR_stamp_rg_name: ${{ vars.TF_VAR_STAMP_RG_NAME }}
-      TF_VAR_acs_email_domain: ${{ vars.TF_VAR_ACS_EMAIL_DOMAIN }}
-      # Sensitive inputs flow as TF_VAR_* env vars straight from env-scoped
-      # secrets — never written to disk.
-      TF_VAR_puretrack_api_key: ${{ secrets.TF_VAR_PURETRACK_API_KEY }}
-      TF_VAR_puretrack_email: ${{ secrets.TF_VAR_PURETRACK_EMAIL }}
-      TF_VAR_puretrack_password: ${{ secrets.TF_VAR_PURETRACK_PASSWORD }}
-    steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-
-      - uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
-        with:
-          terraform_version: "<2.0.0"
-          terraform_wrapper: false
-
-      - uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
-        with:
-          client-id: ${{ secrets.AZURE_CLIENT_ID }}
-          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
-          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      - name: Validate required Terraform variables
-        run: |
-          set -euo pipefail
-          for variable_name in TF_VAR_platform_rg_name TF_VAR_stamp_rg_name TF_VAR_acs_email_domain; do
-            if [[ -z "${!variable_name:-}" ]]; then
-              echo "Required GitHub environment variable is missing: ${variable_name}" >&2
-              exit 1
-            fi
-          done
-
-      # iac/env/<env>.tfvars is gitignored (holds operator-specific values),
-      # so a clean CI checkout lacks it. Generate the non-sensitive half from
-      # env-scoped GitHub vars; the sensitive half rides TF_VAR_* job env.
-      - name: Generate environment tfvars (runtime)
-        env:
-          OPS_EMAIL: ${{ vars.OPS_EMAIL }}
-          ACS_SENDER_ADDRESS: ${{ vars.ACS_SENDER_ADDRESS }}
-          ALLOWED_ORIGINS: ${{ vars.ALLOWED_ORIGINS }}
-          PRODUCTION_HOSTNAME: ${{ vars.PRODUCTION_HOSTNAME }}
-          DNS_ZONE_NAME: ${{ vars.DNS_ZONE_NAME }}
-          DNS_ZONE_RESOURCE_GROUP_NAME: ${{ vars.DNS_ZONE_RESOURCE_GROUP_NAME }}
-          JWT_SECRET_VERSION: ${{ vars.JWT_SECRET_VERSION }}
-          ACS_SECRET_VERSION: ${{ vars.ACS_SECRET_VERSION }}
-          BLOB_SCHEMA_MODE: ${{ vars.BLOB_SCHEMA_MODE }}
-          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        run: |
-          set -euo pipefail
-          cat > "iac/env/${TARGET_ENV}.tfvars" <<EOF
-          # Generated at workflow runtime from GitHub env-scoped vars — never committed.
-          # Sensitive PureTrack values ride TF_VAR_* env vars.
-          stamp_name = "${TARGET_ENV}"
-          location   = "uksouth"
-
-          allowed_origins = ${ALLOWED_ORIGINS:-[]}
-
-          ops_email = "${OPS_EMAIL}"
-
-          acs_sender_address = "${ACS_SENDER_ADDRESS}"
-
-          jwt_secret_version = "${JWT_SECRET_VERSION:-1}"
-          acs_secret_version = "${ACS_SECRET_VERSION:-1}"
-          blob_schema_mode   = "${BLOB_SCHEMA_MODE:-observe}"
-
-          terraform_principal_type = "ServicePrincipal"
-
-          production_hostname          = "${PRODUCTION_HOSTNAME}"
-          dns_zone_name                = "${DNS_ZONE_NAME}"
-          dns_zone_resource_group_name = "${DNS_ZONE_RESOURCE_GROUP_NAME}"
-
-          slack_webhook_url = "${SLACK_WEBHOOK_URL}"
-          EOF
-
-      - name: Terraform init
-        run: terraform -chdir=iac/environment init -input=false -backend-config="../env/${TARGET_ENV}.backend.hcl"
-
-      - name: Terraform plan
-        run: |
-          set -euo pipefail
-          terraform -chdir=iac/environment plan -input=false -var-file="../env/${TARGET_ENV}.tfvars" -out=tfplan | tee plan-output.txt
-          {
-            echo "## Terraform plan — ${TARGET_ENV}"
-            echo '```'
-            tail -n 80 plan-output.txt
-            echo '```'
-          } >> "$GITHUB_STEP_SUMMARY"
-
-      - name: Terraform apply
-        if: inputs.action == 'apply'
-        run: terraform -chdir=iac/environment apply -input=false tfplan
+    uses: ./.github/workflows/terraform-run.yml
+    secrets: inherit
+    with:
+      root: ${{ inputs.env == 'shared' && 'shared' || 'environment' }}
+      target_env: ${{ inputs.env }}
+      mode: ${{ inputs.action }}
