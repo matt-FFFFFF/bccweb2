@@ -1,0 +1,10 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
+# Use with:
+#   terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl
+
+resource_group_name  = "rg-bccweb-tfstate"
+storage_account_name = "stbccweb13afe"
+container_name       = "tfstate-shared"
+key                  = "shared.tfstate"
+use_azuread_auth     = true

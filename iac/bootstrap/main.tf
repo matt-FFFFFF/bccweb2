@@ -4,9 +4,9 @@
 #
 # Provisions (one-shot, per Azure subscription/region):
 #   * Bootstrap resource group
-#   * Storage account hosting the tfstate blob container
+#   * Storage account hosting per-environment tfstate blob containers
 #   * Blob service with 30-day soft-delete
-#   * `tfstate` blob container (private)
+#   * `tfstate-<env>` blob containers (private)
 #   * CanNotDelete management lock on the storage account
 #   * Per-environment RGs (platform + stamp) consumed by the `iac/environment`
 #     stack as plain inputs (platform_rg_name/stamp_rg_name) — never created
@@ -93,7 +93,6 @@ resource "azapi_update_resource" "tfstate_blob_service" {
 # ─── tfstate container (private) ─────────────────────────────────────────────
 
 resource "azapi_resource" "tfstate_container" {
-
   for_each  = var.github_environments
   type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2025-06-01"
   name      = join("-", [var.tfstate_container_prefix, each.key])
@@ -346,7 +345,7 @@ resource "github_actions_environment_variable" "rg_names" {
 
 resource "local_file" "backend_config" {
   for_each        = var.github_environments
-  filename        = "${path.module}/../${each.key}.backend.hcl"
+  filename        = "${path.module}/../env/${each.key}.backend.hcl"
   file_permission = "0644"
   content         = <<-EOT
     # SPDX-FileCopyrightText: 2026 British Club Challenge authors

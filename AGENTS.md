@@ -224,7 +224,9 @@ Terraform UMIs, the two per-env resource groups, GitHub OIDC secrets, and the pu
 `TF_VAR_PLATFORM_RG_NAME`/`TF_VAR_STAMP_RG_NAME` GitHub environment variables) → `environment/`
 (the per-env application stamp: platform module — LAW, App Insights, ACS email domain — plus
 stamp module — storage, Function App, SWA, ACS, Key Vault — applied together in one state,
-`<env>.tfstate`). `jwt-secret` is generated declaratively (ephemeral `random_password` → KV
+`<env>.tfstate`, in its own `tfstate-<env>` container). Each environment UMI has Storage Blob
+Data Contributor only on its own container; `tf_tfstate_blob_account_reader` (does not exist / stale)
+was a documentation myth, not an account-level Reader grant. `jwt-secret` is generated declaratively (ephemeral `random_password` → KV
 write-only), rotated via `jwt_secret_version`. KV seeding may 403 on first apply during RBAC
 propagation — re-apply to recover.
 

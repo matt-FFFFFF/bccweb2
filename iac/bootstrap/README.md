@@ -49,10 +49,11 @@ modules now apply together in one state per environment.
 - Terraform ≥ 1.11.
 - `az login` against a principal with **Owner** (or **Contributor** +
   **User Access Administrator**) on the target subscription — this config
-  creates `Microsoft.Authorization/roleAssignments` resources (`tf_owner_role`,
-  `tf_tfstate_blob_role`, `tf_tfstate_blob_account_reader` in `main.tf`) to
-  grant each per-env UMI RG-scoped Owner and Storage Blob Data
-  Contributor/Reader; plain **Contributor** alone does NOT include
+  creates `Microsoft.Authorization/roleAssignments` resources (`tf_owner_role`
+  and `tf_tfstate_blob_role` in `main.tf`) to grant each per-env UMI RG-scoped
+  Owner and container-scoped Storage Blob Data Contributor. The previously
+  documented `tf_tfstate_blob_account_reader` (does not exist / stale) resource
+  was never present; plain **Contributor** alone does NOT include
   `Microsoft.Authorization/roleAssignments/write` and the apply will fail with
   an authorization error on those resources.
 - A globally-unique storage account name (3–24 chars, lowercase letters and
@@ -113,19 +114,60 @@ config is supplied at `init` time from this file. There is only one backend
 file per environment now — the platform and stamp modules apply together in
 a single state, so there is no separate `common-<env>.backend.hcl`.
 
-**Known drift (out of scope for this change, do not "fix" by substituting
-files)**: the `local_file.backend_config` resource in `main.tf` also writes
-a generated snippet straight to `iac/<env>.backend.hcl` (repo root), using a
-per-env container name (`tfstate-<env>`) and storage account
-`stbccweb13afe`. The **authoritative** files every command and workflow in
-this repo actually use are the committed `iac/env/<env>.backend.hcl`, which
-instead point at a single shared `tfstate` container in storage account
-`stbccwebtfstate813afe` (from commit `810b5a1`, before the per-env-container
-change landed here). The two disagree — this is a known branch-level
-inconsistency between this module's current output and the committed
-`iac/env/` files; it is not resolved by this docs change. Use
-`iac/env/<env>.backend.hcl` for every command in this README, not the
-root-level generated file.
+The committed files and `local_file.backend_config` now share the authoritative
+`iac/env/<env>.backend.hcl` path and resolve to the live bootstrap-managed
+account. Do not substitute the obsolete root-level `iac/<env>.backend.hcl`
+files for these configs.
+
+## ADOPTION: migrate existing state without losing history
+
+Adopt the per-environment containers only in a reviewed maintenance window.
+The canonical account is the account already managed by the local bootstrap
+state; never change `tfstate_storage_account_name` to make configuration match
+an old backend file because that would propose replacement of the locked,
+in-use account. Never delete or overwrite the only copy of `prod.tfstate`.
+
+1. Confirm the live account and preserve the bootstrap state before changing
+   remote state:
+   ```sh
+   terraform -chdir=iac/bootstrap state show azapi_resource.tfstate_sa
+   mkdir -p .terraform-state-backup
+   cp iac/bootstrap/terraform.tfstate .terraform-state-backup/bootstrap.tfstate
+   ```
+2. Inventory the old and destination blobs, then download every existing state
+   blob with Azure AD authentication. Repeat the download for each environment
+   and for any destination blob that already exists; keep the directory outside
+   version control:
+   ```sh
+   az storage blob list --auth-mode login --account-name <old-account> --container-name <old-container> -o table
+   az storage blob download --auth-mode login --account-name <old-account> --container-name <old-container> --name prod.tfstate --file .terraform-state-backup/prod.source.tfstate
+   az storage blob download --auth-mode login --account-name stbccweb13afe --container-name tfstate-prod --name prod.tfstate --file .terraform-state-backup/prod.destination.tfstate
+   ```
+   A missing destination blob is expected on first adoption; a missing source
+   blob is a stop condition.
+3. Reconcile the local bootstrap state before any bootstrap apply. If a live
+   account or per-environment container exists but is absent from
+   `terraform state list`, import it rather than recreating it:
+   ```sh
+   terraform -chdir=iac/bootstrap import azapi_resource.tfstate_sa /subscriptions/<subscription-id>/resourceGroups/rg-bccweb-tfstate/providers/Microsoft.Storage/storageAccounts/stbccweb13afe
+   terraform -chdir=iac/bootstrap import 'azapi_resource.tfstate_container["prod"]' /subscriptions/<subscription-id>/resourceGroups/rg-bccweb-tfstate/providers/Microsoft.Storage/storageAccounts/stbccweb13afe/blobServices/default/containers/tfstate-prod
+   ```
+   Import only missing addresses. Save and review a bootstrap plan before an
+   operator applies it to create missing containers and container-scoped role
+   assignments.
+4. Pull each source backend through Terraform, preserving another byte-for-byte
+   backup, then initialize the canonical destination and push that exact state:
+   ```sh
+   terraform -chdir=iac/environment init -reconfigure -backend-config=<source-backend.hcl>
+   terraform -chdir=iac/environment state pull > .terraform-state-backup/prod.pulled.tfstate
+   terraform -chdir=iac/environment init -reconfigure -backend-config=../env/prod.backend.hcl
+   terraform -chdir=iac/environment state push .terraform-state-backup/prod.pulled.tfstate
+   terraform -chdir=iac/environment state pull > .terraform-state-backup/prod.after.tfstate
+   ```
+5. Compare the pulled state serial, lineage, and resource addresses before and
+   after the push, then run a refresh-only plan against the canonical backend.
+   Retain all backups and the old `prod.tfstate` blob until every environment
+   has passed review; adoption copies history and does not delete the source.
 
 ## Outputs
 
@@ -162,14 +204,12 @@ scope:
 
 plus **Storage Blob Data Contributor** on its own tfstate container (the
 azurerm backend uses Azure AD auth). The RG-scoped Owner grants prevent a dev
-pipeline from changing prod workload resources. They do **not** currently
-provide state confidentiality: `tf_tfstate_blob_account_reader` grants every
-environment UMI Storage Blob Data Reader at the storage-account scope, so a
-compromised dev pipeline can read prod state. This is a known unresolved
-branch risk; do not claim full dev/prod isolation until that account-level
-Reader grant is redesigned. Restrict who can edit `terraform_umis` and
+pipeline from changing prod workload resources, and the container-scoped data
+grant prevents it from reading or overwriting prod state. The former
+`tf_tfstate_blob_account_reader` (does not exist / stale) account-level Reader
+claim was documentation-only. Restrict who can edit `terraform_umis` and
 `github_repo` — adding an entry grants that GitHub environment Owner over its
-named RGs via OIDC and read access to state in the shared account.
+named RGs via OIDC and contributor access to its named tfstate container.
 
 ### Adding a new GitHub environment
 
@@ -378,6 +418,5 @@ Local state for the bootstrap is the standard pattern:
   account, not one shared container. Per-env fan-out (`for_each`) is also
   used for UMIs, federated credentials, pre-created RGs, and role
   assignments keyed by `terraform_umis`.
-- No subscription-scoped role assignments — RG-scoped Owner, per-container
-  Storage Blob Data Contributor, and the known unresolved account-scoped
-  Storage Blob Data Reader grant described in the security note above.
+- No subscription- or storage-account-scoped role assignments — only
+  RG-scoped Owner and per-container Storage Blob Data Contributor.
