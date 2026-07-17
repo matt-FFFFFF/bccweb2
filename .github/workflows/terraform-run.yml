@@ -1,0 +1,179 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
+name: Reusable Terraform run
+
+on:
+  workflow_call:
+    inputs:
+      root:
+        description: Terraform root to run
+        required: true
+        type: string
+      target_env:
+        description: GitHub environment and backend configuration to target
+        required: true
+        type: string
+      mode:
+        description: Terraform operation to run (plan, apply, or drift-gate)
+        required: true
+        type: string
+
+jobs:
+  terraform:
+    name: Terraform ${{ inputs.mode }} (${{ inputs.root }} / ${{ inputs.target_env }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.target_env }}
+    permissions:
+      id-token: write
+      contents: read
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_USE_AZUREAD: "true"
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      TF_IN_AUTOMATION: "true"
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - uses: ./.github/actions/tf-setup
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      # First-party callers pass secrets: inherit so this in-repo exporter can
+      # expose every environment-scoped TF_VAR_* value without writing tfvars.
+      - name: Export Terraform variables
+        env:
+          SECRETS_JSON: ${{ toJSON(secrets) }}
+          VARS_JSON: ${{ toJSON(vars) }}
+        run: node scripts/tfvars-to-github-env.mjs
+
+      - name: Validate invocation
+        env:
+          ROOT: ${{ inputs.root }}
+          TARGET_ENV: ${{ inputs.target_env }}
+          MODE: ${{ inputs.mode }}
+        run: |
+          set -euo pipefail
+          case "$ROOT" in
+            shared|environment) ;;
+            *)
+              echo "::error::Unsupported Terraform root: $ROOT"
+              exit 1
+              ;;
+          esac
+          case "$ROOT:$TARGET_ENV" in
+            shared:shared|environment:staging|environment:prod) ;;
+            *)
+              echo "::error::Invalid Terraform root/environment pair: $ROOT/$TARGET_ENV"
+              exit 1
+              ;;
+          esac
+          case "$MODE" in
+            plan|apply|drift-gate) ;;
+            *)
+              echo "::error::Unsupported Terraform mode: $MODE"
+              exit 1
+              ;;
+          esac
+
+      - name: Validate required Terraform variables
+        env:
+          ROOT: ${{ inputs.root }}
+        run: |
+          set -euo pipefail
+          case "$ROOT" in
+            environment)
+              required_variables=(
+                TF_VAR_stamp_name
+                TF_VAR_stamp_rg_name
+                TF_VAR_tfstate_resource_group_name
+                TF_VAR_tfstate_storage_account_name
+                TF_VAR_acs_sender_address
+                TF_VAR_ops_email
+                TF_VAR_puretrack_api_key
+                TF_VAR_puretrack_email
+                TF_VAR_puretrack_password
+              )
+              ;;
+            shared)
+              required_variables=(
+                TF_VAR_shared_rg_name
+                TF_VAR_acs_email_domain
+                TF_VAR_acs_sender_address
+                TF_VAR_production_hostname
+              )
+              ;;
+          esac
+          for variable_name in "${required_variables[@]}"; do
+            if [[ -z "${!variable_name:-}" ]]; then
+              echo "Required GitHub environment variable is missing: ${variable_name}" >&2
+              exit 1
+            fi
+          done
+
+      - name: Terraform init
+        env:
+          ROOT: ${{ inputs.root }}
+          TARGET_ENV: ${{ inputs.target_env }}
+        run: terraform -chdir="iac/${ROOT}" init -input=false -backend-config="../env/${TARGET_ENV}.backend.hcl"
+
+      - name: Terraform plan
+        if: inputs.mode == 'plan'
+        env:
+          ROOT: ${{ inputs.root }}
+          TARGET_ENV: ${{ inputs.target_env }}
+        run: |
+          set -euo pipefail
+          terraform -chdir="iac/${ROOT}" plan -input=false -out=tfplan | tee plan-output.txt
+          {
+            echo "## Terraform plan — ${ROOT} / ${TARGET_ENV}"
+            echo '```'
+            tail -n 80 plan-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Terraform apply
+        if: inputs.mode == 'apply'
+        env:
+          ROOT: ${{ inputs.root }}
+          TARGET_ENV: ${{ inputs.target_env }}
+        run: |
+          set -euo pipefail
+          terraform -chdir="iac/${ROOT}" plan -input=false -out=tfplan | tee plan-output.txt
+          {
+            echo "## Terraform apply plan — ${ROOT} / ${TARGET_ENV}"
+            echo '```'
+            tail -n 80 plan-output.txt
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          terraform -chdir="iac/${ROOT}" apply -input=false tfplan
+
+      - name: Terraform plan (drift gate)
+        if: inputs.mode == 'drift-gate'
+        env:
+          ROOT: ${{ inputs.root }}
+          TARGET_ENV: ${{ inputs.target_env }}
+        run: |
+          set -euo pipefail
+          set +e
+          terraform -chdir="iac/${ROOT}" plan -input=false -detailed-exitcode | tee plan-output.txt
+          rc=${PIPESTATUS[0]}
+          set -e
+          if [ "$rc" -eq 2 ]; then
+            {
+              echo "## Terraform plan shows drift or pending changes — ${ROOT} / ${TARGET_ENV}"
+              echo "Run the manual Terraform workflow in apply mode to reconcile."
+              echo '```'
+              tail -n 80 plan-output.txt
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+            echo "::error::Terraform plan shows drift or pending changes. Run the manual Terraform workflow in apply mode to reconcile."
+            exit 1
+          elif [ "$rc" -ne 0 ]; then
+            echo "::error::Terraform plan failed (exit $rc)"
+            exit "$rc"
+          fi
+          echo "No infrastructure drift — gate passed for ${ROOT} / ${TARGET_ENV}." >> "$GITHUB_STEP_SUMMARY"
