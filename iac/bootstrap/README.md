@@ -40,7 +40,8 @@ JSON-encoded body strings). This config uses **local state** intentionally; see
   re-apply / teardown" below).
 
 One bootstrap storage account hosts a tfstate blob container per environment
-(`tfstate-prod`, `tfstate-dev`, etc., each holding a `<env>.tfstate` blob) —
+(`tfstate-staging`, `tfstate-prod`, and `tfstate-shared`, each holding an
+environment-specific tfstate blob) —
 there is no separate container per stack, since the platform and stamp
 modules now apply together in one state per environment.
 
@@ -49,10 +50,11 @@ modules now apply together in one state per environment.
 - Terraform ≥ 1.11.
 - `az login` against a principal with **Owner** (or **Contributor** +
   **User Access Administrator**) on the target subscription — this config
-  creates `Microsoft.Authorization/roleAssignments` resources (`tf_owner_role`
-  and `tf_tfstate_blob_role` in `main.tf`) to grant each UMI Owner on exactly
-  its shared or stamp RG and Storage Blob Data Contributor on its own state
-  container. The previously
+  creates `Microsoft.Authorization/roleAssignments` resources (`tf_owner_role`,
+  `tf_tfstate_blob_role`, and `tf_tfstate_shared_reader` in `main.tf`) to grant
+  each UMI Owner on exactly its shared or stamp RG and Storage Blob Data
+  Contributor on its own state container, plus each application UMI Reader on
+  `tfstate-shared`. The previously
   documented `tf_tfstate_blob_account_reader` (does not exist / stale) resource
   was never present; plain **Contributor** alone does NOT include
   `Microsoft.Authorization/roleAssignments/write` and the apply will fail with
@@ -191,7 +193,7 @@ in-use account. Never delete or overwrite the only copy of `prod.tfstate`.
 ## GitHub Actions OIDC setup
 
 The bootstrap provisions **one user-assigned managed identity (UMI) per
-downstream stack** (`id-bccweb-terraform-dev`,
+downstream stack** (`id-bccweb-terraform-staging`,
 `id-bccweb-terraform-prod`, `id-bccweb-terraform-shared`) that GitHub Actions
 assumes via OIDC — no client secrets stored anywhere. Each UMI carries exactly
 one federated identity credential, scoped to
@@ -200,14 +202,16 @@ one federated identity credential, scoped to
 **Security note**: Each UMI is granted **RG-scoped Owner** on exactly one
 pre-created resource group — never at subscription scope:
 
-- `id-bccweb-terraform-dev` → Owner on `stamp-dev`
+- `id-bccweb-terraform-staging` → Owner on `stamp-staging`
 - `id-bccweb-terraform-prod` → Owner on `stamp-prod`
 - `id-bccweb-terraform-shared` → Owner on `rg-bccweb-shared`
 
 plus **Storage Blob Data Contributor** on its own tfstate container (the
-azurerm backend uses Azure AD auth). The RG-scoped Owner grants prevent a dev
-pipeline from changing prod workload resources, and the container-scoped data
-grant prevents it from reading or overwriting prod state. The former
+azurerm backend uses Azure AD auth). The staging and prod identities additionally
+receive **Storage Blob Data Reader** on `tfstate-shared`, allowing remote-state
+output reads without write/delete access. The RG-scoped Owner grants prevent a
+staging pipeline from changing prod workload resources, and the container-scoped
+Contributor grant prevents it from reading or overwriting prod state. The former
 `tf_tfstate_blob_account_reader` (does not exist / stale) account-level Reader
 claim was documentation-only. Restrict who can edit `terraform_umis` and
 `github_repo` — adding an entry grants that GitHub environment Owner over its
@@ -220,13 +224,13 @@ Add a `terraform_umis` entry and the matching `github_environments` name in
 
 ```hcl
 # iac/bootstrap/terraform.tfvars
-github_environments = ["dev", "prod", "shared", "staging"]
+github_environments = ["staging", "prod", "shared", "preview"]
 
 terraform_umis = {
-  # ... existing dev + prod + shared entries ...
-  staging = {
-    stamp_rg   = "stamp-staging"
-    github_env = "staging"
+  # ... existing staging + prod + shared entries ...
+  preview = {
+    stamp_rg   = "stamp-preview"
+    github_env = "preview"
   }
 }
 ```
@@ -424,10 +428,11 @@ Local state for the bootstrap is the standard pattern:
   single-instance — no `for_each` / `count`. The tfstate blob **container**
   is per-environment (`azapi_resource.tfstate_container`, `for_each =
   var.github_environments`, named `<tfstate_container_prefix>-<env>`, e.g.
-  `tfstate-dev`) — one container per environment inside the single storage
+  `tfstate-staging`) — one container per environment inside the single storage
   account, not one shared container. Fan-out (`for_each`) is also used for
   UMIs, federated credentials, pre-created RGs, and role assignments keyed by
   `terraform_umis`; the RG map has one shared entry plus one stamp entry per
   application environment.
 - No subscription- or storage-account-scoped role assignments — only
-  RG-scoped Owner and per-container Storage Blob Data Contributor.
+  RG-scoped Owner, per-container Storage Blob Data Contributor on each UMI's
+  own container, and application-UMI Reader on `tfstate-shared`.

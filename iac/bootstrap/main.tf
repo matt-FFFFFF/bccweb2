@@ -252,6 +252,25 @@ resource "azapi_resource" "tf_tfstate_blob_role" {
   }
 }
 
+# Application stacks read shared.tfstate outputs but must not write or delete
+# shared state. Storage Blob Data Reader is scoped to tfstate-shared only; the
+# shared UMI already owns that container through the Contributor grant above.
+resource "azapi_resource" "tf_tfstate_shared_reader" {
+  for_each = local.application_umis
+
+  type      = "Microsoft.Authorization/roleAssignments@2022-04-01"
+  name      = uuidv5("url", "bccweb-tf-tfstate-shared-reader-${each.key}-${azapi_resource.tfstate_container["shared"].id}")
+  parent_id = azapi_resource.tfstate_container["shared"].id
+
+  body = {
+    properties = {
+      roleDefinitionId = "/subscriptions/${data.azapi_client_config.current.subscription_id}/providers/Microsoft.Authorization/roleDefinitions/2a2b9908-6ea1-4ae2-8e65-a410df84e7d1"
+      principalId      = azapi_resource.tf_umi[each.key].output.properties.principalId
+      principalType    = "ServicePrincipal"
+    }
+  }
+}
+
 # ─── GitHub repo environments + Azure OIDC secrets ───────────────────────────
 #
 # Closes the OIDC loop: instead of an operator manually pasting three values
@@ -324,18 +343,12 @@ resource "github_actions_environment_secret" "azure" {
 
   # Defensive: ensure the RG-scoped Owner + tfstate blob grants land first so
   # that each UMI is fully usable the moment CI reads these secrets.
-  depends_on = [azapi_resource.tf_owner_role, azapi_resource.tf_tfstate_blob_role]
+  depends_on = [azapi_resource.tf_owner_role, azapi_resource.tf_tfstate_blob_role, azapi_resource.tf_tfstate_shared_reader]
 }
 
 locals {
   application_umis = {
     for k, cfg in var.terraform_umis : k => cfg if k != "shared"
-  }
-
-  # T4 renames dev to staging. Excluding the transitional dev environment here
-  # publishes shared-state inputs to prod now and to staging after that rename.
-  shared_state_consumers = {
-    for k, cfg in local.application_umis : k => cfg if cfg.github_env != "dev"
   }
 
   github_environment_vars = var.manage_github_secrets ? merge(
@@ -350,7 +363,7 @@ locals {
       "shared/TF_VAR_shared_rg_name"        = { env = "shared", name = "TF_VAR_shared_rg_name", value = azapi_resource.pre_created_rg["shared"].name }
     },
     merge([
-      for k, cfg in local.shared_state_consumers : {
+      for k, cfg in local.application_umis : {
         "${cfg.github_env}/AZURE_LOCATION"                      = { env = cfg.github_env, name = "AZURE_LOCATION", value = var.location }
         "${cfg.github_env}/SHARED_RG_NAME"                      = { env = cfg.github_env, name = "SHARED_RG_NAME", value = azapi_resource.pre_created_rg["shared"].name }
         "${cfg.github_env}/TF_VAR_tfstate_resource_group_name"  = { env = cfg.github_env, name = "TF_VAR_tfstate_resource_group_name", value = azapi_resource.bootstrap_rg.name }

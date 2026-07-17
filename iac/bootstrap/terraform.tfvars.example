@@ -5,17 +5,17 @@
 #
 # `tfstate_storage_account_name` must be globally unique (3–24 chars,
 # lowercase letters and digits). The canonical `terraform_umis` map below is
-# the dev + prod + shared model: one UMI per downstream stack, each owning
+# the staging + prod + shared model: one UMI per downstream stack, each owning
 # exactly its pre-created stamp or shared RG.
 
 tfstate_storage_account_name = "stbccweb13afe"
 
-github_environments = ["dev", "prod", "shared"]
+github_environments = ["staging", "prod", "shared"]
 
 terraform_umis = {
-  dev = {
-    stamp_rg   = "stamp-dev"
-    github_env = "dev"
+  staging = {
+    stamp_rg   = "stamp-staging"
+    github_env = "staging"
   }
   prod = {
     stamp_rg   = "stamp-prod"

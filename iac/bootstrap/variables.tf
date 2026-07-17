@@ -56,7 +56,7 @@ variable "github_repo" {
 variable "github_environments" {
   type        = set(string)
   description = "GitHub environment names that receive the per-env Azure OIDC secrets. Every `terraform_umis` entry's `github_env` must appear in this list."
-  default     = ["dev", "prod", "shared"]
+  default     = ["staging", "prod", "shared"]
 
   validation {
     condition     = alltrue([for e in var.github_environments : can(regex("^[a-z0-9-]+$", e))])
@@ -69,7 +69,7 @@ variable "terraform_umis" {
     stamp_rg   = optional(string)
     github_env = string
   }))
-  description = "Terraform UMIs keyed by stack name (dev, prod, shared). Application entries name their stamp RG; shared omits stamp_rg and owns rg-bccweb-shared. Each entry names the GitHub environment whose OIDC subject the UMI trusts. The UMI is named id-bccweb-terraform-<key>. No default — supply via terraform.tfvars (see terraform.tfvars.example)."
+  description = "Terraform UMIs keyed by stack name (staging, prod, shared). Application entries name their stamp RG; shared omits stamp_rg and owns rg-bccweb-shared. Each entry names the GitHub environment whose OIDC subject the UMI trusts. The UMI is named id-bccweb-terraform-<key>. No default — supply via terraform.tfvars (see terraform.tfvars.example)."
   nullable    = false
 
   validation {

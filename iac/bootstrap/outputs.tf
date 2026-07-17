@@ -88,7 +88,8 @@ output "github_actions_setup" {
 
     One UMI per downstream stack; each owns ONLY its matching shared or stamp
     RG (RG-scoped Owner, never subscription scope) and can contribute only to
-    its own tfstate container. There is no account-level state-reader assignment.
+    its own tfstate container. Application UMIs can also read, but not write,
+    the shared tfstate container; there is no account-level state assignment.
 
     1. GitHub environment secrets (3 per environment):
 %{if var.manage_github_secrets~}
@@ -112,7 +113,7 @@ output "github_actions_setup" {
 %{endfor~}
          shared: TF_VAR_shared_rg_name         = ${azapi_resource.pre_created_rg["shared"].name}
          shared: TF_VAR_env_umi_principal_ids  = ${jsonencode(local.terraform_umi_principal_ids)}
-%{for k, v in local.shared_state_consumers~}
+%{for k, v in local.application_umis~}
          ${v.github_env}: SHARED_RG_NAME = ${azapi_resource.pre_created_rg["shared"].name}
          ${v.github_env}: AZURE_LOCATION = ${var.location}
          ${v.github_env}: TF_VAR_tfstate_resource_group_name  = ${azapi_resource.bootstrap_rg.name}
@@ -137,7 +138,7 @@ output "github_actions_setup" {
 %{endfor~}
          shared: TF_VAR_shared_rg_name        = ${azapi_resource.pre_created_rg["shared"].name}
          shared: TF_VAR_env_umi_principal_ids = ${jsonencode(local.terraform_umi_principal_ids)}
-%{for k, v in local.shared_state_consumers~}
+%{for k, v in local.application_umis~}
          ${v.github_env}: SHARED_RG_NAME = ${azapi_resource.pre_created_rg["shared"].name}
          ${v.github_env}: AZURE_LOCATION = ${var.location}
          ${v.github_env}: TF_VAR_tfstate_resource_group_name  = ${azapi_resource.bootstrap_rg.name}

@@ -1,22 +1,22 @@
 # SPDX-FileCopyrightText: 2026 British Club Challenge authors
 # SPDX-License-Identifier: MPL-2.0
-# COMMITTED TEMPLATE. Copy to dev.tfvars (gitignored) and fill in:
-#   cp iac/env/dev.tfvars.example iac/env/dev.tfvars
+# COMMITTED TEMPLATE. Copy to staging.tfvars (gitignored) and fill in:
+#   cp iac/env/staging.tfvars.example iac/env/staging.tfvars
 # Use with:
-#   terraform -chdir=iac/environment init -backend-config=../env/dev.backend.hcl && terraform -chdir=iac/environment apply -var-file=../env/dev.tfvars
+#   terraform -chdir=iac/environment init -backend-config=../env/staging.backend.hcl && terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars
 # DO NOT COMMIT REAL SECRETS. Set via env vars: TF_VAR_puretrack_api_key=... etc., or pipeline secrets.
-# CI does not use this file directly — deploy workflows generate dev.tfvars at
+# CI does not use this file directly — deploy workflows generate staging.tfvars at
 # runtime from GitHub env-scoped vars + TF_VAR_* secrets (see .github/workflows).
 
-stamp_name = "dev"
+stamp_name = "staging"
 location   = "uksouth"
 
 # Local applies only. CI sources these values from the TF_VAR_* GitHub environment vars.
 acs_email_domain = "<REQUIRED: operator must replace before apply>"
-platform_rg_name = "rg-bccweb-platform-dev"
-stamp_rg_name    = "rg-bccweb-dev"
+platform_rg_name = "rg-bccweb-platform-staging"
+stamp_rg_name    = "stamp-staging"
 
-# CORS: dev SWA default hostname; leave empty until known.
+# CORS: staging SWA default hostname; leave empty until known.
 allowed_origins = []
 
 ops_email = "<REQUIRED: operator must replace before apply>" # REQUIRED
