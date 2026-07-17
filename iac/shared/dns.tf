@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MPL-2.0
 
 locals {
-  production_cname_record_name = trimsuffix(trimprefix(var.production_hostname, "${var.dns_zone_name}."), ".")
+  # Azure DNS record-set name is RELATIVE to the zone: strip the ".<zone>" suffix.
+  # (A CNAME cannot sit at the apex, so production_hostname is always a subdomain of the zone.)
+  production_cname_record_name = trimsuffix(var.production_hostname, ".${var.dns_zone_name}")
 }
 
 resource "azapi_resource" "production_cname" {

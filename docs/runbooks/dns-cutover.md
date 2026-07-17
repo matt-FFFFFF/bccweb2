@@ -7,16 +7,11 @@ This runbook covers two intertwined DNS changes that ship together at production
 
 The two changes are independent in DNS but conventionally done in the same operator session. The TTL strategy below applies to both.
 
-> **Known caveat (not yet fixed):** `iac/shared/dns.tf`'s record-name computation strips
-> the DNS zone as a prefix (`trimprefix(var.production_hostname, "${var.dns_zone_name}.")`)
-> rather than as a suffix. For a hostname like `www.example.com` under zone
-> `example.com`, this leaves the record name unchanged (`www.example.com`) instead of
-> reducing it to `www`, which would make Azure DNS create the CNAME at
-> `www.example.com.example.com` and fail SWA's `cname-delegation` validation. This is
-> latent and only exercised once both `production_hostname` and `dns_zone_name` are set
-> for a real cutover — verify the planned record name with `terraform -chdir=iac/shared
-> plan` before applying, and if it looks wrong, fix `dns.tf` to `trimsuffix(var.production_hostname,
-> ".${var.dns_zone_name}")` first.
+> **Record-name handling:** `iac/shared/dns.tf` correctly computes the Azure DNS
+> zone-relative record name with `trimsuffix(var.production_hostname,
+> ".${var.dns_zone_name}")`. For example, `www.example.com` under zone `example.com`
+> becomes `www`. As a cutover safeguard, review `terraform -chdir=iac/shared plan`
+> before applying and confirm the planned record name and CNAME target.
 
 ## Pre-flight
 

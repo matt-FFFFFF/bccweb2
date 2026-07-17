@@ -97,6 +97,7 @@ run "shared_plans" {
     condition = (
       length(azapi_resource.production_cname) == 1 &&
       azapi_resource.production_cname[0].type == "Microsoft.Network/dnsZones/CNAME@2018-05-01" &&
+      azapi_resource.production_cname[0].name == "www" &&
       length(azapi_resource.swa_custom_domain) == 1 &&
       azapi_resource.swa_custom_domain[0].type == "Microsoft.Web/staticSites/customDomains@2025-03-01" &&
       azapi_resource.swa_custom_domain[0].body.properties.validationMethod == "cname-delegation"

@@ -262,15 +262,11 @@ az role assignment create \
 Skip this phase entirely if prod will not use a custom domain
 (`production_hostname`/`dns_zone_name` left empty in `iac/env/shared.tfvars`).
 
-**Known caveat carried over from the stamp module** (documented in
-`.omo/notepads/infra-topology-design/issues.md`, T8): the CNAME record-name
-computation in `iac/shared/dns.tf` uses `trimprefix` where the correct form
-for stripping a zone *suffix* is `trimsuffix(var.production_hostname, ".${var.dns_zone_name}")`.
-This is pre-existing (mirrored byte-for-byte from the stamp module's
-original `dns.tf`) and only bites once `production_hostname`/`dns_zone_name`
-are both non-empty. If you populate them as part of this migration, verify
-the computed record name manually before relying on Azure DNS validation to
-catch it.
+The CNAME record-name computation in `iac/shared/dns.tf` correctly strips the
+zone suffix with `trimsuffix(var.production_hostname, ".${var.dns_zone_name}")`,
+producing the zone-relative name Azure DNS expects. If you populate
+`production_hostname`/`dns_zone_name` as part of this migration, review the
+shared Terraform plan and confirm the computed record name before applying.
 
 ## Phase 5.5 — Populate GitHub Environment Variables + Secrets
 
