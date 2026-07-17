@@ -145,7 +145,7 @@ run "rbac_plans" {
         azapi_resource.env_ai_monitoring_reader,
         azapi_resource.env_acs_contributor,
         azapi_resource.env_swa_contributor,
-      ] : [
+        ] : [
         for assignment in assignments :
         !strcontains(lower(assignment.parent_id), "/dnszones/")
       ]
