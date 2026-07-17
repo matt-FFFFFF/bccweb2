@@ -20,6 +20,7 @@ locals {
   is_prod            = var.stamp_name == "prod"
   storage_sku        = local.is_prod ? "Standard_GRS" : "Standard_LRS"
   enable_delete_lock = local.is_prod
+  always_ready_count = var.stamp_name == "prod" ? 1 : 0
 }
 
 # ─── Stamp module (single instance — single-stamp by user decision) ───────────
@@ -33,6 +34,7 @@ module "stamp" {
   allowed_origins    = var.allowed_origins
   storage_sku        = local.storage_sku
   enable_delete_lock = local.enable_delete_lock
+  always_ready_count = local.always_ready_count
   ops_email          = var.ops_email
   slack_webhook_url  = var.slack_webhook_url
   acs_id             = data.terraform_remote_state.shared.outputs.acs_id

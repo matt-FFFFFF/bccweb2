@@ -332,7 +332,7 @@ resource "azapi_resource" "blob_heal_storm" {
 # orchestration in the API: it acquires a lease, recomputes brief artifacts,
 # generates a PDF, optionally creates PureTrack groups, and emails the brief.
 # A sustained p95 above 30s usually means PDF generation is degrading (memory
-# pressure on Y1 SKU) or PureTrack upstream is slow.
+# pressure on the Flex 2048 MB instance) or PureTrack upstream is slow.
 #
 # Investigate-async severity 2: slow lockRound is annoying but not user-facing
 # — pilots can still register and view rounds while it degrades.

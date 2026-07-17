@@ -10,6 +10,11 @@ output "function_app_name" {
   value       = module.stamp.function_app_name
 }
 
+output "function_app_default_hostname" {
+  description = "Default hostname of the Function App used when linking the shared Static Web App backend."
+  value       = module.stamp.function_app_default_hostname
+}
+
 output "storage_account_name_runtime" {
   description = "Name of the runtime storage account."
   value       = module.stamp.storage_account_name_runtime

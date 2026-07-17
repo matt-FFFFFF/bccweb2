@@ -47,6 +47,12 @@ variable "enable_delete_lock" {
   default     = false
 }
 
+variable "always_ready_count" {
+  description = "Number of always-ready HTTP instances for the Flex Consumption Function App."
+  type        = number
+  default     = 0
+}
+
 variable "ops_email" {
   description = "Alert recipient email address."
   type        = string

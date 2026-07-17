@@ -36,6 +36,9 @@ mock_provider "azapi" {
           principalId      = "00000000-0000-0000-0000-000000000000"
           clientId         = "00000000-0000-0000-0000-000000000001"
           customerId       = "00000000-0000-0000-0000-000000000003"
+          primaryEndpoints = {
+            blob = "https://runtime-unit.blob.core.windows.net/"
+          }
           verificationRecords = {
             Domain = { type = "TXT", name = "@", value = "test-domain" }
             SPF    = { type = "TXT", name = "@", value = "v=spf1 include:spf.protection.outlook.com -all" }
@@ -187,6 +190,66 @@ run "function_app_settings_use_kv_references" {
       one([for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting.value if setting.name == "BLOB_CONNECTION_STRING"]) == "DefaultEndpointsProtocol=https;AccountName=stbccwebunitdata;AccountKey=TEST_STORAGE_KEY_SENTINEL;EndpointSuffix=core.windows.net"
     )
     error_message = "AzureWebJobsStorage must use the runtime account and BLOB_CONNECTION_STRING must use the distinct data account."
+  }
+}
+
+run "function_app_uses_flex_consumption" {
+  command = plan
+
+  providers = {
+    azapi  = azapi.mock
+    random = random.mock
+  }
+
+  module {
+    source = "./tests/unit/stamp-fixture"
+  }
+
+  variables {
+    always_ready_count = 1
+  }
+
+  assert {
+    condition = (
+      azapi_resource.service_plan.type == "Microsoft.Web/serverfarms@2024-04-01" &&
+      azapi_resource.service_plan.body.kind == "functionapp" &&
+      azapi_resource.service_plan.body.sku.name == "FC1" &&
+      azapi_resource.service_plan.body.sku.tier == "FlexConsumption" &&
+      azapi_resource.service_plan.body.properties.reserved == true
+    )
+    error_message = "The Function App service plan must use the Linux FC1 Flex Consumption SKU."
+  }
+
+  assert {
+    condition = (
+      azapi_resource.function_app.type == "Microsoft.Web/sites@2024-04-01" &&
+      azapi_resource.function_app.body.kind == "functionapp,linux" &&
+      azapi_resource.function_app.body.properties.functionAppConfig.runtime.name == "node" &&
+      azapi_resource.function_app.body.properties.functionAppConfig.runtime.version == "24" &&
+      azapi_resource.function_app.body.properties.functionAppConfig.scaleAndConcurrency.instanceMemoryMB == 2048 &&
+      contains([512, 2048, 4096], azapi_resource.function_app.body.properties.functionAppConfig.scaleAndConcurrency.instanceMemoryMB) &&
+      azapi_resource.function_app.body.properties.functionAppConfig.scaleAndConcurrency.maximumInstanceCount == 100 &&
+      length(azapi_resource.function_app.body.properties.functionAppConfig.scaleAndConcurrency.alwaysReady) == 1 &&
+      azapi_resource.function_app.body.properties.functionAppConfig.scaleAndConcurrency.alwaysReady[0].name == "http" &&
+      azapi_resource.function_app.body.properties.functionAppConfig.scaleAndConcurrency.alwaysReady[0].instanceCount == 1
+    )
+    error_message = "Flex must run Node 24 with 2048 MB workers, a 100-instance maximum, and the valid http always-ready group."
+  }
+
+  assert {
+    condition = (
+      azapi_resource.function_app.body.properties.functionAppConfig.deployment.storage.type == "blobContainer" &&
+      azapi_resource.function_app.body.properties.functionAppConfig.deployment.storage.value == "https://runtime-unit.blob.core.windows.net/deploymentpackage" &&
+      endswith(azapi_resource.function_app.body.properties.functionAppConfig.deployment.storage.value, "/deploymentpackage") &&
+      azapi_resource.function_app.body.properties.functionAppConfig.deployment.storage.authentication.type == "StorageAccountConnectionString" &&
+      azapi_resource.function_app.body.properties.functionAppConfig.deployment.storage.authentication.storageAccountConnectionStringName == "AzureWebJobsStorage"
+    )
+    error_message = "Flex deployment storage must use the runtime account blob endpoint and AzureWebJobsStorage connection-string authentication."
+  }
+
+  assert {
+    condition     = output.function_app_default_hostname == "test.example.com"
+    error_message = "The stamp module must export the Function App default hostname for backend linking."
   }
 }
 

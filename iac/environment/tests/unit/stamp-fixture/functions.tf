@@ -2,9 +2,6 @@
 # SPDX-License-Identifier: MPL-2.0
 locals {
   function_app_settings = [
-    { name = "FUNCTIONS_WORKER_RUNTIME", value = "node" },
-    { name = "FUNCTIONS_EXTENSION_VERSION", value = "~4" },
-    { name = "WEBSITE_NODE_DEFAULT_VERSION", value = "~24" },
     { name = "AzureWebJobsStorage", value = local.storage_runtime_connection_string },
     { name = "BLOB_CONNECTION_STRING", value = local.storage_data_connection_string },
     { name = "BLOB_CONTAINER_NAME", value = "data" },
@@ -36,17 +33,17 @@ resource "azapi_resource" "fn_umi" {
 }
 
 resource "azapi_resource" "service_plan" {
-  type      = "Microsoft.Web/serverfarms@2025-03-01"
+  type      = "Microsoft.Web/serverfarms@2024-04-01"
   name      = "asp-bccweb-${var.stamp_name}"
   parent_id = local.stamp_rg_id
   location  = var.location
   tags      = var.tags
 
   body = {
-    kind = "linux"
+    kind = "functionapp"
     sku = {
-      name = "Y1"
-      tier = "Dynamic"
+      name = "FC1"
+      tier = "FlexConsumption"
     }
     properties = {
       reserved = true
@@ -55,7 +52,7 @@ resource "azapi_resource" "service_plan" {
 }
 
 resource "azapi_resource" "function_app" {
-  type      = "Microsoft.Web/sites@2025-03-01"
+  type      = "Microsoft.Web/sites@2024-04-01"
   name      = "func-bccweb-${var.stamp_name}"
   parent_id = local.stamp_rg_id
   location  = var.location
@@ -73,16 +70,41 @@ resource "azapi_resource" "function_app" {
       httpsOnly                 = true
       keyVaultReferenceIdentity = azapi_resource.fn_umi.id
       siteConfig = {
-        linuxFxVersion = "NODE|24"
-        appSettings    = local.function_app_settings
+        appSettings = local.function_app_settings
         cors = {
           allowedOrigins = var.allowed_origins
+        }
+      }
+      functionAppConfig = {
+        deployment = {
+          storage = {
+            type  = "blobContainer"
+            value = "${trimsuffix(azapi_resource.storage_runtime.output.properties.primaryEndpoints.blob, "/")}/deploymentpackage"
+            authentication = {
+              type                               = "StorageAccountConnectionString"
+              storageAccountConnectionStringName = "AzureWebJobsStorage"
+            }
+          }
+        }
+        runtime = {
+          name    = "node"
+          version = "24"
+        }
+        scaleAndConcurrency = {
+          maximumInstanceCount = 100
+          instanceMemoryMB     = 2048
+          alwaysReady = var.always_ready_count > 0 ? [{
+            name          = "http"
+            instanceCount = var.always_ready_count
+          }] : []
         }
       }
     }
   }
 
   response_export_values = ["id", "name", "properties.defaultHostName"]
+
+  depends_on = [azapi_resource.storage_container_deploy]
 
   lifecycle {
     ignore_changes = [body.properties.siteConfig.cors]

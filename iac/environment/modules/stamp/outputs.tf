@@ -10,6 +10,11 @@ output "function_app_name" {
   value       = azapi_resource.function_app.name
 }
 
+output "function_app_default_hostname" {
+  description = "Default hostname of the Function App used when linking the shared Static Web App backend."
+  value       = azapi_resource.function_app.output.properties.defaultHostName
+}
+
 output "storage_account_name_runtime" {
   description = "Name of the runtime storage account backing Azure Functions and queues."
   value       = azapi_resource.storage_runtime.name
