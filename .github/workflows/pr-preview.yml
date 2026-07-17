@@ -1,0 +1,84 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
+name: PR preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+jobs:
+  preview:
+    name: Static SWA preview
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+    # GitHub withholds OIDC tokens and secrets from fork pull requests.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    env:
+      VITE_BLOB_BASE_URL: ${{ vars.VITE_BLOB_BASE_URL }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Build static web app
+        if: github.event.action != 'closed'
+        uses: ./.github/actions/setup-node-mise
+        with:
+          build: build-web
+
+      - uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch SWA deployment token
+        if: github.event.action != 'closed'
+        id: swa_token
+        run: |
+          set -euo pipefail
+          SWA_TOKEN=$(az staticwebapp secrets list --name swa-bccweb-shared --resource-group "${{ vars.SHARED_RG_NAME }}" --query "properties.apiKey" -o tsv)
+          echo "::add-mask::$SWA_TOKEN"
+          echo "token=$SWA_TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy static preview
+        if: github.event.action != 'closed'
+        id: deploy_preview
+        uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.swa_token.outputs.token }}
+          action: upload
+          app_location: "apps/web"
+          output_location: "../../dist/web"
+          api_location: ""
+          skip_app_build: true
+          deployment_environment: ${{ github.event.number }}
+
+      # Previews are static-only: /api/* is expected to fail and is excluded
+      # from navigationFallback in staticwebapp.config.json.
+      - name: Smoke test static preview
+        if: github.event.action != 'closed'
+        env:
+          PREVIEW_URL: ${{ steps.deploy_preview.outputs.static_web_app_url }}
+        run: |
+          set -euo pipefail
+          url="${PREVIEW_URL%/}/"
+          for _ in $(seq 1 24); do
+            body=$(curl -fsS "$url" || true)
+            if curl -fsSI "$url" | grep -qi '^content-type: text/html' && printf '%s' "$body" | grep -Eiq 'BCC'; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Static preview smoke test failed"
+          exit 1
+
+      - name: Delete static preview
+        if: github.event.action == 'closed'
+        run: >-
+          az staticwebapp environment delete
+          --name swa-bccweb-shared
+          --resource-group "${{ vars.SHARED_RG_NAME }}"
+          --environment-name "${{ github.event.number }}"
+          --yes
