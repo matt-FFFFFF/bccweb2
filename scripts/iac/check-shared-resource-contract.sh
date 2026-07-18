@@ -69,7 +69,7 @@ environment_default_line="$(awk '
   in_variable && /^[[:space:]]*default[[:space:]]*=/ { print; exit }
   in_variable && /^}/ { exit }
 ' "$shared_dir/variables.tf")"
-environment_names="$(printf '%s\n' "$environment_default_line" | rg -o '"[^"]+"' | tr -d '"' | LC_ALL=C sort)"
+environment_names="$(printf '%s\n' "$environment_default_line" | grep -oE '"[^"]+"' | tr -d '"' | LC_ALL=C sort)"
 expected_environments="$(printf '%s\n' prod staging)"
 
 if [[ "$environment_names" != "$expected_environments" ]]; then
@@ -113,7 +113,7 @@ if [[ "$managed_set" != "$expected_managed_set" ]]; then
   exit 1
 fi
 
-actual_outputs="$(rg --no-filename -o '^output "[^"]+"' "$shared_dir"/*.tf | cut -d '"' -f 2 | LC_ALL=C sort)"
+actual_outputs="$(grep -hoE '^output "[^"]+"' "$shared_dir"/*.tf | cut -d '"' -f 2 | LC_ALL=C sort)"
 expected_outputs="$(printf '%s\n' \
   'acs_dns_records_for_operator' \
   'acs_email_domain_id' \
@@ -155,7 +155,7 @@ output_bodies="$(awk '
   }
 ' "$shared_dir"/*.tf)"
 
-if printf '%s\n' "$output_bodies" | rg -n '(listKeys|ConnectionString|primaryConnectionString)'; then
+if printf '%s\n' "$output_bodies" | grep -nE '(listKeys|ConnectionString|primaryConnectionString)'; then
   printf 'Shared output bodies must not reference secret-producing fields or operations.\n' >&2
   exit 1
 fi

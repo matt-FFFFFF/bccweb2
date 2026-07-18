@@ -18,11 +18,11 @@ runs:
       shell: bash
       run: |
         for i in {1..30}; do
-          if curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:10000/devstoreaccount1?comp=list 2>/dev/null | grep -qE "^(200|403|400)$"; then
-            echo "Azurite ready after ${i} attempts"
-            exit 0
-          fi
-          echo "Attempt $i: Azurite not ready, sleeping 2s..."
+          code=$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:10000/devstoreaccount1?comp=list" || true)
+          case "$code" in
+            200|400|403) echo "Azurite ready after ${i} attempts (HTTP $code)"; exit 0 ;;
+          esac
+          echo "Attempt $i: Azurite not ready (HTTP ${code:-none}), sleeping 2s..."
           sleep 2
         done
         echo "::error::Azurite failed to become ready after 60s"

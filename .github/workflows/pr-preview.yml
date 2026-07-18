@@ -14,8 +14,13 @@ jobs:
     permissions:
       id-token: write
       contents: read
-    # GitHub withholds OIDC tokens and secrets from fork pull requests.
-    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Same-repo PRs only (forks lack OIDC/secrets), AND opt-in: the operator sets the
+    # repo/staging-env variable PREVIEW_ENABLED=true only after the shared SWA + staging
+    # GitHub environment exist (see docs/runbooks/migration-shared-topology.md). Until then
+    # this job skips so PR CI stays green.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      vars.PREVIEW_ENABLED == 'true'
     env:
       VITE_BLOB_BASE_URL: ${{ vars.VITE_BLOB_BASE_URL }}
     steps:
