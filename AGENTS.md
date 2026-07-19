@@ -21,7 +21,8 @@ apps/web/         @bccweb/web      — React 19 SPA (Vite 8, React Router v8, TS
 packages/types/   @bccweb/types    — Shared TS interfaces (no runtime deps)
 packages/schemas/ @bccweb/schemas  — Zod schemas, one per blob family (the schema layer)
 packages/scoring/ @bccweb/scoring  — Pure scoring: scoreRound(), computeLeague()
-iac/              Terraform (Azure), 2 stacks   scripts/  Admin/migration/privacy-scan
+iac/              Terraform (Azure), 3 roots (bootstrap/shared/environment)
+scripts/  Admin/migration/privacy-scan
 tests/e2e/        Playwright E2E (`npm run e2e`)  dist/web/ Vite build output (→ SWA)
 docs/architecture/ Human-facing design docs (storage-and-queues.md)
 docs/runbooks/    Operational runbooks (alerts, cutover, privacy, load-testing, ...)

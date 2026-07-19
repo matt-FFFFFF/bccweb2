@@ -105,9 +105,10 @@ If this decommission ever needs to tear down bccweb2's OWN three-root Terraform 
 (e.g. a full project shutdown, not just the legacy app), the order is strict and the
 reverse of how the roots were built: **env-stamp (`iac/environment`) → shared
 (`iac/shared`) → bootstrap (`iac/bootstrap`)**. The shared root's monitoring, ACS, and SWA
-resources, and the env-stamp's data storage account (prod), all carry `prevent_destroy` in
-Terraform plus (for prod data storage) an Azure `CanNotDelete` management lock — **lift
-both before attempting destroy**:
+resources carry `prevent_destroy` in Terraform (lifecycle-level protection); the
+env-stamp's prod data storage account carries no `prevent_destroy` at all — it is
+protected only by an Azure `CanNotDelete` management lock (management-plane, not
+Terraform). **Lift both before attempting destroy**:
 
 ```bash
 # 1. Remove the management lock on the prod data storage account first —
@@ -118,8 +119,9 @@ az lock delete --name storage-nodelete \
   --resource-type Microsoft.Storage/storageAccounts
 
 # 2. Remove `prevent_destroy = true` from the affected resources
-#    (iac/environment/modules/stamp/storage.tf for prod data storage;
-#     iac/shared/monitoring.tf, iac/shared/acs.tf, iac/shared/swa.tf for the shared root)
+#    (iac/shared/monitoring.tf, iac/shared/acs.tf, iac/shared/swa.tf for the
+#    shared root — the env-stamp's prod data storage account has no
+#    `prevent_destroy`; the lock removed in step 1 is its only protection)
 #    and commit that change before running destroy.
 
 # 3. Destroy in order: env-stamp for every application environment first,

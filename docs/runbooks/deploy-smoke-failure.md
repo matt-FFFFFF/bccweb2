@@ -1,6 +1,6 @@
 # Deploy failure runbook
 
-Covers failures in `deploy-dev.yml` (push to `main`) and `deploy-prod.yml`
+Covers failures in `deploy-staging.yml` (push to `main`) and `deploy-prod.yml`
 (release published). Both share three failure classes: the terraform drift
 gate, the post-deploy smoke gate, and (prod only) the release-ancestry check.
 
@@ -13,7 +13,7 @@ If the post-deploy smoke gate fails:
 3. Re-run the environment apply — `gh workflow run terraform.yml -f env=<env> -f action=apply` — the declarative secret pipeline will re-evaluate KV secret resources. If RBAC propagation lag caused a 403 on the first apply, a re-apply resolves it.
 4. Manual rollback: the Function App runs on Flex Consumption (FC1), which has **no
    deployment slots** — there is no slot to swap. Rolling back means re-deploying the prior
-   good artifact: revert the merge (or push a revert commit) so `deploy-dev.yml` re-runs
+   good artifact: revert the merge (or push a revert commit) so `deploy-staging.yml` re-runs
    the zip-deploy against `main`'s previous good commit; for prod, delete the bad GitHub
    release and publish a new release on the previous good tag. There is no stored build
    artifact or CI-side rollback command — every deploy re-zips the current checkout, so
@@ -41,4 +41,4 @@ The prod workflow refuses releases whose commit is not reachable from `main`.
 Notes:
 
 - Do not rely on auto-rollback; the workflows intentionally fail so operators investigate immediately.
-- Add the `deploy-dev.yml` jobs to main branch protection as required status checks in GitHub repo settings.
+- Add the `deploy-staging.yml` jobs to main branch protection as required status checks in GitHub repo settings.

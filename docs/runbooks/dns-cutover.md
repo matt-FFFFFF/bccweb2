@@ -147,7 +147,18 @@ When DNS is NOT hosted in Azure (e.g. domain at Gandi, Cloudflare, Namecheap):
 3. 24h before cutover: lower TTL to 300s. Do not change the target yet.
 4. At cutover: change the target to the value returned by `terraform -chdir=iac/shared output -raw swa_default_hostname`. Keep TTL at 300s.
 5. Wait for propagation. Run `bash scripts/iac/validate-dns.sh` (see below) to verify.
-6. After 24h of stable traffic and clean Application Insights metrics, raise TTL back to 3600s.
+6. Register the hostname on the shared SWA so Azure can issue the certificate:
+   ```bash
+   az staticwebapp hostname set --name swa-bccweb-shared \
+     --resource-group "$SHARED_RG_NAME" \
+     --hostname <production_hostname> \
+     --validation-method cname-delegation
+   ```
+   Terraform deliberately does not manage the custom domain on this path — auto-creating
+   the `azapi` SWA `customDomains` child here would block the shared `apply` waiting on a
+   registrar CNAME the operator controls out-of-band, so this manual step is required
+   whenever `dns_zone_name` is empty.
+7. After 24h of stable traffic and clean Application Insights metrics, raise TTL back to 3600s.
 
 Do not delete the old target until the rollback window in `docs/runbooks/cutover.md` closes.
 
