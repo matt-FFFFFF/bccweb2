@@ -361,7 +361,14 @@ destroyed, not migrated — phase 2).
 
 ## Phase 6 — Apply shared, then staging, then prod
 
+Create the gitignored local shared variables file from its committed template,
+then fill every required placeholder. In particular, populate
+`env_umi_principal_ids` from the bootstrap output shown below before applying:
+
 ```sh
+cp iac/env/shared.tfvars.example iac/env/shared.tfvars
+terraform -chdir=iac/bootstrap output -json terraform_umi_principal_ids
+
 terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl
 terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'
 ```

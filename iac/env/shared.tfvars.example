@@ -1,0 +1,32 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
+# COMMITTED TEMPLATE. Copy to shared.tfvars (gitignored) and fill in:
+#   cp iac/env/shared.tfvars.example iac/env/shared.tfvars
+# Use with:
+#   terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'
+# CI does not use this file; it sources TF_VAR_* from the GitHub environment.
+
+environments   = ["staging", "prod"]
+location       = "uksouth"
+shared_rg_name = "rg-bccweb-shared"
+
+acs_email_domain   = "<REQUIRED: ACS email domain>"
+acs_sender_address = "<REQUIRED: sender address whose domain equals acs_email_domain>"
+
+# Leave these empty until the production DNS cutover.
+production_hostname          = ""
+dns_zone_name                = ""
+dns_zone_resource_group_name = ""
+
+tags = {}
+
+# REQUIRED: populate this map from:
+#   terraform -chdir=iac/bootstrap output -json terraform_umi_principal_ids
+env_umi_principal_ids = {
+  staging = "<REQUIRED: staging Terraform UMI principal ID>"
+  prod    = "<REQUIRED: prod Terraform UMI principal ID>"
+  shared  = "<REQUIRED: shared Terraform UMI principal ID>"
+}
+
+# CI uses ServicePrincipal. The local apply command above overrides this to User.
+terraform_principal_type = "ServicePrincipal"
