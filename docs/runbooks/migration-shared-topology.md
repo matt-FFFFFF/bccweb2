@@ -279,7 +279,7 @@ summarized here:
 | Environment | Operator-set entries to add |
 |---|---|
 | `shared` | `TF_VAR_acs_email_domain`, `TF_VAR_acs_sender_address`, `TF_VAR_production_hostname`, `TF_VAR_dns_zone_name`, `TF_VAR_dns_zone_resource_group_name` (last three only for a prod custom domain) |
-| `staging`, `prod` | `TF_VAR_acs_sender_address`, `TF_VAR_ops_email`, `TF_VAR_puretrack_api_key`/`_email`/`_password` (secrets), `TF_VAR_allowed_origins` (JSON array), `TF_VAR_slack_webhook_url`, `TF_VAR_jwt_secret_version`, `TF_VAR_acs_secret_version`, `TF_VAR_blob_schema_mode`, `AZURE_FUNCTIONAPP_NAME`, `VITE_BLOB_BASE_URL` |
+| `staging`, `prod` | `TF_VAR_ops_email`, `TF_VAR_puretrack_api_key`/`_email`/`_password` (secrets), `TF_VAR_allowed_origins` (JSON array), `TF_VAR_slack_webhook_url`, `TF_VAR_jwt_secret_version`, `TF_VAR_acs_secret_version`, `TF_VAR_blob_schema_mode`, `AZURE_FUNCTIONAPP_NAME`, `VITE_BLOB_BASE_URL` |
 
 **The new `staging` GitHub environment inherits NONE of dev's operator
 values.** Dev and staging are different GitHub environments (staging was

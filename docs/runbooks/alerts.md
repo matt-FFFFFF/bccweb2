@@ -86,11 +86,11 @@ The Function App's HTTP 5xx response rate exceeded 1% of total requests over the
    ```
 
 3. If the regression maps to a recent deploy, roll back by re-running the deploy workflow
-   against the last known-good commit/tag: `deploy-dev.yml` re-runs automatically on any push
+   against the last known-good commit/tag: `deploy-staging.yml` re-runs automatically on any push
    to `main`, so revert the merge (or push a revert commit) to redeploy the previous code; for
    prod, delete the bad GitHub release and re-publish a release on the previous good tag (per
    `docs/runbooks/deploy-smoke-failure.md`). **There is no stored previous-package artifact or
-   CI-side rollback command** — `deploy-dev.yml`/`deploy-prod.yml` zip-deploy the current
+   CI-side rollback command** — `deploy-staging.yml`/`deploy-prod.yml` zip-deploy the current
    checkout via `Azure/functions-action` on every run and do not upload or retain build
    artifacts, so "rollback" always means re-deploying good source, not restoring a saved
    package.

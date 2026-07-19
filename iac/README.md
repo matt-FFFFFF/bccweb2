@@ -197,7 +197,7 @@ added manually (repo Settings → Environments → `<env>` → Variables/Secrets
 | `AZURE_LOCATION` | Variable | `staging`, `prod` | Bootstrap-published |
 | `TF_VAR_acs_email_domain`, `TF_VAR_acs_sender_address` | Variable | `shared` | Operator-set |
 | `TF_VAR_production_hostname`, `TF_VAR_dns_zone_name`, `TF_VAR_dns_zone_resource_group_name` | Variable | `shared` (prod domain only) | Operator-set |
-| `TF_VAR_acs_sender_address`, `TF_VAR_ops_email` | Variable | `staging`, `prod` | Operator-set (`acs_sender_address` mirrors the shared root's value) |
+| `TF_VAR_ops_email` | Variable | `staging`, `prod` | Operator-set |
 | `TF_VAR_puretrack_api_key`, `TF_VAR_puretrack_email`, `TF_VAR_puretrack_password` | Secret | `staging`, `prod` | Operator-set |
 | `TF_VAR_allowed_origins`, `TF_VAR_slack_webhook_url`, `TF_VAR_jwt_secret_version`, `TF_VAR_acs_secret_version`, `TF_VAR_blob_schema_mode` | Variable/Secret | `staging`, `prod` | Operator-set (all optional, defaulted) |
 | `AZURE_FUNCTIONAPP_NAME` | Variable | `staging`, `prod` | Operator-set |

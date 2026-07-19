@@ -70,9 +70,13 @@ valid for non-JSON artifacts and explicitly justified lease/index operations.
 ## Storage Queues
 
 Ten queues, all in Account A (`stbccweb<env>rt`, the `AzureWebJobsStorage` account — see
-"Two storage accounts per environment" above), created by `init-storage.mjs` — across
-five families, each a main queue plus a `-poison` dead-letter queue
-(`maxDequeueCount=5` in `host.json`):
+"Two storage accounts per environment" above), across five families, each a main queue
+plus a `-poison` dead-letter queue (`maxDequeueCount=5` in `host.json`). In Azure, the
+`queue_service` and ten queue resources in
+[`iac/environment/modules/stamp/storage.tf`](../../iac/environment/modules/stamp/storage.tf)
+provision all ten. Locally, `init-storage.mjs` creates the same ten queues (plus the
+`data`/`data-private` blob containers) against Azurite, since there's no Terraform apply
+in that path:
 
 | Family | Main queue | Poison queue |
 |---|---|---|
