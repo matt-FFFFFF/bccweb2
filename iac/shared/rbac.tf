@@ -14,7 +14,7 @@ resource "azapi_resource" "env_ai_monitoring_reader" {
   for_each = local.application_umi_principal_ids
 
   type      = "Microsoft.Authorization/roleAssignments@2022-04-01"
-  name      = uuidv5("url", "bccweb-shared-${each.key}-monitoring-reader-${azapi_resource.ai[each.key].id}")
+  name      = uuidv5("url", "bccweb-shared-${each.key}-monitoring-reader-${azapi_resource.ai[each.key].id}-${each.value}")
   parent_id = azapi_resource.ai[each.key].id
 
   body = {
@@ -32,7 +32,7 @@ resource "azapi_resource" "env_acs_contributor" {
   for_each = local.application_umi_principal_ids
 
   type      = "Microsoft.Authorization/roleAssignments@2022-04-01"
-  name      = uuidv5("url", "bccweb-shared-${each.key}-acs-contributor-${azapi_resource.acs.id}")
+  name      = uuidv5("url", "bccweb-shared-${each.key}-acs-contributor-${azapi_resource.acs.id}-${each.value}")
   parent_id = azapi_resource.acs.id
 
   body = {
@@ -48,7 +48,7 @@ resource "azapi_resource" "env_swa_contributor" {
   for_each = local.application_umi_principal_ids
 
   type      = "Microsoft.Authorization/roleAssignments@2022-04-01"
-  name      = uuidv5("url", "bccweb-shared-${each.key}-swa-contributor-${azapi_resource.swa.id}")
+  name      = uuidv5("url", "bccweb-shared-${each.key}-swa-contributor-${azapi_resource.swa.id}-${each.value}")
   parent_id = azapi_resource.swa.id
 
   body = {
