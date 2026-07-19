@@ -294,6 +294,41 @@ data account), e.g. `https://stbccweb<env>data.blob.core.windows.net/data`
 — see phase 7 for the full per-env matrix and why this is Account B, not
 Account A.
 
+### Preview environment security preconditions (REQUIRED before `PREVIEW_ENABLED=true`)
+
+[`.github/workflows/pr-preview.yml`](../../.github/workflows/pr-preview.yml)
+deploys ephemeral PR previews to the shared SWA, but is gated OFF by the
+`PREVIEW_ENABLED` repo/staging-env variable until this phase's GitHub
+environment work is done. That gate is **not** sufficient on its own: the job
+checks out and builds PR-branch-controlled code inside a job that, as
+currently wired, holds the `staging` environment's Azure OIDC identity — the
+same Terraform user-assigned managed identity that is Owner on the staging
+stamp resource group and Contributor on the shared ACS/SWA resources. The
+job's same-repo check blocks forks, but not an unreviewed branch pushed by any
+collaborator with write access, so as written this is a privilege-escalation
+path, not just a preview convenience.
+
+Before setting `PREVIEW_ENABLED=true` for real, both of the following are
+REQUIRED, not optional:
+
+1. **Dedicated least-privilege preview identity.** Create a separate
+   GitHub environment (e.g. `preview`) backed by its own user-assigned
+   managed identity, scoped to ONLY manage SWA preview environments on
+   `swa-bccweb-shared` (`az staticwebapp environment create/delete` and
+   `secrets list` on that one Static Web App). This identity must NOT be the
+   staging stamp UMI — that identity's broader Owner/Contributor grants are
+   exactly what makes the current wiring a privilege-escalation risk.
+   Point `pr-preview.yml`'s `environment:` at this dedicated environment once
+   it exists.
+2. **Required-reviewer deployment protection.** Turn on GitHub's
+   required-reviewer protection rule for that dedicated preview environment,
+   so the credentials are only released to a workflow run after an approver
+   signs off — closing the gap the same-repo check alone leaves for
+   unreviewed branches from collaborators with write access.
+
+Until both are in place, leave `PREVIEW_ENABLED` unset (or `false`); the
+workflow is designed to skip cleanly so PR CI stays green either way.
+
 ## Phase 5.6 — Adopt any existing prod/shared tfstate
 
 Per T1's per-environment container adoption, inventory the **old** shared

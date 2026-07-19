@@ -18,6 +18,29 @@ jobs:
     # repo/staging-env variable PREVIEW_ENABLED=true only after the shared SWA + staging
     # GitHub environment exist (see docs/runbooks/migration-shared-topology.md). Until then
     # this job skips so PR CI stays green.
+    #
+    # SECURITY WARNING (pwn-request risk): this job checks out and builds PR-branch-
+    # controlled code (the head ref, via actions/checkout above) INSIDE a job that holds
+    # the `staging` environment's Azure OIDC identity plus a Static Web Apps deployment
+    # token. The `same-repo` check above excludes forks, but does NOT exclude an
+    # unreviewed branch pushed by any collaborator with write access; that branch's
+    # build step still runs with these credentials attached. Enabling PREVIEW_ENABLED
+    # against the CURRENT `staging` environment would hand PR-controlled code the
+    # staging Terraform user-assigned managed identity, which is Owner on the staging
+    # stamp resource group and Contributor on the shared ACS/SWA resources. That's a
+    # privilege-escalation path, not just a preview-deploy convenience.
+    #
+    # Before flipping PREVIEW_ENABLED=true, the operator MUST:
+    #   (a) point this job's `environment:` at a DEDICATED, least-privilege preview
+    #       identity/GitHub environment whose UMI can ONLY manage SWA preview
+    #       environments on `swa-bccweb-shared` (az staticwebapp environment
+    #       create/delete + secrets list). NEVER the staging stamp UMI used above:
+    #       its broader Owner/Contributor grants are exactly the escalation risk; and
+    #   (b) enable required-reviewer deployment protection on that dedicated
+    #       environment so its credentials are only released to a workflow run after
+    #       an approver signs off, closing the gap left by the same-repo check alone.
+    # See docs/runbooks/migration-shared-topology.md, Phase 5.5, "Preview environment
+    # security preconditions" for the full requirement.
     if: >-
       github.event.pull_request.head.repo.full_name == github.repository &&
       vars.PREVIEW_ENABLED == 'true'
