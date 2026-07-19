@@ -67,12 +67,6 @@ variable "slack_webhook_url" {
   default     = ""
 }
 
-variable "acs_sender_address" {
-  description = "ACS sender address."
-  type        = string
-  nullable    = false
-}
-
 variable "puretrack_api_key" {
   description = "PureTrack API key."
   type        = string

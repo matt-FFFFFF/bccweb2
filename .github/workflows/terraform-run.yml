@@ -91,7 +91,6 @@ jobs:
                 TF_VAR_stamp_rg_name
                 TF_VAR_tfstate_resource_group_name
                 TF_VAR_tfstate_storage_account_name
-                TF_VAR_acs_sender_address
                 TF_VAR_ops_email
                 TF_VAR_puretrack_api_key
                 TF_VAR_puretrack_email

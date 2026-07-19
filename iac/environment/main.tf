@@ -38,7 +38,7 @@ module "stamp" {
   ops_email          = var.ops_email
   slack_webhook_url  = var.slack_webhook_url
   acs_id             = data.terraform_remote_state.shared.outputs.acs_id
-  acs_sender_address = var.acs_sender_address
+  acs_sender_address = data.terraform_remote_state.shared.outputs.acs_sender_address
   puretrack_api_key  = var.puretrack_api_key
   puretrack_email    = var.puretrack_email
   puretrack_password = var.puretrack_password

@@ -21,9 +21,6 @@ allowed_origins = ["https://<your-prod-hostname>"]
 
 ops_email = "<REQUIRED: operator must replace before apply>" # REQUIRED
 
-# This address must be on the configured ACS sending domain.
-acs_sender_address = "<REQUIRED: operator must replace before apply>" # REQUIRED
-
 puretrack_api_key  = "<REQUIRED: see TF_VAR_puretrack_api_key>"  # REQUIRED
 puretrack_email    = "<REQUIRED: see TF_VAR_puretrack_email>"    # REQUIRED
 puretrack_password = "<REQUIRED: see TF_VAR_puretrack_password>" # REQUIRED

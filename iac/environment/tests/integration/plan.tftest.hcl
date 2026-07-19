@@ -35,8 +35,6 @@ variables {
   ops_email         = "ops-integration-test@example.invalid"
   slack_webhook_url = ""
 
-  acs_sender_address = "no-reply@integration-test.example.invalid"
-
   # Sentinel values — never real secrets. The plan-only invocation does not
   # write these anywhere; they only need to satisfy `nullable = false`.
   puretrack_api_key  = "TEST_PURETRACK_API_KEY"

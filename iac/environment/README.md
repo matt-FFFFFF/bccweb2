@@ -10,8 +10,9 @@ Composes one [`modules/stamp`](modules/stamp) child module containing the app's
 runtime and data storage accounts, Function App, Key Vault (RBAC, 6 secrets),
 and alert rules.
 The shared root owns Application Insights, ACS, and the Static Web App. The
-environment root reads only `app_insights_ids` and `acs_id` from shared state;
-Key Vault fetches both connection strings directly from those resource IDs.
+environment root reads `app_insights_ids`, `acs_id`, and `acs_sender_address`
+from shared state; Key Vault fetches both connection strings directly from
+those resource IDs.
 
 The stamp resource group is pre-created by
 [`iac/bootstrap`](../bootstrap/README.md), which grants the environment's
@@ -49,8 +50,10 @@ vars/secrets in CI):
 | `tfstate_resource_group_name` | `TF_VAR_TFSTATE_RESOURCE_GROUP_NAME` | Resource group containing the canonical state account. |
 | `tfstate_storage_account_name` | `TF_VAR_TFSTATE_STORAGE_ACCOUNT_NAME` | Canonical state account containing `tfstate-shared/shared.tfstate`. |
 | `ops_email` | tfvars / `vars.OPS_EMAIL` | Alert recipient. |
-| `acs_sender_address` | tfvars / `vars.ACS_SENDER_ADDRESS` | Sender address configured by the shared root. |
 | `puretrack_api_key`, `puretrack_email`, `puretrack_password` | `TF_VAR_*` secrets | Sensitive; never written to a tfvars file in CI. |
+
+The ACS sender address is not an environment-root input; it comes from the
+shared root's `acs_sender_address` remote-state output.
 
 Optional inputs (`allowed_origins`, `slack_webhook_url`, `jwt_secret_version`,
 `acs_secret_version`, `blob_schema_mode`, `terraform_principal_type`) have defaults — see
