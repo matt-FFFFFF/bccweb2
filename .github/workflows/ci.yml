@@ -131,6 +131,9 @@ jobs:
       - name: Check stamp storage split contract
         run: bash scripts/iac/check-stamp-storage-split.sh
 
+      - name: Run tfvars exporter tests
+        run: npm run tfvars:test
+
   # ── 2. Docker builds ────────────────────────────────────────────────────────────
   # Build every image that docker-compose builds locally (apps/api/Dockerfile.dev
   # and apps/web/Dockerfile.dev). `docker compose build` builds exactly the
