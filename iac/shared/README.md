@@ -57,11 +57,12 @@ terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl
 terraform -chdir=iac/shared plan
 ```
 
-The root derives the active subscription ID and Terraform caller object ID from
-the AzAPI client context. Its inputs are resource names, public host/domain
-configuration, tags, principal IDs, and principal type only; it reads no
-passwords, access keys, connection strings, or other secret values. Shared
-state must likewise expose resource identifiers and public metadata only.
+The root derives the active subscription ID from the AzAPI client context. Its
+inputs are resource names, public host/domain configuration, tags, and the
+environment UMI principal IDs used by its leaf-scoped role assignments; it
+reads no passwords, access keys, connection strings, or other secret values.
+Shared state must likewise expose resource identifiers and public metadata
+only.
 
 ## Tests
 

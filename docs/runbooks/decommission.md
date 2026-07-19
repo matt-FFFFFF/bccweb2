@@ -128,7 +128,7 @@ az lock delete --name storage-nodelete \
 #    then shared, then bootstrap last (bootstrap owns the tfstate storage
 #    account and RGs that the other two roots' state depends on).
 terraform -chdir=iac/environment destroy -var-file=../env/<env>.tfvars -var 'terraform_principal_type=User'
-terraform -chdir=iac/shared destroy -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'
+terraform -chdir=iac/shared destroy -var-file=../env/shared.tfvars
 terraform -chdir=iac/bootstrap destroy
 ```
 

@@ -82,7 +82,7 @@ Follow these steps to provision the topology from scratch.
 4.  **Apply the shared root**:
     ```bash
     terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl
-    terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'
+    terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars
     ```
     This provisions the Log Analytics workspace, per-environment Application
     Insights, Azure Communication Services, and the Standard SWA.
@@ -125,8 +125,10 @@ Follow these steps to provision the topology from scratch.
     user) MUST override to `"User"` — the Key Vault Secrets Officer role
     assignment (`keyvault.tf`) uses this to pick the correct
     `principalType`, and it will be wrong for a human principal otherwise.
-    Every local `apply`/`plan` command in this document includes
-    `-var 'terraform_principal_type=User'` for that reason.
+    Every local `iac/environment` `apply`/`plan` command in this document
+    includes `-var 'terraform_principal_type=User'` for that reason. The
+    shared root has no caller-scoped role assignment and needs no such
+    override.
 7.  **Deploy the environment stamp**:
     ```bash
     gh workflow run terraform.yml -f env=staging -f action=apply

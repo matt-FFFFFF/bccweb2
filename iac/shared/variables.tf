@@ -80,14 +80,3 @@ variable "env_umi_principal_ids" {
     error_message = "env_umi_principal_ids must contain an entry for every environment in environments."
   }
 }
-
-variable "terraform_principal_type" {
-  description = "Principal type for the identity running Terraform (ServicePrincipal for CI OIDC UMIs; User for local az login plans)."
-  type        = string
-  default     = "ServicePrincipal"
-
-  validation {
-    condition     = contains(["User", "ServicePrincipal"], var.terraform_principal_type)
-    error_message = "terraform_principal_type must be either \"User\" or \"ServicePrincipal\"."
-  }
-}

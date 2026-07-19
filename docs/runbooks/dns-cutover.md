@@ -19,10 +19,9 @@ The two changes are independent in DNS but conventionally done in the same opera
    There is exactly one Static Web App (`swa-bccweb-shared`) shared across the whole
    topology — it is not created separately for each environment. Run
    `terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl` and
-   `terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'`
-   (drop the `-var` override when this runs via CI instead of a local `az login`). This
-   one apply provisions the SWA, the ACS email domain, and (when `production_hostname`
-   and `dns_zone_name` are both set) the production CNAME together.
+   `terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars`. This one apply
+   provisions the SWA, the ACS email domain, and (when `production_hostname` and
+   `dns_zone_name` are both set) the production CNAME together.
 2. Read the operator-facing outputs from the shared root:
    ```bash
  terraform -chdir=iac/shared output acs_dns_records_for_operator
@@ -57,7 +56,7 @@ DNS TTL controls how long resolvers cache the record. A high TTL is good for ste
 
 Apply the same TTL schedule to the ACS SPF / DKIM / DMARC TXT records during the email-verification window — if a wrong DKIM value gets published you want to be able to correct it in minutes, not hours.
 
-**Terraform path:** `iac/shared/dns.tf` hard-codes `ttl = 3600`. To run the lower-TTL phase, manually `az network dns record-set cname update --ttl 300 ...` 24h before cutover, then re-run `terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'` (local apply) after the stability window to let Terraform reassert 3600. Do **not** edit `ttl` in `dns.tf` during the cutover window — that would race with the operator's portal change.
+**Terraform path:** `iac/shared/dns.tf` hard-codes `ttl = 3600`. To run the lower-TTL phase, manually `az network dns record-set cname update --ttl 300 ...` 24h before cutover, then re-run `terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars` after the stability window to let Terraform reassert 3600. Do **not** edit `ttl` in `dns.tf` during the cutover window — that would race with the operator's portal change.
 
 **Manual / registrar path:** lower the TTL on the existing record at the registrar 24h before cutover, change the target at cutover, raise the TTL 24h after stable traffic. Same schedule.
 
@@ -92,7 +91,7 @@ created separately per environment. There is no per-environment DNS record to ma
 
 ```bash
 terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl
-terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'
+terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars
 ```
 
 The plan should show one `azapi_resource.production_cname[0]` to add. After apply, the record exists in the Azure DNS zone with TTL 3600. To run the T-24h lower-TTL phase, run:
@@ -136,7 +135,7 @@ deliberately **not** the shared `shared_rg_name`: `dns.tf` addresses the
 configured DNS-zone resource group, falling back to the zone name only when
 `dns_zone_resource_group_name` is empty.
 
-24h after stable traffic, run `terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'` again to let Terraform reset the TTL to 3600.
+24h after stable traffic, run `terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars` again to let Terraform reset the TTL to 3600.
 
 ### Manual / registrar path (var.dns_zone_name empty)
 

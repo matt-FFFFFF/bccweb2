@@ -376,7 +376,7 @@ cp iac/env/shared.tfvars.example iac/env/shared.tfvars
 terraform -chdir=iac/bootstrap output -json terraform_umi_principal_ids
 
 terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl
-terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'
+terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars
 ```
 
 This provisions the Log Analytics workspace, per-env Application Insights,

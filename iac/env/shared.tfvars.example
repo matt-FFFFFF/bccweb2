@@ -3,7 +3,7 @@
 # COMMITTED TEMPLATE. Copy to shared.tfvars (gitignored) and fill in:
 #   cp iac/env/shared.tfvars.example iac/env/shared.tfvars
 # Use with:
-#   terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var 'terraform_principal_type=User'
+#   terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars
 # CI does not use this file; it sources TF_VAR_* from the GitHub environment.
 
 environments   = ["staging", "prod"]
@@ -27,6 +27,3 @@ env_umi_principal_ids = {
   prod    = "<REQUIRED: prod Terraform UMI principal ID>"
   shared  = "<REQUIRED: shared Terraform UMI principal ID>"
 }
-
-# CI uses ServicePrincipal. The local apply command above overrides this to User.
-terraform_principal_type = "ServicePrincipal"
