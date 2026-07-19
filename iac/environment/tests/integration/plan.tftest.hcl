@@ -48,6 +48,15 @@ variables {
 override_data {
   target = data.terraform_remote_state.shared
 
+  # IMPORTANT — REAL SHARED-RESOURCE READS:
+  # The stamp reads the Application Insights connection string from Azure, so
+  # the Application Insights ID must identify a real, existing component. The
+  # legacy component is the default stand-in because appi-bccweb-<stamp_name>
+  # has not been applied yet. After rollout, repoint this override to the shared
+  # appi-bccweb-<stamp_name> output and keep ACS on acs-bccweb-shared.
+  # This test remains operator-invoked and plan-only. It is currently rollout-
+  # blocked because the intentional real acs-bccweb-shared listKeys read returns
+  # 404 until shared infrastructure is applied; do not mock or apply around it.
   values = {
     outputs = {
       app_insights_ids = {
