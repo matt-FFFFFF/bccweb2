@@ -12,9 +12,9 @@ stamp_name = "staging"
 location   = "uksouth"
 
 # Local applies only. CI sources these values from the TF_VAR_* GitHub environment vars.
-acs_email_domain = "<REQUIRED: operator must replace before apply>"
-platform_rg_name = "rg-bccweb-platform-staging"
-stamp_rg_name    = "stamp-staging"
+tfstate_resource_group_name = "rg-bccweb-tfstate" # REQUIRED: bootstrap state RG; CI supplies TF_VAR_tfstate_resource_group_name
+tfstate_storage_account_name = "stbccweb13afe" # REQUIRED: canonical bootstrap state account; CI supplies TF_VAR_tfstate_storage_account_name
+stamp_rg_name = "stamp-staging"
 
 # CORS: staging SWA default hostname; leave empty until known.
 allowed_origins = []
@@ -36,11 +36,6 @@ blob_schema_mode   = "observe"
 # because CI (GitHub Actions → per-env Terraform UMI via OIDC) is the primary
 # path. Override to "User" when applying locally as yourself (`az login` context).
 terraform_principal_type = "ServicePrincipal"
-
-# Leave empty until DNS/cutover is configured.
-production_hostname          = ""
-dns_zone_name                = ""
-dns_zone_resource_group_name = ""
 
 # Optional alert receiver.
 slack_webhook_url = ""
