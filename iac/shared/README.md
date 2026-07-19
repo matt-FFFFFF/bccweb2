@@ -12,8 +12,9 @@ creates the resource group itself.
   environment in `var.environments` (default `["staging", "prod"]`), each
   attached to that workspace.
 - **`acs.tf`**: one Azure Communication Services email service + customer-managed
-  domain, plus one communication service (`acs-bccweb-shared`) linked to that
-  domain. `listKeys` stays ephemeral — `acs.tf` never exports a connection string.
+  domain, the configured sender username provisioned beneath that domain, plus one
+  communication service (`acs-bccweb-shared`) linked to the domain. `listKeys` stays
+  ephemeral — `acs.tf` never exports a connection string.
 - **`swa.tf` + `dns.tf`**: one Standard-tier Static Web App (`swa-bccweb-shared`)
   shared by every environment, plus (when `production_hostname`/`dns_zone_name`
   are both set) the production custom-domain CNAME and `customDomains` child

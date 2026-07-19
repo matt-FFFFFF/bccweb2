@@ -36,6 +36,11 @@ variable "production_hostname" {
   description = "Public production hostname for the shared Static Web App."
   type        = string
   default     = ""
+
+  validation {
+    condition     = var.production_hostname == "" || var.dns_zone_name == "" || (endswith(var.production_hostname, ".${var.dns_zone_name}") && var.production_hostname != var.dns_zone_name)
+    error_message = "production_hostname must be a non-apex subdomain of dns_zone_name (end with `.<dns_zone_name>`)."
+  }
 }
 
 variable "dns_zone_name" {

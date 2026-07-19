@@ -82,6 +82,9 @@ run "shared_plans" {
       azapi_resource.acs_email.type == "Microsoft.Communication/emailServices@2025-09-01" &&
       azapi_resource.acs_email_domain.name == var.acs_email_domain &&
       azapi_resource.acs_email_domain.type == "Microsoft.Communication/emailServices/domains@2025-09-01" &&
+      azapi_resource.acs_sender_username.name == "no-reply" &&
+      azapi_resource.acs_sender_username.type == "Microsoft.Communication/emailServices/domains/senderUsernames@2025-09-01" &&
+      azapi_resource.acs_sender_username.parent_id == azapi_resource.acs_email_domain.id &&
       azapi_resource.acs.name == "acs-bccweb-shared" &&
       azapi_resource.acs.type == "Microsoft.Communication/communicationServices@2025-09-01"
     )
@@ -162,4 +165,18 @@ run "dns_zone_rg_falls_back_to_zone_name" {
     )
     error_message = "An empty DNS resource-group input must fall back to the DNS zone name without producing an empty resource-group segment."
   }
+}
+
+run "production_hostname_must_be_zone_subdomain" {
+  command = plan
+
+  providers = {
+    azapi = azapi.mock
+  }
+
+  variables {
+    production_hostname = "www.unrelated.example.test"
+  }
+
+  expect_failures = [var.production_hostname]
 }

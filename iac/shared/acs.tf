@@ -39,6 +39,23 @@ resource "azapi_resource" "acs_email_domain" {
   }
 }
 
+resource "azapi_resource" "acs_sender_username" {
+  type      = "Microsoft.Communication/emailServices/domains/senderUsernames@2025-09-01"
+  name      = split("@", var.acs_sender_address)[0]
+  parent_id = azapi_resource.acs_email_domain.id
+
+  body = {
+    properties = {
+      username    = split("@", var.acs_sender_address)[0]
+      displayName = "British Club Challenge"
+    }
+  }
+
+  lifecycle {
+    prevent_destroy = true
+  }
+}
+
 resource "azapi_resource" "acs" {
   type      = "Microsoft.Communication/communicationServices@2025-09-01"
   name      = "acs-bccweb-shared"

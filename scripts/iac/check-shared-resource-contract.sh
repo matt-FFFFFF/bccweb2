@@ -52,6 +52,7 @@ expected_declarations="$(printf '%s\n' \
   'azapi_resource.acs' \
   'azapi_resource.acs_email' \
   'azapi_resource.acs_email_domain' \
+  'azapi_resource.acs_sender_username' \
   'azapi_resource.ai' \
   'azapi_resource.law' \
   'azapi_resource.production_cname' \
@@ -100,6 +101,7 @@ expected_managed_set="$(printf '%s\n' \
   'azapi_resource.acs' \
   'azapi_resource.acs_email' \
   'azapi_resource.acs_email_domain' \
+  'azapi_resource.acs_sender_username' \
   'azapi_resource.ai["prod"]' \
   'azapi_resource.ai["staging"]' \
   'azapi_resource.law' \
