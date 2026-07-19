@@ -54,6 +54,7 @@ jobs:
         with:
           app-name: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
           package: .deploy
+          sku: flexconsumption
 
   deploy-web:
     name: Deploy Web (SWA)
@@ -159,23 +160,31 @@ jobs:
             environment_args+=(--environment-name "$SWA_ENVIRONMENT_NAME")
           fi
 
-          if az staticwebapp backends show \
+          current="$(az staticwebapp backends show \
             --name swa-bccweb-shared \
             --resource-group "${{ vars.SHARED_RG_NAME }}" \
-            "${environment_args[@]}" >/dev/null 2>&1; then
-            az staticwebapp backends unlink \
+            --query '[0].backendResourceId' \
+            -o tsv \
+            "${environment_args[@]}" 2>/dev/null || true)"
+
+          if [[ "$current" == "$function_id" ]]; then
+            echo "backend already linked to ${function_id}; no-op"
+          else
+            if [[ -n "$current" ]]; then
+              az staticwebapp backends unlink \
+                --name swa-bccweb-shared \
+                --resource-group "${{ vars.SHARED_RG_NAME }}" \
+                --remove-backend-auth true \
+                "${environment_args[@]}"
+            fi
+
+            az staticwebapp backends link \
               --name swa-bccweb-shared \
               --resource-group "${{ vars.SHARED_RG_NAME }}" \
-              --remove-backend-auth true \
+              --backend-resource-id "$function_id" \
+              --backend-region "${{ vars.AZURE_LOCATION }}" \
               "${environment_args[@]}"
           fi
-
-          az staticwebapp backends link \
-            --name swa-bccweb-shared \
-            --resource-group "${{ vars.SHARED_RG_NAME }}" \
-            --backend-resource-id "$function_id" \
-            --backend-region "${{ vars.AZURE_LOCATION }}" \
-            "${environment_args[@]}"
 
       - name: Smoke test through SWA
         env:

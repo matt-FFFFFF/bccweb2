@@ -103,7 +103,7 @@ jobs:
                 TF_VAR_shared_rg_name
                 TF_VAR_acs_email_domain
                 TF_VAR_acs_sender_address
-                TF_VAR_production_hostname
+                TF_VAR_env_umi_principal_ids
               )
               ;;
           esac
