@@ -98,6 +98,11 @@ variable "terraform_umis" {
   }
 
   validation {
+    condition     = alltrue([for k, v in var.terraform_umis : k == v.github_env])
+    error_message = "Each terraform_umis map key must equal its github_env (the key is the identity/environment name used downstream)."
+  }
+
+  validation {
     condition = (
       contains(keys(var.terraform_umis), "shared") &&
       alltrue([
