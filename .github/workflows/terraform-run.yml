@@ -23,6 +23,9 @@ jobs:
     name: Terraform ${{ inputs.mode }} (${{ inputs.root }} / ${{ inputs.target_env }})
     runs-on: ubuntu-latest
     environment: ${{ inputs.target_env }}
+    concurrency:
+      group: terraform-${{ inputs.root }}-${{ inputs.target_env }}
+      cancel-in-progress: false
     permissions:
       id-token: write
       contents: read

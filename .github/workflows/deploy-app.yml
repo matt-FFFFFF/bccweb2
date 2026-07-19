@@ -247,3 +247,51 @@ jobs:
             echo "::error::SWA web content smoke failed"
             exit 1
           fi
+
+      - name: Smoke test production hostname
+        if: inputs.is_production && vars.WEB_HOST != ''
+        env:
+          WEB_HOST: ${{ vars.WEB_HOST }}
+        run: |
+          set -euo pipefail
+
+          health_ok=0
+          for _ in $(seq 1 24); do
+            body="$(curl -fsS "https://${WEB_HOST}/api/health" || true)"
+            if printf '%s' "$body" | jq -e '.status == "ok"' >/dev/null 2>&1; then
+              health_ok=1
+              break
+            fi
+            sleep 5
+          done
+
+          if [[ "$health_ok" -ne 1 ]]; then
+            echo "::error::Production-host health smoke failed"
+            exit 1
+          fi
+
+          if ! curl -fsS "https://${WEB_HOST}/api/seasons" | jq -e 'type == "array"' >/dev/null; then
+            echo "::error::Production-host seasons smoke failed"
+            exit 1
+          fi
+
+          root_url="https://${WEB_HOST}/"
+          headers_ok=0
+          for _ in $(seq 1 24); do
+            headers="$(curl -fsSI "$root_url" || true)"
+            if printf '%s' "$headers" | grep -qi '^content-type: text/html'; then
+              headers_ok=1
+              break
+            fi
+            sleep 5
+          done
+
+          if [[ "$headers_ok" -ne 1 ]]; then
+            echo "::error::Production-host web content-type smoke failed"
+            exit 1
+          fi
+
+          if ! curl -fsS "$root_url" | grep -Eiq 'BCC'; then
+            echo "::error::Production-host web content smoke failed"
+            exit 1
+          fi
