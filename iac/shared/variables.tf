@@ -30,6 +30,15 @@ variable "acs_sender_address" {
   description = "Full sender address on the shared ACS email domain."
   type        = string
   nullable    = false
+
+  validation {
+    condition = (
+      length(split("@", var.acs_sender_address)) == 2 &&
+      trimspace(split("@", var.acs_sender_address)[0]) != "" &&
+      split("@", var.acs_sender_address)[1] == var.acs_email_domain
+    )
+    error_message = "acs_sender_address must be exactly one <local-part>@<domain> whose domain equals acs_email_domain."
+  }
 }
 
 variable "production_hostname" {

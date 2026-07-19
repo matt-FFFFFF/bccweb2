@@ -180,3 +180,17 @@ run "production_hostname_must_be_zone_subdomain" {
 
   expect_failures = [var.production_hostname]
 }
+
+run "acs_sender_address_domain_must_match_email_domain" {
+  command = plan
+
+  providers = {
+    azapi = azapi.mock
+  }
+
+  variables {
+    acs_sender_address = "no-reply@unrelated.example.test"
+  }
+
+  expect_failures = [var.acs_sender_address]
+}
