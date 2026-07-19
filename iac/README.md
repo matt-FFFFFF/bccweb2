@@ -213,6 +213,7 @@ added manually (repo Settings → Environments → `<env>` → Variables/Secrets
 | `TF_VAR_allowed_origins`, `TF_VAR_slack_webhook_url`, `TF_VAR_jwt_secret_version`, `TF_VAR_acs_secret_version`, `TF_VAR_blob_schema_mode` | Variable/Secret | `staging`, `prod` | Operator-set (all optional, defaulted) |
 | `AZURE_FUNCTIONAPP_NAME` | Variable | `staging`, `prod` | Operator-set |
 | `VITE_BLOB_BASE_URL` | Variable | `staging`, `prod` | Operator-set |
+| `WEB_HOST` | Variable | `prod` | Operator-set (production web hostname for the deploy-app.yml production-domain smoke; set only when a custom domain is enabled) |
 
 Terraform-required-variable validation lives in `terraform-run.yml`'s
 "Validate required Terraform variables" step — see that workflow for the

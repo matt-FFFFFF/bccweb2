@@ -279,7 +279,7 @@ summarized here:
 | Environment | Operator-set entries to add |
 |---|---|
 | `shared` | `TF_VAR_acs_email_domain`, `TF_VAR_acs_sender_address`, `TF_VAR_production_hostname`, `TF_VAR_dns_zone_name`, `TF_VAR_dns_zone_resource_group_name` (last three only for a prod custom domain) |
-| `staging`, `prod` | `TF_VAR_ops_email`, `TF_VAR_puretrack_api_key`/`_email`/`_password` (secrets), `TF_VAR_allowed_origins` (JSON array), `TF_VAR_slack_webhook_url`, `TF_VAR_jwt_secret_version`, `TF_VAR_acs_secret_version`, `TF_VAR_blob_schema_mode`, `AZURE_FUNCTIONAPP_NAME`, `VITE_BLOB_BASE_URL` |
+| `staging`, `prod` | `TF_VAR_ops_email`, `TF_VAR_puretrack_api_key`/`_email`/`_password` (secrets), `TF_VAR_allowed_origins` (JSON array), `TF_VAR_slack_webhook_url`, `TF_VAR_jwt_secret_version`, `TF_VAR_acs_secret_version`, `TF_VAR_blob_schema_mode`, `AZURE_FUNCTIONAPP_NAME`, `VITE_BLOB_BASE_URL`, `WEB_HOST` (prod only) |
 
 **The new `staging` GitHub environment inherits NONE of dev's operator
 values.** Dev and staging are different GitHub environments (staging was
@@ -293,6 +293,14 @@ explicitly; don't assume they carried over.
 data account), e.g. `https://stbccweb<env>data.blob.core.windows.net/data`
 — see phase 7 for the full per-env matrix and why this is Account B, not
 Account A.
+
+`WEB_HOST` is **prod-only** and required only when a custom
+`production_hostname` is configured for prod (see phase 5 above). Its value
+is that production hostname, e.g. `bcc.flyparagliding.org.uk`. Setting it
+enables `deploy-app.yml`'s production-domain smoke gate, which checks the
+health, seasons, and HTML responses on the real custom domain after a prod
+deploy. If `WEB_HOST` is left unset, that smoke step is skipped by design —
+only the default SWA hostname gets smoke-tested.
 
 ### Preview environment security preconditions (REQUIRED before `PREVIEW_ENABLED=true`)
 
