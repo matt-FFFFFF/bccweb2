@@ -300,20 +300,32 @@ resource below and never touch the secrets endpoint — land in this
 config's local `terraform.tfstate` unencrypted; that is acceptable only
 because none of them are real secrets, per the paragraph above.
 
-The Terraform-managed resource adopts a pre-existing environment with the
-same name (idempotent) and `lifecycle.ignore_changes = [reviewers,
-deployment_branch_policy]` ensures Terraform will **not** fight any
-reviewer or branch-policy settings you configure manually in the GitHub UI
-— those remain operator-owned.
+If a `prod` or `staging` GitHub environment already exists with
+operator-configured protection (required reviewers, admin bypass disabled,
+self-review prevention, or a wait timer), import it into bootstrap state
+**before the first bootstrap apply**:
+
+```sh
+terraform -chdir=iac/bootstrap import 'github_repository_environment.envs["<env>"]' <owner>/<repo>:<env>
+```
+
+This import is mandatory for safe adoption. Creating the Terraform resource is
+an upsert that can overwrite a pre-existing remote environment with provider
+defaults; `lifecycle.ignore_changes` cannot protect it on that first apply.
+After import, `ignore_changes` keeps the UI-owned required reviewers, deployment
+branch policy, wait timer, admin-bypass setting, and self-review prevention
+stable on subsequent applies.
 
 **Re-applying against an environment bootstrapped before this variable
 publication existed**: `terraform_umis` entries created before
-`TF_VAR_STAMP_RG_NAME` and the other deterministic variables were added still adopt the
-existing GitHub environment (idempotent), but that environment won't have
-the variables yet. Run and review `terraform -chdir=iac/bootstrap plan`
-against the same `terraform.tfvars`, then apply the reviewed plan to backfill
-them. The two published variables are the required outcome, not a guarantee
-that they are the sole changes: the plan may also reconcile
+`TF_VAR_STAMP_RG_NAME` and the other deterministic variables were added may
+already have their GitHub environment in bootstrap state, but that environment
+won't have the variables yet. Run and review
+`terraform -chdir=iac/bootstrap plan` against the same `terraform.tfvars`, then
+apply the reviewed plan to backfill them. If the remote environment is not in
+bootstrap state, import it first as described above. The published variables
+are the required outcome, not a guarantee that they are the sole changes: the
+plan may also reconcile
 `allowSharedKeyAccess = false` or other pending bootstrap drift.
 
 #### Escape hatch: `manage_github_secrets = false`

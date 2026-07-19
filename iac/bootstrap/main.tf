@@ -315,7 +315,7 @@ resource "github_repository_environment" "envs" {
   environment = each.key
 
   lifecycle {
-    ignore_changes = [reviewers, deployment_branch_policy]
+    ignore_changes = [reviewers, deployment_branch_policy, wait_timer, can_admins_bypass, prevent_self_review]
   }
 }
 
