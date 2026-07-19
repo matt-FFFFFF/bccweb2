@@ -298,8 +298,14 @@ Account A.
 
 [`.github/workflows/pr-preview.yml`](../../.github/workflows/pr-preview.yml)
 deploys ephemeral PR previews to the shared SWA, but is gated OFF by the
-`PREVIEW_ENABLED` repo/staging-env variable until this phase's GitHub
-environment work is done. That gate is **not** sufficient on its own: the job
+`PREVIEW_ENABLED` variable until this phase's GitHub environment work is
+done. `PREVIEW_ENABLED` MUST be set at the **repository** level (Settings >
+Secrets and variables > Actions > Variables), not on the `staging`
+environment: the gate is a job-level `if:`, and GitHub evaluates a job's `if:`
+before that job's `environment:` (and its environment-scoped variables) is
+loaded, so an environment-scoped `PREVIEW_ENABLED` would never be visible to
+the check and the job would be permanently skipped. That gate is **not**
+sufficient on its own: the job
 checks out and builds PR-branch-controlled code inside a job that, as
 currently wired, holds the `staging` environment's Azure OIDC identity — the
 same Terraform user-assigned managed identity that is Owner on the staging

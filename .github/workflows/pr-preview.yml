@@ -15,9 +15,14 @@ jobs:
       id-token: write
       contents: read
     # Same-repo PRs only (forks lack OIDC/secrets), AND opt-in: the operator sets the
-    # repo/staging-env variable PREVIEW_ENABLED=true only after the shared SWA + staging
-    # GitHub environment exist (see docs/runbooks/migration-shared-topology.md). Until then
-    # this job skips so PR CI stays green.
+    # REPOSITORY-level Actions variable PREVIEW_ENABLED=true (Settings > Secrets and
+    # variables > Actions > Variables) only after the shared SWA + staging GitHub
+    # environment exist (see docs/runbooks/migration-shared-topology.md).
+    # PREVIEW_ENABLED must stay repository-level, NOT environment-scoped: GitHub
+    # evaluates this job-level `if` before the job's `environment:` (below) is loaded,
+    # so an environment-scoped variable would never be visible here and the job would
+    # be permanently skipped. Until PREVIEW_ENABLED is set, this job skips so PR CI
+    # stays green.
     #
     # SECURITY WARNING (pwn-request risk): this job checks out and builds PR-branch-
     # controlled code (the head ref, via actions/checkout above) INSIDE a job that holds

@@ -5,8 +5,7 @@
 # Use with:
 #   terraform -chdir=iac/environment init -backend-config=../env/staging.backend.hcl && terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars
 # DO NOT COMMIT REAL SECRETS. Set via env vars: TF_VAR_puretrack_api_key=... etc., or pipeline secrets.
-# CI does not use this file directly — deploy workflows generate staging.tfvars at
-# runtime from GitHub env-scoped vars + TF_VAR_* secrets (see .github/workflows).
+# CI does not use this file; it sources TF_VAR_* from the GitHub environment.
 
 stamp_name = "staging"
 location   = "uksouth"

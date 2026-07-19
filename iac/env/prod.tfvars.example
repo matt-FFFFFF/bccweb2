@@ -5,8 +5,7 @@
 # Use with:
 #   terraform -chdir=iac/environment init -backend-config=../env/prod.backend.hcl && terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars
 # DO NOT COMMIT REAL SECRETS. Set via env vars: TF_VAR_puretrack_api_key=... etc., or pipeline secrets.
-# CI does not use this file directly — deploy workflows generate prod.tfvars at
-# runtime from GitHub env-scoped vars + TF_VAR_* secrets (see .github/workflows).
+# CI does not use this file; it sources TF_VAR_* from the GitHub environment.
 
 stamp_name = "prod"
 location   = "uksouth"
