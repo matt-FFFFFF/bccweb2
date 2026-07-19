@@ -19,10 +19,11 @@ creates the resource group itself.
   are both set) the production custom-domain CNAME and `customDomains` child
   resource, ordered so DNS is created before Azure validates the domain.
 - **`rbac.tf`**: leaf-scoped role assignments granting each environment's
-  Terraform UMI (from `var.env_umi_principal_ids`, intersected with
-  `var.environments`) Monitoring Reader on its own Application Insights
-  component, plus Contributor on the single shared ACS and SWA resources.
-  No DNS or Owner assignment is granted here.
+  Terraform UMI (from required `var.env_umi_principal_ids`, which must contain
+  every entry in `var.environments` and may contain additional keys such as
+  `shared`) Monitoring Reader on its own Application Insights component, plus
+  Contributor on the single shared ACS and SWA resources. No DNS or Owner
+  assignment is granted here.
 
 The complete non-secret output contract is **frozen at exactly nine outputs**
 (enforced by `scripts/iac/check-shared-resource-contract.sh`, run in CI as

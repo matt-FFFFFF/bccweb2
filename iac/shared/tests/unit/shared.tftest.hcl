@@ -40,6 +40,11 @@ variables {
   acs_email_domain   = "mail.shared.example.test"
   acs_sender_address = "no-reply@mail.shared.example.test"
 
+  env_umi_principal_ids = {
+    staging = "10000000-0000-0000-0000-000000000001"
+    prod    = "20000000-0000-0000-0000-000000000002"
+  }
+
   production_hostname          = "www.shared.example.test"
   dns_zone_name                = "shared.example.test"
   dns_zone_resource_group_name = "rg-bccweb-dns"
@@ -136,5 +141,25 @@ run "shared_plans" {
       output.swa_id == azapi_resource.swa.id
     )
     error_message = "The Static Web App outputs must expose its frozen name, default hostname, and resource ID."
+  }
+}
+
+run "dns_zone_rg_falls_back_to_zone_name" {
+  command = plan
+
+  providers = {
+    azapi = azapi.mock
+  }
+
+  variables {
+    dns_zone_resource_group_name = ""
+  }
+
+  assert {
+    condition = (
+      strcontains(azapi_resource.production_cname[0].parent_id, "/resourceGroups/${var.dns_zone_name}/") &&
+      !strcontains(azapi_resource.production_cname[0].parent_id, "/resourceGroups//")
+    )
+    error_message = "An empty DNS resource-group input must fall back to the DNS zone name without producing an empty resource-group segment."
   }
 }

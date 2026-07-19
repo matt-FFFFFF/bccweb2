@@ -22,6 +22,8 @@ resource "azapi_resource" "swa" {
   response_export_values = ["id", "name", "properties.defaultHostname"]
 
   lifecycle {
+    prevent_destroy = true
+
     ignore_changes = [
       body.properties.repositoryUrl,
       body.properties.branch,

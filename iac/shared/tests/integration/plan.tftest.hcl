@@ -11,6 +11,11 @@ variables {
   shared_rg_name     = "rg-bccweb-shared"
   acs_email_domain   = "mail.integration-test.example.invalid"
   acs_sender_address = "no-reply@mail.integration-test.example.invalid"
+
+  env_umi_principal_ids = {
+    staging = "10000000-0000-0000-0000-000000000001"
+    prod    = "20000000-0000-0000-0000-000000000002"
+  }
 }
 
 run "plan_against_real_provider" {

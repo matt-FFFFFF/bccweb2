@@ -59,7 +59,12 @@ variable "tags" {
 variable "env_umi_principal_ids" {
   description = "Application environment names mapped to their Terraform UMI principal IDs for leaf-scoped shared-resource RBAC."
   type        = map(string)
-  default     = {}
+  nullable    = false
+
+  validation {
+    condition     = alltrue([for e in var.environments : contains(keys(var.env_umi_principal_ids), e)])
+    error_message = "env_umi_principal_ids must contain an entry for every environment in environments."
+  }
 }
 
 variable "terraform_principal_type" {
