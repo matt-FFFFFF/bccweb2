@@ -125,6 +125,12 @@ jobs:
           terraform -chdir=iac/shared init -backend=false -test-directory=tests/unit
           terraform -chdir=iac/shared test -test-directory=tests/unit
 
+      - name: Validate bootstrap Terraform
+        run: |
+          terraform -chdir=iac/bootstrap init -backend=false
+          terraform -chdir=iac/bootstrap validate
+          terraform -chdir=iac/bootstrap fmt -check
+
       - name: Check shared Terraform resource contract
         run: bash scripts/iac/check-shared-resource-contract.sh
 
