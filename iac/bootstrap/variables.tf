@@ -62,6 +62,18 @@ variable "github_environments" {
     condition     = alltrue([for e in var.github_environments : can(regex("^[a-z0-9-]+$", e))])
     error_message = "Each GitHub environment name must match ^[a-z0-9-]+$ (lowercase letters, digits, hyphens)."
   }
+
+  validation {
+    condition = alltrue([
+      for e in var.github_environments : (
+        length("${var.tfstate_container_prefix}-${e}") >= 3 &&
+        length("${var.tfstate_container_prefix}-${e}") <= 63 &&
+        can(regex("^[a-z0-9]([a-z0-9-]*[a-z0-9])?$", "${var.tfstate_container_prefix}-${e}")) &&
+        !can(regex("--", "${var.tfstate_container_prefix}-${e}"))
+      )
+    ])
+    error_message = "Each derived tfstate container name (<tfstate_container_prefix>-<environment>) must be 3–63 characters, start and end with a lowercase letter or digit, and contain no consecutive hyphens."
+  }
 }
 
 variable "terraform_umis" {
