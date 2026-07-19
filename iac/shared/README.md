@@ -50,11 +50,19 @@ terraform -chdir=iac/shared fmt -check
 ```
 
 For an authenticated plan against shared state, first sign in with `az login`
-and initialize the committed backend:
+and copy/fill the local variables file from its example. Populate
+`env_umi_principal_ids` from the bootstrap output:
+
+```sh
+cp iac/env/shared.tfvars.example iac/env/shared.tfvars
+terraform -chdir=iac/bootstrap output -json terraform_umi_principal_ids
+```
+
+Then initialize the committed backend and plan with that var-file:
 
 ```sh
 terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl
-terraform -chdir=iac/shared plan
+terraform -chdir=iac/shared plan -var-file=../env/shared.tfvars
 ```
 
 The root derives the active subscription ID from the AzAPI client context. Its

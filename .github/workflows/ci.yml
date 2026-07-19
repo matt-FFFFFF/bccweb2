@@ -129,7 +129,7 @@ jobs:
         run: |
           terraform -chdir=iac/bootstrap init -backend=false
           terraform -chdir=iac/bootstrap validate
-          terraform -chdir=iac/bootstrap fmt -check
+          terraform fmt -check -recursive iac/
 
       - name: Check shared Terraform resource contract
         run: bash scripts/iac/check-shared-resource-contract.sh
