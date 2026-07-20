@@ -114,17 +114,18 @@ Follow these steps to provision the topology from scratch.
     user) MUST override to `"User"` — the Key Vault Secrets Officer role
     assignment (`keyvault.tf`) uses this to pick the correct
     `principalType`, and it will be wrong for a human principal otherwise.
-    The committed `iac/env/<env>.local.tfvars.example` sets
-    `terraform_principal_type = "User"` for exactly this reason, so every
-    local `iac/environment` apply/plan command in this document that passes
-    both var-files needs no separate `-var` override. The shared root has no
+    `terraform_principal_type` is **never committed** — not in
+    `iac/env/<env>.tfvars` nor in `iac/env/<env>.local.tfvars.example` —
+    so every local `iac/environment` apply/plan command in this document
+    passes it as an explicit `-var 'terraform_principal_type=User'` CLI
+    override after both `-var-file` flags. The shared root has no
     caller-scoped role assignment and needs no such override.
 7.  **Deploy the environment stamp**:
     ```bash
     gh workflow run terraform.yml -f env=staging -f action=apply
     # or locally:
     terraform -chdir=iac/environment init -backend-config=../env/staging.backend.hcl
-    terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars -var-file=../env/staging.local.tfvars
+    terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars -var-file=../env/staging.local.tfvars -var 'terraform_principal_type=User'
     ```
     This apply provisions the stamp module (storage — two accounts, Flex
     Consumption Function App, Key Vault, alerts) for the given environment,
@@ -172,7 +173,7 @@ To add a new application environment (e.g., a second `staging`-like env):
     ```bash
     cp iac/env/<env>.local.tfvars.example iac/env/<env>.local.tfvars
     terraform -chdir=iac/environment init -backend-config=../env/<env>.backend.hcl
-    terraform -chdir=iac/environment apply -var-file=../env/<env>.tfvars -var-file=../env/<env>.local.tfvars
+    terraform -chdir=iac/environment apply -var-file=../env/<env>.tfvars -var-file=../env/<env>.local.tfvars -var 'terraform_principal_type=User'
     ```
 
 State is isolated per environment within the bootstrap storage account: each

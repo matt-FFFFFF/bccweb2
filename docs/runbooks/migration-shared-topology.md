@@ -418,10 +418,10 @@ shared AI/ACS/SWA resources.
 
 ```sh
 terraform -chdir=iac/environment init -backend-config=../env/staging.backend.hcl
-terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars -var-file=../env/staging.local.tfvars
+terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars -var-file=../env/staging.local.tfvars -var 'terraform_principal_type=User'
 
 terraform -chdir=iac/environment init -reconfigure -backend-config=../env/prod.backend.hcl
-terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars -var-file=../env/prod.local.tfvars
+terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars -var-file=../env/prod.local.tfvars -var 'terraform_principal_type=User'
 ```
 
 `prod` here is a **first-time provision** in the refactored topology (per

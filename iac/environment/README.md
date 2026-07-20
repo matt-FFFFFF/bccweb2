@@ -30,10 +30,12 @@ always use `../env/<env>.backend.hcl`.
 
 `../env/<env>.tfvars` is the committed, tracked, non-secret base (stamp name,
 location, CORS origins, secret-version bumps). Secrets and bootstrap-generated
-values (`stamp_rg_name`, the `tfstate_*` values, `ops_email`, `puretrack_*`,
-and `terraform_principal_type` for local human applies) live in a gitignored
-local overlay copied from `../env/<env>.local.tfvars.example`. Local applies
-pass the base file first and the local overlay second so the overlay wins.
+values (`stamp_rg_name`, the `tfstate_*` values, `ops_email`, `puretrack_*`)
+live in a gitignored local overlay copied from
+`../env/<env>.local.tfvars.example`. Local applies pass the base file first
+and the local overlay second so the overlay wins, then append
+`-var 'terraform_principal_type=User'` as a CLI override — that variable is
+never committed in any tfvars file (see [../README.md](../README.md#first-time-setup) step 6).
 CI loads the committed base with `-var-file`; `terraform-run.yml` maps
 required GitHub environment variables and secrets explicitly into `TF_VAR_*`
 job environment entries (see `.github/workflows/terraform-run.yml`).
@@ -79,13 +81,13 @@ gh workflow run terraform.yml -f env=staging -f action=apply
 # (or -f env=prod)
 ```
 
-Locally (needs `az login` with rights on both resource groups; the local
-overlay's `terraform_principal_type = "User"` is required for a human
-principal — see [../README.md](../README.md#first-time-setup) step 5):
+Locally (needs `az login` with rights on both resource groups; the CLI
+override `-var 'terraform_principal_type=User'` is required for a human
+principal — see [../README.md](../README.md#first-time-setup) step 6):
 
 ```sh
 terraform -chdir=iac/environment init -backend-config=../env/<env>.backend.hcl
-terraform -chdir=iac/environment apply -var-file=../env/<env>.tfvars -var-file=../env/<env>.local.tfvars
+terraform -chdir=iac/environment apply -var-file=../env/<env>.tfvars -var-file=../env/<env>.local.tfvars -var 'terraform_principal_type=User'
 ```
 
 ## Outputs
