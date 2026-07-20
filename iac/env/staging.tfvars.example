@@ -1,18 +1,26 @@
 # SPDX-FileCopyrightText: 2026 British Club Challenge authors
 # SPDX-License-Identifier: MPL-2.0
-# COMMITTED TEMPLATE. Copy to staging.tfvars (gitignored) and fill in:
-#   cp iac/env/staging.tfvars.example iac/env/staging.tfvars
-# Use with:
-#   terraform -chdir=iac/environment init -backend-config=../env/staging.backend.hcl && terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars
-# DO NOT COMMIT REAL SECRETS. Set via env vars: TF_VAR_puretrack_api_key=... etc., or pipeline secrets.
-# CI does not use this file; it sources TF_VAR_* from the GitHub environment.
+# HISTORICAL FULL-SCHEMA REFERENCE. This file documents every environment-root
+# variable, secret and non-secret alike. The non-secret subset below is now
+# the committed, tracked `iac/env/staging.tfvars` — do not `cp` this file
+# over it; edit `staging.tfvars` directly if a committed base value needs to
+# change. Secrets and bootstrap-generated values (`stamp_rg_name`, the
+# `tfstate_*` values, `ops_email`, `puretrack_*`, `terraform_principal_type`
+# for local human applies) live in the gitignored local overlay; copy that
+# overlay from `iac/env/staging.local.tfvars.example` instead:
+#   cp iac/env/staging.local.tfvars.example iac/env/staging.local.tfvars
+# Apply with the committed base first, then the local overlay (overlay wins):
+#   terraform -chdir=iac/environment init -backend-config=../env/staging.backend.hcl && terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars -var-file=../env/staging.local.tfvars
+# DO NOT COMMIT REAL SECRETS. In CI, secrets and generated values are mapped
+# explicitly into TF_VAR_* job-environment entries by terraform-run.yml.
 
 stamp_name = "staging"
 location   = "uksouth"
 
-# Local applies only. CI sources these values from the TF_VAR_* GitHub environment vars.
-tfstate_resource_group_name = "rg-bccweb-tfstate" # REQUIRED: bootstrap state RG; CI supplies TF_VAR_tfstate_resource_group_name
-tfstate_storage_account_name = "stbccweb13afe" # REQUIRED: canonical bootstrap state account; CI supplies TF_VAR_tfstate_storage_account_name
+# Local overlay values (see iac/env/staging.local.tfvars.example). CI maps
+# these from GitHub environment secrets/variables via terraform-run.yml.
+tfstate_resource_group_name = "rg-bccweb-tfstate" # REQUIRED: bootstrap state RG; CI maps TF_VAR_tfstate_resource_group_name
+tfstate_storage_account_name = "stbccweb13afe" # REQUIRED: canonical bootstrap state account; CI maps TF_VAR_tfstate_storage_account_name
 stamp_rg_name = "stamp-staging"
 
 # CORS: staging SWA default hostname; leave empty until known.

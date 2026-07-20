@@ -83,8 +83,12 @@ cd .worktrees/dev-teardown
 npm ci && make build   # the pinned config's own toolchain, not main's
 ```
 
-Reconstruct dev's gitignored tfvars and secrets **at this pinned checkout**
-(these are gitignored everywhere, so they don't come along with the SHA):
+Reconstruct dev's config at this pinned checkout. If the pinned SHA already
+carries the committed-base / gitignored-local-overlay split (base
+`iac/env/dev.tfvars` tracked, secrets in `iac/env/dev.local.tfvars`), only the
+local overlay needs reconstruction — the committed base comes along with the
+checkout. On an older pinned SHA where the whole file was gitignored, rebuild
+it from the example (these values don't come along with the SHA either way):
 
 ```sh
 cp iac/env/dev.tfvars.example iac/env/dev.tfvars
@@ -375,16 +379,18 @@ destroyed, not migrated — phase 2).
 
 ## Phase 6 — Apply shared, then staging, then prod
 
-Create the gitignored local shared variables file from its committed template,
-then fill every required placeholder. In particular, populate
-`env_umi_principal_ids` from the bootstrap output shown below before applying:
+Create the gitignored local shared overlay from its committed template, then
+fill every required placeholder. In particular, populate
+`env_umi_principal_ids` from the bootstrap output shown below before applying
+(the committed `iac/env/shared.tfvars` base already has `acs_email_domain`
+and `acs_sender_address`):
 
 ```sh
-cp iac/env/shared.tfvars.example iac/env/shared.tfvars
+cp iac/env/shared.local.tfvars.example iac/env/shared.local.tfvars
 terraform -chdir=iac/bootstrap output -json terraform_umi_principal_ids
 
 terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl
-terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars
+terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var-file=../env/shared.local.tfvars
 ```
 
 This provisions the Log Analytics workspace, per-env Application Insights,
@@ -394,10 +400,10 @@ shared AI/ACS/SWA resources.
 
 ```sh
 terraform -chdir=iac/environment init -backend-config=../env/staging.backend.hcl
-terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars -var 'terraform_principal_type=User'
+terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars -var-file=../env/staging.local.tfvars
 
 terraform -chdir=iac/environment init -reconfigure -backend-config=../env/prod.backend.hcl
-terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars -var 'terraform_principal_type=User'
+terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars -var-file=../env/prod.local.tfvars
 ```
 
 `prod` here is a **first-time provision** in the refactored topology (per

@@ -1,10 +1,15 @@
 # SPDX-FileCopyrightText: 2026 British Club Challenge authors
 # SPDX-License-Identifier: MPL-2.0
-# COMMITTED TEMPLATE. Copy to shared.tfvars (gitignored) and fill in:
-#   cp iac/env/shared.tfvars.example iac/env/shared.tfvars
-# Use with:
-#   terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars
-# CI does not use this file; it sources TF_VAR_* from the GitHub environment.
+# HISTORICAL FULL-SCHEMA REFERENCE. This file documents every shared-root
+# variable, secret and non-secret alike. The non-secret subset below is now
+# the committed, tracked `iac/env/shared.tfvars` — do not `cp` this file over
+# it; edit `shared.tfvars` directly if a committed base value needs to
+# change. Secrets and bootstrap-generated values (`env_umi_principal_ids`,
+# `shared_rg_name`) live in the gitignored local overlay; copy that overlay
+# from `iac/env/shared.local.tfvars.example` instead:
+#   cp iac/env/shared.local.tfvars.example iac/env/shared.local.tfvars
+# Apply with the committed base first, then the local overlay (overlay wins):
+#   terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var-file=../env/shared.local.tfvars
 
 environments   = ["staging", "prod"]
 location       = "uksouth"

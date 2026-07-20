@@ -275,7 +275,6 @@ secrets) so CI never has to hand-supply bootstrap-owned topology:
 | Variable | Source | Per-env? |
 |---|---|---|
 | `TF_VAR_STAMP_RG_NAME` | `azapi_resource.pre_created_rg["stamp-<env>"].name` | **Yes — different RG name per env** |
-| `TF_VAR_stamp_name` | GitHub environment name | **Yes** |
 | `SHARED_RG_NAME` | `azapi_resource.pre_created_rg["shared"].name` | Prod now; staging after its T4 rename |
 | `AZURE_LOCATION` | `var.location` (`uksouth` by default) | Prod now; staging after its T4 rename |
 | `TF_VAR_tfstate_resource_group_name` | `azapi_resource.bootstrap_rg.name` | Prod now; staging after its T4 rename |

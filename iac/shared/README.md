@@ -49,20 +49,24 @@ terraform -chdir=iac/shared validate
 terraform -chdir=iac/shared fmt -check
 ```
 
-For an authenticated plan against shared state, first sign in with `az login`
-and copy/fill the local variables file from its example. Populate
-`env_umi_principal_ids` from the bootstrap output:
+For an authenticated plan against shared state, first sign in with `az login`.
+`iac/env/shared.tfvars` is the committed, tracked base (`acs_email_domain`,
+`acs_sender_address`, the empty DNS placeholders, tags). Bootstrap-generated
+values — `env_umi_principal_ids` and `shared_rg_name` — live in a gitignored
+local overlay; copy its template and populate it from the bootstrap output:
 
 ```sh
-cp iac/env/shared.tfvars.example iac/env/shared.tfvars
+cp iac/env/shared.local.tfvars.example iac/env/shared.local.tfvars
 terraform -chdir=iac/bootstrap output -json terraform_umi_principal_ids
+terraform -chdir=iac/bootstrap output -json pre_created_rg_names
 ```
 
-Then initialize the committed backend and plan with that var-file:
+Then initialize the committed backend and plan with the base file first, the
+local overlay second so the overlay wins:
 
 ```sh
 terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl
-terraform -chdir=iac/shared plan -var-file=../env/shared.tfvars
+terraform -chdir=iac/shared plan -var-file=../env/shared.tfvars -var-file=../env/shared.local.tfvars
 ```
 
 The root derives the active subscription ID from the AzAPI client context. Its

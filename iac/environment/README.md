@@ -28,11 +28,15 @@ always use `../env/<env>.backend.hcl`.
 
 ## tfvars
 
-`../env/<env>.tfvars` contains committed, non-secret base values. Local
-operators can use a separate override for sensitive values. CI loads this
-base file with `-var-file`; `terraform-run.yml` maps required GitHub
-environment variables and secrets explicitly into `TF_VAR_*` job environment
-entries (see `.github/workflows/terraform-run.yml`).
+`../env/<env>.tfvars` is the committed, tracked, non-secret base (stamp name,
+location, CORS origins, secret-version bumps). Secrets and bootstrap-generated
+values (`stamp_rg_name`, the `tfstate_*` values, `ops_email`, `puretrack_*`,
+and `terraform_principal_type` for local human applies) live in a gitignored
+local overlay copied from `../env/<env>.local.tfvars.example`. Local applies
+pass the base file first and the local overlay second so the overlay wins.
+CI loads the committed base with `-var-file`; `terraform-run.yml` maps
+required GitHub environment variables and secrets explicitly into `TF_VAR_*`
+job environment entries (see `.github/workflows/terraform-run.yml`).
 
 ## Required inputs
 
@@ -56,15 +60,10 @@ Optional inputs (`allowed_origins`, `slack_webhook_url`, `jwt_secret_version`,
 [`variables.tf`](variables.tf) and `../env/<env>.tfvars.example`.
 
 **Precedence note**: `-var-file` values always override `TF_VAR_*`
-environment variables for the same variable name. The committed
-`<env>.tfvars.example` already has placeholder entries for
-`stamp_rg_name`, the two `tfstate_*` values, and all three `puretrack_*`
-values, so a local apply that both fills those placeholders
-in `<env>.tfvars` AND exports the matching `TF_VAR_*` will silently use
-the tfvars value. Either fill the tfvars file directly (recommended for
-local applies) or remove/comment those specific keys from your local
-tfvars before exporting `TF_VAR_*` to test the CI-style path — see
-[../README.md](../README.md#first-time-setup) step 5.
+environment variables for the same variable name, and a later `-var-file`
+overrides an earlier one for the same variable. Passing both the committed
+base and the local overlay (base first, overlay second) is the recommended
+local path — see [../README.md](../README.md#first-time-setup) step 5.
 
 ## How to run
 
@@ -80,13 +79,13 @@ gh workflow run terraform.yml -f env=staging -f action=apply
 # (or -f env=prod)
 ```
 
-Locally (needs `az login` with rights on both resource groups; the
-`terraform_principal_type=User` override is required for a human principal
-— see [../README.md](../README.md#first-time-setup) step 5):
+Locally (needs `az login` with rights on both resource groups; the local
+overlay's `terraform_principal_type = "User"` is required for a human
+principal — see [../README.md](../README.md#first-time-setup) step 5):
 
 ```sh
 terraform -chdir=iac/environment init -backend-config=../env/<env>.backend.hcl
-terraform -chdir=iac/environment apply -var-file=../env/<env>.tfvars -var 'terraform_principal_type=User'
+terraform -chdir=iac/environment apply -var-file=../env/<env>.tfvars -var-file=../env/<env>.local.tfvars
 ```
 
 ## Outputs

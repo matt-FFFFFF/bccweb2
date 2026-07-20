@@ -18,7 +18,7 @@ The action group `ag-bccweb-prod-ops` is the single fan-out point. To rotate the
 ```bash
 # Update terraform.tfvars (NOT this file) and re-apply:
 terraform -chdir=iac/environment init -backend-config=../env/prod.backend.hcl
-terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars -var 'terraform_principal_type=User' -target=module.stamp.azapi_resource.ops
+terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars -var-file=../env/prod.local.tfvars -target=module.stamp.azapi_resource.ops
 ```
 
 To add an additional receiver (PagerDuty, OpsGenie, etc.), add a new `*_receiver` block inside the action group resource — never create a second action group, the per-alert `action_group_id` references would diverge.
@@ -547,7 +547,7 @@ systematic bug in the replace-then-create step.
 3. Verify the plan:
    ```bash
     terraform -chdir=iac/environment init -backend-config=../env/prod.backend.hcl
-    terraform -chdir=iac/environment plan -var-file=../env/prod.tfvars -var 'terraform_principal_type=User'
+    terraform -chdir=iac/environment plan -var-file=../env/prod.tfvars -var-file=../env/prod.local.tfvars
     ```
 4. Append the chosen metric / KQL query to `.omo/notepads/bccweb2-go-live-gap-closure/learnings.md`.
 
