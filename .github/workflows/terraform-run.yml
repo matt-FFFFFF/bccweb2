@@ -151,7 +151,7 @@ jobs:
             tail -n 80 plan-output.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          terraform -chdir="iac/${ROOT}" apply -input=false -var-file="../env/${TARGET_ENV}.tfvars" tfplan
+          terraform -chdir="iac/${ROOT}" apply -input=false tfplan
 
       - name: Terraform plan (drift gate)
         if: inputs.mode == 'drift-gate'
