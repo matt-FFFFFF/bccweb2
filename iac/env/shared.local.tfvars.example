@@ -6,9 +6,9 @@
 # Pass it after the committed base so the overlay wins:
 #   terraform -chdir=iac/shared plan -var-file=../env/shared.tfvars -var-file=../env/shared.local.tfvars
 # Populate the UMI map from:
-#   terraform -chdir=iac/bootstrap output -json terraform_umi_principal_ids
-# Populate shared_rg_name from the .shared value returned by:
-#   terraform -chdir=iac/bootstrap output -json pre_created_rg_names
+#   terraform -chdir=iac/bootstrap output -json terraform_umi_principal_ids | jq '{staging: .staging, prod: .prod, shared: .shared}'
+# Populate shared_rg_name from:
+#   terraform -chdir=iac/bootstrap output -json pre_created_rg_names | jq -r '.shared'
 
 shared_rg_name = "<from: pre_created_rg_names .shared>"
 

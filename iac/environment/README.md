@@ -45,11 +45,11 @@ vars/secrets in CI):
 
 | Variable | Source | Notes |
 |---|---|---|
-| `stamp_name` | tfvars / CI-generated | Environment name used as the resource-name suffix. |
-| `stamp_rg_name` | `TF_VAR_STAMP_RG_NAME` | Published by bootstrap as a GitHub environment variable. |
-| `tfstate_resource_group_name` | `TF_VAR_TFSTATE_RESOURCE_GROUP_NAME` | Resource group containing the canonical state account. |
-| `tfstate_storage_account_name` | `TF_VAR_TFSTATE_STORAGE_ACCOUNT_NAME` | Canonical state account containing `tfstate-shared/shared.tfstate`. |
-| `ops_email` | tfvars / `vars.OPS_EMAIL` | Alert recipient. |
+| `stamp_name` | Committed base tfvars (`iac/env/<env>.tfvars`) | Environment name used as the resource-name suffix; authored, not CI-generated. |
+| `stamp_rg_name` | `vars.TF_VAR_STAMP_RG_NAME` | Published by bootstrap as a GitHub environment variable. |
+| `tfstate_resource_group_name` | `vars.TF_VAR_tfstate_resource_group_name` | Resource group containing the canonical state account. |
+| `tfstate_storage_account_name` | `vars.TF_VAR_tfstate_storage_account_name` | Canonical state account containing `tfstate-shared/shared.tfstate`. |
+| `ops_email` | tfvars locally / `secrets.TF_VAR_ops_email` in CI | Alert recipient; treated as a Secret, not a Variable, even though it isn't sensitive (public repo). |
 | `puretrack_api_key`, `puretrack_email`, `puretrack_password` | `TF_VAR_*` secrets | Sensitive; never written to a tfvars file in CI. |
 
 The ACS sender address is not an environment-root input; it comes from the

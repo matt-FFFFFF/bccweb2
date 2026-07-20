@@ -5,8 +5,8 @@
 #   chmod 600 iac/env/prod.local.tfvars
 # Pass it after the committed base so the overlay wins:
 #   terraform -chdir=iac/environment plan -var-file=../env/prod.tfvars -var-file=../env/prod.local.tfvars
-# Populate stamp_rg_name from the .["stamp-prod"] value returned by:
-#   terraform -chdir=iac/bootstrap output -json pre_created_rg_names
+# Populate stamp_rg_name from:
+#   terraform -chdir=iac/bootstrap output -json pre_created_rg_names | jq -r '.["stamp-prod"]'
 # Populate the tfstate values from:
 #   terraform -chdir=iac/bootstrap output -raw resource_group_name
 #   terraform -chdir=iac/bootstrap output -raw storage_account_name

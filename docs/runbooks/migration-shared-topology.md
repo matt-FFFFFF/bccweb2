@@ -272,23 +272,41 @@ producing the zone-relative name Azure DNS expects. If you populate
 `production_hostname`/`dns_zone_name` as part of this migration, review the
 shared Terraform plan and confirm the computed record name before applying.
 
-## Phase 5.5 — Populate GitHub Environment Variables + Secrets
+## Phase 5.5 — Populate GitHub Secrets (generated variables are automatic)
 
-Before the shared/environment applies in phase 6, populate every
-**operator-set** entry in the GitHub Variables/Secrets contract (bootstrap
-already published the **bootstrap-published** subset in phase 4). See the
-full table in [`iac/README.md`](../../iac/README.md#github-environment-variables--secrets-contract);
-summarized here:
+Authored non-secret config (`acs_email_domain`, `acs_sender_address`,
+`production_hostname`, `dns_zone_name`, `dns_zone_resource_group_name`,
+`allowed_origins`, `jwt_secret_version`, `acs_secret_version`,
+`blob_schema_mode`, and friends) is **committed** in `iac/env/<env>.tfvars` —
+there's nothing to enter in GitHub for these; both local applies and CI load
+the same tracked file with `-var-file`. If a value needs to differ for this
+migration (e.g. a real ACS email domain, or a prod custom domain), edit the
+committed base file directly and commit that change; don't create a GitHub
+entry for it.
 
-| Environment | Operator-set entries to add |
+Only two categories of GitHub environment entries exist, and only one of
+them needs manual work before the shared/environment applies in phase 6:
+
+- **Bootstrap-published generated variables** (`TF_VAR_STAMP_RG_NAME`,
+  `TF_VAR_shared_rg_name`, `TF_VAR_env_umi_principal_ids`,
+  `TF_VAR_tfstate_resource_group_name`, `TF_VAR_tfstate_storage_account_name`,
+  `AZURE_LOCATION`, `SHARED_RG_NAME`) — already written by phase 4's bootstrap
+  apply. Nothing to do here.
+- **Operator-set secrets** — populate these by hand. See the full table in
+  [`iac/README.md`](../../iac/README.md#github-environment-variables--secrets-contract);
+  summarized here:
+
+| Environment | Secrets to add |
 |---|---|
-| `shared` | `TF_VAR_acs_email_domain`, `TF_VAR_acs_sender_address`, `TF_VAR_production_hostname`, `TF_VAR_dns_zone_name`, `TF_VAR_dns_zone_resource_group_name` (last three only for a prod custom domain) |
-| `staging`, `prod` | `TF_VAR_ops_email`, `TF_VAR_puretrack_api_key`/`_email`/`_password` (secrets), `TF_VAR_allowed_origins` (JSON array), `TF_VAR_slack_webhook_url`, `TF_VAR_jwt_secret_version`, `TF_VAR_acs_secret_version`, `TF_VAR_blob_schema_mode`, `AZURE_FUNCTIONAPP_NAME`, `VITE_BLOB_BASE_URL`, `WEB_HOST` (prod only) |
+| `staging`, `prod` | `TF_VAR_ops_email` (a Secret, not a Variable — public repo), `TF_VAR_puretrack_api_key`/`_email`/`_password`, `TF_VAR_slack_webhook_url` (optional) |
+
+Plus the app-deploy Variables `AZURE_FUNCTIONAPP_NAME`, `VITE_BLOB_BASE_URL`,
+and `WEB_HOST` (prod only) — see below.
 
 **The new `staging` GitHub environment inherits NONE of dev's operator
-values.** Dev and staging are different GitHub environments (staging was
+secrets.** Dev and staging are different GitHub environments (staging was
 created/renamed by bootstrap in phase 4, or already existed from T4's
-config) — every operator-set variable/secret above must be entered fresh
+config) — every operator-set secret above must be entered fresh
 for `staging`, even if the value happens to match what dev used to have.
 Copy dev's values as a starting point if appropriate, but set them
 explicitly; don't assume they carried over.

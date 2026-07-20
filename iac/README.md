@@ -143,9 +143,11 @@ Follow these steps to provision the topology from scratch.
 
 ## Secret Rotation
 
-Secrets are managed declaratively. Rotating them involves updating the version
-variables in `iac/env/<env>.tfvars` (or the equivalent GitHub environment
-variable for CI) and re-applying `iac/environment`.
+Secrets are managed declaratively. Rotating them means editing the version
+variables in the committed base file, `iac/env/<env>.tfvars`, and re-applying
+`iac/environment` — both locally and in CI, since CI loads the same committed
+base with `-var-file`. There is no GitHub-variable alternative for these
+values; they are authored, non-secret, and live only in the tracked tfvars.
 
 -   **JWT Secret**: Bump `jwt_secret_version` (e.g., `"1"` → `"2"`). Terraform generates a new random password and updates Key Vault.
 -   **ACS Connection String**: Rotate the access key in the Azure portal, then bump `acs_secret_version`. Terraform fetches the new key and updates Key Vault.
@@ -182,28 +184,37 @@ was a documentation error, not a Terraform resource.
 
 ## GitHub Environment Variables & Secrets Contract
 
-Each GitHub environment needs a specific set of `TF_VAR_*` variables (for
-Terraform applies via `terraform-run.yml`) plus, for `staging`/`prod`, the
-app-deploy variables `deploy-app.yml` reads. **Bootstrap-published** entries
-are written automatically by `iac/bootstrap` (`manage_github_secrets = true`);
-**operator-set** entries have no source of truth in Terraform and must be
-added manually (repo Settings → Environments → `<env>` → Variables/Secrets).
+Each GitHub environment needs a specific set of `TF_VAR_*` secrets/variables
+(for Terraform applies via `terraform-run.yml`) plus, for `staging`/`prod`,
+the app-deploy variables `deploy-app.yml` reads. **Bootstrap-published**
+entries are written automatically by `iac/bootstrap` (`manage_github_secrets
+= true`); **operator-set** entries have no source of truth in Terraform and
+must be added manually (repo Settings → Environments → `<env>` →
+Variables/Secrets).
+
+**Authored non-secret values are not GitHub entries at all.** Every authored
+config value — `production_hostname`, `dns_zone_name`,
+`dns_zone_resource_group_name`, `allowed_origins`, `jwt_secret_version`,
+`acs_secret_version`, `blob_schema_mode`, `acs_email_domain`,
+`acs_sender_address` — lives only in the committed base tfvars
+(`iac/env/<env>.tfvars`). Both local applies and CI load that same file with
+`-var-file`; there is no GitHub-side duplicate to keep in sync, and rotating
+one of these values (e.g. bumping `jwt_secret_version`) means editing the
+base file and re-applying, not touching GitHub.
 
 | Name | Kind | Environments | Bootstrap-published or operator-set |
 |---|---|---|---|
 | `AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID` | Secret | all | Bootstrap-published (OIDC identifiers, not real secrets) |
 | `TF_VAR_shared_rg_name` | Variable | `shared` | Bootstrap-published |
 | `TF_VAR_env_umi_principal_ids` | Variable | `shared` | Bootstrap-published |
-| `TF_VAR_stamp_rg_name` | Variable | `staging`, `prod` | Bootstrap-published |
+| `TF_VAR_STAMP_RG_NAME` | Variable | `staging`, `prod` | Bootstrap-published (mapped to Terraform's `stamp_rg_name` via `vars.TF_VAR_STAMP_RG_NAME` in `terraform-run.yml`) |
 | `TF_VAR_tfstate_resource_group_name` | Variable | `staging`, `prod` | Bootstrap-published |
 | `TF_VAR_tfstate_storage_account_name` | Variable | `staging`, `prod` | Bootstrap-published |
 | `SHARED_RG_NAME` | Variable | `staging`, `prod` | Bootstrap-published |
 | `AZURE_LOCATION` | Variable | `staging`, `prod` | Bootstrap-published |
-| N/A — `acs_email_domain`/`acs_sender_address` | tfvars | `shared` | Committed base (`iac/env/shared.tfvars`), not a GitHub variable — CI loads it via `-var-file` |
-| `TF_VAR_production_hostname`, `TF_VAR_dns_zone_name`, `TF_VAR_dns_zone_resource_group_name` | Variable | `shared` (prod domain only) | Operator-set (overrides the empty committed-base defaults for DNS cutover) |
-| `TF_VAR_ops_email` | Variable | `staging`, `prod` | Operator-set |
+| `TF_VAR_ops_email` | **Secret** | `staging`, `prod` | Operator-set (public repo — kept as a Secret, not a Variable, even though it isn't sensitive) |
 | `TF_VAR_puretrack_api_key`, `TF_VAR_puretrack_email`, `TF_VAR_puretrack_password` | Secret | `staging`, `prod` | Operator-set |
-| `TF_VAR_allowed_origins`, `TF_VAR_slack_webhook_url`, `TF_VAR_jwt_secret_version`, `TF_VAR_acs_secret_version`, `TF_VAR_blob_schema_mode` | Variable/Secret | `staging`, `prod` | Operator-set (all optional, defaulted) |
+| `TF_VAR_slack_webhook_url` | Secret | `staging`, `prod` | Operator-set (optional, defaulted) |
 | `AZURE_FUNCTIONAPP_NAME` | Variable | `staging`, `prod` | Operator-set |
 | `VITE_BLOB_BASE_URL` | Variable | `staging`, `prod` | Operator-set |
 | `WEB_HOST` | Variable | `prod` | Operator-set (production web hostname for the deploy-app.yml production-domain smoke; set only when a custom domain is enabled) |

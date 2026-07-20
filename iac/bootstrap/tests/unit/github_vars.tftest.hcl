@@ -82,4 +82,36 @@ run "published_github_variables_exclude_authored_stamp_name" {
     ])
     error_message = "Bootstrap must retain the generated stamp RG, shared RG, and environment UMI principal ID variables."
   }
+
+  assert {
+    condition = length(setsubtract(
+      toset([for variable in github_actions_environment_variable.rg_names : variable.variable_name]),
+      toset([
+        "TF_VAR_STAMP_RG_NAME",
+        "TF_VAR_shared_rg_name",
+        "TF_VAR_env_umi_principal_ids",
+        "AZURE_LOCATION",
+        "SHARED_RG_NAME",
+        "TF_VAR_tfstate_resource_group_name",
+        "TF_VAR_tfstate_storage_account_name",
+      ])
+    )) == 0
+    error_message = "Bootstrap must not publish any GitHub environment variable outside the exact expected set."
+  }
+
+  assert {
+    condition = length(setsubtract(
+      toset([
+        "TF_VAR_STAMP_RG_NAME",
+        "TF_VAR_shared_rg_name",
+        "TF_VAR_env_umi_principal_ids",
+        "AZURE_LOCATION",
+        "SHARED_RG_NAME",
+        "TF_VAR_tfstate_resource_group_name",
+        "TF_VAR_tfstate_storage_account_name",
+      ]),
+      toset([for variable in github_actions_environment_variable.rg_names : variable.variable_name])
+    )) == 0
+    error_message = "Bootstrap must publish EXACTLY this set of GitHub environment variables for the staging+shared fixture — none missing."
+  }
 }
