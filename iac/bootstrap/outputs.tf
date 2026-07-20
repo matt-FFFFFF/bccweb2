@@ -109,7 +109,6 @@ output "github_actions_setup" {
        Terraform also publishes deterministic GitHub environment variables:
 %{for k, v in local.application_umis~}
          ${v.github_env}: TF_VAR_STAMP_RG_NAME = ${azapi_resource.pre_created_rg["stamp-${k}"].name}
-         ${v.github_env}: TF_VAR_stamp_name    = ${v.github_env}
 %{endfor~}
          shared: TF_VAR_shared_rg_name         = ${azapi_resource.pre_created_rg["shared"].name}
          shared: TF_VAR_env_umi_principal_ids  = ${jsonencode(local.terraform_umi_principal_ids)}
@@ -134,7 +133,6 @@ output "github_actions_setup" {
        ENVIRONMENT-level variables manually:
 %{for k, v in local.application_umis~}
          ${v.github_env}: TF_VAR_STAMP_RG_NAME = ${azapi_resource.pre_created_rg["stamp-${k}"].name}
-         ${v.github_env}: TF_VAR_stamp_name    = ${v.github_env}
 %{endfor~}
          shared: TF_VAR_shared_rg_name        = ${azapi_resource.pre_created_rg["shared"].name}
          shared: TF_VAR_env_umi_principal_ids = ${jsonencode(local.terraform_umi_principal_ids)}

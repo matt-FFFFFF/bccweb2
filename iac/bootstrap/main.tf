@@ -355,7 +355,6 @@ locals {
     merge([
       for k, cfg in local.application_umis : {
         "${cfg.github_env}/TF_VAR_STAMP_RG_NAME" = { env = cfg.github_env, name = "TF_VAR_STAMP_RG_NAME", value = azapi_resource.pre_created_rg["stamp-${k}"].name }
-        "${cfg.github_env}/TF_VAR_stamp_name"    = { env = cfg.github_env, name = "TF_VAR_stamp_name", value = cfg.github_env }
       }
     ]...),
     {
