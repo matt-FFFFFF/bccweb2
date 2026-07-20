@@ -28,15 +28,11 @@ always use `../env/<env>.backend.hcl`.
 
 ## tfvars
 
-`../env/<env>.tfvars` — **gitignored** (holds operator emails and PureTrack
-credentials; the ACS email domain is a shared-root input, not an
-`iac/environment` variable, so it is never in this file). Local applies:
-copy `../env/<env>.tfvars.example` and fill in. CI writes no tfvars file at
-all — `scripts/tfvars-to-github-env.mjs` exports every environment-scoped
-`TF_VAR_*` value (from GitHub environment variables and secrets) directly
-into `$GITHUB_ENV`, and `terraform-run.yml` runs `terraform plan`/`apply`
-against those environment variables (see
-`.github/workflows/terraform-run.yml`).
+`../env/<env>.tfvars` contains committed, non-secret base values. Local
+operators can use a separate override for sensitive values. CI loads this
+base file with `-var-file`; `terraform-run.yml` maps required GitHub
+environment variables and secrets explicitly into `TF_VAR_*` job environment
+entries (see `.github/workflows/terraform-run.yml`).
 
 ## Required inputs
 

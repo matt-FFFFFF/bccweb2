@@ -36,6 +36,16 @@ jobs:
       ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       TF_IN_AUTOMATION: "true"
+      TF_VAR_ops_email: ${{ secrets.TF_VAR_ops_email }}
+      TF_VAR_puretrack_api_key: ${{ secrets.TF_VAR_puretrack_api_key }}
+      TF_VAR_puretrack_email: ${{ secrets.TF_VAR_puretrack_email }}
+      TF_VAR_puretrack_password: ${{ secrets.TF_VAR_puretrack_password }}
+      TF_VAR_slack_webhook_url: ${{ secrets.TF_VAR_slack_webhook_url }}
+      TF_VAR_stamp_rg_name: ${{ vars.TF_VAR_STAMP_RG_NAME }}
+      TF_VAR_tfstate_resource_group_name: ${{ vars.TF_VAR_tfstate_resource_group_name }}
+      TF_VAR_tfstate_storage_account_name: ${{ vars.TF_VAR_tfstate_storage_account_name }}
+      TF_VAR_shared_rg_name: ${{ vars.TF_VAR_shared_rg_name }}
+      TF_VAR_env_umi_principal_ids: ${{ vars.TF_VAR_env_umi_principal_ids }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -44,14 +54,6 @@ jobs:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-
-      # First-party callers pass secrets: inherit so this in-repo exporter can
-      # expose every environment-scoped TF_VAR_* value without writing tfvars.
-      - name: Export Terraform variables
-        env:
-          SECRETS_JSON: ${{ toJSON(secrets) }}
-          VARS_JSON: ${{ toJSON(vars) }}
-        run: node scripts/tfvars-to-github-env.mjs
 
       - name: Validate invocation
         env:
@@ -90,7 +92,6 @@ jobs:
           case "$ROOT" in
             environment)
               required_variables=(
-                TF_VAR_stamp_name
                 TF_VAR_stamp_rg_name
                 TF_VAR_tfstate_resource_group_name
                 TF_VAR_tfstate_storage_account_name
@@ -103,15 +104,14 @@ jobs:
             shared)
               required_variables=(
                 TF_VAR_shared_rg_name
-                TF_VAR_acs_email_domain
-                TF_VAR_acs_sender_address
                 TF_VAR_env_umi_principal_ids
               )
               ;;
           esac
           for variable_name in "${required_variables[@]}"; do
-            if [[ -z "${!variable_name:-}" ]]; then
-              echo "Required GitHub environment variable is missing: ${variable_name}" >&2
+            variable_value=${!variable_name:-}
+            if [[ -z "${variable_value//[[:space:]]/}" ]]; then
+              echo "${variable_name}" >&2
               exit 1
             fi
           done
@@ -129,7 +129,7 @@ jobs:
           TARGET_ENV: ${{ inputs.target_env }}
         run: |
           set -euo pipefail
-          terraform -chdir="iac/${ROOT}" plan -input=false -out=tfplan | tee plan-output.txt
+          terraform -chdir="iac/${ROOT}" plan -input=false -var-file="../env/${TARGET_ENV}.tfvars" -out=tfplan | tee plan-output.txt
           {
             echo "## Terraform plan — ${ROOT} / ${TARGET_ENV}"
             echo '```'
@@ -144,14 +144,14 @@ jobs:
           TARGET_ENV: ${{ inputs.target_env }}
         run: |
           set -euo pipefail
-          terraform -chdir="iac/${ROOT}" plan -input=false -out=tfplan | tee plan-output.txt
+          terraform -chdir="iac/${ROOT}" plan -input=false -var-file="../env/${TARGET_ENV}.tfvars" -out=tfplan | tee plan-output.txt
           {
             echo "## Terraform apply plan — ${ROOT} / ${TARGET_ENV}"
             echo '```'
             tail -n 80 plan-output.txt
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-          terraform -chdir="iac/${ROOT}" apply -input=false tfplan
+          terraform -chdir="iac/${ROOT}" apply -input=false -var-file="../env/${TARGET_ENV}.tfvars" tfplan
 
       - name: Terraform plan (drift gate)
         if: inputs.mode == 'drift-gate'
@@ -161,7 +161,7 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          terraform -chdir="iac/${ROOT}" plan -input=false -detailed-exitcode | tee plan-output.txt
+          terraform -chdir="iac/${ROOT}" plan -input=false -var-file="../env/${TARGET_ENV}.tfvars" -detailed-exitcode | tee plan-output.txt
           rc=${PIPESTATUS[0]}
           set -e
           if [ "$rc" -eq 2 ]; then

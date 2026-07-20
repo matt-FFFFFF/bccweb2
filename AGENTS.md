@@ -251,10 +251,9 @@ instance shared across environments (`iac/shared`); the per-env API backend is l
 imperatively via `az staticwebapp backends link` (Terraform cannot express a cross-resource
 Functions↔SWA backend link) rather than a Terraform-managed backend resource.
 
-Environment configuration is standardized as `TF_VAR_*` GitHub environment variables, generated
-at CI-run time from `iac/env/<env>.tfvars`-shaped input by `scripts/tfvars-to-github-env.mjs`,
-which writes each name/value pair into `$GITHUB_ENV` (masking secret values) rather than a
-committed tfvars file.
+Environment configuration combines committed, non-secret base values from
+`iac/env/<env>.tfvars` with explicit `TF_VAR_*` GitHub environment variable/secret mappings in
+`terraform-run.yml`; secrets flow only through the workflow job environment.
 
 CI (`.github/workflows/`) is DRY: three composite actions (`.github/actions/{setup-node-mise,
 azurite,tf-setup}`) plus two reusable workflows (`deploy-app.yml`, `terraform-run.yml`) that the

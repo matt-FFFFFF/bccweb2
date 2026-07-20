@@ -13,7 +13,7 @@ All infrastructure is provisioned using **AzAPI v2.10** with HCL-native bodies.
 - `bootstrap/`: One-shot config provisioning the remote state storage account, the per-env Terraform UMIs (GitHub OIDC, RG-scoped Owner), the shared resource group plus one stamp resource group per application environment, and the GitHub environment secrets/variables. Uses **local state** (it provisions its own remote-state target, so it cannot live there itself). See [bootstrap/README.md](bootstrap/README.md).
 - `shared/`: The platform layer used by the stable `staging`/`prod` environments — Log Analytics workspace, per-environment Application Insights, Azure Communication Services (email), and one Standard-tier Static Web App (with the production custom domain/DNS). One remote state, `shared.tfstate`. See [shared/README.md](shared/README.md).
 - `environment/`: Per-env application stack, composed of a single `modules/stamp` child module (storage — two accounts, see below — Flex Consumption Function App, Key Vault, alerts, optional DNS). It reads only non-secret `app_insights_ids`/`acs_id` from the `shared` root's remote state. One `terraform apply` provisions the stamp for a given environment. See [environment/README.md](environment/README.md).
-- `env/`: Environment-specific configuration — `<env>.backend.hcl` (committed) and `<env>.tfvars` (gitignored; copy from the committed `<env>.tfvars.example`).
+- `env/`: Committed environment-specific configuration — `<env>.backend.hcl` and non-secret base values in `<env>.tfvars`; secrets are supplied through explicit workflow `TF_VAR_*` environment mappings.
 
 Bootstrap and the committed backend files use one canonical layout: storage
 account `stbccweb13afe`, with one private `tfstate-<env>` container and one
@@ -93,11 +93,10 @@ Follow these steps to provision the topology from scratch.
     ```bash
     cp iac/env/staging.tfvars.example iac/env/staging.tfvars
     ```
-    Fill in the required placeholders (marked `# REQUIRED`), including
-    `puretrack_api_key`, `puretrack_email`, and `puretrack_password` — the
-    example template already has entries for all of them. CI does not need
-    this file — the `terraform.yml` workflow (via `scripts/tfvars-to-github-env.mjs`)
-    generates the `TF_VAR_*` set at runtime from GitHub environment vars/secrets.
+    Fill in the required placeholders (marked `# REQUIRED`) for local use.
+    CI loads the committed base file with `-var-file` and supplies required
+    secrets through explicit `TF_VAR_*` job-environment mappings in
+    `terraform-run.yml`.
 6.  **Sensitive values — pick one path, don't mix them**: `-var-file`
     assignments always win over `TF_VAR_*` environment variables (Terraform
     applies `-var`/`-var-file` after environment variables), so setting both

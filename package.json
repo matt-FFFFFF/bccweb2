@@ -16,7 +16,6 @@
     "license:check": "node scripts/spdx-header.mjs",
     "license:fix": "node scripts/spdx-header.mjs --fix",
     "license:test": "node --test scripts/__tests__/spdx-header.test.mjs",
-    "tfvars:test": "node --test scripts/__tests__/tfvars-to-github-env.test.mjs",
     "iac:platform-contract": "bash scripts/iac/check-shared-resource-contract.sh",
     "iac:stamp-storage-split": "bash scripts/iac/check-stamp-storage-split.sh",
     "fixtures:audit": "node scripts/audit-fixtures.mjs --json",
