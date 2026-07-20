@@ -27,8 +27,11 @@ local.settings.json
 *.tfvars
 *.tfvars.json
 *tfplan*
-# Non-sensitive .example templates are committed. Real per-env tfvars
-# (dev.tfvars, prod.tfvars) hold secrets and stay ignored.
+# The three committed bases are non-secret and tracked; secret/generated values
+# live in ignored *.local.tfvars overlays.
+!iac/env/shared.tfvars
+!iac/env/staging.tfvars
+!iac/env/prod.tfvars
 !iac/env/*.tfvars.example
 
 # Playwright

@@ -131,14 +131,27 @@ jobs:
           terraform -chdir=iac/bootstrap validate
           terraform fmt -check -recursive iac/
 
+      - name: Check committed tfvars are non-secret
+        shell: bash
+        run: |
+          files=(iac/env/shared.tfvars iac/env/staging.tfvars iac/env/prod.tfvars)
+          forbidden='ops_email|puretrack_api_key|puretrack_email|puretrack_password|slack_webhook_url|terraform_principal_type|shared_rg_name|env_umi_principal_ids|stamp_rg_name|platform_rg_name|tfstate_resource_group_name|tfstate_storage_account_name'
+          failed=0
+          while IFS=: read -r path key; do
+            printf '%s:%s\n' "$path" "$key"
+            failed=1
+          done < <(grep -EHn "^[[:space:]]*(${forbidden})[[:space:]]*=" "${files[@]}" | sed -E 's/^([^:]+):[0-9]+:[[:space:]]*([^[:space:]=]+).*/\1:\2/' || true)
+          while IFS=: read -r path key; do
+            printf '%s:%s\n' "$path" "$key"
+            failed=1
+          done < <(grep -FHn '<REQUIRED' "${files[@]}" | sed -nE 's/^([^:]+):[0-9]+:[[:space:]]*([[:alnum:]_]+)[[:space:]]*=.*/\1:\2/p' || true)
+          exit "$failed"
+
       - name: Check shared Terraform resource contract
         run: bash scripts/iac/check-shared-resource-contract.sh
 
       - name: Check stamp storage split contract
         run: bash scripts/iac/check-stamp-storage-split.sh
-
-      - name: Run tfvars exporter tests
-        run: npm run tfvars:test
 
   # ── 2. Docker builds ────────────────────────────────────────────────────────────
   # Build every image that docker-compose builds locally (apps/api/Dockerfile.dev
