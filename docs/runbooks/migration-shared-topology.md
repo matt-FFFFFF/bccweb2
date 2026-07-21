@@ -217,6 +217,28 @@ the account unlocked longer than the container/role delete takes.
 
 Now on `main` (post-refactor), from the normal working tree:
 
+**Parity checklist — run before `terraform -chdir=iac/bootstrap plan`.** The
+refactored bootstrap no longer publishes the deterministic-topology GitHub
+variables (`TF_VAR_shared_rg_name`, `TF_VAR_tfstate_resource_group_name`,
+`TF_VAR_tfstate_storage_account_name`) that an older bootstrap may have left
+on the `staging`/`prod`/`shared` GitHub environments; the plan below will
+propose deleting them. Before accepting those deletes, confirm the committed
+files already carry the equivalent values, so nothing is lost when GitHub's
+copy goes away:
+
+- `iac/env/shared.tfvars` has the correct `shared_rg_name`.
+- `iac/env/staging.tfvars` and `iac/env/prod.tfvars` each have the correct
+  `stamp_rg_name`, `tfstate_resource_group_name`, and
+  `tfstate_storage_account_name`.
+- `iac/env/shared.backend.hcl`, `iac/env/staging.backend.hcl`, and
+  `iac/env/prod.backend.hcl` each resolve to the same canonical bootstrap
+  storage account and the correct per-environment container.
+
+If any of these committed values are missing or don't match what bootstrap's
+plan will delete, fix the committed files first and re-run the plan — do not
+apply a plan that deletes a GitHub variable whose value isn't already
+captured somewhere committed.
+
 ```sh
 terraform -chdir=iac/bootstrap init -backend=false
 terraform -chdir=iac/bootstrap plan   # review carefully before applying
@@ -226,6 +248,11 @@ Confirm the plan shows:
 - **Deletes**: dev's now-empty `stamp-dev` resource group and `id-bccweb-terraform-dev`
   UMI (these are NOT under the tfstate-account lock — only the tfstate
   container/role from phase 3 were).
+- **Deletes**: any of `TF_VAR_shared_rg_name`, `TF_VAR_tfstate_resource_group_name`,
+  or `TF_VAR_tfstate_storage_account_name` still present on `staging`/`prod`/
+  `shared` from a pre-refactor bootstrap apply — expected once the parity
+  checklist above has passed, since the refactored config no longer manages
+  these GitHub variables.
 - **Creates**: `rg-bccweb-shared`, `id-bccweb-terraform-shared`, dev→staging
   rename artifacts (staging UMI/RG if not already adopted from dev's
   identity — see the plan's exact diff; T4 already renamed dev's UMI/RG to
@@ -240,12 +267,15 @@ Apply:
 terraform -chdir=iac/bootstrap apply
 ```
 
-This publishes `TF_VAR_env_umi_principal_ids` (JSON map, including the new
-`shared` UMI's principal ID) to the `shared` GitHub environment, and the
-deterministic bootstrap-owned `TF_VAR_*`/`SHARED_RG_NAME`/`AZURE_LOCATION`
-variables to `staging`/`prod` — see `iac/README.md`'s "GitHub Environment
-Variables & Secrets Contract" table for the complete bootstrap-published
-set.
+This writes `iac/env/shared.generated.tfvars` (including the new `shared`
+UMI's principal ID) as a non-secret mode-0644 file, and publishes the application deploy variables
+`TF_VAR_STAMP_RG_NAME`/`SHARED_RG_NAME`/`AZURE_LOCATION` to `staging`/`prod`
+(consumed by `deploy-app.yml`, not Terraform) — see `iac/README.md`'s
+"GitHub Environment Variables & Secrets Contract" table for the complete
+bootstrap-published set. `shared_rg_name`, `stamp_rg_name`, and the
+`tfstate_*` values are deterministic once `terraform_umis`/
+`github_environments` are fixed, so they're already committed in
+`iac/env/{shared,staging,prod}.tfvars` — nothing to publish for them.
 
 ## Phase 5 — Operator DNS grant (only if using a prod custom domain)
 
@@ -272,7 +302,7 @@ producing the zone-relative name Azure DNS expects. If you populate
 `production_hostname`/`dns_zone_name` as part of this migration, review the
 shared Terraform plan and confirm the computed record name before applying.
 
-## Phase 5.5 — Populate GitHub Secrets (generated variables are automatic)
+## Phase 5.5 — Populate GitHub Secrets (deploy variables are automatic)
 
 Authored non-secret config (`acs_email_domain`, `acs_sender_address`,
 `production_hostname`, `dns_zone_name`, `dns_zone_resource_group_name`,
@@ -287,11 +317,10 @@ entry for it.
 Only two categories of GitHub environment entries exist, and only one of
 them needs manual work before the shared/environment applies in phase 6:
 
-- **Bootstrap-published generated variables** (`TF_VAR_STAMP_RG_NAME`,
-  `TF_VAR_shared_rg_name`, `TF_VAR_env_umi_principal_ids`,
-  `TF_VAR_tfstate_resource_group_name`, `TF_VAR_tfstate_storage_account_name`,
-  `AZURE_LOCATION`, `SHARED_RG_NAME`) — already written by phase 4's bootstrap
-  apply. Nothing to do here.
+- **Bootstrap-published deploy variables**:
+  `TF_VAR_STAMP_RG_NAME`/`SHARED_RG_NAME`/`AZURE_LOCATION` are used by
+  `deploy-app.yml`, not Terraform, and are already written by phase 4's
+  bootstrap apply. There are no GitHub Terraform-input variables.
 - **Operator-set secrets** — populate these by hand. See the full table in
   [`iac/README.md`](../../iac/README.md#github-environment-variables--secrets-contract);
   summarized here:
@@ -355,7 +384,27 @@ REQUIRED, not optional:
    staging stamp UMI — that identity's broader Owner/Contributor grants are
    exactly what makes the current wiring a privilege-escalation risk.
    Point `pr-preview.yml`'s `environment:` at this dedicated environment once
-   it exists.
+   it exists. This environment is deliberately **not** a bootstrap
+   `terraform_umis` entry (see
+   [`iac/bootstrap/README.md`](../../iac/bootstrap/README.md#adding-a-new-github-environment)
+   for why that recipe grants the wrong kind of access here), so none of its
+   variables/secrets are bootstrap-published — every one below must be set
+   by hand on this new environment:
+   - `SHARED_RG_NAME` — the same shared resource-group name bootstrap
+     publishes to `staging`/`prod` (`rg-bccweb-shared` by default; read it
+     from `terraform -chdir=iac/bootstrap output -json pre_created_rg_names`
+     if unsure). `pr-preview.yml` reads `vars.SHARED_RG_NAME` directly to
+     locate `swa-bccweb-shared` for both the `az staticwebapp secrets list`
+     and `az staticwebapp environment delete` steps — without it those
+     steps have no resource group to target.
+   - `AZURE_CLIENT_ID` / `AZURE_TENANT_ID` / `AZURE_SUBSCRIPTION_ID` — the
+     new preview identity's own OIDC secrets (`azure/login` reads these),
+     never copied from `staging`.
+   - `VITE_BLOB_BASE_URL` — same value as `staging`'s (previews build
+     against staging's public data account); `pr-preview.yml` passes this
+     straight through as a build-time env var.
+   - The repository-level `PREVIEW_ENABLED` variable (see above) still
+     applies regardless of which environment the job points at.
 2. **Required-reviewer deployment protection.** Turn on GitHub's
    required-reviewer protection rule for that dedicated preview environment,
    so the credentials are only released to a workflow run after an approver
@@ -397,18 +446,18 @@ destroyed, not migrated — phase 2).
 
 ## Phase 6 — Apply shared, then staging, then prod
 
-Create the gitignored local shared overlay from its committed template, then
-fill every required placeholder. In particular, populate
-`env_umi_principal_ids` from the bootstrap output shown below before applying
-(the committed `iac/env/shared.tfvars` base already has `acs_email_domain`
-and `acs_sender_address`):
+Review and commit the non-secret, mode-0644
+`iac/env/shared.generated.tfvars` written by phase 4 before applying (the
+committed `iac/env/shared.tfvars` base already has `acs_email_domain` and
+`acs_sender_address`). Its absence before the first bootstrap apply is
+expected; shared cannot plan until the file is committed:
 
 ```sh
-cp iac/env/shared.local.tfvars.example iac/env/shared.local.tfvars
-terraform -chdir=iac/bootstrap output -json terraform_umi_principal_ids
+test -f iac/env/shared.generated.tfvars
+git diff --no-index /dev/null iac/env/shared.generated.tfvars || test $? -eq 1
 
 terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl
-terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var-file=../env/shared.local.tfvars
+terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var-file=../env/shared.generated.tfvars
 ```
 
 This provisions the Log Analytics workspace, per-env Application Insights,

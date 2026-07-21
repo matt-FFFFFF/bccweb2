@@ -230,8 +230,11 @@ needed). **E2E**: Playwright vs `E2E_BASE_URL` (default `:5173`); CI: 2 retries,
 ## Infra / Deploy (`iac/`)
 
 Terraform, THREE roots (see `iac/README.md`): `bootstrap/` (one-shot: tfstate storage, per-env
-Terraform UMIs, the shared + per-env stamp resource groups, GitHub OIDC secrets, and the published
-`TF_VAR_*` topology variables — see below) → `shared/` (the platform layer shared by `staging`/
+Terraform UMIs, the shared + per-env stamp resource groups, GitHub OIDC secrets, the
+application deploy variables `TF_VAR_STAMP_RG_NAME`/`AZURE_LOCATION`/`SHARED_RG_NAME` — for
+`deploy-app.yml` (and, for `SHARED_RG_NAME`, `pr-preview.yml`), not Terraform — and the non-secret, mode-0644
+`iac/env/shared.generated.tfvars`, which must be reviewed and committed after bootstrap apply
+because its UMI IDs do not exist beforehand) → `shared/` (the platform layer shared by `staging`/
 `prod`: Log Analytics workspace, per-env Application Insights, Azure Communication Services,
 and one Standard Static Web App with the prod custom domain/DNS; see `iac/shared/README.md`) →
 `environment/` (the per-env application stamp: storage, Flex Consumption Function App, Key
@@ -251,9 +254,14 @@ instance shared across environments (`iac/shared`); the per-env API backend is l
 imperatively via `az staticwebapp backends link` (Terraform cannot express a cross-resource
 Functions↔SWA backend link) rather than a Terraform-managed backend resource.
 
-Environment configuration combines committed, non-secret base values from
-`iac/env/<env>.tfvars` with explicit `TF_VAR_*` GitHub environment variable/secret mappings in
-`terraform-run.yml`; secrets flow only through the workflow job environment.
+Environment configuration is deterministic, non-secret Terraform topology (`shared_rg_name`,
+`stamp_rg_name`, `tfstate_resource_group_name`, `tfstate_storage_account_name`) committed
+directly in `iac/env/{shared,staging,prod}.tfvars`, plus explicit `TF_VAR_*` GitHub environment
+secret mappings in `terraform-run.yml` for operator secrets (`ops_email`, `puretrack_*`,
+`slack_webhook_url`). Shared plans additionally load the committed
+`iac/env/shared.generated.tfvars`; environment plans never load it. There are no GitHub
+Terraform-input variables. Terraform-native `validation` blocks replace the shell required-vars
+pre-check that `terraform-run.yml` used to run. Secrets flow only through the workflow job environment.
 
 CI (`.github/workflows/`) is DRY: three composite actions (`.github/actions/{setup-node-mise,
 azurite,tf-setup}`) plus two reusable workflows (`deploy-app.yml`, `terraform-run.yml`) that the
