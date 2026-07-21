@@ -7,23 +7,17 @@
 # terraform_principal_type as a CLI override for local human applies
 # (CI uses the ServicePrincipal default):
 #   terraform -chdir=iac/environment plan -var-file=../env/staging.tfvars -var-file=../env/staging.local.tfvars -var 'terraform_principal_type=User'
-# Populate stamp_rg_name from:
-#   terraform -chdir=iac/bootstrap output -json pre_created_rg_names | jq -r '.["stamp-staging"]'
-# Populate the tfstate values from:
-#   terraform -chdir=iac/bootstrap output -raw resource_group_name
-#   terraform -chdir=iac/bootstrap output -raw storage_account_name
-# GitHub Secrets cannot be read back. Enter ops_email, the PureTrack values,
-# and the optional Slack webhook by hand for local use.
+# The deterministic topology (stamp_rg_name, tfstate_resource_group_name,
+# tfstate_storage_account_name) is committed-base-owned in
+# iac/env/staging.tfvars — nothing to populate here for it. GitHub Secrets
+# cannot be read back. Enter ops_email, the PureTrack values, and the
+# optional Slack webhook by hand for local use.
 
 ops_email          = "<REQUIRED: operations email address>"
 puretrack_api_key  = "<REQUIRED: PureTrack API key>"
 puretrack_email    = "<REQUIRED: PureTrack email address>"
 puretrack_password = "<REQUIRED: PureTrack password>"
 slack_webhook_url  = ""
-
-stamp_rg_name                = "<from: pre_created_rg_names .[\"stamp-staging\"]>"
-tfstate_resource_group_name  = "<from: terraform output -raw resource_group_name>"
-tfstate_storage_account_name = "<from: terraform output -raw storage_account_name>"
 
 # terraform_principal_type is NOT set in this file — pass it as a CLI override
 # for local human applies (CI uses the ServicePrincipal default).
