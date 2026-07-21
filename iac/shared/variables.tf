@@ -18,6 +18,11 @@ variable "shared_rg_name" {
   description = "Name of the pre-created shared resource group owned by iac/bootstrap."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.shared_rg_name) != ""
+    error_message = "shared_rg_name must not be empty or whitespace."
+  }
 }
 
 variable "acs_email_domain" {
@@ -78,5 +83,10 @@ variable "env_umi_principal_ids" {
   validation {
     condition     = alltrue([for e in var.environments : contains(keys(var.env_umi_principal_ids), e)])
     error_message = "env_umi_principal_ids must contain an entry for every environment in environments."
+  }
+
+  validation {
+    condition     = alltrue([for principal_id in values(var.env_umi_principal_ids) : trimspace(principal_id) != ""])
+    error_message = "env_umi_principal_ids values must not be empty or whitespace."
   }
 }
