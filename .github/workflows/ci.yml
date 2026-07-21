@@ -176,6 +176,9 @@ jobs:
           done < <(grep -FHn '<REQUIRED' "${files[@]}" | sed -nE 's/^([^:]+):[0-9]+:[[:space:]]*([[:alnum:]_]+)[[:space:]]*=.*/\1:\2/p' || true)
           exit "$failed"
 
+      - name: Check workload location contract
+        run: bash scripts/iac/check-workload-location-contract.sh
+
       - name: Check shared Terraform resource contract
         run: bash scripts/iac/check-shared-resource-contract.sh
 
