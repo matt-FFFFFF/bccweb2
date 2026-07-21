@@ -110,10 +110,10 @@ run "canonical_github_variables_and_shared_tfvars_are_generated" {
     condition = alltrue([
       for key, expected in {
         "staging/TF_VAR_STAMP_RG_NAME" = { environment = "staging", name = "TF_VAR_STAMP_RG_NAME", value = "stamp-staging" }
-        "staging/AZURE_LOCATION"       = { environment = "staging", name = "AZURE_LOCATION", value = "uksouth" }
+        "staging/AZURE_LOCATION"       = { environment = "staging", name = "AZURE_LOCATION", value = "swedencentral" }
         "staging/SHARED_RG_NAME"       = { environment = "staging", name = "SHARED_RG_NAME", value = "rg-bccweb-shared" }
         "prod/TF_VAR_STAMP_RG_NAME"    = { environment = "prod", name = "TF_VAR_STAMP_RG_NAME", value = "stamp-prod" }
-        "prod/AZURE_LOCATION"          = { environment = "prod", name = "AZURE_LOCATION", value = "uksouth" }
+        "prod/AZURE_LOCATION"          = { environment = "prod", name = "AZURE_LOCATION", value = "swedencentral" }
         "prod/SHARED_RG_NAME"          = { environment = "prod", name = "SHARED_RG_NAME", value = "rg-bccweb-shared" }
         } : (
         github_actions_environment_variable.rg_names[key].environment == expected.environment &&
@@ -155,6 +155,22 @@ run "canonical_github_variables_and_shared_tfvars_are_generated" {
       }
       EOT
     error_message = "The generated shared tfvars must contain the exact SPDX header, provenance comment, and complete sorted principal-ID map."
+  }
+
+  assert {
+    condition = alltrue([
+      for resource_group in azapi_resource.pre_created_rg :
+      resource_group.location == "swedencentral"
+    ])
+    error_message = "Application workload resource groups must be pre-created in Sweden Central."
+  }
+
+  assert {
+    condition = alltrue([
+      for environment, credential in azapi_resource.tf_umi_fed_cred :
+      credential.body.properties.subject == "repo:matt-FFFFFF@16320656/bccweb2@1264013182:environment:${environment}"
+    ])
+    error_message = "Azure federated credentials must trust GitHub's immutable repository subject claims."
   }
 }
 

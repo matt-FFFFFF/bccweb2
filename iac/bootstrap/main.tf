@@ -201,7 +201,7 @@ resource "azapi_resource" "tf_umi_fed_cred" {
   body = {
     properties = {
       issuer    = "https://token.actions.githubusercontent.com"
-      subject   = "repo:${var.github_repo}:environment:${each.value.github_env}"
+      subject   = "repo:${var.github_oidc_subject_repo}:environment:${each.value.github_env}"
       audiences = ["api://AzureADTokenExchange"]
     }
   }
