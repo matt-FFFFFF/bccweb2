@@ -12,7 +12,7 @@
 #   cp iac/env/prod.local.tfvars.example iac/env/prod.local.tfvars
 # Apply with the committed base first, then the local overlay (overlay wins):
 #   terraform -chdir=iac/environment init -backend-config=../env/prod.backend.hcl && terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars -var-file=../env/prod.local.tfvars
-# DO NOT COMMIT REAL SECRETS. In CI, secrets and generated values are mapped
+# DO NOT COMMIT REAL SECRETS. In CI, secrets are mapped
 # explicitly into TF_VAR_* job-environment entries by terraform-run.yml.
 
 stamp_name = "prod"

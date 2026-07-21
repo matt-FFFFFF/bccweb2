@@ -149,6 +149,17 @@ jobs:
           test "$(grep -Fc -- "-var-file=\"../env/\${TARGET_ENV}.tfvars\"" "$workflow")" -eq 3
           test "$(grep -Fc "terraform -chdir=\"iac/\${ROOT}\" apply -input=false tfplan" "$workflow")" -eq 1
 
+      - name: Check deploy backend query contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/deploy-app.yml
+          test "$(grep -Fc -- "--query 'backendResourceId'" "$workflow")" -eq 1
+          if grep -Fq -- "--query '[0].backendResourceId'" "$workflow"; then
+            echo "deploy-app.yml must query the singular backend object, not an array element." >&2
+            exit 1
+          fi
+
       - name: Check committed tfvars are non-secret
         shell: bash
         run: |

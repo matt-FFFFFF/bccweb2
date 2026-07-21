@@ -163,7 +163,7 @@ jobs:
           current="$(az staticwebapp backends show \
             --name swa-bccweb-shared \
             --resource-group "${{ vars.SHARED_RG_NAME }}" \
-            --query '[0].backendResourceId' \
+            --query 'backendResourceId' \
             -o tsv \
             "${environment_args[@]}" 2>/dev/null || true)"
 
