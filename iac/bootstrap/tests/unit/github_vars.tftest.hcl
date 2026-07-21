@@ -214,6 +214,7 @@ run "partially_immutable_oidc_subject_is_rejected" {
   }
 
   variables {
+    github_repo              = "owner/repository"
     github_oidc_subject_repo = "owner@1/repository"
   }
 
