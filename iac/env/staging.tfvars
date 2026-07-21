@@ -8,6 +8,8 @@ tfstate_resource_group_name  = "rg-bccweb-tfstate"
 tfstate_storage_account_name = "stbccweb13afe"
 stamp_rg_name                = "stamp-staging"
 
+# Initial provisioning only: no origins means Blob Storage emits no CORS rule.
+# Replace with the shared SWA's HTTPS origin and re-apply before browser SPA use.
 allowed_origins = []
 tags            = {}
 

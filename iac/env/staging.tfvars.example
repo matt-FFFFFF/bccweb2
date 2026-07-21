@@ -12,7 +12,7 @@
 #   cp iac/env/staging.local.tfvars.example iac/env/staging.local.tfvars
 # Apply with the committed base first, then the local overlay (overlay wins):
 #   terraform -chdir=iac/environment init -backend-config=../env/staging.backend.hcl && terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars -var-file=../env/staging.local.tfvars
-# DO NOT COMMIT REAL SECRETS. In CI, secrets and generated values are mapped
+# DO NOT COMMIT REAL SECRETS. In CI, secrets are mapped
 # explicitly into TF_VAR_* job-environment entries by terraform-run.yml.
 
 stamp_name = "staging"
@@ -25,7 +25,9 @@ tfstate_resource_group_name  = "rg-bccweb-tfstate" # REQUIRED: bootstrap state R
 tfstate_storage_account_name = "stbccweb13afe"     # REQUIRED: canonical bootstrap state account
 stamp_rg_name                = "stamp-staging"
 
-# CORS: staging SWA default hostname; leave empty until known.
+# Initial provisioning only: no origins means Blob Storage emits no CORS rule.
+# After the shared SWA exists, replace this with its HTTPS default origin,
+# commit staging.tfvars, and re-apply the environment before browser SPA use.
 allowed_origins = []
 
 ops_email = "<REQUIRED: operator must replace before apply>" # REQUIRED

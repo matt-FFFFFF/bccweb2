@@ -435,7 +435,12 @@ run "storage_split_staging" {
       azapi_resource.blob_service_data.body.properties.changeFeed.enabled == true &&
       azapi_resource.blob_service_data.body.properties.deleteRetentionPolicy.days == 7 &&
       azapi_resource.blob_service_data.body.properties.containerDeleteRetentionPolicy.days == 7 &&
+      length(azapi_resource.blob_service_data.body.properties.cors.corsRules) == 1 &&
       azapi_resource.blob_service_data.body.properties.cors.corsRules[0].allowedOrigins == var.allowed_origins &&
+      azapi_resource.blob_service_data.body.properties.cors.corsRules[0].allowedMethods == ["GET", "HEAD", "OPTIONS"] &&
+      azapi_resource.blob_service_data.body.properties.cors.corsRules[0].allowedHeaders == ["Content-Type", "Authorization", "x-ms-version", "x-ms-date", "x-ms-blob-type", "If-Match", "If-None-Match", "If-Modified-Since", "Range"] &&
+      azapi_resource.blob_service_data.body.properties.cors.corsRules[0].exposedHeaders == ["x-ms-request-id", "x-ms-version", "Content-Length", "Content-Type", "ETag", "Last-Modified"] &&
+      azapi_resource.blob_service_data.body.properties.cors.corsRules[0].maxAgeInSeconds == 3600 &&
       azapi_resource.storage_container_data.name == "data" &&
       azapi_resource.storage_container_data.parent_id == azapi_resource.blob_service_data.id &&
       azapi_resource.storage_container_data.body.properties.publicAccess == "Blob" &&
@@ -459,6 +464,28 @@ run "storage_split_staging" {
       output.storage_account_name_data == "stbccwebunitdata"
     )
     error_message = "The stamp module must export distinct runtime and data storage account names."
+  }
+}
+
+run "storage_empty_allowed_origins_disables_cors" {
+  command = plan
+
+  providers = {
+    azapi  = azapi.mock
+    random = random.mock
+  }
+
+  module {
+    source = "./tests/unit/stamp-fixture"
+  }
+
+  variables {
+    allowed_origins = []
+  }
+
+  assert {
+    condition     = length(azapi_resource.blob_service_data.body.properties.cors.corsRules) == 0
+    error_message = "An empty allowed_origins list must disable Blob Storage CORS instead of emitting an invalid empty-origin rule."
   }
 }
 

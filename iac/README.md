@@ -144,6 +144,15 @@ Follow these steps to provision the topology from scratch.
     reading Application Insights and ACS identifiers from `iac/shared`'s
     remote state.
 
+    Staging may be provisioned initially with `allowed_origins = []`; this emits
+    no Blob Storage CORS rule and is therefore not ready for browser SPA use.
+    Once the one shared SWA exists, read its Azure-assigned hostname with
+    `terraform -chdir=iac/shared output -raw swa_default_hostname`, commit
+    `allowed_origins = ["https://<that-hostname>"]` to
+    `iac/env/staging.tfvars`, and re-apply staging before using the SPA. The
+    shared SWA serves stable environment deployments and PR previews while
+    deploy automation maps each environment's Function App backend to it.
+
     After the shared apply, register the registrar DNS records printed by
     `terraform -chdir=iac/shared output acs_dns_records_for_operator` so
     Azure Communication Services can verify the email domain — see

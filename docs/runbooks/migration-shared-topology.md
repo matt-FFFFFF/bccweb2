@@ -465,6 +465,24 @@ Azure Communication Services, the Standard SWA, and (T23) the leaf-scoped
 RBAC granting each app-env UMI Monitoring Reader / Contributor onto the
 shared AI/ACS/SWA resources.
 
+The first staging environment apply may leave `allowed_origins = []` in
+`iac/env/staging.tfvars`. That bootstraps the stamp with **no Blob Storage CORS
+rules** and is not browser-operational: the SPA cannot read Account B directly
+from a different origin. After the shared apply above, obtain the Azure-assigned
+hostname for the one shared SWA:
+
+```sh
+STAGING_SPA_HOSTNAME=$(terraform -chdir=iac/shared output -raw swa_default_hostname)
+```
+
+That single Standard SWA serves the stable environment deployments and PR
+preview environments; deploy automation links each environment's Function App
+backend to it rather than provisioning an SWA per stamp. Set staging's committed
+origin to `allowed_origins = ["https://${STAGING_SPA_HOSTNAME}"]`, commit
+`iac/env/staging.tfvars`, and re-apply `iac/environment` for staging before any
+browser use. Do not add a wildcard or treat the initial empty-origin apply as a
+usable staging deployment.
+
 ```sh
 terraform -chdir=iac/environment init -backend-config=../env/staging.backend.hcl
 terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars -var-file=../env/staging.local.tfvars -var 'terraform_principal_type=User'

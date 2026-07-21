@@ -227,7 +227,7 @@ resource "azapi_resource" "blob_service_data" {
         days    = 7
       }
       cors = {
-        corsRules = [
+        corsRules = length(var.allowed_origins) == 0 ? [] : [
           {
             allowedOrigins  = var.allowed_origins
             allowedMethods  = ["GET", "HEAD", "OPTIONS"]
