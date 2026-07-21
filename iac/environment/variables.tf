@@ -12,18 +12,33 @@ variable "tfstate_resource_group_name" {
   description = "Resource group containing the canonical Terraform state storage account."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.tfstate_resource_group_name) != ""
+    error_message = "tfstate_resource_group_name must not be empty or whitespace."
+  }
 }
 
 variable "tfstate_storage_account_name" {
   description = "Name of the canonical Terraform state storage account."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.tfstate_storage_account_name) != ""
+    error_message = "tfstate_storage_account_name must not be empty or whitespace."
+  }
 }
 
 variable "stamp_rg_name" {
   description = "Name of the pre-created stamp resource group."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.stamp_rg_name) != ""
+    error_message = "stamp_rg_name must not be empty or whitespace."
+  }
 }
 
 variable "tags" {
@@ -59,6 +74,11 @@ variable "ops_email" {
   description = "Alert recipient email address."
   type        = string
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.ops_email) != ""
+    error_message = "ops_email must not be empty or whitespace."
+  }
 }
 
 variable "slack_webhook_url" {
@@ -72,6 +92,11 @@ variable "puretrack_api_key" {
   type        = string
   sensitive   = true
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.puretrack_api_key) != ""
+    error_message = "puretrack_api_key must not be empty or whitespace."
+  }
 }
 
 variable "puretrack_email" {
@@ -79,6 +104,11 @@ variable "puretrack_email" {
   type        = string
   sensitive   = true
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.puretrack_email) != ""
+    error_message = "puretrack_email must not be empty or whitespace."
+  }
 }
 
 variable "puretrack_password" {
@@ -86,6 +116,11 @@ variable "puretrack_password" {
   type        = string
   sensitive   = true
   nullable    = false
+
+  validation {
+    condition     = trimspace(var.puretrack_password) != ""
+    error_message = "puretrack_password must not be empty or whitespace."
+  }
 }
 
 variable "jwt_secret_version" {
