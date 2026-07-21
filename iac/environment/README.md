@@ -120,7 +120,8 @@ The operator keys map to Azure's raw keys as follows:
 `domain_ownership` → `Domain`, `spf` → `SPF`, `dkim` → `DKIM`, `dkim2` →
 `DKIM2`, and `dmarc` → `DMARC`; there is no MX record here. Azure
 Communication Services polls for the records and flips the domain to
-"Verified" once they resolve — no further Terraform action is required.
+"Verified" once they resolve. Then set `link_acs_email_domain = true` in
+`iac/env/shared.tfvars` and re-apply the shared root to enable outbound email.
 The shared root's output contract is documented in
 [`../shared/OUTPUTS.md`](../shared/OUTPUTS.md).
 

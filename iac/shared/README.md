@@ -13,8 +13,11 @@ creates the resource group itself.
   attached to that workspace.
 - **`acs.tf`**: one Azure Communication Services email service + customer-managed
   domain, the configured sender username provisioned beneath that domain, plus one
-  communication service (`acs-bccweb-shared`) linked to the domain. `listKeys` stays
-  ephemeral — `acs.tf` never exports a connection string.
+  communication service (`acs-bccweb-shared`). The first apply leaves
+  `linkedDomains` empty so Azure can expose DNS verification records. After the
+  externally managed domain is verified, set `link_acs_email_domain = true` and
+  re-apply to enable email. `listKeys` stays ephemeral — `acs.tf` never exports a
+  connection string.
 - **`swa.tf` + `dns.tf`**: one Standard-tier Static Web App (`swa-bccweb-shared`)
   in West Europe because Static Web Apps does not support Sweden Central,
   shared by every environment, plus (when `production_hostname`/`dns_zone_name`

@@ -156,7 +156,9 @@ Follow these steps to provision the topology from scratch.
 
     After the shared apply, register the registrar DNS records printed by
     `terraform -chdir=iac/shared output acs_dns_records_for_operator` so
-    Azure Communication Services can verify the email domain — see
+    Azure Communication Services can verify the email domain. Once Azure
+    reports the domain verified, set `link_acs_email_domain = true` in the
+    committed shared tfvars and re-apply — see
     [environment/README.md](environment/README.md#acs-domain-verification).
 
     **Note on RBAC Propagation**: On the very first apply, you might
