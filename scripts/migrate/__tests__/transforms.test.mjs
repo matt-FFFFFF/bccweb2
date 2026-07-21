@@ -9,6 +9,7 @@ import {
   ensureNonEmpty,
   legacyMigratedSignature,
   parseFrequencyMhz,
+  pilotSummaryFromMigration,
 } from "../transforms.mjs";
 
 test("legacyMigratedSignature uses the legacy-import user sentinel", () => {
@@ -36,6 +37,36 @@ test("ensureNonEmpty returns a trimmed non-empty value or fallback", () => {
   assert.equal(ensureNonEmpty("  ", "X"), "X");
   assert.equal(ensureNonEmpty("a", "X"), "a");
   assert.equal(ensureNonEmpty(null, "X"), "X");
+});
+
+test("pilotSummaryFromMigration omits clubId when a pilot has no current club", () => {
+  const summary = pilotSummaryFromMigration({
+    id: "pilot-1",
+    legacyId: 1,
+    name: "Unaffiliated Pilot",
+    currentSeasonClub: undefined,
+    rating: "Pilot",
+  });
+
+  assert.deepEqual(summary, {
+    id: "pilot-1",
+    legacyId: 1,
+    name: "Unaffiliated Pilot",
+    rating: "Pilot",
+  });
+  assert.equal(Object.hasOwn(summary, "clubId"), false);
+});
+
+test("pilotSummaryFromMigration includes the current club ID when present", () => {
+  const summary = pilotSummaryFromMigration({
+    id: "pilot-2",
+    legacyId: 2,
+    name: "Affiliated Pilot",
+    currentSeasonClub: { clubId: "club-1", clubName: "Club One" },
+    rating: "Advanced Pilot",
+  });
+
+  assert.equal(summary.clubId, "club-1");
 });
 
 test("assertSeasonYear coerces valid years and throws on bad source data", () => {
