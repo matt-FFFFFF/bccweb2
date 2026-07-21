@@ -102,7 +102,7 @@ export function isInScope(relPath) {
   // Terraform lock files are generated/tool-managed (`terraform init` rewrites
   // them) and match the `.hcl` rule below, so exclude them by basename before
   // the allowlist. Matches at any depth (iac/, iac/bootstrap/, modules/...).
-  if (relPath.endsWith(".terraform.lock.hcl")) return null;
+  if (relPath.slice(relPath.lastIndexOf("/") + 1) === ".terraform.lock.hcl") return null;
 
   // 2. Positive allowlist — longest suffix wins.
   for (const [suffix, style] of SUFFIX_STYLES) {

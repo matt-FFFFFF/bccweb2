@@ -81,6 +81,12 @@ test("isInScope: .tfvars.example wins over a bare .example (longest suffix first
   assert.equal(isInScope("iac/env/dev.tfvars.example")?.prefix, "# ");
 });
 
+test("isInScope: excludes only the exact Terraform lockfile basename", () => {
+  assert.equal(isInScope("iac/bootstrap/.terraform.lock.hcl"), null);
+  assert.equal(isInScope("policy.terraform.lock.hcl")?.prefix, "# ");
+  assert.equal(isInScope("nested/policy.terraform.lock.hcl")?.prefix, "# ");
+});
+
 test("isInScope: null for excluded / unlisted paths", () => {
   const outOfScope = [
     "vite-env.d.ts",
@@ -235,4 +241,3 @@ test("isViolation: empty (or BOM-only) in-scope file is not a violation", () => 
   const [c, l] = headerLines(LINE);
   assert.equal(isViolation(`${c}\n${l}\n`), false, "compliant → not a violation");
 });
-
