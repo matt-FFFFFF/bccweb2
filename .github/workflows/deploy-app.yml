@@ -42,6 +42,13 @@ jobs:
           cp apps/api/host.json apps/api/package.json .deploy/
           cp -r apps/api/dist .deploy/dist
           rsync -a --copy-links node_modules/ .deploy/node_modules/
+          # Required overlay: npm leaves some @bccweb/api PROD deps un-hoisted under
+          # apps/api/node_modules (e.g. puppeteer-core). Flex ships node_modules as-is
+          # (remoteBuild=false); without this the entry point hits ERR_MODULE_NOT_FOUND
+          # and the host indexes zero functions. Do not remove.
+          if [ -d apps/api/node_modules ]; then
+            rsync -a --copy-links apps/api/node_modules/ .deploy/node_modules/
+          fi
 
       - uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
         with:
