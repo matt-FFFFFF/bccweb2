@@ -66,7 +66,7 @@ resource "azapi_resource" "acs" {
   body = {
     properties = {
       dataLocation  = "Europe"
-      linkedDomains = [azapi_resource.acs_email_domain.id]
+      linkedDomains = var.link_acs_email_domain ? [azapi_resource.acs_email_domain.id] : []
     }
   }
 

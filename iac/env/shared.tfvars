@@ -7,8 +7,9 @@ swa_location = "westeurope"
 
 shared_rg_name = "rg-bccweb-shared"
 
-acs_email_domain   = "mail.flyparagliding.org.uk"
-acs_sender_address = "no-reply@mail.flyparagliding.org.uk"
+acs_email_domain      = "mail.flyparagliding.org.uk"
+acs_sender_address    = "no-reply@mail.flyparagliding.org.uk"
+link_acs_email_domain = false
 
 production_hostname          = ""
 dns_zone_name                = ""

@@ -17,6 +17,7 @@ shared_rg_name = "rg-bccweb-shared"
 
 acs_email_domain   = "<REQUIRED: ACS email domain>"
 acs_sender_address = "<REQUIRED: sender address whose domain equals acs_email_domain>"
+link_acs_email_domain = false
 
 # Leave these empty until the production DNS cutover.
 production_hostname          = ""
