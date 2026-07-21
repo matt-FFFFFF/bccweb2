@@ -112,6 +112,14 @@ variable "terraform_umis" {
     )
     error_message = "terraform_umis must include shared without stamp_rg; every application environment must set stamp_rg."
   }
+
+  validation {
+    condition = alltrue([
+      for k, v in var.terraform_umis :
+      k == "shared" ? true : v.stamp_rg == "stamp-${k}"
+    ])
+    error_message = "Each non-shared terraform_umis stamp_rg must equal stamp-<key>."
+  }
 }
 
 variable "manage_github_secrets" {
