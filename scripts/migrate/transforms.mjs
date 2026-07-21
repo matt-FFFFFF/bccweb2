@@ -43,6 +43,16 @@ export function ensureNonEmpty(value, fallback) {
   return trimmed.length > 0 ? trimmed : fallback;
 }
 
+export function pilotSummaryFromMigration({ id, legacyId, name, currentSeasonClub, rating }) {
+  return {
+    id,
+    legacyId,
+    name,
+    ...(currentSeasonClub ? { clubId: currentSeasonClub.clubId } : {}),
+    rating,
+  };
+}
+
 export function assertSeasonYear(raw) {
   const year = Number(raw);
   if (!Number.isInteger(year) || year < 2000 || year > 9999) {

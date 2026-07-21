@@ -56,7 +56,7 @@ import { buildPilotClubHistory, queryPilotClubRows } from "./pilot-club-history-
 import { writeDiscardedCounts } from "./discarded-counts.mjs";
 import { writeNormalizationCounts } from "./normalization-counts.mjs";
 import { createTally, normalizeCoachType, normalizePilotRating, normalizeRoundStatus, normalizeScoringType, normalizeWingClass } from "./enum-normalize.mjs";
-import { assertSeasonYear, briefImageBlobFromLegacy, briefImagePath, ensureNonEmpty, normalizeWebsiteUrl, parseFrequencyMhz, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature } from "./transforms.mjs";
+import { assertSeasonYear, briefImageBlobFromLegacy, briefImagePath, ensureNonEmpty, normalizeWebsiteUrl, parseFrequencyMhz, manufacturerFromLegacyRow, legacySignaturePath, legacyMigratedSignature, pilotSummaryFromMigration } from "./transforms.mjs";
 import { legacyScoreManifestPath, writeLegacyScoreManifest } from "./legacy-score-manifest.mjs";
 
 // ─── CLI flags ────────────────────────────────────────────────────────────────
@@ -600,13 +600,13 @@ async function main() {
 
     await uploadPrivateBlob(`pilots/${id}.json`, pilotDoc);
 
-    pilotsSummary.push({
+    pilotsSummary.push(pilotSummaryFromMigration({
       id,
       legacyId: r.ID,
       name: fullName,
-      clubId: currentSeasonClub?.clubId ?? null,
+      currentSeasonClub,
       rating: pilotRating,
-    });
+    }));
 
     if (r.UserEmail) {
       pilotEmailIndex[r.UserEmail.toLowerCase()] = id;
