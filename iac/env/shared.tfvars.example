@@ -4,12 +4,11 @@
 # variable, secret and non-secret alike. The non-secret subset below is now
 # the committed, tracked `iac/env/shared.tfvars` — do not `cp` this file over
 # it; edit `shared.tfvars` directly if a committed base value needs to
-# change. Secrets and bootstrap-generated values (`env_umi_principal_ids`,
-# `shared_rg_name`) live in the gitignored local overlay; copy that overlay
-# from `iac/env/shared.local.tfvars.example` instead:
-#   cp iac/env/shared.local.tfvars.example iac/env/shared.local.tfvars
-# Apply with the committed base first, then the local overlay (overlay wins):
-#   terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var-file=../env/shared.local.tfvars
+# change. Deterministic topology (`shared_rg_name`) is committed-base-owned
+# in `shared.tfvars`. Bootstrap writes `env_umi_principal_ids` to the
+# non-secret, committed `iac/env/shared.generated.tfvars` after its first apply.
+# Apply with the committed base first, then bootstrap's generated file:
+#   terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var-file=../env/shared.generated.tfvars
 
 environments   = ["staging", "prod"]
 location       = "uksouth"
@@ -25,8 +24,8 @@ dns_zone_resource_group_name = ""
 
 tags = {}
 
-# REQUIRED: populate this map from:
-#   terraform -chdir=iac/bootstrap output -json terraform_umi_principal_ids
+# Bootstrap-generated reference; the canonical value is written to
+# `iac/env/shared.generated.tfvars`, not maintained in this example.
 env_umi_principal_ids = {
   staging = "<REQUIRED: staging Terraform UMI principal ID>"
   prod    = "<REQUIRED: prod Terraform UMI principal ID>"

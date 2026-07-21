@@ -4,10 +4,11 @@
 # variable, secret and non-secret alike. The non-secret subset below is now
 # the committed, tracked `iac/env/prod.tfvars` — do not `cp` this file over
 # it; edit `prod.tfvars` directly if a committed base value needs to change.
-# Secrets and bootstrap-generated values (`stamp_rg_name`, the `tfstate_*`
-# values, `ops_email`, `puretrack_*`, `terraform_principal_type` for local
-# human applies) live in the gitignored local overlay; copy that overlay
-# from `iac/env/prod.local.tfvars.example` instead:
+# Deterministic topology (`stamp_rg_name`, `tfstate_resource_group_name`,
+# `tfstate_storage_account_name`) is committed-base-owned in `prod.tfvars`,
+# not the local overlay. Secrets (`ops_email`, `puretrack_*`) live in the
+# gitignored local overlay; copy that overlay from `iac/env/prod.local.tfvars.example`
+# instead:
 #   cp iac/env/prod.local.tfvars.example iac/env/prod.local.tfvars
 # Apply with the committed base first, then the local overlay (overlay wins):
 #   terraform -chdir=iac/environment init -backend-config=../env/prod.backend.hcl && terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars -var-file=../env/prod.local.tfvars
@@ -17,11 +18,12 @@
 stamp_name = "prod"
 location   = "uksouth"
 
-# Local overlay values (see iac/env/prod.local.tfvars.example). CI maps
-# these from GitHub environment secrets/variables via terraform-run.yml.
-tfstate_resource_group_name = "rg-bccweb-tfstate" # REQUIRED: bootstrap state RG; CI maps TF_VAR_tfstate_resource_group_name
-tfstate_storage_account_name = "stbccweb13afe" # REQUIRED: canonical bootstrap state account; CI maps TF_VAR_tfstate_storage_account_name
-stamp_rg_name = "stamp-prod"
+# Deterministic topology: committed-base-owned (matches the canonical
+# bootstrap storage account / stamp resource group names). CI loads these
+# from the committed base file too, not from GitHub-mapped TF_VAR_* entries.
+tfstate_resource_group_name  = "rg-bccweb-tfstate" # REQUIRED: bootstrap state RG
+tfstate_storage_account_name = "stbccweb13afe"     # REQUIRED: canonical bootstrap state account
+stamp_rg_name                = "stamp-prod"
 
 # CORS: replace with the real production hostname before apply.
 allowed_origins = ["https://<your-prod-hostname>"]
@@ -39,6 +41,10 @@ blob_schema_mode   = "observe"
 # Principal type for the identity running Terraform. Default is ServicePrincipal
 # because CI (GitHub Actions → Terraform UMI via OIDC) is the primary path.
 # Override to "User" when applying locally as yourself (`az login` context).
+# Documented here for the full schema only — never committed in the real
+# `prod.tfvars` or in `prod.local.tfvars.example`; every local apply passes
+# it as an explicit `-var 'terraform_principal_type=User'` CLI override
+# instead (see iac/README.md's "First-time Setup" step 6).
 terraform_principal_type = "ServicePrincipal"
 
 # Optional alert receiver.
