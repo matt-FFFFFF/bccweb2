@@ -188,10 +188,10 @@ run "function_app_settings_use_kv_references" {
     condition = (
       one([for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting.value if setting.name == "AzureWebJobsStorage"]) == "DefaultEndpointsProtocol=https;AccountName=stbccwebunitrt;AccountKey=TEST_STORAGE_KEY_SENTINEL;EndpointSuffix=core.windows.net" &&
       one([for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting.value if setting.name == "BLOB_CONNECTION_STRING"]) == "DefaultEndpointsProtocol=https;AccountName=stbccwebunitdata;AccountKey=TEST_STORAGE_KEY_SENTINEL;EndpointSuffix=core.windows.net" &&
-      one([for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting.value if setting.name == "FUNCTIONS_WORKER_RUNTIME"]) == "node" &&
+      length([for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting if setting.name == "FUNCTIONS_WORKER_RUNTIME"]) == 0 &&
       one([for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting.value if setting.name == "FUNCTIONS_NODE_BLOCK_ON_ENTRY_POINT_ERROR"]) == "true"
     )
-    error_message = "Function settings must select the Node worker, surface entry-point errors, and use distinct runtime/data storage accounts."
+    error_message = "Flex settings must omit the forbidden worker setting, surface entry-point errors, and use distinct runtime/data storage accounts."
   }
 }
 
