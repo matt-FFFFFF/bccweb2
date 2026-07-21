@@ -115,6 +115,45 @@ if [[ "$managed_set" != "$expected_managed_set" ]]; then
   exit 1
 fi
 
+resource_block() {
+  local resource_name="$1"
+  awk -v target="$resource_name" '
+    function brace_delta(value, copy, opens, closes) {
+      copy = value
+      opens = gsub(/\{/, "{", copy)
+      copy = value
+      closes = gsub(/\}/, "}", copy)
+      return opens - closes
+    }
+    $0 ~ "^[[:space:]]*resource[[:space:]]+\"azapi_resource\"[[:space:]]+\"" target "\"[[:space:]]*\\{" {
+      in_resource = 1
+      depth = brace_delta($0)
+      print
+      if (depth == 0) exit
+      next
+    }
+    in_resource {
+      print
+      depth += brace_delta($0)
+      if (depth == 0) exit
+    }
+  ' "$shared_dir/acs.tf"
+}
+
+for protected_resource in acs_email acs; do
+  resource_block "$protected_resource" | grep -Eq '^[[:space:]]*prevent_destroy[[:space:]]*=[[:space:]]*true' || {
+    printf 'Shared lifecycle contract failed: azapi_resource.%s must retain prevent_destroy=true.\n' "$protected_resource" >&2
+    exit 1
+  }
+done
+
+for replaceable_resource in acs_email_domain acs_sender_username; do
+  if resource_block "$replaceable_resource" | grep -Eq '^[[:space:]]*prevent_destroy[[:space:]]*='; then
+    printf 'Shared lifecycle contract failed: azapi_resource.%s must remain replaceable.\n' "$replaceable_resource" >&2
+    exit 1
+  fi
+done
+
 actual_outputs="$(grep -hoE '^output "[^"]+"' "$shared_dir"/*.tf | cut -d '"' -f 2 | LC_ALL=C sort)"
 expected_outputs="$(printf '%s\n' \
   'acs_dns_records_for_operator' \

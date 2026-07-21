@@ -34,9 +34,6 @@ resource "azapi_resource" "acs_email_domain" {
 
   response_export_values = ["properties.verificationRecords"]
 
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 resource "azapi_resource" "acs_sender_username" {
@@ -51,9 +48,6 @@ resource "azapi_resource" "acs_sender_username" {
     }
   }
 
-  lifecycle {
-    prevent_destroy = true
-  }
 }
 
 resource "azapi_resource" "acs" {
