@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 
 stamp_name = "staging"
-location   = "uksouth"
+location   = "swedencentral"
 
 tfstate_resource_group_name  = "rg-bccweb-tfstate"
 tfstate_storage_account_name = "stbccweb13afe"

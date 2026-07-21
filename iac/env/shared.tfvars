@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MPL-2.0
 
 environments = ["staging", "prod"]
-location     = "uksouth"
+location     = "swedencentral"
 
 shared_rg_name = "rg-bccweb-shared"
 
