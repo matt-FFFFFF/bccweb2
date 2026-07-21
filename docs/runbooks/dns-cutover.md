@@ -2,7 +2,7 @@
 
 This runbook covers two intertwined DNS changes that ship together at production cutover:
 
-1. **ACS email domain verification** — publish SPF, DKIM, DKIM2 and DMARC records at the registrar so the Azure Communication Services sending domain becomes Verified and outbound mail is deliverable.
+1. **ACS email domain verification and activation** — publish SPF, DKIM, DKIM2 and DMARC records at the registrar, wait for Azure verification, then enable the committed domain-link toggle so outbound mail is deliverable.
 2. **Production CNAME flip** — point the public hostname (e.g. `bcc.flyparagliding.org.uk`) at the Azure Static Web App default hostname.
 
 The two changes are independent in DNS but conventionally done in the same operator session. The TTL strategy below applies to both.
@@ -72,6 +72,11 @@ For each record returned by `terraform -chdir=iac/shared output acs_dns_records_
    not a separate Terraform recommendation output. Tighten to
    `p=quarantine` after one clean week of DMARC aggregate reports, and to
    `p=reject` only after a second clean week.
+5. After Azure reports every required domain check as Verified, set
+   `link_acs_email_domain = true` in `iac/env/shared.tfvars`, commit it through
+   review, and run the shared Terraform apply workflow. Confirm the final plan
+   changes only `acs-bccweb-shared.properties.linkedDomains` and that the apply
+   succeeds before treating outbound mail as enabled.
 
 **DMARC policy progression — non-negotiable for first deployment:**
 
