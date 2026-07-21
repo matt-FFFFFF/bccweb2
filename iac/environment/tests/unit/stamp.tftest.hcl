@@ -187,9 +187,11 @@ run "function_app_settings_use_kv_references" {
   assert {
     condition = (
       one([for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting.value if setting.name == "AzureWebJobsStorage"]) == "DefaultEndpointsProtocol=https;AccountName=stbccwebunitrt;AccountKey=TEST_STORAGE_KEY_SENTINEL;EndpointSuffix=core.windows.net" &&
-      one([for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting.value if setting.name == "BLOB_CONNECTION_STRING"]) == "DefaultEndpointsProtocol=https;AccountName=stbccwebunitdata;AccountKey=TEST_STORAGE_KEY_SENTINEL;EndpointSuffix=core.windows.net"
+      one([for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting.value if setting.name == "BLOB_CONNECTION_STRING"]) == "DefaultEndpointsProtocol=https;AccountName=stbccwebunitdata;AccountKey=TEST_STORAGE_KEY_SENTINEL;EndpointSuffix=core.windows.net" &&
+      one([for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting.value if setting.name == "FUNCTIONS_WORKER_RUNTIME"]) == "node" &&
+      one([for setting in azapi_resource.function_app.body.properties.siteConfig.appSettings : setting.value if setting.name == "FUNCTIONS_NODE_BLOCK_ON_ENTRY_POINT_ERROR"]) == "true"
     )
-    error_message = "AzureWebJobsStorage must use the runtime account and BLOB_CONNECTION_STRING must use the distinct data account."
+    error_message = "Function settings must select the Node worker, surface entry-point errors, and use distinct runtime/data storage accounts."
   }
 }
 
