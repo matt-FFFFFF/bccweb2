@@ -1,0 +1,23 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
+# Copy this local-only overlay, then restrict its permissions:
+#   cp iac/env/staging.local.tfvars.example iac/env/staging.local.tfvars
+#   chmod 600 iac/env/staging.local.tfvars
+# Pass it after the committed base so the overlay wins, and pass
+# terraform_principal_type as a CLI override for local human applies
+# (CI uses the ServicePrincipal default):
+#   terraform -chdir=iac/environment plan -var-file=../env/staging.tfvars -var-file=../env/staging.local.tfvars -var 'terraform_principal_type=User'
+# The deterministic topology (stamp_rg_name, tfstate_resource_group_name,
+# tfstate_storage_account_name) is committed-base-owned in
+# iac/env/staging.tfvars — nothing to populate here for it. GitHub Secrets
+# cannot be read back. Enter ops_email, the PureTrack values, and the
+# optional Slack webhook by hand for local use.
+
+ops_email          = "<REQUIRED: operations email address>"
+puretrack_api_key  = "<REQUIRED: PureTrack API key>"
+puretrack_email    = "<REQUIRED: PureTrack email address>"
+puretrack_password = "<REQUIRED: PureTrack password>"
+slack_webhook_url  = ""
+
+# terraform_principal_type is NOT set in this file — pass it as a CLI override
+# for local human applies (CI uses the ServicePrincipal default).

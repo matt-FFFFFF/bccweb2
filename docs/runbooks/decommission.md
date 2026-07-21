@@ -90,7 +90,8 @@ az storage blob upload \
 ```
 
 ### 4. Target Infrastructure Destroy
-Use `terraform destroy` with explicit `-target` flags. **NEVER** run a blanket destroy.
+Use `terraform destroy` with explicit `-target` flags against the **legacy** infrastructure
+only. **NEVER** run a blanket destroy.
 ```bash
 # Example targeted destroy commands
 terraform destroy \
@@ -99,6 +100,41 @@ terraform destroy \
   -target=azurerm_mssql_server.legacy_server \
   -target=azurerm_dns_cname_record.legacy_hostname
 ```
+
+If this decommission ever needs to tear down bccweb2's OWN three-root Terraform topology
+(e.g. a full project shutdown, not just the legacy app), the order is strict and the
+reverse of how the roots were built: **env-stamp (`iac/environment`) → shared
+(`iac/shared`) → bootstrap (`iac/bootstrap`)**. The shared root's monitoring, ACS, and SWA
+resources carry `prevent_destroy` in Terraform (lifecycle-level protection); the
+env-stamp's prod data storage account carries no `prevent_destroy` at all — it is
+protected only by an Azure `CanNotDelete` management lock (management-plane, not
+Terraform). **Lift both before attempting destroy**:
+
+```bash
+# 1. Remove the management lock on the prod data storage account first —
+#    `terraform destroy` cannot remove a locked resource.
+az lock delete --name storage-nodelete \
+  --resource-group "$(terraform -chdir=iac/environment output -raw resource_group_name)" \
+  --resource-name "$(terraform -chdir=iac/environment output -raw storage_account_name_data)" \
+  --resource-type Microsoft.Storage/storageAccounts
+
+# 2. Remove `prevent_destroy = true` from the affected resources
+#    (iac/shared/monitoring.tf, iac/shared/acs.tf, iac/shared/swa.tf for the
+#    shared root — the env-stamp's prod data storage account has no
+#    `prevent_destroy`; the lock removed in step 1 is its only protection)
+#    and commit that change before running destroy.
+
+# 3. Destroy in order: env-stamp for every application environment first,
+#    then shared, then bootstrap last (bootstrap owns the tfstate storage
+#    account and RGs that the other two roots' state depends on).
+terraform -chdir=iac/environment destroy -var-file=../env/<env>.tfvars -var-file=../env/<env>.local.tfvars
+terraform -chdir=iac/shared destroy -var-file=../env/shared.tfvars -var-file=../env/shared.generated.tfvars
+terraform -chdir=iac/bootstrap destroy
+```
+
+Destroying out of order (e.g. bootstrap before env-stamp) orphans the other roots' state —
+their backend containers and RG live in bootstrap, and shared's monitoring/ACS/SWA outputs
+are consumed by every env-stamp's remote-state read.
 
 ### 5. Remove `_current` Symlink
 On the legacy deployment server (if applicable), remove the `_current` symlink pointing to the legacy binaries. This is a deliberate, separate step to prevent accidental restarts of the old code.

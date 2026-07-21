@@ -10,7 +10,8 @@ data stored in Azure Blob Storage (no database). Replaces a legacy .NET app.
 - **API**: Azure Functions v4 (Node 24, ESM, programming-model v4), TypeScript
 - **Storage**: Azure Blob Storage (two containers: `data` public, `data-private` private)
 - **Auth**: HS256 JWT (bespoke), `JWT_SECRET` from Azure Key Vault in prod
-- **Hosting**: Static Web App (SPA) + Function App (API), Terraform-managed
+- **Hosting**: Static Web App (Standard tier, shared across environments) + Function App
+  (Flex Consumption, one per environment), Terraform-managed
 - **Email**: Azure Communication Services
 - **Tests**: Vitest (unit/integration), Playwright (E2E)
 
@@ -118,17 +119,18 @@ Tokens live in `localStorage` (`bcc_access_token`, `bcc_refresh_token`,
 ## Deployment
 
 Three GitHub Actions workflows, all authenticating to Azure via **OIDC**
-(per-env managed identities — no static credentials in the repo):
+(per-env managed identities — no static credentials in the repo), each a thin
+caller of a reusable workflow:
 
-- [`deploy-dev.yml`](.github/workflows/deploy-dev.yml) — every merge to `main` deploys to dev: terraform drift gate, then Functions zip-deploy + SWA deploy with smoke tests
-- [`deploy-prod.yml`](.github/workflows/deploy-prod.yml) — publishing a GitHub release deploys to prod: release-ancestry check (commit must be on `main`), drift gate, then the same deploy jobs
-- [`terraform.yml`](.github/workflows/terraform.yml) — manual plan/apply for any stack (`common`/`service`) × env (`dev`/`prod`); also the drift-reconcile path
+- [`deploy-staging.yml`](.github/workflows/deploy-staging.yml) — every merge to `main` deploys to `staging`, via [`deploy-app.yml`](.github/workflows/deploy-app.yml): Functions zip-deploy + SWA backend-link deploy with smoke tests
+- [`deploy-prod.yml`](.github/workflows/deploy-prod.yml) — publishing a GitHub release deploys to `prod`, via the same `deploy-app.yml`, after a release-ancestry check (commit must be on `main`)
+- [`terraform.yml`](.github/workflows/terraform.yml) — manual plan/apply of any root (`shared`/`staging`/`prod`), via [`terraform-run.yml`](.github/workflows/terraform-run.yml); also the drift-reconcile path
 
-Infrastructure is managed by Terraform in [`iac/`](iac/) — see [iac/README.md](iac/README.md) for the stack layout (`bootstrap/` → `common/` → `service/`). Secrets are seeded declaratively via AzAPI data-plane writes (no shell script).
+Infrastructure is managed by Terraform in [`iac/`](iac/) — see [iac/README.md](iac/README.md) for the three-root layout (`bootstrap/` → `shared/` → `environment/`). The Static Web App is Standard-tier and shared across environments (`iac/shared`); each environment's Function App backend is linked to it imperatively via `az staticwebapp backends link` (part of `deploy-app.yml`). Secrets are seeded declaratively via AzAPI data-plane writes (no shell script).
 
 There is **no auto-rollback**. A failed smoke test fails the workflow and
 leaves the deploy in place for operator investigation —
-see [`docs/runbooks/deploy-smoke-failure.md`](docs/runbooks/deploy-smoke-failure.md).
+see [`docs/runbooks/deploy-smoke-failure.md`](docs/runbooks/deploy-smoke-failure.md). The Function App is Flex Consumption and has no deployment slots, so a manual rollback always means redeploying the prior artifact.
 
 ## Operations
 

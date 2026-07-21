@@ -26,28 +26,10 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Start Azurite
-        run: |
-          docker rm -f azurite >/dev/null 2>&1 || true
-          docker run -d --name azurite -p 10000:10000 -p 10001:10001 mcr.microsoft.com/azure-storage/azurite azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --skipApiVersionCheck
+        uses: ./.github/actions/azurite
 
-      - name: Wait for Azurite
-        run: |
-          for i in {1..30}; do
-            if curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:10000/devstoreaccount1?comp=list 2>/dev/null | grep -qE "^(200|403|400)$"; then
-              echo "Azurite ready after ${i} attempts"
-              exit 0
-            fi
-            echo "Attempt $i: Azurite not ready, sleeping 2s..."
-            sleep 2
-          done
-          echo "::error::Azurite failed to become ready after 60s"
-          exit 1
-
-      - name: Set up mise
-        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
-
-      - name: Install dependencies
-        run: npm ci
+      - name: Set up Node with mise
+        uses: ./.github/actions/setup-node-mise
 
       - name: Create Azurite containers
         run: node scripts/init-storage.mjs

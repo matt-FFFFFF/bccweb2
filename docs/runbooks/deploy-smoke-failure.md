@@ -1,6 +1,6 @@
 # Deploy failure runbook
 
-Covers failures in `deploy-dev.yml` (push to `main`) and `deploy-prod.yml`
+Covers failures in `deploy-staging.yml` (push to `main`) and `deploy-prod.yml`
 (release published). Both share three failure classes: the terraform drift
 gate, the post-deploy smoke gate, and (prod only) the release-ancestry check.
 
@@ -10,17 +10,24 @@ If the post-deploy smoke gate fails:
 
 1. Check App Insights / Function App logs for errors.
 2. Verify `vars.API_HOST` and `vars.WEB_HOST` are set correctly for the environment (env-scoped GitHub vars).
-3. Re-run the service apply — `gh workflow run terraform.yml -f stack=service -f env=<env> -f mode=apply` — the declarative secret pipeline will re-evaluate KV secret resources. If RBAC propagation lag caused a 403 on the first apply, a re-apply resolves it.
-4. Manually roll back in Azure Portal if needed.
+3. Re-run the environment apply — `gh workflow run terraform.yml -f env=<env> -f action=apply` — the declarative secret pipeline will re-evaluate KV secret resources. If RBAC propagation lag caused a 403 on the first apply, a re-apply resolves it.
+4. Manual rollback: the Function App runs on Flex Consumption (FC1), which has **no
+   deployment slots** — there is no slot to swap. Rolling back means re-deploying the prior
+   good artifact: revert the merge (or push a revert commit) so `deploy-staging.yml` re-runs
+   the zip-deploy against `main`'s previous good commit; for prod, delete the bad GitHub
+   release and publish a new release on the previous good tag. There is no stored build
+   artifact or CI-side rollback command — every deploy re-zips the current checkout, so
+   "rollback" always means redeploying good source, not restoring a saved package or
+   swapping a slot.
 
 ## terraform-check failures (drift gate)
 
-The first deploy job plans the service stack with `-detailed-exitcode`; any
-drift or pending change (exit code 2) fails the run **before** app code
-deploys.
+The first deploy job plans the `iac/environment` stack with
+`-detailed-exitcode`; any drift or pending change (exit code 2) fails the
+run **before** app code deploys.
 
 1. Read the plan diff in the failed run's step summary (`gh run view <id>` or the Actions UI) — it shows exactly what differs.
-2. Expected change (e.g. a merged iac/ edit)? Apply it: `gh workflow run terraform.yml -f stack=service -f env=<env> -f mode=apply`, wait for success, then re-run the failed deploy (or push/re-publish).
+2. Expected change (e.g. a merged iac/ edit)? Apply it: `gh workflow run terraform.yml -f env=<env> -f action=apply`, wait for success, then re-run the failed deploy (or push/re-publish).
 3. Unexpected drift (portal edit, partial apply)? Investigate before applying — the plan diff names the drifted resources.
 
 ## verify-release-ancestry failures (prod only)
@@ -34,4 +41,4 @@ The prod workflow refuses releases whose commit is not reachable from `main`.
 Notes:
 
 - Do not rely on auto-rollback; the workflows intentionally fail so operators investigate immediately.
-- Add the `deploy-dev.yml` jobs to main branch protection as required status checks in GitHub repo settings.
+- Add the `deploy-staging.yml` jobs to main branch protection as required status checks in GitHub repo settings.

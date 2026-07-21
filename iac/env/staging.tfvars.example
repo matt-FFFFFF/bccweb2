@@ -1,0 +1,53 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
+# HISTORICAL FULL-SCHEMA REFERENCE. This file documents every environment-root
+# variable, secret and non-secret alike. The non-secret subset below is now
+# the committed, tracked `iac/env/staging.tfvars` — do not `cp` this file
+# over it; edit `staging.tfvars` directly if a committed base value needs to
+# change. Deterministic topology (`stamp_rg_name`, `tfstate_resource_group_name`,
+# `tfstate_storage_account_name`) is committed-base-owned in `staging.tfvars`,
+# not the local overlay. Secrets (`ops_email`, `puretrack_*`) live in the
+# gitignored local overlay; copy that overlay from `iac/env/staging.local.tfvars.example`
+# instead:
+#   cp iac/env/staging.local.tfvars.example iac/env/staging.local.tfvars
+# Apply with the committed base first, then the local overlay (overlay wins):
+#   terraform -chdir=iac/environment init -backend-config=../env/staging.backend.hcl && terraform -chdir=iac/environment apply -var-file=../env/staging.tfvars -var-file=../env/staging.local.tfvars
+# DO NOT COMMIT REAL SECRETS. In CI, secrets are mapped
+# explicitly into TF_VAR_* job-environment entries by terraform-run.yml.
+
+stamp_name = "staging"
+location   = "uksouth"
+
+# Deterministic topology: committed-base-owned (matches the canonical
+# bootstrap storage account / stamp resource group names). CI loads these
+# from the committed base file too, not from GitHub-mapped TF_VAR_* entries.
+tfstate_resource_group_name  = "rg-bccweb-tfstate" # REQUIRED: bootstrap state RG
+tfstate_storage_account_name = "stbccweb13afe"     # REQUIRED: canonical bootstrap state account
+stamp_rg_name                = "stamp-staging"
+
+# Initial provisioning only: no origins means Blob Storage emits no CORS rule.
+# After the shared SWA exists, replace this with its HTTPS default origin,
+# commit staging.tfvars, and re-apply the environment before browser SPA use.
+allowed_origins = []
+
+ops_email = "<REQUIRED: operator must replace before apply>" # REQUIRED
+
+puretrack_api_key  = "<REQUIRED: see TF_VAR_puretrack_api_key>"  # REQUIRED
+puretrack_email    = "<REQUIRED: see TF_VAR_puretrack_email>"    # REQUIRED
+puretrack_password = "<REQUIRED: see TF_VAR_puretrack_password>" # REQUIRED
+
+jwt_secret_version = "1"
+acs_secret_version = "1"
+blob_schema_mode   = "observe"
+
+# Principal type for the identity running Terraform. Default is ServicePrincipal
+# because CI (GitHub Actions → per-env Terraform UMI via OIDC) is the primary
+# path. Override to "User" when applying locally as yourself (`az login` context).
+# Documented here for the full schema only — never committed in the real
+# `staging.tfvars` or in `staging.local.tfvars.example`; every local apply
+# passes it as an explicit `-var 'terraform_principal_type=User'` CLI
+# override instead (see iac/README.md's "First-time Setup" step 6).
+terraform_principal_type = "ServicePrincipal"
+
+# Optional alert receiver.
+slack_webhook_url = ""

@@ -16,6 +16,8 @@
     "license:check": "node scripts/spdx-header.mjs",
     "license:fix": "node scripts/spdx-header.mjs --fix",
     "license:test": "node --test scripts/__tests__/spdx-header.test.mjs",
+    "iac:platform-contract": "bash scripts/iac/check-shared-resource-contract.sh",
+    "iac:stamp-storage-split": "bash scripts/iac/check-stamp-storage-split.sh",
     "fixtures:audit": "node scripts/audit-fixtures.mjs --json",
     "admin:test": "node --test scripts/admin/__tests__/move-manufacturers-to-public.test.mjs scripts/admin/__tests__/reconcile-orphan-igcs.test.mjs scripts/admin/__tests__/redispatch-stuck-igc-validations.test.mjs",
     "fixtures:test": "node --test scripts/__tests__/fixture-operation.test.mjs scripts/__tests__/loadtest-topology.test.mjs scripts/__tests__/seed-fixture-pilots.test.mjs scripts/__tests__/seed-fixtures.integration.test.mjs scripts/__tests__/seed-fixtures.adversarial.test.mjs scripts/__tests__/seed-fixtures.transaction.test.mjs",

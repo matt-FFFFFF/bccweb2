@@ -1,0 +1,25 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
+name: Set up Node with mise
+description: Install mise-managed tools and npm dependencies, optionally building a Make target
+
+inputs:
+  build:
+    description: Optional Make target or targets to build
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Set up mise
+      uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
+
+    - name: Install dependencies
+      shell: bash
+      run: npm ci
+
+    - name: Build
+      if: inputs.build != ''
+      shell: bash
+      run: make ${{ inputs.build }}

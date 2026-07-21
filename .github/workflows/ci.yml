@@ -28,14 +28,10 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Set up mise
-        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build shared packages
-        run: make build-types build-schemas build-scoring
+      - name: Set up Node with mise
+        uses: ./.github/actions/setup-node-mise
+        with:
+          build: build-types build-schemas build-scoring
 
       - name: Typecheck
         run: make typecheck
@@ -50,17 +46,13 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Set up mise
-        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
-
-      - name: Install dependencies
-        run: npm ci
+      - name: Set up Node with mise
+        uses: ./.github/actions/setup-node-mise
+        with:
+          build: build-types build-schemas build-scoring
 
       - name: SPDX header unit tests
         run: node --test scripts/__tests__/spdx-header.test.mjs
-
-      - name: Build shared packages
-        run: make build-types build-schemas build-scoring
 
       - name: Run load-test contract tests
         run: npm run loadtest:test
@@ -79,30 +71,13 @@ jobs:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Start Azurite
-        run: |
-          docker rm -f azurite >/dev/null 2>&1 || true
-          docker run -d --name azurite -p 10000:10000 -p 10001:10001 \
-            mcr.microsoft.com/azure-storage/azurite \
-            azurite --blobHost 0.0.0.0 --queueHost 0.0.0.0 --skipApiVersionCheck
+        uses: ./.github/actions/azurite
 
-      - name: Wait for Azurite
-        run: |
-          for i in {1..30}; do
-            if curl -fsS -o /dev/null -w "%{http_code}" http://127.0.0.1:10000/devstoreaccount1?comp=list 2>/dev/null | grep -qE "^(200|403|400)$"; then
-              echo "Azurite ready after ${i} attempts"
-              exit 0
-            fi
-            echo "Attempt $i: Azurite not ready, sleeping 2s..."
-            sleep 2
-          done
-          echo "::error::Azurite failed to become ready after 60s"
-          exit 1
-
-      - name: Set up mise
-        uses: jdx/mise-action@e6a8b3978addb5a52f2b4cd9d91eafa7f0ab959d # v4.2.0
-
-      - name: Install dependencies
-        run: npm ci
+      # Built dist/ is required: API tests resolve @bccweb/* from dist/.
+      - name: Set up Node with mise
+        uses: ./.github/actions/setup-node-mise
+        with:
+          build: build
 
       # scripts/migrate is a standalone package outside the npm workspaces, with
       # its own package-lock.json. Install it separately so that lockfile drift
@@ -110,10 +85,6 @@ jobs:
       - name: Install migration script dependencies
         run: npm ci
         working-directory: scripts/migrate
-
-      # Built dist/ is required: API tests resolve @bccweb/* from dist/.
-      - name: Build all packages
-        run: make build
 
       - name: Run tests
         run: make test
@@ -128,6 +99,88 @@ jobs:
       # afford the extra minute, so cover them here while Azurite is already up.
       - name: Run heavy tests
         run: make test-heavy
+
+  # ── Terraform contracts ────────────────────────────────────────────────────────
+  # Offline-only: mocked unit suites, fixture parity, and static resource contracts.
+  # Authenticated plan-only integration tests remain an operator-invoked check.
+  terraform-contracts:
+    name: Terraform contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Terraform with mise
+        uses: ./.github/actions/setup-node-mise
+
+      - name: Check stamp fixture sync
+        run: diff -r --exclude=keyvault.tf --exclude=variables.tf --exclude=README.md iac/environment/modules/stamp iac/environment/tests/unit/stamp-fixture
+
+      - name: Run environment Terraform unit tests
+        run: |
+          terraform -chdir=iac/environment init -backend=false -test-directory=tests/unit
+          terraform -chdir=iac/environment test -test-directory=tests/unit
+
+      - name: Run shared Terraform unit tests
+        run: |
+          terraform -chdir=iac/shared init -backend=false -test-directory=tests/unit
+          terraform -chdir=iac/shared test -test-directory=tests/unit
+
+      - name: Run bootstrap Terraform unit tests
+        run: |
+          if ! cmp -s iac/bootstrap/terraform.tfvars iac/bootstrap/terraform.tfvars.example; then
+            echo "Bootstrap terraform.tfvars and terraform.tfvars.example must remain byte-identical." >&2
+            exit 1
+          fi
+          terraform -chdir=iac/bootstrap init -backend=false -test-directory=tests/unit
+          terraform -chdir=iac/bootstrap validate
+          terraform -chdir=iac/bootstrap test -test-directory=tests/unit
+          terraform fmt -check -recursive iac/
+
+      - name: Check Terraform workflow var-file contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/terraform-run.yml
+          if grep -Fq "TF_VAR_env_umi_principal_ids" "$workflow"; then
+            echo "terraform-run.yml must not map the UMI principal IDs through GitHub." >&2
+            exit 1
+          fi
+          test "$(grep -Ec "TF_CLI_ARGS_plan: .*inputs\.root == 'shared'.*-var-file=\.\./env/shared\.generated\.tfvars" "$workflow")" -eq 1
+          test "$(grep -Fc -- "-var-file=\"../env/\${TARGET_ENV}.tfvars\"" "$workflow")" -eq 3
+          test "$(grep -Fc "terraform -chdir=\"iac/\${ROOT}\" apply -input=false tfplan" "$workflow")" -eq 1
+
+      - name: Check deploy backend query contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/deploy-app.yml
+          test "$(grep -Fc -- "--query 'backendResourceId'" "$workflow")" -eq 1
+          if grep -Fq -- "--query '[0].backendResourceId'" "$workflow"; then
+            echo "deploy-app.yml must query the singular backend object, not an array element." >&2
+            exit 1
+          fi
+
+      - name: Check committed tfvars are non-secret
+        shell: bash
+        run: |
+          files=(iac/bootstrap/terraform.tfvars iac/env/shared.tfvars iac/env/staging.tfvars iac/env/prod.tfvars)
+          forbidden='ops_email|puretrack_api_key|puretrack_email|puretrack_password|slack_webhook_url|terraform_principal_type'
+          failed=0
+          while IFS=: read -r path key; do
+            printf '%s:%s\n' "$path" "$key"
+            failed=1
+          done < <(grep -EHn "^[[:space:]]*(${forbidden})[[:space:]]*=" "${files[@]}" | sed -E 's/^([^:]+):[0-9]+:[[:space:]]*([^[:space:]=]+).*/\1:\2/' || true)
+          while IFS=: read -r path key; do
+            printf '%s:%s\n' "$path" "$key"
+            failed=1
+          done < <(grep -FHn '<REQUIRED' "${files[@]}" | sed -nE 's/^([^:]+):[0-9]+:[[:space:]]*([[:alnum:]_]+)[[:space:]]*=.*/\1:\2/p' || true)
+          exit "$failed"
+
+      - name: Check shared Terraform resource contract
+        run: bash scripts/iac/check-shared-resource-contract.sh
+
+      - name: Check stamp storage split contract
+        run: bash scripts/iac/check-stamp-storage-split.sh
 
   # ── 2. Docker builds ────────────────────────────────────────────────────────────
   # Build every image that docker-compose builds locally (apps/api/Dockerfile.dev

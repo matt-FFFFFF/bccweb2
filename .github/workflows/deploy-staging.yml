@@ -1,0 +1,39 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
+name: Deploy staging
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency: environment-staging
+
+jobs:
+  env-drift:
+    uses: ./.github/workflows/terraform-run.yml
+    with:
+      root: environment
+      target_env: staging
+      mode: drift-gate
+    secrets: inherit
+
+  shared-drift:
+    uses: ./.github/workflows/terraform-run.yml
+    with:
+      root: shared
+      target_env: shared
+      mode: drift-gate
+    secrets: inherit
+
+  deploy:
+    needs: [env-drift, shared-drift]
+    uses: ./.github/workflows/deploy-app.yml
+    with:
+      environment: staging
+      swa_environment_name: staging
+      is_production: false
+    secrets: inherit

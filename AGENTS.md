@@ -21,7 +21,8 @@ apps/web/         @bccweb/web      — React 19 SPA (Vite 8, React Router v8, TS
 packages/types/   @bccweb/types    — Shared TS interfaces (no runtime deps)
 packages/schemas/ @bccweb/schemas  — Zod schemas, one per blob family (the schema layer)
 packages/scoring/ @bccweb/scoring  — Pure scoring: scoreRound(), computeLeague()
-iac/              Terraform (Azure), 3 stacks   scripts/  Admin/migration/privacy-scan
+iac/              Terraform (Azure), 3 roots (bootstrap/shared/environment)
+scripts/  Admin/migration/privacy-scan
 tests/e2e/        Playwright E2E (`npm run e2e`)  dist/web/ Vite build output (→ SWA)
 docs/architecture/ Human-facing design docs (storage-and-queues.md)
 docs/runbooks/    Operational runbooks (alerts, cutover, privacy, load-testing, ...)
@@ -35,7 +36,10 @@ first. `make clean` deletes `dist/` + `*.tsbuildinfo` (stops stale incremental b
 
 ## Toolchain (pinned in `.mise.toml`)
 
-Node 24.16.0, Terraform `latest` (workflows expect 1.10.x), `azure-functions-core-tools`
+Node 24.16.0, Terraform `1` (`.mise.toml`; all `iac/` roots/modules pin
+`required_version = "~> 1.11"`; Terraform is provisioned by mise in CI via the
+`./.github/actions/setup-node-mise` composite — there is no `hashicorp/setup-terraform`
+step anywhere in this repo), `azure-functions-core-tools`
 4.12.0, npm 11 (ships with Node 24). `mise install` brings these up.
 
 ## Dependency management
@@ -141,16 +145,24 @@ holds PII). `withLease()` / `withPrivateLease()` in
 [privacy scanner](scripts/privacy-scan.mjs) fails CI if PII leaks into the public
 container.
 
-**Storage Queues**: ten queues (same storage account), across five families —
-brief PDF, sign-to-fly reflect, rescore, PureTrack group, IGC signature/date
-validation — each a main queue plus a `-poison` dead-letter. Rescore normally records
-failures on its job-status blob; its poison queue remains a host-failure safety net
-rather than an HTTP-visible retry path. All producers/triggers use the
-`AzureWebJobsStorage` connection only; never `BLOB_CONNECTION_STRING`. Queue job
-schemas (`BriefPdfJobSchema`, `SignToFlyReflectJobSchema`, `PureTrackGroupJobSchema`,
-`RescoreJobMessageSchema`, `IgcValidationJobSchema`) are all `.strict()` so PII can
-never enter a queue message — `privacy-scan.mjs` does not cover queues, so these
-schemas are the compensating control.
+**Storage Queues**: ten queues, across five families — brief PDF, sign-to-fly reflect,
+rescore, PureTrack group, IGC signature/date validation — each a main queue plus a
+`-poison` dead-letter. Rescore normally records failures on its job-status blob; its
+poison queue remains a host-failure safety net rather than an HTTP-visible retry path.
+All producers/triggers use the `AzureWebJobsStorage` connection only; never
+`BLOB_CONNECTION_STRING`. Queue job schemas (`BriefPdfJobSchema`,
+`SignToFlyReflectJobSchema`, `PureTrackGroupJobSchema`, `RescoreJobMessageSchema`,
+`IgcValidationJobSchema`) are all `.strict()` so PII can never enter a queue message —
+`privacy-scan.mjs` does not cover queues, so these schemas are the compensating control.
+
+**Two storage accounts per env** (infra-only split; no app-code change — the API still
+uses one shared `BlobServiceClient` per connection string, so `data`/`data-private`
+still can't be split across accounts): Account A `stbccweb<env>rt` backs
+`AzureWebJobsStorage` — runtime host storage, all ten queues, and the Flex Consumption
+`deploymentpackage` container; Account B `stbccweb<env>data` backs
+`BLOB_CONNECTION_STRING` — the `data`/`data-private` containers only. See
+[docs/architecture/storage-and-queues.md](docs/architecture/storage-and-queues.md) for
+the full split.
 
 Full container/family/flow reference (containers, all ten queues, brief PDF/sign
 reflect/rescore/PureTrack/IGC-validation flows, CAS/attempt semantics, poison
@@ -217,19 +229,52 @@ needed). **E2E**: Playwright vs `E2E_BASE_URL` (default `:5173`); CI: 2 retries,
 
 ## Infra / Deploy (`iac/`)
 
-Terraform, 3 stacks (see `iac/README.md`): `bootstrap/` (tfstate storage, per-env UMIs/RGs,
-GitHub OIDC secrets) → `common/` (LAW + App Insights + ACS email domain) → `service/`
-(storage, Function App, SWA, ACS, Key Vault — the stamp). `jwt-secret` is generated
-declaratively (ephemeral `random_password` → KV write-only), rotated via `jwt_secret_version`.
-KV seeding may 403 on first apply during RBAC propagation — re-apply to recover.
+Terraform, THREE roots (see `iac/README.md`): `bootstrap/` (one-shot: tfstate storage, per-env
+Terraform UMIs, the shared + per-env stamp resource groups, GitHub OIDC secrets, the
+application deploy variables `TF_VAR_STAMP_RG_NAME`/`AZURE_LOCATION`/`SHARED_RG_NAME` — for
+`deploy-app.yml` (and, for `SHARED_RG_NAME`, `pr-preview.yml`), not Terraform — and the non-secret, mode-0644
+`iac/env/shared.generated.tfvars`, which must be reviewed and committed after bootstrap apply
+because its UMI IDs do not exist beforehand) → `shared/` (the platform layer shared by `staging`/
+`prod`: Log Analytics workspace, per-env Application Insights, Azure Communication Services,
+and one Standard Static Web App with the prod custom domain/DNS; see `iac/shared/README.md`) →
+`environment/` (the per-env application stamp: storage, Flex Consumption Function App, Key
+Vault, alerts — reads only non-secret `app_insights_ids`/`acs_id` from `iac/shared`'s remote
+state; one state, `<env>.tfstate`, in its own `tfstate-<env>` container). Each environment UMI has
+Storage Blob Data Contributor only on its own tfstate container (plus `staging`/`prod` get
+Storage Blob Data Reader on `tfstate-shared`); the previously documented
+`tf_tfstate_blob_account_reader` never existed — it was a documentation myth, not an
+account-level Reader grant. `jwt-secret` is generated declaratively (ephemeral `random_password` → KV
+write-only), rotated via `jwt_secret_version`. KV seeding may 403 on first apply during RBAC
+propagation — re-apply to recover.
 
-CI (`.github/workflows/`): `ci.yml` (every PR/push to `main`: typecheck, lint, full build,
-Vitest incl. heavy tests with Azurite, `docker compose build`); `deploy-dev.yml` (push to
-`main` → dev: drift gate → Function App + SWA in parallel, each smoke-tested `/api/health`,
-`/api/seasons`, web root; **no auto-rollback**); `deploy-prod.yml` (GitHub release → prod:
-release-ancestry check on `main` → same gate + jobs); `terraform.yml` (manual plan/apply
-per stack × env; also drift-reconcile); `privacy-scan.yml` (Azurite + seed + `privacy-scan.mjs`,
-fails on PII leak). Prod SPA: Static Web App + routes in
+The Function App is **Flex Consumption** (`Microsoft.Web/serverfarms` SKU `FC1`/`FlexConsumption`,
+`Microsoft.Web/sites` with `functionAppConfig`) — no deployment slots, so a manual rollback means
+redeploying the prior artifact, never a slot swap. The Static Web App is **Standard** tier, one
+instance shared across environments (`iac/shared`); the per-env API backend is linked
+imperatively via `az staticwebapp backends link` (Terraform cannot express a cross-resource
+Functions↔SWA backend link) rather than a Terraform-managed backend resource.
+
+Environment configuration is deterministic, non-secret Terraform topology (`shared_rg_name`,
+`stamp_rg_name`, `tfstate_resource_group_name`, `tfstate_storage_account_name`) committed
+directly in `iac/env/{shared,staging,prod}.tfvars`, plus explicit `TF_VAR_*` GitHub environment
+secret mappings in `terraform-run.yml` for operator secrets (`ops_email`, `puretrack_*`,
+`slack_webhook_url`). Shared plans additionally load the committed
+`iac/env/shared.generated.tfvars`; environment plans never load it. There are no GitHub
+Terraform-input variables. Terraform-native `validation` blocks replace the shell required-vars
+pre-check that `terraform-run.yml` used to run. Secrets flow only through the workflow job environment.
+
+CI (`.github/workflows/`) is DRY: three composite actions (`.github/actions/{setup-node-mise,
+azurite,tf-setup}`) plus two reusable workflows (`deploy-app.yml`, `terraform-run.yml`) that the
+thin per-trigger workflows call. `ci.yml` (every PR/push to `main`: typecheck, lint, full build,
+Vitest incl. heavy tests with Azurite, `docker compose build`, plus a `terraform-contracts` job —
+offline Terraform unit tests, fixture-sync diff, and the shared-resource/stamp-storage-split
+contract scripts); `deploy-staging.yml` (push to `main` → `staging`, via `deploy-app.yml`);
+`deploy-prod.yml` (GitHub release → `prod`, via `deploy-app.yml`); `terraform.yml` calls
+`terraform-run.yml` for plan/apply per root+env; `pr-preview.yml` deploys a static-only SPA
+preview to the shared SWA for same-repo PRs; `privacy-scan.yml` (Azurite + seed +
+`privacy-scan.mjs`, fails on PII leak). Terraform itself comes
+from mise (`.mise.toml` pins `terraform = "1"`) via the `setup-node-mise` composite — there is
+no `hashicorp/setup-terraform` step anywhere in this repo. Prod SPA: Static Web App + routes in
 [`staticwebapp.config.json`](apps/web/public/staticwebapp.config.json)
 (kept in `apps/web/public/` so Vite copies it to the `dist/web` output-location root the SWA
 deploy uploads — SPA fallback, security headers, `/api/*` → Function App); local Docker uses Caddy with the

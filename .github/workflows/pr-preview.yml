@@ -1,0 +1,117 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
+name: PR preview
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, closed]
+
+jobs:
+  preview:
+    name: Static SWA preview
+    runs-on: ubuntu-latest
+    environment: staging
+    permissions:
+      id-token: write
+      contents: read
+    # Same-repo PRs only (forks lack OIDC/secrets), AND opt-in: the operator sets the
+    # REPOSITORY-level Actions variable PREVIEW_ENABLED=true (Settings > Secrets and
+    # variables > Actions > Variables) only after the shared SWA + staging GitHub
+    # environment exist (see docs/runbooks/migration-shared-topology.md).
+    # PREVIEW_ENABLED must stay repository-level, NOT environment-scoped: GitHub
+    # evaluates this job-level `if` before the job's `environment:` (below) is loaded,
+    # so an environment-scoped variable would never be visible here and the job would
+    # be permanently skipped. Until PREVIEW_ENABLED is set, this job skips so PR CI
+    # stays green.
+    #
+    # SECURITY WARNING (pwn-request risk): this job checks out and builds PR-branch-
+    # controlled code (the head ref, via actions/checkout above) INSIDE a job that holds
+    # the `staging` environment's Azure OIDC identity plus a Static Web Apps deployment
+    # token. The `same-repo` check above excludes forks, but does NOT exclude an
+    # unreviewed branch pushed by any collaborator with write access; that branch's
+    # build step still runs with these credentials attached. Enabling PREVIEW_ENABLED
+    # against the CURRENT `staging` environment would hand PR-controlled code the
+    # staging Terraform user-assigned managed identity, which is Owner on the staging
+    # stamp resource group and Contributor on the shared ACS/SWA resources. That's a
+    # privilege-escalation path, not just a preview-deploy convenience.
+    #
+    # Before flipping PREVIEW_ENABLED=true, the operator MUST:
+    #   (a) point this job's `environment:` at a DEDICATED, least-privilege preview
+    #       identity/GitHub environment whose UMI can ONLY manage SWA preview
+    #       environments on `swa-bccweb-shared` (az staticwebapp environment
+    #       create/delete + secrets list). NEVER the staging stamp UMI used above:
+    #       its broader Owner/Contributor grants are exactly the escalation risk; and
+    #   (b) enable required-reviewer deployment protection on that dedicated
+    #       environment so its credentials are only released to a workflow run after
+    #       an approver signs off, closing the gap left by the same-repo check alone.
+    # See docs/runbooks/migration-shared-topology.md, Phase 5.5, "Preview environment
+    # security preconditions" for the full requirement.
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      vars.PREVIEW_ENABLED == 'true'
+    env:
+      VITE_BLOB_BASE_URL: ${{ vars.VITE_BLOB_BASE_URL }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Build static web app
+        if: github.event.action != 'closed'
+        uses: ./.github/actions/setup-node-mise
+        with:
+          build: build-web
+
+      - uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Fetch SWA deployment token
+        if: github.event.action != 'closed'
+        id: swa_token
+        run: |
+          set -euo pipefail
+          SWA_TOKEN=$(az staticwebapp secrets list --name swa-bccweb-shared --resource-group "${{ vars.SHARED_RG_NAME }}" --query "properties.apiKey" -o tsv)
+          echo "::add-mask::$SWA_TOKEN"
+          echo "token=$SWA_TOKEN" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy static preview
+        if: github.event.action != 'closed'
+        id: deploy_preview
+        uses: Azure/static-web-apps-deploy@1a947af9992250f3bc2e68ad0754c0b0c11566c9 # v1
+        with:
+          azure_static_web_apps_api_token: ${{ steps.swa_token.outputs.token }}
+          action: upload
+          app_location: "apps/web"
+          output_location: "../../dist/web"
+          api_location: ""
+          skip_app_build: true
+          deployment_environment: ${{ github.event.number }}
+
+      # Previews are static-only: /api/* is expected to fail and is excluded
+      # from navigationFallback in staticwebapp.config.json.
+      - name: Smoke test static preview
+        if: github.event.action != 'closed'
+        env:
+          PREVIEW_URL: ${{ steps.deploy_preview.outputs.static_web_app_url }}
+        run: |
+          set -euo pipefail
+          url="${PREVIEW_URL%/}/"
+          for _ in $(seq 1 24); do
+            body=$(curl -fsS "$url" || true)
+            if curl -fsSI "$url" | grep -qi '^content-type: text/html' && printf '%s' "$body" | grep -Eiq 'BCC'; then
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "::error::Static preview smoke test failed"
+          exit 1
+
+      - name: Delete static preview
+        if: github.event.action == 'closed'
+        run: >-
+          az staticwebapp environment delete
+          --name swa-bccweb-shared
+          --resource-group "${{ vars.SHARED_RG_NAME }}"
+          --environment-name "${{ github.event.number }}"
+          --yes

@@ -1,6 +1,6 @@
 # Alerts Runbook
 
-This runbook describes every Azure Monitor alert defined in `iac/modules/stamp/alerts.tf`. Each alert routes to the single `module.stamp.azapi_resource.ops` (email = `var.ops_email`, optional Slack webhook = `var.slack_webhook_url`).
+This runbook describes every Azure Monitor alert defined in `iac/environment/modules/stamp/alerts.tf`. Each alert routes to the single `azapi_resource.ops` action group (defined inside that module; referenced as `module.stamp.azapi_resource.ops` from the `iac/environment` root — email = `var.ops_email`, optional Slack webhook = `var.slack_webhook_url`).
 
 ## Severity convention
 
@@ -9,7 +9,7 @@ This runbook describes every Azure Monitor alert defined in `iac/modules/stamp/a
 | 1 | Real fire — page on-call immediately | Acknowledge within 15 minutes, mitigate within 1 hour |
 | 2 | Investigate-async — anomaly worth a human look | Triage within 4 hours during business hours; out-of-hours, batch with next morning standup unless escalates |
 
-A severity 1 alert that fires repeatedly inside a 30-minute window should be escalated to the project owner (Matt White). A severity 2 alert that fires every evaluation period for more than 24 hours should be upgraded to severity 1 by editing the corresponding resource in `iac/alerts.tf` and re-applying.
+A severity 1 alert that fires repeatedly inside a 30-minute window should be escalated to the project owner (Matt White). A severity 2 alert that fires every evaluation period for more than 24 hours should be upgraded to severity 1 by editing the corresponding resource in `iac/environment/modules/stamp/alerts.tf` and re-applying.
 
 ## Action group
 
@@ -17,8 +17,8 @@ The action group `ag-bccweb-prod-ops` is the single fan-out point. To rotate the
 
 ```bash
 # Update terraform.tfvars (NOT this file) and re-apply:
-terraform -chdir=iac/service init -backend-config=../env/prod.backend.hcl
-terraform -chdir=iac/service apply -var-file=../env/prod.tfvars -target=module.stamp.azapi_resource.ops
+terraform -chdir=iac/environment init -backend-config=../env/prod.backend.hcl
+terraform -chdir=iac/environment apply -var-file=../env/prod.tfvars -var-file=../env/prod.local.tfvars -var 'terraform_principal_type=User' -target=module.stamp.azapi_resource.ops
 ```
 
 To add an additional receiver (PagerDuty, OpsGenie, etc.), add a new `*_receiver` block inside the action group resource — never create a second action group, the per-alert `action_group_id` references would diverge.
@@ -63,7 +63,7 @@ The Function App's HTTP 5xx response rate exceeded 1% of total requests over the
 - A regression in the latest Function App deployment (check the most recent CI deploy timestamp).
 - Storage account 5xx (correlate with `storage-server-errors`; if both are firing, fix storage first).
 - Key Vault access failure causing JWT/AI/ACS secret resolution to throw 500s on every authenticated request (correlate with the AI `exceptions` table for `KeyVaultReferenceException`).
-- Cold-start storms on the Y1 SKU after a long idle period — usually self-clears within one evaluation window.
+- Cold-start storms after a long idle period on Flex Consumption (FC1) — usually self-clears within one evaluation window.
 
 ### Immediate response
 
@@ -85,23 +85,25 @@ The Function App's HTTP 5xx response rate exceeded 1% of total requests over the
    | order by n desc
    ```
 
-3. If the regression maps to a recent deploy, roll back the Function App package via Azure CLI:
-   ```bash
-   az functionapp deployment list-publishing-credentials \
-      --name "$(terraform -chdir=iac/service output -raw function_app_name)" \
-      --resource-group "$(terraform -chdir=iac/service output -raw resource_group_name)"
-   # then use the previous WEBSITE_RUN_FROM_PACKAGE URL stored in CI artifacts
-   ```
+3. If the regression maps to a recent deploy, roll back by re-running the deploy workflow
+   against the last known-good commit/tag: `deploy-staging.yml` re-runs automatically on any push
+   to `main`, so revert the merge (or push a revert commit) to redeploy the previous code; for
+   prod, delete the bad GitHub release and re-publish a release on the previous good tag (per
+   `docs/runbooks/deploy-smoke-failure.md`). **There is no stored previous-package artifact or
+   CI-side rollback command** — `deploy-staging.yml`/`deploy-prod.yml` zip-deploy the current
+   checkout via `Azure/functions-action` on every run and do not upload or retain build
+   artifacts, so "rollback" always means re-deploying good source, not restoring a saved
+   package.
 
 4. If storage is the cause, follow `storage-server-errors` below first.
 
 ### Page vs investigate-async
 
-Page. Acknowledge inside 15 minutes; mitigate (deploy rollback or feature flag) inside 1 hour. If neither rollback nor mitigation is possible, post a status banner via the SPA maintenance page wording in `docs/runbooks/cutover.md#maintenance-page-text`.
+Page. Acknowledge inside 15 minutes; mitigate (deploy rollback or feature flag) inside 1 hour. If neither rollback nor mitigation is possible, publish the wording under `docs/runbooks/cutover.md#maintenance-page-text` through whatever hosting-level mechanism is available — there is no maintenance-mode page or banner component in the SPA to switch on (see that section's note).
 
 ### Escalation
 
-If unmitigated after 1 hour: escalate to project owner (Matt White) via the contact in `decisions.md`.
+If unmitigated after 1 hour: escalate to the project owner (Matt White).
 
 ---
 
@@ -145,7 +147,7 @@ Investigate-async. Triage during business hours. Page only if this alert co-fire
 
 ### Escalation
 
-If failures persist over 24h with no root cause identified: escalate to project owner and consider upgrading severity to 1 in `iac/alerts.tf`.
+If failures persist over 24h with no root cause identified: escalate to project owner and consider upgrading severity to 1 in `iac/environment/modules/stamp/alerts.tf`.
 
 ---
 
@@ -165,11 +167,13 @@ The storage account returned more than 5 transactions tagged `ServerBusyError` (
 
 ### Immediate response
 
-1. Confirm the storage account is healthy:
+1. Confirm the storage account is healthy (this alert scopes the storage server-error
+   Transactions metric to the DATA account — `data`/`data-private`, the account fronting
+   pilot-facing reads/writes — not the runtime/queue account):
    ```bash
    az storage account show \
-      --name "$(terraform -chdir=iac/service output -raw storage_account_name)" \
-      --resource-group "$(terraform -chdir=iac/service output -raw resource_group_name)" \
+      --name "$(terraform -chdir=iac/environment output -raw storage_account_name_data)" \
+      --resource-group "$(terraform -chdir=iac/environment output -raw resource_group_name)" \
      --query "{provisioning: provisioningState, status: statusOfPrimary, sku: sku.name}"
    ```
 
@@ -186,7 +190,7 @@ The storage account returned more than 5 transactions tagged `ServerBusyError` (
 
 3. If throttled, throttle the caller: pause any in-flight migration (`scripts/migrate/migrate.mjs`), back off recompute fan-out by waiting for `recomputeSeason` in-flight promise to settle (already single-flight per process, but parallel function instances multiply load).
 
-4. If a regional Azure incident, switch the maintenance page on the SWA per `docs/runbooks/cutover.md#rollback-plan` and wait for the underlying incident to resolve. GRS replication does not protect against control-plane outages.
+4. If a regional Azure incident, publish the maintenance wording per `docs/runbooks/cutover.md#maintenance-page-text` (there is no maintenance-mode page on the SWA to switch — see that section's note) and wait for the underlying incident to resolve. GRS replication does not protect against control-plane outages.
 
 ### Page vs investigate-async
 
@@ -249,14 +253,13 @@ If credential-stuffing pattern is confirmed: escalate to project owner and docum
 
 ### What it means
 
-The p95 duration of the `lockRound` Function over the last 30 minutes exceeded 30s. `lockRound` is the slowest orchestration in the API: it generates the brief PDF, optionally creates PureTrack groups, and sends ACS emails. The window is intentionally 30 minutes (not 5) because `lockRound` is low-volume and a shorter window has insufficient samples (the alert guards with `n >= 3`).
+The p95 duration of the `lockRound` Function over the last 30 minutes exceeded 30s. `lockRound` is the slowest orchestration in the API: it first generates pilot snapshots via a parallel per-pilot blob-read fan-out (outside any lease, to avoid holding the lease during that read burst), then re-validates the frozen brief hash and writes the Locked round + brief atomically inside the round+brief lease, then **enqueues** (does not itself run) the brief-PDF job (`enqueueBriefPdf`) and the PureTrack group-creation job (`enqueuePureTrackGroupJob`) — `lockRound` never sends an ACS email itself. The window is intentionally 30 minutes (not 5) because `lockRound` is low-volume and a shorter window has insufficient samples (the alert guards with `n >= 3`).
 
 ### Likely causes
 
-- PureTrack upstream slow / hanging (T34 introduced skip handling but slow responses still block the lease window).
-- Memory pressure on the Y1 SKU during PDF generation (`apps/api/src/lib/pdf.ts`) for a round with many pilots / large brief content.
-- ACS email send timing out under retry, blocking the orchestration.
-- A blob lease contention storm if multiple coordinators are locking adjacent rounds concurrently.
+- A large round's pilot-snapshot fan-out (parallel per-pilot blob reads before the lease is taken) or a large frozen brief download/hash-verify inside the round+brief lease.
+- Blob lease contention if multiple coordinators are locking adjacent rounds concurrently, or a slow `enqueueBriefPdf`/`enqueuePureTrackGroupJob` Storage Queue enqueue call (these only *enqueue* the PDF/PureTrack work — the PDF render and PureTrack group creation themselves run later in separate queue-triggered workers, outside `lockRound`'s own duration).
+- Memory pressure on the Flex Consumption (FC1) plan from concurrent invocations, not from PDF generation itself (PDF rendering happens in the `briefPdf` worker, not inside `lockRound`).
 
 ### Immediate response
 
@@ -278,9 +281,9 @@ The p95 duration of the `lockRound` Function over the last 30 minutes exceeded 3
    | order by p95 desc
    ```
 
-3. If PureTrack is the culprit, the existing `puretrack.skip` metric path (T34) means the alert is informational only. Confirm no error storm in `[METRIC] puretrack.create.failed`.
+3. If the slow dependency is the `round-puretrack-group`/`brief-pdf` queue enqueue call itself (not the worker), this is Storage Queue-side latency — correlate with `storage-server-errors` above. The PureTrack **worker's** own slowness/failures show up separately as `[METRIC] puretrack.create.failed`/`puretrack.skip` (T34) and do not extend `lockRound`'s own p95, since PureTrack group creation runs after `lockRound` returns.
 
-4. If PDF generation is the culprit, check the round size and consider chunking the brief content; the Y1 SKU has a hard 1.5GB memory ceiling per instance.
+4. If the slow dependency is a blob read/write (pilot snapshot fan-out, brief download, or the round+brief lease acquisition itself), check for lease contention from concurrent lock attempts on adjacent rounds, or a round with an unusually large team/pilot count driving the snapshot fan-out.
 
 ### Page vs investigate-async
 
@@ -330,7 +333,7 @@ This is intentional — the alert resource is in place so that the emitter can b
    az storage blob show \
      --container data \
      --name "seasons/<year>.json" \
-      --account-name "$(terraform -chdir=iac/service output -raw storage_account_name)" \
+      --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name_data)" \
      --query "properties.lastModified"
    ```
 
@@ -374,7 +377,7 @@ not appear; the status blob (`rescore-jobs/{jobId}.json`) may be stuck at `runni
    az storage blob download \
      --container data-private \
      --name "rescore-jobs/<jobId>.json" \
-     --account-name "$(terraform -chdir=iac/service output -raw storage_account_name)" \
+     --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name_data)" \
      --file /tmp/rescore-job.json
    cat /tmp/rescore-job.json
    ```
@@ -429,16 +432,17 @@ PureTrack groups.
    az storage blob download \
      --container data-private \
      --name "rounds/<roundId>.json" \
-     --account-name "$(terraform -chdir=iac/service output -raw storage_account_name)" \
+     --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name_data)" \
      --file /tmp/round.json
    cat /tmp/round.json | jq .pureTrack
    ```
-2. Check whether the job is still in the main queue or already dead-lettered:
+2. Check whether the job is still in the main queue or already dead-lettered (queues live on
+   the RUNTIME account, not the data account):
    ```bash
    az storage message peek --queue-name round-puretrack-group --num-messages 32 \
-     --account-name "$(terraform -chdir=iac/service output -raw storage_account_name)"
+     --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name_runtime)"
    az storage message peek --queue-name round-puretrack-group-poison --num-messages 32 \
-     --account-name "$(terraform -chdir=iac/service output -raw storage_account_name)"
+     --account-name "$(terraform -chdir=iac/environment output -raw storage_account_name_runtime)"
    ```
 3. If `failed` and the main queue is empty (the worker recorded the failure and ACKed the message), use the round's
    `Recreate Groups` action in the Admin UI (`POST /api/rounds/{id}/puretrack/create-groups`)
@@ -538,12 +542,12 @@ systematic bug in the replace-then-create step.
 
 ## How to add a new alert
 
-1. Add the resource to `iac/modules/stamp/alerts.tf` referencing `module.stamp.azapi_resource.ops.id`.
+1. Add the resource to `iac/environment/modules/stamp/alerts.tf` referencing `azapi_resource.ops.id` (module-internal — `alerts.tf` lives inside the `stamp` module itself, so it addresses the action group without a `module.stamp.` prefix; that prefix is only used from the `iac/environment` root, e.g. the `-target=` flag above).
 2. Add a section to this runbook with the same five subsections (What it means / Likely causes / Immediate response / Page vs investigate-async / Escalation).
 3. Verify the plan:
    ```bash
-    terraform -chdir=iac/service init -backend-config=../env/prod.backend.hcl
-    terraform -chdir=iac/service plan -var-file=../env/prod.tfvars
+    terraform -chdir=iac/environment init -backend-config=../env/prod.backend.hcl
+    terraform -chdir=iac/environment plan -var-file=../env/prod.tfvars -var-file=../env/prod.local.tfvars -var 'terraform_principal_type=User'
     ```
 4. Append the chosen metric / KQL query to `.omo/notepads/bccweb2-go-live-gap-closure/learnings.md`.
 
@@ -554,7 +558,7 @@ Use Azure Monitor action rules (suppression) at the subscription level rather th
 ```bash
 az monitor action-rule create \
   --name "maintenance-$(date +%Y%m%d-%H%M)" \
-  --resource-group "$(terraform -chdir=iac/service output -raw resource_group_name)" \
+  --resource-group "$(terraform -chdir=iac/environment output -raw resource_group_name)" \
   --rule-type Suppression \
   --suppression-recurrence-type Once \
   --suppression-start-date "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \

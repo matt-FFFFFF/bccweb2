@@ -4,42 +4,17 @@
 #
 # Provisions (one-shot, per Azure subscription/region):
 #   * Bootstrap resource group
-#   * Storage account hosting the tfstate blob container
+#   * Storage account hosting per-environment tfstate blob containers
 #   * Blob service with 30-day soft-delete
-#   * `tfstate` blob container (private)
+#   * `tfstate-<env>` blob containers (private)
 #   * CanNotDelete management lock on the storage account
-#   * Per-environment RGs (platform + stamp) consumed by the common and
-#     service stacks by interpolated name/ID
-#   * Per-environment Terraform UMIs with RG-scoped Owner + GitHub OIDC
-#     federation + per-env GitHub Actions secrets
+#   * One shared RG plus one stamp RG per application environment
+#   * Per-stack Terraform UMIs with RG-scoped Owner + GitHub OIDC federation
+#     + GitHub Actions OIDC secrets, deploy variables, and generated UMI IDs
 #
 # Local state is intentional — this config provisions its own remote-state
 # target, so it cannot itself live in that target. Re-running is safe; AzAPI
 # resources are idempotent on identical bodies.
-
-terraform {
-  required_version = "~> 1.11"
-
-  required_providers {
-    azapi = {
-      source  = "Azure/azapi"
-      version = "~> 2.10"
-    }
-    github = {
-      source  = "integrations/github"
-      version = "~> 6.4"
-    }
-  }
-}
-
-provider "azapi" {}
-
-# The github provider authenticates via the GITHUB_TOKEN env var (default
-# behavior). When `manage_github_secrets = false`, every github_* resource is
-# gated off, so the provider is never invoked and the token can be absent.
-provider "github" {
-  owner = split("/", var.github_repo)[0]
-}
 
 data "azapi_client_config" "current" {}
 
@@ -65,9 +40,11 @@ resource "azapi_resource" "bootstrap_rg" {
 #
 # StorageV2 + LRS is sufficient for tfstate: small, append-style writes; one
 # region is fine because the backend is regional anyway. Shared-key access is
-# enabled because the `azurerm` backend uses Azure AD when `use_azuread_auth =
-# true` is set in the backend HCL but still benefits from shared-key fallback
-# for tooling. Public blob access is disabled — tfstate is private.
+# DISABLED (`allowSharedKeyAccess = false` below) — the `azurerm` backend
+# authenticates via Azure AD (`use_azuread_auth = true` in the backend HCL),
+# and every UMI/user applying against this account gets Storage Blob Data
+# Contributor (or Owner, for the operator running this bootstrap) instead of
+# an account key. Public blob access is disabled — tfstate is private.
 
 resource "azapi_resource" "tfstate_sa" {
   type      = "Microsoft.Storage/storageAccounts@2025-06-01"
@@ -84,11 +61,11 @@ resource "azapi_resource" "tfstate_sa" {
       allowBlobPublicAccess    = false
       minimumTlsVersion        = "TLS1_2"
       supportsHttpsTrafficOnly = true
-      allowSharedKeyAccess     = true
+      allowSharedKeyAccess     = false
     }
   }
 
-  response_export_values = ["id", "name", "properties.primaryEndpoints.blob"]
+  response_export_values = ["properties.primaryEndpoints.blob"]
 }
 
 # ─── Blob service (soft delete) ──────────────────────────────────────────────
@@ -114,8 +91,9 @@ resource "azapi_update_resource" "tfstate_blob_service" {
 # ─── tfstate container (private) ─────────────────────────────────────────────
 
 resource "azapi_resource" "tfstate_container" {
+  for_each  = var.github_environments
   type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2025-06-01"
-  name      = var.tfstate_container_name
+  name      = join("-", [var.tfstate_container_prefix, each.key])
   parent_id = "${azapi_resource.tfstate_sa.id}/blobServices/default"
 
   body = {
@@ -148,23 +126,29 @@ resource "azapi_resource" "tfstate_sa_lock" {
     }
   }
 
-  depends_on = [azapi_resource.tfstate_sa]
+  depends_on = [
+    azapi_update_resource.tfstate_blob_service,
+    azapi_resource.tfstate_container,
+    azapi_resource.tf_tfstate_blob_role,
+    azapi_resource.tf_tfstate_shared_reader,
+  ]
 }
 
 # ─── Pre-created resource groups ─────────────────────────────────────────────
 #
-# Bootstrap owns every environment RG so the downstream common + service
-# stacks never need RG-create rights — they reference these by interpolated name/ID.
-# Two RGs per env: the platform RG (observability home, common stack) and the
-# stamp RG (service stack).
+# Bootstrap owns the shared RG and every application environment's stamp RG,
+# so downstream stacks never need RG-create rights. Shared services live in
+# `rg-bccweb-shared`; each application environment gets only `stamp-<env>`.
 
 locals {
-  pre_created_rgs = merge([
-    for env, cfg in var.terraform_umis : {
-      "platform-${env}" = cfg.platform_rg
-      "stamp-${env}"    = cfg.stamp_rg
+  shared_rg_name = "rg-bccweb-shared"
+  pre_created_rgs = merge(
+    { shared = local.shared_rg_name },
+    {
+      for env, cfg in var.terraform_umis :
+      "stamp-${env}" => cfg.stamp_rg if env != "shared"
     }
-  ]...)
+  )
 }
 
 resource "azapi_resource" "pre_created_rg" {
@@ -177,21 +161,22 @@ resource "azapi_resource" "pre_created_rg" {
   body = {
     tags = {
       project     = "bccweb"
-      environment = split("-", each.key)[1]
+      environment = each.key == "shared" ? "shared" : split("-", each.key)[1]
       managed_by  = "terraform"
     }
   }
 
-  response_export_values = ["id", "name"]
+  response_export_values = []
 }
 
 # ─── Terraform UMIs + GitHub OIDC federated credentials ──────────────────────
 #
-# One user-assigned managed identity per environment that GitHub Actions
+# One user-assigned managed identity per downstream stack that GitHub Actions
 # assumes via OIDC (no client secrets stored anywhere). Each UMI carries one
 # federated credential scoped to `repo:<owner/repo>:environment:<github_env>`
-# and is granted Owner ONLY on its env's two pre-created RGs — never at
-# subscription scope.
+# and is granted Owner ONLY on its matching pre-created RG — never at
+# subscription scope. Application identities own their stamp RG; the shared
+# identity owns the shared RG.
 
 resource "azapi_resource" "tf_umi" {
   for_each = var.terraform_umis
@@ -222,16 +207,16 @@ resource "azapi_resource" "tf_umi_fed_cred" {
   }
 }
 
-# One Owner assignment per (UMI, RG) pair — 2 RGs per env. Role-assignment
+# One Owner assignment per (UMI, RG) pair. Role-assignment
 # names must be GUIDs; uuidv5 derives a stable one from the pair key so
 # re-applies are no-ops (no random provider state involved).
 locals {
-  umi_rg_owner_pairs = merge([
-    for env, cfg in var.terraform_umis : {
-      "${env}-platform" = { env = env, rg_key = "platform-${env}" }
-      "${env}-stamp"    = { env = env, rg_key = "stamp-${env}" }
+  umi_rg_owner_pairs = {
+    for env, cfg in var.terraform_umis : env => {
+      env    = env
+      rg_key = env == "shared" ? "shared" : "stamp-${env}"
     }
-  ]...)
+  }
 }
 
 # Owner role definition GUID is a well-known constant — see
@@ -261,11 +246,30 @@ resource "azapi_resource" "tf_tfstate_blob_role" {
 
   type      = "Microsoft.Authorization/roleAssignments@2022-04-01"
   name      = uuidv5("url", "bccweb-tf-tfstate-blob-${each.key}-${azapi_resource.tfstate_sa.id}")
-  parent_id = azapi_resource.tfstate_sa.id
+  parent_id = azapi_resource.tfstate_container[each.value.github_env].id
 
   body = {
     properties = {
       roleDefinitionId = "/subscriptions/${data.azapi_client_config.current.subscription_id}/providers/Microsoft.Authorization/roleDefinitions/ba92f5b4-2d11-453d-a403-e96b0029c9fe"
+      principalId      = azapi_resource.tf_umi[each.key].output.properties.principalId
+      principalType    = "ServicePrincipal"
+    }
+  }
+}
+
+# Application stacks read shared.tfstate outputs but must not write or delete
+# shared state. Storage Blob Data Reader is scoped to tfstate-shared only; the
+# shared UMI already owns that container through the Contributor grant above.
+resource "azapi_resource" "tf_tfstate_shared_reader" {
+  for_each = local.application_umis
+
+  type      = "Microsoft.Authorization/roleAssignments@2022-04-01"
+  name      = uuidv5("url", "bccweb-tf-tfstate-shared-reader-${each.key}-${azapi_resource.tfstate_container["shared"].id}")
+  parent_id = azapi_resource.tfstate_container["shared"].id
+
+  body = {
+    properties = {
+      roleDefinitionId = "/subscriptions/${data.azapi_client_config.current.subscription_id}/providers/Microsoft.Authorization/roleDefinitions/2a2b9908-6ea1-4ae2-8e65-a410df84e7d1"
       principalId      = azapi_resource.tf_umi[each.key].output.properties.principalId
       principalType    = "ServicePrincipal"
     }
@@ -303,6 +307,29 @@ locals {
     for k, cfg in var.terraform_umis :
     cfg.github_env => azapi_resource.tf_umi[k].output.properties.clientId
   }
+
+  terraform_umi_principal_ids = {
+    for k, v in azapi_resource.tf_umi : k => v.output.properties.principalId
+  }
+
+  terraform_umi_key_width = max([
+    for key in keys(local.terraform_umi_principal_ids) : length(key)
+  ]...)
+
+  shared_generated_tfvars_content = join("\n", concat(
+    [
+      "# SPDX-FileCopyrightText: 2026 British Club Challenge authors",
+      "# SPDX-License-Identifier: MPL-2.0",
+      "# Generated by iac/bootstrap; non-secret and must be committed after bootstrap apply.",
+      "",
+      "env_umi_principal_ids = {",
+    ],
+    [
+      for key in sort(keys(local.terraform_umi_principal_ids)) :
+      "  ${format("%-${local.terraform_umi_key_width}s", key)} = ${jsonencode(local.terraform_umi_principal_ids[key])}"
+    ],
+    ["}", ""]
+  ))
 }
 
 resource "github_repository_environment" "envs" {
@@ -312,7 +339,7 @@ resource "github_repository_environment" "envs" {
   environment = each.key
 
   lifecycle {
-    ignore_changes = [reviewers, deployment_branch_policy]
+    ignore_changes = [reviewers, deployment_branch_policy, wait_timer, can_admins_bypass, prevent_self_review]
   }
 }
 
@@ -323,11 +350,15 @@ resource "github_actions_environment_secret" "azure" {
   environment = github_repository_environment.envs[each.value.env].environment
   secret_name = each.value.name
 
-  # plaintext_value is encrypted client-side using the environment's public
-  # key before being sent to GitHub; only the ciphertext lands in state. The
-  # values themselves are not real secrets — clientId/tenantId/subscriptionId
-  # are public identifiers (OIDC binds clientId to the federated subject).
-  plaintext_value = (
+  # `value` is sent to GitHub's API over TLS (the provider handles that
+  # transport-level encryption; it is not something this config does). The
+  # values themselves land in this config's LOCAL terraform.tfstate in plain
+  # text — that is acceptable because they are not real secrets:
+  # clientId/tenantId/subscriptionId are public identifiers (OIDC binds
+  # clientId to the federated subject, so disclosure alone is not exploitable
+  # outside the permitted GitHub repo+environment).
+
+  value = (
     each.value.name == "AZURE_CLIENT_ID" ? local.env_client_ids[each.value.env] :
     each.value.name == "AZURE_TENANT_ID" ? data.azapi_client_config.current.tenant_id :
     each.value.name == "AZURE_SUBSCRIPTION_ID" ? data.azapi_client_config.current.subscription_id :
@@ -336,5 +367,49 @@ resource "github_actions_environment_secret" "azure" {
 
   # Defensive: ensure the RG-scoped Owner + tfstate blob grants land first so
   # that each UMI is fully usable the moment CI reads these secrets.
-  depends_on = [azapi_resource.tf_owner_role, azapi_resource.tf_tfstate_blob_role]
+  depends_on = [azapi_resource.tf_owner_role, azapi_resource.tf_tfstate_blob_role, azapi_resource.tf_tfstate_shared_reader]
+}
+
+locals {
+  application_umis = {
+    for k, cfg in var.terraform_umis : k => cfg if k != "shared"
+  }
+
+  github_environment_vars = var.manage_github_secrets ? merge([
+    for k, cfg in local.application_umis : {
+      "${cfg.github_env}/TF_VAR_STAMP_RG_NAME" = { env = cfg.github_env, name = "TF_VAR_STAMP_RG_NAME", value = azapi_resource.pre_created_rg["stamp-${k}"].name }
+      "${cfg.github_env}/AZURE_LOCATION"       = { env = cfg.github_env, name = "AZURE_LOCATION", value = var.location }
+      "${cfg.github_env}/SHARED_RG_NAME"       = { env = cfg.github_env, name = "SHARED_RG_NAME", value = azapi_resource.pre_created_rg["shared"].name }
+    }
+  ]...) : {}
+}
+
+resource "github_actions_environment_variable" "rg_names" {
+  for_each      = local.github_environment_vars
+  repository    = split("/", var.github_repo)[1]
+  environment   = github_repository_environment.envs[each.value.env].environment
+  variable_name = each.value.name
+  value         = each.value.value
+}
+
+resource "local_file" "backend_config" {
+  for_each        = var.github_environments
+  filename        = "${path.module}/../env/${each.key}.backend.hcl"
+  file_permission = "0644"
+  content         = <<-EOT
+    # SPDX-FileCopyrightText: 2026 British Club Challenge authors
+    # SPDX-License-Identifier: MPL-2.0
+    # Generated by iac/bootstrap
+    resource_group_name  = "${azapi_resource.bootstrap_rg.name}"
+    storage_account_name = "${azapi_resource.tfstate_sa.name}"
+    container_name       = "${azapi_resource.tfstate_container[each.key].name}"
+    key                  = "${each.key}.tfstate"
+    use_azuread_auth     = true
+  EOT
+}
+
+resource "local_file" "shared_generated_tfvars" {
+  filename        = "${path.module}/../env/shared.generated.tfvars"
+  file_permission = "0644"
+  content         = local.shared_generated_tfvars_content
 }

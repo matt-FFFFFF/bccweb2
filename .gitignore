@@ -22,16 +22,22 @@ local.settings.json
 
 # Terraform
 .terraform
-.terraform.lock.hcl
 *.tfstate
 *.tfstate.backup
 *.tfvars
 *.tfvars.json
-# Non-sensitive tfvars are committed: common-stack values + the .example
-# templates. Real per-env service tfvars (dev.tfvars, prod.tfvars) hold
-# secrets and stay ignored.
-!iac/env/common-*.tfvars
+*tfplan*
+# Bootstrap tfvars is non-secret canonical bootstrap topology.
+!iac/bootstrap/terraform.tfvars
+# The committed environment bases are non-secret and tracked.
+!iac/env/shared.tfvars
+!iac/env/staging.tfvars
+!iac/env/prod.tfvars
+# Bootstrap generates this non-secret file; commit it after bootstrap apply.
+!iac/env/shared.generated.tfvars
 !iac/env/*.tfvars.example
+# Secret local overlays remain ignored even though tracked tfvars are negated above.
+iac/env/*.local.tfvars
 
 # Playwright
 playwright-report/

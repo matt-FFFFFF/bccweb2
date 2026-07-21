@@ -1,0 +1,33 @@
+# SPDX-FileCopyrightText: 2026 British Club Challenge authors
+# SPDX-License-Identifier: MPL-2.0
+# HISTORICAL FULL-SCHEMA REFERENCE. This file documents every shared-root
+# variable, secret and non-secret alike. The non-secret subset below is now
+# the committed, tracked `iac/env/shared.tfvars` — do not `cp` this file over
+# it; edit `shared.tfvars` directly if a committed base value needs to
+# change. Deterministic topology (`shared_rg_name`) is committed-base-owned
+# in `shared.tfvars`. Bootstrap writes `env_umi_principal_ids` to the
+# non-secret, committed `iac/env/shared.generated.tfvars` after its first apply.
+# Apply with the committed base first, then bootstrap's generated file:
+#   terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var-file=../env/shared.generated.tfvars
+
+environments   = ["staging", "prod"]
+location       = "uksouth"
+shared_rg_name = "rg-bccweb-shared"
+
+acs_email_domain   = "<REQUIRED: ACS email domain>"
+acs_sender_address = "<REQUIRED: sender address whose domain equals acs_email_domain>"
+
+# Leave these empty until the production DNS cutover.
+production_hostname          = ""
+dns_zone_name                = ""
+dns_zone_resource_group_name = ""
+
+tags = {}
+
+# Bootstrap-generated reference; the canonical value is written to
+# `iac/env/shared.generated.tfvars`, not maintained in this example.
+env_umi_principal_ids = {
+  staging = "<REQUIRED: staging Terraform UMI principal ID>"
+  prod    = "<REQUIRED: prod Terraform UMI principal ID>"
+  shared  = "<REQUIRED: shared Terraform UMI principal ID>"
+}
