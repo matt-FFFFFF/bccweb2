@@ -11,6 +11,11 @@ fail() {
   exit 1
 }
 
+for service in blob_service_runtime queue_service blob_service_data; do
+  grep -Eq "^[[:space:]]*resource[[:space:]]+\"azapi_update_resource\"[[:space:]]+\"${service}\"" "$storage_file" ||
+    fail "azapi_update_resource.$service must update Azure's implicit default service"
+done
+
 resource_records="$(awk '
   function brace_delta(value, copy, opens, closes) {
     copy = value
@@ -76,9 +81,7 @@ assert_name() {
     fail "azapi_resource.$resource_name Azure name is '$actual_name', expected '$expected_name'"
 }
 
-assert_parent queue_service azapi_resource.storage_runtime.id
-assert_parent blob_service_runtime azapi_resource.storage_runtime.id
-assert_parent storage_container_deploy azapi_resource.blob_service_runtime.id
+assert_parent storage_container_deploy '"${azapi_resource.storage_runtime.id}/blobServices/default"'
 assert_name storage_container_deploy deploymentpackage
 
 queue_resources=(
@@ -95,12 +98,11 @@ queue_resources=(
 )
 
 for queue_resource in "${queue_resources[@]}"; do
-  assert_parent "$queue_resource" azapi_resource.queue_service.id
+  assert_parent "$queue_resource" '"${azapi_resource.storage_runtime.id}/queueServices/default"'
 done
 
-assert_parent blob_service_data azapi_resource.storage_data.id
-assert_parent storage_container_data azapi_resource.blob_service_data.id
-assert_parent storage_container_data_private azapi_resource.blob_service_data.id
+assert_parent storage_container_data '"${azapi_resource.storage_data.id}/blobServices/default"'
+assert_parent storage_container_data_private '"${azapi_resource.storage_data.id}/blobServices/default"'
 assert_parent storage_lifecycle azapi_resource.storage_data.id
 assert_name storage_container_data data
 assert_name storage_container_data_private data-private

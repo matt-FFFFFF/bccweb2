@@ -45,10 +45,9 @@ resource "azapi_resource" "storage_runtime" {
 # The runtime blob service intentionally has no versioning, CORS, change feed,
 # or soft-delete policy. It exists only for Functions runtime state and the Flex
 # deployment package container used by the later Flex migration.
-resource "azapi_resource" "blob_service_runtime" {
-  type      = "Microsoft.Storage/storageAccounts/blobServices@2025-06-01"
-  name      = "default"
-  parent_id = azapi_resource.storage_runtime.id
+resource "azapi_update_resource" "blob_service_runtime" {
+  type        = "Microsoft.Storage/storageAccounts/blobServices@2025-06-01"
+  resource_id = "${azapi_resource.storage_runtime.id}/blobServices/default"
 
   body = {
     properties = {}
@@ -58,13 +57,15 @@ resource "azapi_resource" "blob_service_runtime" {
 resource "azapi_resource" "storage_container_deploy" {
   type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2025-06-01"
   name      = "deploymentpackage"
-  parent_id = azapi_resource.blob_service_runtime.id
+  parent_id = "${azapi_resource.storage_runtime.id}/blobServices/default"
 
   body = {
     properties = {
       publicAccess = "None"
     }
   }
+
+  depends_on = [azapi_update_resource.blob_service_runtime]
 }
 
 # ─── Queue Service ───────────────────────────────────────────────────────────
@@ -72,10 +73,9 @@ resource "azapi_resource" "storage_container_deploy" {
 # All queue-triggered Functions and producers use AzureWebJobsStorage, so every
 # application queue belongs to the runtime account.
 
-resource "azapi_resource" "queue_service" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices@2025-06-01"
-  name      = "default"
-  parent_id = azapi_resource.storage_runtime.id
+resource "azapi_update_resource" "queue_service" {
+  type        = "Microsoft.Storage/storageAccounts/queueServices@2025-06-01"
+  resource_id = "${azapi_resource.storage_runtime.id}/queueServices/default"
 
   body = {
     properties = {}
@@ -85,71 +85,81 @@ resource "azapi_resource" "queue_service" {
 # ─── Round-Brief PDF Queues ──────────────────────────────────────────────────
 
 resource "azapi_resource" "queue_brief_pdf" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "round-brief-pdf"
-  parent_id = azapi_resource.queue_service.id
+  type       = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name       = "round-brief-pdf"
+  parent_id  = "${azapi_resource.storage_runtime.id}/queueServices/default"
+  depends_on = [azapi_update_resource.queue_service]
 }
 
 resource "azapi_resource" "queue_brief_pdf_poison" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "round-brief-pdf-poison"
-  parent_id = azapi_resource.queue_service.id
+  type       = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name       = "round-brief-pdf-poison"
+  parent_id  = "${azapi_resource.storage_runtime.id}/queueServices/default"
+  depends_on = [azapi_update_resource.queue_service]
 }
 
 # ─── Sign-to-Fly Reflect Queues ──────────────────────────────────────────────
 
 resource "azapi_resource" "queue_signtofly_reflect" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "signtofly-reflect"
-  parent_id = azapi_resource.queue_service.id
+  type       = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name       = "signtofly-reflect"
+  parent_id  = "${azapi_resource.storage_runtime.id}/queueServices/default"
+  depends_on = [azapi_update_resource.queue_service]
 }
 
 resource "azapi_resource" "queue_signtofly_reflect_poison" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "signtofly-reflect-poison"
-  parent_id = azapi_resource.queue_service.id
+  type       = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name       = "signtofly-reflect-poison"
+  parent_id  = "${azapi_resource.storage_runtime.id}/queueServices/default"
+  depends_on = [azapi_update_resource.queue_service]
 }
 
 # ─── Rescore Jobs Queues ─────────────────────────────────────────────────────
 
 resource "azapi_resource" "queue_rescore_jobs" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "rescore-jobs"
-  parent_id = azapi_resource.queue_service.id
+  type       = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name       = "rescore-jobs"
+  parent_id  = "${azapi_resource.storage_runtime.id}/queueServices/default"
+  depends_on = [azapi_update_resource.queue_service]
 }
 
 resource "azapi_resource" "queue_rescore_jobs_poison" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "rescore-jobs-poison"
-  parent_id = azapi_resource.queue_service.id
+  type       = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name       = "rescore-jobs-poison"
+  parent_id  = "${azapi_resource.storage_runtime.id}/queueServices/default"
+  depends_on = [azapi_update_resource.queue_service]
 }
 
 # ─── IGC Validation Queues ───────────────────────────────────────────────────
 
 resource "azapi_resource" "queue_igc_validation" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "igc-validation"
-  parent_id = azapi_resource.queue_service.id
+  type       = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name       = "igc-validation"
+  parent_id  = "${azapi_resource.storage_runtime.id}/queueServices/default"
+  depends_on = [azapi_update_resource.queue_service]
 }
 
 resource "azapi_resource" "queue_igc_validation_poison" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "igc-validation-poison"
-  parent_id = azapi_resource.queue_service.id
+  type       = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name       = "igc-validation-poison"
+  parent_id  = "${azapi_resource.storage_runtime.id}/queueServices/default"
+  depends_on = [azapi_update_resource.queue_service]
 }
 
 # ─── PureTrack Group Queues ──────────────────────────────────────────────────
 
 resource "azapi_resource" "queue_puretrack_group" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "round-puretrack-group"
-  parent_id = azapi_resource.queue_service.id
+  type       = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name       = "round-puretrack-group"
+  parent_id  = "${azapi_resource.storage_runtime.id}/queueServices/default"
+  depends_on = [azapi_update_resource.queue_service]
 }
 
 resource "azapi_resource" "queue_puretrack_group_poison" {
-  type      = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
-  name      = "round-puretrack-group-poison"
-  parent_id = azapi_resource.queue_service.id
+  type       = "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01"
+  name       = "round-puretrack-group-poison"
+  parent_id  = "${azapi_resource.storage_runtime.id}/queueServices/default"
+  depends_on = [azapi_update_resource.queue_service]
 }
 
 # ─── Data Storage Account ────────────────────────────────────────────────────
@@ -207,10 +217,9 @@ resource "azapi_resource" "storage_lock" {
 
 # Versioning, change feed, and soft-delete protect application data. CORS is
 # locked to var.allowed_origins (no wildcard).
-resource "azapi_resource" "blob_service_data" {
-  type      = "Microsoft.Storage/storageAccounts/blobServices@2025-06-01"
-  name      = "default"
-  parent_id = azapi_resource.storage_data.id
+resource "azapi_update_resource" "blob_service_data" {
+  type        = "Microsoft.Storage/storageAccounts/blobServices@2025-06-01"
+  resource_id = "${azapi_resource.storage_data.id}/blobServices/default"
 
   body = {
     properties = {
@@ -244,25 +253,27 @@ resource "azapi_resource" "blob_service_data" {
 resource "azapi_resource" "storage_container_data" {
   type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2025-06-01"
   name      = "data"
-  parent_id = azapi_resource.blob_service_data.id
+  parent_id = "${azapi_resource.storage_data.id}/blobServices/default"
 
   body = {
     properties = {
       publicAccess = "Blob"
     }
   }
+  depends_on = [azapi_update_resource.blob_service_data]
 }
 
 resource "azapi_resource" "storage_container_data_private" {
   type      = "Microsoft.Storage/storageAccounts/blobServices/containers@2025-06-01"
   name      = "data-private"
-  parent_id = azapi_resource.blob_service_data.id
+  parent_id = "${azapi_resource.storage_data.id}/blobServices/default"
 
   body = {
     properties = {
       publicAccess = "None"
     }
   }
+  depends_on = [azapi_update_resource.blob_service_data]
 }
 
 # ─── Per-Account Keys ────────────────────────────────────────────────────────
@@ -346,5 +357,5 @@ resource "azapi_resource" "storage_lifecycle" {
     }
   }
 
-  depends_on = [azapi_resource.blob_service_data, azapi_resource.storage_container_data_private]
+  depends_on = [azapi_update_resource.blob_service_data, azapi_resource.storage_container_data_private]
 }
