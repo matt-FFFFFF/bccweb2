@@ -162,7 +162,7 @@ The storage account returned more than 5 transactions tagged `ServerBusyError` (
 ### Likely causes
 
 - Hot partition / scale ceiling on the `data` or `data-private` container (large recompute fan-out, mass import).
-- An infrastructure-level Azure incident in the resource group's region (`uksouth`). Check `https://status.azure.com`.
+- An infrastructure-level Azure incident in the resource group's region (`swedencentral`). Check `https://status.azure.com`.
 - A storage account configuration drift removing GRS or enabling network restrictions that block the Function App.
 
 ### Immediate response

@@ -267,7 +267,8 @@ terraform -chdir=iac/bootstrap apply
 
 The apply creates the env's UMI, federated credential, stamp RG, role
 assignments, GitHub environment, and secrets in one shot. The federated
-subject claim is `repo:<owner/repo>:environment:<name>`, so the
+subject claim is `repo:<owner@id/repo@id>:environment:<name>`, using the
+canonical `github_oidc_subject_repo` input, so the
 `github_env` value and the GitHub environment name must match exactly
 (case-sensitive).
 
@@ -464,7 +465,8 @@ jobs:
 ```
 
 Without `environment: <name>`, GitHub issues an OIDC token whose `sub` claim
-is `repo:<owner/repo>:ref:refs/heads/<branch>` (or similar), which no
+uses a branch context instead of the configured immutable
+`repo:<owner@id/repo@id>:environment:<name>` form, which no
 federated credential here trusts — `azure/login` will fail with a 400. The
 `environment` also selects which env-scoped `AZURE_CLIENT_ID` the job reads,
 binding the job to that env's UMI and its RG-scoped permissions.

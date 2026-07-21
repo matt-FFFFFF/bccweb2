@@ -145,7 +145,7 @@ output "github_actions_setup" {
 %{endif~}
 
     2. Federated credentials exist for these GitHub environments (subject
-       claim repo:${var.github_repo}:environment:<env>):
+       claim repo:${var.github_oidc_subject_repo}:environment:<env>):
 %{for k, v in var.terraform_umis~}
          - ${v.github_env} (UMI id-bccweb-terraform-${k})
 %{endfor~}
