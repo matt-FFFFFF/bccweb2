@@ -64,7 +64,8 @@ Follow these steps to provision the topology from scratch.
     env's UMI, its resource group(s), its GitHub environment, the three
     Azure OIDC secrets (`AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID`),
     application deploy variables `TF_VAR_STAMP_RG_NAME`/`AZURE_LOCATION`/
-    `SHARED_RG_NAME` on `staging`/`prod` (consumed by `deploy-app.yml`, and
+    `SHARED_RG_NAME` on `staging`/`prod` (with `AZURE_LOCATION` sourced from
+    the Sweden Central workload location; consumed by `deploy-app.yml`, and
     `SHARED_RG_NAME` also by `pr-preview.yml`; not Terraform). It also writes the complete UMI
     principal-ID map to `iac/env/shared.generated.tfvars` with mode 0644.
     That file is non-secret but cannot exist before bootstrap creates the

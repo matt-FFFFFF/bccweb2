@@ -320,7 +320,9 @@ them needs manual work before the shared/environment applies in phase 6:
 - **Bootstrap-published deploy variables**:
   `TF_VAR_STAMP_RG_NAME`/`SHARED_RG_NAME`/`AZURE_LOCATION` are used by
   `deploy-app.yml`, not Terraform, and are already written by phase 4's
-  bootstrap apply. There are no GitHub Terraform-input variables.
+  bootstrap apply. `AZURE_LOCATION` is Sweden Central, matching the complete
+  bootstrap/shared/application topology. There are no GitHub Terraform-input
+  variables.
 - **Operator-set secrets** — populate these by hand. See the full table in
   [`iac/README.md`](../../iac/README.md#github-environment-variables--secrets-contract);
   summarized here:

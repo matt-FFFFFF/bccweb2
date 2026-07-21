@@ -99,7 +99,7 @@ terraform -chdir=iac/bootstrap validate
 #    copy the example and edit it before the first apply:
 #    cp iac/bootstrap/terraform.tfvars.example iac/bootstrap/terraform.tfvars
 
-# 4. Apply. Other variables have sensible defaults (location=uksouth,
+# 4. Apply. Other variables have sensible defaults (location=swedencentral,
 #    bootstrap_rg_name=rg-bccweb-tfstate, tfstate_container_prefix=tfstate).
 terraform -chdir=iac/bootstrap apply
 
@@ -221,7 +221,9 @@ downstream stack** (`id-bccweb-terraform-staging`,
 `id-bccweb-terraform-prod`, `id-bccweb-terraform-shared`) that GitHub Actions
 assumes via OIDC — no client secrets stored anywhere. Each UMI carries exactly
 one federated identity credential, scoped to
-`repo:<github_repo>:environment:<github_env>` per its `terraform_umis` entry.
+`repo:<github_oidc_subject_repo>:environment:<github_env>` per its
+`terraform_umis` entry. The canonical input includes GitHub's immutable owner
+and repository IDs so Azure exactly matches the subject GitHub emits.
 
 **Security note**: Each UMI is granted **RG-scoped Owner** on exactly one
 pre-created resource group — never at subscription scope:
@@ -329,7 +331,7 @@ directly in `iac/env/{shared,staging,prod}.tfvars` instead:
 |---|---|---|
 | `TF_VAR_STAMP_RG_NAME` | `azapi_resource.pre_created_rg["stamp-<env>"].name` | **Yes — different RG name per env** |
 | `SHARED_RG_NAME` | `azapi_resource.pre_created_rg["shared"].name` | `staging` and `prod` both, immediately on apply |
-| `AZURE_LOCATION` | `var.location` (`uksouth` by default) | `staging` and `prod` both, immediately on apply |
+| `AZURE_LOCATION` | `var.location` (`swedencentral` by default) | `staging` and `prod` both, immediately on apply |
 
 No GitHub Actions variable is a Terraform input. Bootstrap writes the complete
 env-to-principal-ID map (including `shared`) to the non-secret, mode-0644
