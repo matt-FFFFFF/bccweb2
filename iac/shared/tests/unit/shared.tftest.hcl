@@ -86,9 +86,10 @@ run "shared_plans" {
       azapi_resource.acs_sender_username.type == "Microsoft.Communication/emailServices/domains/senderUsernames@2025-09-01" &&
       azapi_resource.acs_sender_username.parent_id == azapi_resource.acs_email_domain.id &&
       azapi_resource.acs.name == "acs-bccweb-shared" &&
-      azapi_resource.acs.type == "Microsoft.Communication/communicationServices@2025-09-01"
+      azapi_resource.acs.type == "Microsoft.Communication/communicationServices@2025-09-01" &&
+      length(azapi_resource.acs.body.properties.linkedDomains) == 0
     )
-    error_message = "The shared ACS resources must keep their frozen names and API types."
+    error_message = "The shared ACS resources must keep their frozen names and API types, without linking an unverified email domain."
   }
 
   assert {
@@ -145,6 +146,26 @@ run "shared_plans" {
       output.swa_id == azapi_resource.swa.id
     )
     error_message = "The Static Web App outputs must expose its frozen name, default hostname, and resource ID."
+  }
+}
+
+run "verified_acs_email_domain_can_be_linked" {
+  command = plan
+
+  providers = {
+    azapi = azapi.mock
+  }
+
+  variables {
+    link_acs_email_domain = true
+  }
+
+  assert {
+    condition = (
+      length(azapi_resource.acs.body.properties.linkedDomains) == 1 &&
+      azapi_resource.acs.body.properties.linkedDomains[0] == azapi_resource.acs_email_domain.id
+    )
+    error_message = "Explicitly enabling a verified ACS email domain must link exactly that domain."
   }
 }
 

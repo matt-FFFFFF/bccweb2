@@ -52,6 +52,12 @@ variable "acs_sender_address" {
   }
 }
 
+variable "link_acs_email_domain" {
+  description = "Link the customer-managed email domain after Azure reports all required DNS verification checks as verified."
+  type        = bool
+  default     = false
+}
+
 variable "production_hostname" {
   description = "Public production hostname for the shared Static Web App."
   type        = string
