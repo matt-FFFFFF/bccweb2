@@ -7,6 +7,7 @@ set -euo pipefail
 for config in \
   iac/bootstrap/terraform.tfvars \
   iac/bootstrap/terraform.tfvars.example \
+  iac/bootstrap/variables.tf \
   iac/shared/variables.tf \
   iac/environment/variables.tf \
   iac/env/shared.tfvars \

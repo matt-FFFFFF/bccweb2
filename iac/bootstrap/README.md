@@ -221,8 +221,8 @@ GitHub's immutable subject and verify the exact repository prefix:
 
 ```sh
 gh api --method PUT repos/matt-FFFFFF/bccweb2/actions/oidc/customization/sub \
-  -f use_default=true \
-  -f use_immutable_subject=true
+  -F use_default=true \
+  -F use_immutable_subject=true
 gh api repos/matt-FFFFFF/bccweb2/actions/oidc/customization/sub
 ```
 
