@@ -219,3 +219,20 @@ run "partially_immutable_oidc_subject_is_rejected" {
 
   expect_failures = [var.github_oidc_subject_repo]
 }
+
+run "oidc_subject_repository_mismatch_is_rejected" {
+  command = plan
+
+  providers = {
+    azapi  = azapi.mock
+    github = github.mock
+    local  = local.mock
+  }
+
+  variables {
+    github_repo              = "owner/repository"
+    github_oidc_subject_repo = "attacker@1/repository@2"
+  }
+
+  expect_failures = [var.github_oidc_subject_repo]
+}
