@@ -30,7 +30,14 @@ done
 
 printf 'Location contract passed: bootstrap, shared, staging, and prod use swedencentral.\n'
 
-if ! grep -Eq '^[[:space:]]*swa_location[[:space:]]*=[[:space:]]*"westeurope"[[:space:]]*$' iac/env/shared.tfvars; then
-  printf 'ERROR: iac/env/shared.tfvars must set the supported SWA exception swa_location = "westeurope".\n' >&2
+for config in iac/env/shared.tfvars iac/env/shared.tfvars.example; do
+  if ! grep -Eq '^[[:space:]]*swa_location[[:space:]]*=[[:space:]]*"westeurope"[[:space:]]*$' "$config"; then
+    printf 'ERROR: %s must set the supported SWA exception swa_location = "westeurope".\n' "$config" >&2
+    exit 1
+  fi
+done
+
+if ! grep -A3 '^variable "swa_location"' iac/shared/variables.tf | grep -Eq '^[[:space:]]*default[[:space:]]*=[[:space:]]*"westeurope"[[:space:]]*$'; then
+  printf 'ERROR: iac/shared/variables.tf must default swa_location to the supported West Europe region.\n' >&2
   exit 1
 fi
