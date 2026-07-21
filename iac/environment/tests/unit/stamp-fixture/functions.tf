@@ -3,6 +3,8 @@
 locals {
   function_app_settings = [
     { name = "AzureWebJobsStorage", value = local.storage_runtime_connection_string },
+    { name = "FUNCTIONS_WORKER_RUNTIME", value = "node" },
+    { name = "FUNCTIONS_NODE_BLOCK_ON_ENTRY_POINT_ERROR", value = "true" },
     { name = "BLOB_CONNECTION_STRING", value = local.storage_data_connection_string },
     { name = "BLOB_CONTAINER_NAME", value = "data" },
     { name = "BLOB_PRIVATE_CONTAINER_NAME", value = "data-private" },
