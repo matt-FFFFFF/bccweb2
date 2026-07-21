@@ -173,7 +173,7 @@ resource "azapi_resource" "pre_created_rg" {
 #
 # One user-assigned managed identity per downstream stack that GitHub Actions
 # assumes via OIDC (no client secrets stored anywhere). Each UMI carries one
-# federated credential scoped to `repo:<owner/repo>:environment:<github_env>`
+# federated credential scoped to `repo:<github_oidc_subject_repo>:environment:<github_env>`
 # and is granted Owner ONLY on its matching pre-created RG — never at
 # subscription scope. Application identities own their stamp RG; the shared
 # identity owns the shared RG.

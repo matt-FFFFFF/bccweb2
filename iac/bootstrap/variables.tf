@@ -43,13 +43,13 @@ variable "tfstate_container_prefix" {
 # One UMI per downstream stack; each UMI gets Owner on exactly one pre-created
 # RG (never subscription scope). Each UMI carries one
 # federated identity credential scoped to
-# `repo:<github_repo>:environment:<github_env>`. Adding a new env is a new
+# `repo:<github_oidc_subject_repo>:environment:<github_env>`. Adding a new env is a new
 # `terraform_umis` map entry (plus the matching `github_environments` entry)
 # + re-apply.
 
 variable "github_repo" {
   type        = string
-  description = "owner/repo for GitHub OIDC federated credentials (subject claim becomes repo:<owner/repo>:environment:<env>)."
+  description = "owner/repo selected by GitHub API resources managed during bootstrap."
   default     = "matt-FFFFFF/bccweb2"
 }
 

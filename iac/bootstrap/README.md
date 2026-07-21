@@ -216,6 +216,21 @@ in-use account. Never delete or overwrite the only copy of `prod.tfstate`.
 
 ## GitHub Actions OIDC setup
 
+Before applying Azure federated credentials for an existing repository, enable
+GitHub's immutable subject and verify the exact repository prefix:
+
+```sh
+gh api --method PUT repos/matt-FFFFFF/bccweb2/actions/oidc/customization/sub \
+  -f use_default=true \
+  -f use_immutable_subject=true
+gh api repos/matt-FFFFFF/bccweb2/actions/oidc/customization/sub
+```
+
+The response must report `use_immutable_subject: true` and the
+`repo:matt-FFFFFF@16320656/bccweb2@1264013182` prefix committed as
+`github_oidc_subject_repo`. The GitHub provider does not manage this repository
+setting, so this opt-in is an explicit bootstrap prerequisite.
+
 The bootstrap provisions **one user-assigned managed identity (UMI) per
 downstream stack** (`id-bccweb-terraform-staging`,
 `id-bccweb-terraform-prod`, `id-bccweb-terraform-shared`) that GitHub Actions
