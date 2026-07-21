@@ -28,34 +28,41 @@ always use `../env/<env>.backend.hcl`.
 
 ## tfvars
 
-`../env/<env>.tfvars` is the committed, tracked, non-secret base (stamp name,
-location, CORS origins, secret-version bumps). Secrets and bootstrap-generated
-values (`stamp_rg_name`, the `tfstate_*` values, `ops_email`, `puretrack_*`)
-live in a gitignored local overlay copied from
-`../env/<env>.local.tfvars.example`. Local applies pass the base file first
-and the local overlay second so the overlay wins, then append
+`../env/<env>.tfvars` is the committed, tracked, non-secret base — stamp
+name, location, CORS origins, secret-version bumps, and the deterministic
+topology (`stamp_rg_name`, `tfstate_resource_group_name`,
+`tfstate_storage_account_name`), all committed because they're knowable once
+`terraform_umis`/`github_environments` are fixed in `iac/bootstrap`. Only
+secrets (`ops_email`, `puretrack_*`) live in a gitignored local overlay
+copied from `../env/<env>.local.tfvars.example`. Local applies pass the base
+file first and the local overlay second so the overlay wins, then append
 `-var 'terraform_principal_type=User'` as a CLI override — that variable is
 never committed in any tfvars file (see [../README.md](../README.md#first-time-setup) step 6).
-CI loads the committed base with `-var-file`; `terraform-run.yml` maps
-required GitHub environment variables and secrets explicitly into `TF_VAR_*`
-job environment entries (see `.github/workflows/terraform-run.yml`).
+CI loads the committed base with `-var-file`; `terraform-run.yml` maps only
+the secrets explicitly into `TF_VAR_*` job environment entries (see
+`.github/workflows/terraform-run.yml`). The shared-only
+`iac/env/shared.generated.tfvars` is never loaded by environment plans.
 
 ## Required inputs
 
-Every apply needs these set (via tfvars locally, or GitHub environment
-vars/secrets in CI):
+Every apply needs these set (via committed tfvars for the topology, local
+tfvars/GitHub Secrets for the operator secrets):
 
 | Variable | Source | Notes |
 |---|---|---|
 | `stamp_name` | Committed base tfvars (`iac/env/<env>.tfvars`) | Environment name used as the resource-name suffix; authored, not CI-generated. |
-| `stamp_rg_name` | `vars.TF_VAR_STAMP_RG_NAME` | Published by bootstrap as a GitHub environment variable. |
-| `tfstate_resource_group_name` | `vars.TF_VAR_tfstate_resource_group_name` | Resource group containing the canonical state account. |
-| `tfstate_storage_account_name` | `vars.TF_VAR_tfstate_storage_account_name` | Canonical state account containing `tfstate-shared/shared.tfstate`. |
+| `stamp_rg_name` | Committed base tfvars (`iac/env/<env>.tfvars`) | Deterministic once `terraform_umis`/`github_environments` are fixed in bootstrap; not a GitHub variable. |
+| `tfstate_resource_group_name` | Committed base tfvars (`iac/env/<env>.tfvars`) | Resource group containing the canonical state account; deterministic, not a GitHub variable. |
+| `tfstate_storage_account_name` | Committed base tfvars (`iac/env/<env>.tfvars`) | Canonical state account containing `tfstate-shared/shared.tfstate`; deterministic, not a GitHub variable. |
 | `ops_email` | tfvars locally / `secrets.TF_VAR_ops_email` in CI | Alert recipient; treated as a Secret, not a Variable, even though it isn't sensitive (public repo). |
 | `puretrack_api_key`, `puretrack_email`, `puretrack_password` | `TF_VAR_*` secrets | Sensitive; never written to a tfvars file in CI. |
 
 The ACS sender address is not an environment-root input; it comes from the
-shared root's `acs_sender_address` remote-state output.
+shared root's `acs_sender_address` remote-state output. Note:
+`vars.TF_VAR_STAMP_RG_NAME` also exists as a bootstrap-published GitHub
+environment variable, but it feeds `deploy-app.yml`'s application deploy
+steps, not this Terraform root — this root's `stamp_rg_name` comes from the
+committed tfvars, above.
 
 Optional inputs (`allowed_origins`, `slack_webhook_url`, `jwt_secret_version`,
 `acs_secret_version`, `blob_schema_mode`, `terraform_principal_type`) have defaults — see

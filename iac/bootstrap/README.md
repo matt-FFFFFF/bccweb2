@@ -24,17 +24,28 @@ JSON-encoded body strings). This config uses **local state** intentionally; see
 ## When to run
 
 - **First time, once per Azure subscription/region**, before the first
-  `terraform apply` in `iac/environment`.
+  `terraform apply` in `iac/shared` or `iac/environment`. The first apply
+  creates `iac/env/shared.generated.tfvars`; review and commit that file before
+  running shared.
 - **Re-run whenever the per-environment set changes**: adding a new
   environment (new `terraform_umis` entry + matching `github_environments`
   name — see "Adding a new GitHub environment" below), or backfilling the
-  `TF_VAR_STAMP_RG_NAME` and deterministic topology variables for an
-  environment bootstrapped before that publication existed (see "Populate
-  GitHub secrets" below). Before every re-apply, save and review a plan.
-  Publishing the missing RG-name variables is the required outcome for an
-  existing environment, but it may not be the only change: the current
+  `TF_VAR_STAMP_RG_NAME`/`AZURE_LOCATION`/`SHARED_RG_NAME` deploy variables
+  for an environment bootstrapped before that publication existed (see
+  "Populate GitHub secrets" below). Before every re-apply, save and review a
+  plan. Publishing the missing deploy variables is the required outcome for
+  an existing environment, but it may not be the only change: the current
   bootstrap configuration can also reconcile `allowSharedKeyAccess = false`
-  and any other pending drift recorded in the plan.
+  and any other pending drift recorded in the plan — including, on an
+  environment bootstrapped before the deterministic-topology-as-committed-tfvars
+  change, **deletes** of the now-retired GitHub variables
+  `TF_VAR_shared_rg_name`, `TF_VAR_tfstate_resource_group_name`, and
+  `TF_VAR_tfstate_storage_account_name` (bootstrap no longer publishes these;
+  the topology they carried is deterministic and lives in the committed
+  `iac/env/{shared,staging,prod}.tfvars` instead — see "Populate GitHub
+  secrets" below). Confirm the committed tfvars/backend files already match
+  bootstrap's new plan before accepting those deletions; the values must not
+  disappear from both places at once.
 - Also re-run if you need to recreate the bootstrap RG or rotate to a
   different storage account (a rarer, destructive operation — see "Safe
   re-apply / teardown" below).
@@ -80,17 +91,30 @@ terraform -chdir=iac/bootstrap init -backend=false
 # 2. Validate.
 terraform -chdir=iac/bootstrap validate
 
-# 3. Prepare tfvars. `tfstate_storage_account_name` and `terraform_umis`
-#    have no defaults; copy the committed template and adjust.
-cp iac/bootstrap/terraform.tfvars.example iac/bootstrap/terraform.tfvars
+# 3. `iac/bootstrap/terraform.tfvars` is the canonical, non-secret file and
+#    is committed to this repo — there is nothing to copy for the normal
+#    case. `terraform.tfvars.example` stays alongside it as a template only
+#    for a fork or a from-scratch subscription that needs different
+#    `tfstate_storage_account_name`/`terraform_umis` values; in that case,
+#    copy the example and edit it before the first apply:
+#    cp iac/bootstrap/terraform.tfvars.example iac/bootstrap/terraform.tfvars
 
 # 4. Apply. Other variables have sensible defaults (location=uksouth,
 #    bootstrap_rg_name=rg-bccweb-tfstate, tfstate_container_prefix=tfstate).
 terraform -chdir=iac/bootstrap apply
 
-# 5. Display every backend config snippet. The output is a list of strings.
+# 5. Review and commit the generated, non-secret shared input (mode 0644).
+test -f iac/env/shared.generated.tfvars
+git diff --no-index /dev/null iac/env/shared.generated.tfvars || test $? -eq 1
+
+# 6. Display every backend config snippet. The output is a list of strings.
 terraform -chdir=iac/bootstrap output -json backend_config_hcl | jq -r '.[]'
 ```
+
+`iac/env/shared.generated.tfvars` is intentionally absent before the first
+bootstrap apply because the UMI principal IDs do not exist yet. A shared
+workflow plan cannot run until the reviewed file is committed; do not create a
+placeholder. Environment plans never consume this file.
 
 ## Copying outputs into `iac/env/<env>.backend.hcl`
 
@@ -181,7 +205,7 @@ in-use account. Never delete or overwrite the only copy of `prod.tfstate`.
 | `container_name` | List of tfstate blob-container names, one per environment. Display with `terraform -chdir=iac/bootstrap output -json container_name | jq -r '.[]'`. |
 | `backend_config_hcl` | List of copy-pasteable HCL strings for `iac/env/<env>.backend.hcl`, one per `github_environments` value; select one with the JSON/JQ procedure above. |
 | `terraform_umi_client_ids` | Map env → app (client) ID of that env's Terraform UMI. Pass as `AZURE_CLIENT_ID` to `azure/login@v3`. Not secrets — OIDC binds each to its federated subject. |
-| `terraform_umi_principal_ids` | Map env → object (principal) ID of that env's Terraform UMI. For downstream RBAC. |
+| `terraform_umi_principal_ids` | Map env → object (principal) ID of that env's Terraform UMI. Bootstrap also writes this map to the non-secret, mode-0644 `iac/env/shared.generated.tfvars`; review and commit that file for downstream RBAC. |
 | `terraform_umi_resource_ids` | Map env → full Azure resource ID of that env's Terraform UMI. |
 | `pre_created_rg_names` | Map `shared`/`stamp-<env>` → RG name; bootstrap publishes the relevant names as GitHub environment variables. |
 | `pre_created_rg_ids` | Map `shared`/`stamp-<env>` → RG Azure resource ID. |
@@ -245,13 +269,37 @@ subject claim is `repo:<owner/repo>:environment:<name>`, so the
 `github_env` value and the GitHub environment name must match exactly
 (case-sensitive).
 
+**`preview` above is a generic name for this walkthrough, not the dedicated
+PR-preview identity `.github/workflows/pr-preview.yml` needs.** This recipe
+grants the new UMI **RG-scoped Owner** over a brand-new `stamp-preview`
+resource group — exactly the kind of broad grant the PR-preview identity
+must NOT have (see
+[`docs/runbooks/migration-shared-topology.md`](../../docs/runbooks/migration-shared-topology.md#preview-environment-security-preconditions-required-before-preview_enabledtrue)).
+The real PR-preview identity only needs to manage SWA preview slots on the
+existing shared `swa-bccweb-shared` resource — it wants no `stamp_rg` at
+all. Bootstrap's `terraform_umis` map has no way to express that narrower
+grant (it only issues RG-scoped Owner over a freshly created stamp RG per
+entry), so that identity, its role assignment, and its GitHub environment
+must be created out-of-band (`az identity create` + a scoped `az role
+assignment create` for SWA management, then a GitHub environment wired to
+its OIDC federated credential manually) rather than through this
+`terraform_umis` recipe. Once that dedicated environment exists, it also
+needs its own environment-scoped `SHARED_RG_NAME` variable set by hand
+(bootstrap only auto-publishes `SHARED_RG_NAME` to `staging`/`prod`,
+because only those two appear in `terraform_umis`) — see the migration
+runbook section linked above for the full checklist.
+
 ### Populate GitHub secrets
 
 When `manage_github_secrets = true` (the default), **Terraform creates the
 GitHub environments and pushes the three Azure identifiers as
-environment-scoped Actions secrets, plus the deterministic topology variables
-bootstrap owns, for you** —
-no manual paste is required. The `integrations/github` provider
+environment-scoped Actions secrets plus the application deploy variables for
+you** —
+no manual paste is required. Deterministic topology (`shared_rg_name`,
+`stamp_rg_name`, `tfstate_resource_group_name`, `tfstate_storage_account_name`)
+is **not** part of this publication — it's committed directly in
+`iac/env/{shared,staging,prod}.tfvars` (see below) and bootstrap never writes
+a GitHub variable for it. The `integrations/github` provider
 authenticates via the `GITHUB_TOKEN` environment variable (see
 Prerequisites). After `terraform -chdir=iac/bootstrap apply` completes,
 verify in the GitHub UI at:
@@ -270,19 +318,23 @@ Each environment receives the following secrets — note `AZURE_CLIENT_ID`
 | `AZURE_SUBSCRIPTION_ID` | `data.azapi_client_config.current.subscription_id` | No (shared) |
 
 Application environments receive these GitHub Actions **variables** (not
-secrets) so CI never has to hand-supply bootstrap-owned topology:
+secrets) so `deploy-app.yml`'s `az` CLI steps never have to hand-supply
+bootstrap-owned topology. These are **application deploy variables, not
+Terraform inputs** — `iac/environment`'s and `iac/shared`'s own
+`stamp_rg_name`/`shared_rg_name`/`tfstate_*` variables are deterministic once
+`terraform_umis`/`github_environments` are fixed, so they're committed
+directly in `iac/env/{shared,staging,prod}.tfvars` instead:
 
 | Variable | Source | Per-env? |
 |---|---|---|
 | `TF_VAR_STAMP_RG_NAME` | `azapi_resource.pre_created_rg["stamp-<env>"].name` | **Yes — different RG name per env** |
-| `SHARED_RG_NAME` | `azapi_resource.pre_created_rg["shared"].name` | Prod now; staging after its T4 rename |
-| `AZURE_LOCATION` | `var.location` (`uksouth` by default) | Prod now; staging after its T4 rename |
-| `TF_VAR_tfstate_resource_group_name` | `azapi_resource.bootstrap_rg.name` | Prod now; staging after its T4 rename |
-| `TF_VAR_tfstate_storage_account_name` | `azapi_resource.tfstate_sa.name` | Prod now; staging after its T4 rename |
+| `SHARED_RG_NAME` | `azapi_resource.pre_created_rg["shared"].name` | `staging` and `prod` both, immediately on apply |
+| `AZURE_LOCATION` | `var.location` (`uksouth` by default) | `staging` and `prod` both, immediately on apply |
 
-The `shared` environment receives `TF_VAR_shared_rg_name` from the created
-shared RG and `TF_VAR_env_umi_principal_ids`, a JSON encoding of the complete
-env-to-principal-ID map (including `shared`) for downstream RBAC assignments.
+No GitHub Actions variable is a Terraform input. Bootstrap writes the complete
+env-to-principal-ID map (including `shared`) to the non-secret, mode-0644
+`iac/env/shared.generated.tfvars` instead. Review and commit it after apply;
+the identities do not exist soon enough to commit it before the first apply.
 
 None of these are real secrets — `clientId` is bound to the federated
 subject by OIDC (so even disclosed it cannot be used outside the
@@ -317,7 +369,7 @@ stable on subsequent applies.
 
 **Re-applying against an environment bootstrapped before this variable
 publication existed**: `terraform_umis` entries created before
-`TF_VAR_STAMP_RG_NAME` and the other deterministic variables were added may
+`TF_VAR_STAMP_RG_NAME`/`AZURE_LOCATION`/`SHARED_RG_NAME` were added may
 already have their GitHub environment in bootstrap state, but that environment
 won't have the variables yet. Run and review
 `terraform -chdir=iac/bootstrap plan` against the same `terraform.tfvars`, then
@@ -326,6 +378,25 @@ bootstrap state, import it first as described above. The published variables
 are the required outcome, not a guarantee that they are the sole changes: the
 plan may also reconcile
 `allowSharedKeyAccess = false` or other pending bootstrap drift.
+
+**Deleting the retired deterministic-topology GitHub variables**: an
+environment bootstrapped before the deterministic topology moved to committed
+tfvars may still carry the older, now-unmanaged GitHub variables
+`TF_VAR_shared_rg_name`, `TF_VAR_tfstate_resource_group_name`, and
+`TF_VAR_tfstate_storage_account_name` — bootstrap's current configuration no
+longer declares these, so the very next `terraform -chdir=iac/bootstrap plan`
+against that environment will propose **deleting** them. That's expected and
+correct: their values now live only in the committed
+`iac/env/{shared,staging,prod}.tfvars` and `iac/env/<env>.backend.hcl` files.
+Before an operator accepts a plan containing these deletes, verify the
+committed tfvars and backend files for every affected environment already
+carry the equivalent, correct values (`shared_rg_name`, `stamp_rg_name`,
+`tfstate_resource_group_name`, `tfstate_storage_account_name` in
+`iac/env/<env>.tfvars`, and the matching `resource_group_name`/
+`storage_account_name`/`container_name` in `iac/env/<env>.backend.hcl`) — if
+they don't, fix the committed files first, then re-run the plan and accept
+the deletes only once the committed source of truth matches. Accepting the
+deletes without that check would drop the values from both places at once.
 
 #### Escape hatch: `manage_github_secrets = false`
 
@@ -366,8 +437,8 @@ the `github_actions_setup` output:
 | Variable | Value |
 |---|---|
 | `TF_VAR_STAMP_RG_NAME` | `pre_created_rg_names["stamp-<env>"]` output (per env) |
-| `TF_VAR_shared_rg_name` | `pre_created_rg_names["shared"]` output (shared) |
-| `TF_VAR_env_umi_principal_ids` | JSON-encoded `terraform_umi_principal_ids` output (shared) |
+| `SHARED_RG_NAME` | `pre_created_rg_names["shared"]` output (staging, prod) |
+| `AZURE_LOCATION` | `location` variable value (staging, prod) |
 
 ### Workflow requirements
 

@@ -51,23 +51,33 @@ terraform -chdir=iac/shared fmt -check
 
 For an authenticated plan against shared state, first sign in with `az login`.
 `iac/env/shared.tfvars` is the committed, tracked base (`acs_email_domain`,
-`acs_sender_address`, the empty DNS placeholders, tags). Bootstrap-generated
-values — `env_umi_principal_ids` and `shared_rg_name` — live in a gitignored
-local overlay; copy its template and populate it from the bootstrap output:
+`acs_sender_address`, the empty DNS placeholders, tags, and `shared_rg_name`
+— deterministic once `terraform_umis`/`github_environments` are fixed, so
+it's committed rather than generated). The staging/prod/shared UMI principal
+IDs do not exist before the first bootstrap apply, so bootstrap writes them to
+`iac/env/shared.generated.tfvars`. This generated file is non-secret, mode
+0644, and intentionally absent before that apply. Review and commit it before
+running the shared root; there is no shared local overlay or GitHub Terraform
+variable fallback.
 
 ```sh
-cp iac/env/shared.local.tfvars.example iac/env/shared.local.tfvars
-terraform -chdir=iac/bootstrap output -json terraform_umi_principal_ids
-terraform -chdir=iac/bootstrap output -json pre_created_rg_names
+terraform -chdir=iac/bootstrap apply
+test -f iac/env/shared.generated.tfvars
+git diff --no-index /dev/null iac/env/shared.generated.tfvars || test $? -eq 1
 ```
 
-Then initialize the committed backend and plan with the base file first, the
-local overlay second so the overlay wins:
+Then initialize the committed backend and plan with the authored base first
+and bootstrap's generated file second:
 
 ```sh
 terraform -chdir=iac/shared init -backend-config=../env/shared.backend.hcl
-terraform -chdir=iac/shared plan -var-file=../env/shared.tfvars -var-file=../env/shared.local.tfvars
+terraform -chdir=iac/shared plan -var-file=../env/shared.tfvars -var-file=../env/shared.generated.tfvars
 ```
+
+The reusable workflow supplies the same second file through its shared-only
+`TF_CLI_ARGS_plan`; environment-root plans receive no such argument. A missing
+generated file therefore fails shared plan/apply/drift clearly. This is
+expected until bootstrap has run and the reviewed file has been committed.
 
 The root derives the active subscription ID from the AzAPI client context. Its
 inputs are resource names, public host/domain configuration, tags, and the
