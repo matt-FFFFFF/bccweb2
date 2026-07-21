@@ -92,6 +92,7 @@ jobs:
             scripts/migrate/__tests__/enum-normalize.test.mjs \
             scripts/migrate/__tests__/migration.smoke.test.mjs \
             scripts/migrate/__tests__/pilot-club-history.test.mjs \
+            scripts/migrate/__tests__/reconcile.test.mjs \
             scripts/migrate/__tests__/transforms.test.mjs \
             scripts/migrate/__tests__/validate-heal-classify.test.mjs \
             scripts/migrate/__tests__/validate.manufacturers.test.mjs

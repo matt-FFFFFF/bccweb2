@@ -1,6 +1,7 @@
 // SPDX-FileCopyrightText: 2026 British Club Challenge authors
 // SPDX-License-Identifier: MPL-2.0
-import { describe, expect, test } from "vitest";
+import assert from "node:assert/strict";
+import { describe, test } from "node:test";
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
@@ -50,15 +51,17 @@ describe("reconcile.mjs", () => {
       PROD_BLOB_CONN: "DefaultEndpointsProtocol=https;AccountName=p;AccountKey=secret;",
     });
 
-    expect(result.status).toBe(0);
+    assert.equal(result.status, 0);
     const reportPath = join(cwd, ".migration-state", "prod-dryrun-report.json");
-    expect(existsSync(reportPath)).toBe(true);
+    assert.equal(existsSync(reportPath), true);
     const report = JSON.parse(readFileSync(reportPath, "utf8"));
-    expect(report).toMatchObject({
-      source: {
-        sqlConn: "Server=tcp:bcc-prod;User Id=sa;Password=***;",
-        blobConn: "DefaultEndpointsProtocol=https;AccountName=p;AccountKey=***;",
-      },
+    assert.equal(report.source.sqlConn, "Server=tcp:bcc-prod;User Id=sa;Password=***;");
+    assert.equal(report.source.blobConn, "DefaultEndpointsProtocol=https;AccountName=p;AccountKey=***;");
+    assert.deepEqual({
+      perEntity: report.perEntity,
+      discarded: report.discarded,
+      anomalies: report.anomalies,
+    }, {
       perEntity: {
         club: { count: 2, sample: ["club-uuid-1", "club-uuid-2"] },
         pilot: { count: 1, sample: ["pilot-uuid-10"] },
@@ -66,8 +69,8 @@ describe("reconcile.mjs", () => {
       discarded: {},
       anomalies: [],
     });
-    expect(typeof report.generatedAt).toBe("string");
-    expect(report.prodRows.club).toMatchObject({
+    assert.equal(typeof report.generatedAt, "string");
+    assert.deepEqual(report.prodRows.club, {
       entity: "club",
       expectedCount: 2,
       actualCount: 2,
@@ -86,16 +89,17 @@ describe("reconcile.mjs", () => {
 
     const result = runReconcile(cwd, ["--against-prod-snapshot", snapshotPath]);
 
-    expect(result.status).toBe(1);
+    assert.equal(result.status, 1);
     const report = JSON.parse(
       readFileSync(join(cwd, ".migration-state", "prod-dryrun-report.json"), "utf8"),
     );
-    expect(report.anomalies).toContainEqual(
-      expect.objectContaining({
-        type: "count_mismatch",
-        entity: "club",
-        message: "club: expected 2, got 1",
-      }),
+    assert.equal(
+      report.anomalies.some((anomaly) => (
+        anomaly.type === "count_mismatch" &&
+        anomaly.entity === "club" &&
+        anomaly.message === "club: expected 2, got 1"
+      )),
+      true,
     );
   });
 
@@ -110,11 +114,11 @@ describe("reconcile.mjs", () => {
 
     const result = runReconcile(cwd);
 
-    expect(result.status).toBe(0);
+    assert.equal(result.status, 0);
     const report = JSON.parse(
       readFileSync(join(cwd, ".migration-state", "reconciliation-report.json"), "utf8"),
     );
-    expect(report.discarded.roundClubPilot).toBe(2);
-    expect(result.stdout).toContain("roundClubPilot: 2 rows");
+    assert.equal(report.discarded.roundClubPilot, 2);
+    assert.match(result.stdout, /roundClubPilot: 2 rows/);
   });
 });
