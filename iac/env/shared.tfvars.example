@@ -11,7 +11,8 @@
 #   terraform -chdir=iac/shared apply -var-file=../env/shared.tfvars -var-file=../env/shared.generated.tfvars
 
 environments   = ["staging", "prod"]
-location       = "uksouth"
+location       = "swedencentral"
+swa_location   = "westeurope"
 shared_rg_name = "rg-bccweb-shared"
 
 acs_email_domain   = "<REQUIRED: ACS email domain>"

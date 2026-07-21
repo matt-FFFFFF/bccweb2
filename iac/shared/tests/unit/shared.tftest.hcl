@@ -95,10 +95,11 @@ run "shared_plans" {
     condition = (
       azapi_resource.swa.name == "swa-bccweb-shared" &&
       azapi_resource.swa.type == "Microsoft.Web/staticSites@2025-03-01" &&
+      azapi_resource.swa.location == "westeurope" &&
       azapi_resource.swa.body.sku.name == "Standard" &&
       azapi_resource.swa.body.sku.tier == "Standard"
     )
-    error_message = "The shared Static Web App must keep its frozen name, API type, and Standard SKU."
+    error_message = "The shared Static Web App must keep its frozen name, supported West Europe location, API type, and Standard SKU."
   }
 
   assert {

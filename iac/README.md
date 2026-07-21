@@ -11,7 +11,7 @@ All infrastructure is provisioned using **AzAPI v2.10** with HCL-native bodies.
 ## Layout
 
 - `bootstrap/`: One-shot config provisioning the remote state storage account, the per-env Terraform UMIs (GitHub OIDC, RG-scoped Owner), the shared resource group plus one stamp resource group per application environment, and the GitHub environment secrets/variables. Uses **local state** (it provisions its own remote-state target, so it cannot live there itself). See [bootstrap/README.md](bootstrap/README.md).
-- `shared/`: The platform layer used by the stable `staging`/`prod` environments — Log Analytics workspace, per-environment Application Insights, Azure Communication Services (email), and one Standard-tier Static Web App (with the production custom domain/DNS). One remote state, `shared.tfstate`. See [shared/README.md](shared/README.md).
+- `shared/`: The platform layer used by the stable `staging`/`prod` environments — Sweden Central Log Analytics, per-environment Application Insights, and Azure Communication Services, plus one Standard-tier Static Web App in West Europe (the nearest supported SWA region, with production custom domain/DNS). One remote state, `shared.tfstate`. See [shared/README.md](shared/README.md).
 - `environment/`: Per-env application stack, composed of a single `modules/stamp` child module (storage — two accounts, see below — Flex Consumption Function App, Key Vault, alerts, optional DNS). It reads only non-secret `app_insights_ids`/`acs_id` from the `shared` root's remote state. One `terraform apply` provisions the stamp for a given environment. See [environment/README.md](environment/README.md).
 - `env/`: Committed environment-specific configuration — `<env>.backend.hcl`, non-secret base values in `<env>.tfvars`, and bootstrap's non-secret `shared.generated.tfvars`. Secrets are supplied through explicit workflow `TF_VAR_*` environment mappings. The generated shared file is intentionally absent until bootstrap first applies, then must be reviewed and committed.
 
@@ -64,7 +64,8 @@ Follow these steps to provision the topology from scratch.
     env's UMI, its resource group(s), its GitHub environment, the three
     Azure OIDC secrets (`AZURE_CLIENT_ID`/`AZURE_TENANT_ID`/`AZURE_SUBSCRIPTION_ID`),
     application deploy variables `TF_VAR_STAMP_RG_NAME`/`AZURE_LOCATION`/
-    `SHARED_RG_NAME` on `staging`/`prod` (consumed by `deploy-app.yml`, and
+    `SHARED_RG_NAME` on `staging`/`prod` (with `AZURE_LOCATION` sourced from
+    the Sweden Central workload location; consumed by `deploy-app.yml`, and
     `SHARED_RG_NAME` also by `pr-preview.yml`; not Terraform). It also writes the complete UMI
     principal-ID map to `iac/env/shared.generated.tfvars` with mode 0644.
     That file is non-secret but cannot exist before bootstrap creates the

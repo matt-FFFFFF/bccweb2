@@ -16,6 +16,7 @@ creates the resource group itself.
   communication service (`acs-bccweb-shared`) linked to the domain. `listKeys` stays
   ephemeral — `acs.tf` never exports a connection string.
 - **`swa.tf` + `dns.tf`**: one Standard-tier Static Web App (`swa-bccweb-shared`)
+  in West Europe because Static Web Apps does not support Sweden Central,
   shared by every environment, plus (when `production_hostname`/`dns_zone_name`
   are both set) the production custom-domain CNAME and `customDomains` child
   resource, ordered so DNS is created before Azure validates the domain.

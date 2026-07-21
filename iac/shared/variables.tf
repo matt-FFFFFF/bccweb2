@@ -11,7 +11,13 @@ variable "environments" {
 variable "location" {
   description = "Azure region for shared regional resources."
   type        = string
-  default     = "uksouth"
+  default     = "swedencentral"
+}
+
+variable "swa_location" {
+  description = "Azure Static Web Apps deployment region; Sweden Central is not supported by the service."
+  type        = string
+  default     = "westeurope"
 }
 
 variable "shared_rg_name" {

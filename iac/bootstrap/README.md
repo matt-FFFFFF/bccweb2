@@ -99,7 +99,7 @@ terraform -chdir=iac/bootstrap validate
 #    copy the example and edit it before the first apply:
 #    cp iac/bootstrap/terraform.tfvars.example iac/bootstrap/terraform.tfvars
 
-# 4. Apply. Other variables have sensible defaults (location=uksouth,
+# 4. Apply. Other variables have sensible defaults (location=swedencentral,
 #    bootstrap_rg_name=rg-bccweb-tfstate, tfstate_container_prefix=tfstate).
 terraform -chdir=iac/bootstrap apply
 
@@ -216,12 +216,29 @@ in-use account. Never delete or overwrite the only copy of `prod.tfstate`.
 
 ## GitHub Actions OIDC setup
 
+Before applying Azure federated credentials for an existing repository, enable
+GitHub's immutable subject and verify the exact repository prefix:
+
+```sh
+gh api --method PUT repos/matt-FFFFFF/bccweb2/actions/oidc/customization/sub \
+  -F use_default=true \
+  -F use_immutable_subject=true
+gh api repos/matt-FFFFFF/bccweb2/actions/oidc/customization/sub
+```
+
+The response must report `use_immutable_subject: true` and the
+`repo:matt-FFFFFF@16320656/bccweb2@1264013182` prefix committed as
+`github_oidc_subject_repo`. The GitHub provider does not manage this repository
+setting, so this opt-in is an explicit bootstrap prerequisite.
+
 The bootstrap provisions **one user-assigned managed identity (UMI) per
 downstream stack** (`id-bccweb-terraform-staging`,
 `id-bccweb-terraform-prod`, `id-bccweb-terraform-shared`) that GitHub Actions
 assumes via OIDC — no client secrets stored anywhere. Each UMI carries exactly
 one federated identity credential, scoped to
-`repo:<github_repo>:environment:<github_env>` per its `terraform_umis` entry.
+`repo:<github_oidc_subject_repo>:environment:<github_env>` per its
+`terraform_umis` entry. The canonical input includes GitHub's immutable owner
+and repository IDs so Azure exactly matches the subject GitHub emits.
 
 **Security note**: Each UMI is granted **RG-scoped Owner** on exactly one
 pre-created resource group — never at subscription scope:
@@ -265,7 +282,8 @@ terraform -chdir=iac/bootstrap apply
 
 The apply creates the env's UMI, federated credential, stamp RG, role
 assignments, GitHub environment, and secrets in one shot. The federated
-subject claim is `repo:<owner/repo>:environment:<name>`, so the
+subject claim is `repo:<owner@id/repo@id>:environment:<name>`, using the
+canonical `github_oidc_subject_repo` input, so the
 `github_env` value and the GitHub environment name must match exactly
 (case-sensitive).
 
@@ -329,7 +347,7 @@ directly in `iac/env/{shared,staging,prod}.tfvars` instead:
 |---|---|---|
 | `TF_VAR_STAMP_RG_NAME` | `azapi_resource.pre_created_rg["stamp-<env>"].name` | **Yes — different RG name per env** |
 | `SHARED_RG_NAME` | `azapi_resource.pre_created_rg["shared"].name` | `staging` and `prod` both, immediately on apply |
-| `AZURE_LOCATION` | `var.location` (`uksouth` by default) | `staging` and `prod` both, immediately on apply |
+| `AZURE_LOCATION` | `var.location` (`swedencentral` by default) | `staging` and `prod` both, immediately on apply |
 
 No GitHub Actions variable is a Terraform input. Bootstrap writes the complete
 env-to-principal-ID map (including `shared`) to the non-secret, mode-0644
@@ -462,7 +480,8 @@ jobs:
 ```
 
 Without `environment: <name>`, GitHub issues an OIDC token whose `sub` claim
-is `repo:<owner/repo>:ref:refs/heads/<branch>` (or similar), which no
+uses a branch context instead of the configured immutable
+`repo:<owner@id/repo@id>:environment:<name>` form, which no
 federated credential here trusts — `azure/login` will fail with a 400. The
 `environment` also selects which env-scoped `AZURE_CLIENT_ID` the job reads,
 binding the job to that env's UMI and its RG-scoped permissions.

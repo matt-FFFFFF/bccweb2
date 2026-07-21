@@ -5,7 +5,7 @@ resource "azapi_resource" "swa" {
   type      = "Microsoft.Web/staticSites@2025-03-01"
   name      = "swa-bccweb-shared"
   parent_id = local.shared_rg_id
-  location  = var.location
+  location  = var.swa_location
   tags      = local.tags
 
   body = {

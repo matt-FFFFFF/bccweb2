@@ -11,8 +11,8 @@
 
 variable "location" {
   type        = string
-  description = "Azure region for the bootstrap resource group and tfstate storage account."
-  default     = "uksouth"
+  description = "Azure region for the bootstrap, state, identity, shared, and application resource groups."
+  default     = "swedencentral"
 }
 
 variable "bootstrap_rg_name" {
@@ -43,14 +43,30 @@ variable "tfstate_container_prefix" {
 # One UMI per downstream stack; each UMI gets Owner on exactly one pre-created
 # RG (never subscription scope). Each UMI carries one
 # federated identity credential scoped to
-# `repo:<github_repo>:environment:<github_env>`. Adding a new env is a new
+# `repo:<github_oidc_subject_repo>:environment:<github_env>`. Adding a new env is a new
 # `terraform_umis` map entry (plus the matching `github_environments` entry)
 # + re-apply.
 
 variable "github_repo" {
   type        = string
-  description = "owner/repo for GitHub OIDC federated credentials (subject claim becomes repo:<owner/repo>:environment:<env>)."
+  description = "owner/repo selected by GitHub API resources managed during bootstrap."
   default     = "matt-FFFFFF/bccweb2"
+}
+
+variable "github_oidc_subject_repo" {
+  type        = string
+  description = "Repository segment in GitHub's OIDC subject, including immutable owner/repository IDs when enabled."
+  nullable    = false
+
+  validation {
+    condition     = can(regex("^([^@/:]+/[^@/:]+|[^@/:]+@[0-9]+/[^@/:]+@[0-9]+)$", var.github_oidc_subject_repo))
+    error_message = "github_oidc_subject_repo must be owner/repo or the immutable owner@id/repo@id form."
+  }
+
+  validation {
+    condition     = replace(var.github_oidc_subject_repo, "/@[0-9]+/", "") == var.github_repo
+    error_message = "github_oidc_subject_repo must identify the same owner/repository as github_repo."
+  }
 }
 
 variable "github_environments" {
