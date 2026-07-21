@@ -125,17 +125,35 @@ jobs:
           terraform -chdir=iac/shared init -backend=false -test-directory=tests/unit
           terraform -chdir=iac/shared test -test-directory=tests/unit
 
-      - name: Validate bootstrap Terraform
+      - name: Run bootstrap Terraform unit tests
         run: |
-          terraform -chdir=iac/bootstrap init -backend=false
+          if ! cmp -s iac/bootstrap/terraform.tfvars iac/bootstrap/terraform.tfvars.example; then
+            echo "Bootstrap terraform.tfvars and terraform.tfvars.example must remain byte-identical." >&2
+            exit 1
+          fi
+          terraform -chdir=iac/bootstrap init -backend=false -test-directory=tests/unit
           terraform -chdir=iac/bootstrap validate
+          terraform -chdir=iac/bootstrap test -test-directory=tests/unit
           terraform fmt -check -recursive iac/
+
+      - name: Check Terraform workflow var-file contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/terraform-run.yml
+          if grep -Fq "TF_VAR_env_umi_principal_ids" "$workflow"; then
+            echo "terraform-run.yml must not map the UMI principal IDs through GitHub." >&2
+            exit 1
+          fi
+          test "$(grep -Ec "TF_CLI_ARGS_plan: .*inputs\.root == 'shared'.*-var-file=\.\./env/shared\.generated\.tfvars" "$workflow")" -eq 1
+          test "$(grep -Fc -- "-var-file=\"../env/\${TARGET_ENV}.tfvars\"" "$workflow")" -eq 3
+          test "$(grep -Fc "terraform -chdir=\"iac/\${ROOT}\" apply -input=false tfplan" "$workflow")" -eq 1
 
       - name: Check committed tfvars are non-secret
         shell: bash
         run: |
-          files=(iac/env/shared.tfvars iac/env/staging.tfvars iac/env/prod.tfvars)
-          forbidden='ops_email|puretrack_api_key|puretrack_email|puretrack_password|slack_webhook_url|terraform_principal_type|shared_rg_name|env_umi_principal_ids|stamp_rg_name|platform_rg_name|tfstate_resource_group_name|tfstate_storage_account_name'
+          files=(iac/bootstrap/terraform.tfvars iac/env/shared.tfvars iac/env/staging.tfvars iac/env/prod.tfvars)
+          forbidden='ops_email|puretrack_api_key|puretrack_email|puretrack_password|slack_webhook_url|terraform_principal_type'
           failed=0
           while IFS=: read -r path key; do
             printf '%s:%s\n' "$path" "$key"

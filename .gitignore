@@ -27,12 +27,17 @@ local.settings.json
 *.tfvars
 *.tfvars.json
 *tfplan*
-# The three committed bases are non-secret and tracked; secret/generated values
-# live in ignored *.local.tfvars overlays.
+# Bootstrap tfvars is non-secret canonical bootstrap topology.
+!iac/bootstrap/terraform.tfvars
+# The committed environment bases are non-secret and tracked.
 !iac/env/shared.tfvars
 !iac/env/staging.tfvars
 !iac/env/prod.tfvars
+# Bootstrap generates this non-secret file; commit it after bootstrap apply.
+!iac/env/shared.generated.tfvars
 !iac/env/*.tfvars.example
+# Secret local overlays remain ignored even though tracked tfvars are negated above.
+iac/env/*.local.tfvars
 
 # Playwright
 playwright-report/

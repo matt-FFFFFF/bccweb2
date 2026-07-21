@@ -41,11 +41,9 @@ jobs:
       TF_VAR_puretrack_email: ${{ secrets.TF_VAR_puretrack_email }}
       TF_VAR_puretrack_password: ${{ secrets.TF_VAR_puretrack_password }}
       TF_VAR_slack_webhook_url: ${{ secrets.TF_VAR_slack_webhook_url }}
-      TF_VAR_stamp_rg_name: ${{ vars.TF_VAR_STAMP_RG_NAME }}
-      TF_VAR_tfstate_resource_group_name: ${{ vars.TF_VAR_tfstate_resource_group_name }}
-      TF_VAR_tfstate_storage_account_name: ${{ vars.TF_VAR_tfstate_storage_account_name }}
-      TF_VAR_shared_rg_name: ${{ vars.TF_VAR_shared_rg_name }}
-      TF_VAR_env_umi_principal_ids: ${{ vars.TF_VAR_env_umi_principal_ids }}
+      # Terraform resolves this relative to -chdir's root. Environment plans get
+      # no extra arguments; shared plans require bootstrap's committed output.
+      TF_CLI_ARGS_plan: ${{ inputs.root == 'shared' && '-var-file=../env/shared.generated.tfvars' || '' }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
@@ -83,38 +81,6 @@ jobs:
               exit 1
               ;;
           esac
-
-      - name: Validate required Terraform variables
-        env:
-          ROOT: ${{ inputs.root }}
-        run: |
-          set -euo pipefail
-          case "$ROOT" in
-            environment)
-              required_variables=(
-                TF_VAR_stamp_rg_name
-                TF_VAR_tfstate_resource_group_name
-                TF_VAR_tfstate_storage_account_name
-                TF_VAR_ops_email
-                TF_VAR_puretrack_api_key
-                TF_VAR_puretrack_email
-                TF_VAR_puretrack_password
-              )
-              ;;
-            shared)
-              required_variables=(
-                TF_VAR_shared_rg_name
-                TF_VAR_env_umi_principal_ids
-              )
-              ;;
-          esac
-          for variable_name in "${required_variables[@]}"; do
-            variable_value=${!variable_name:-}
-            if [[ -z "${variable_value//[[:space:]]/}" ]]; then
-              echo "${variable_name}" >&2
-              exit 1
-            fi
-          done
 
       - name: Terraform init
         env:
