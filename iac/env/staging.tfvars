@@ -4,6 +4,10 @@
 stamp_name = "staging"
 location   = "uksouth"
 
+tfstate_resource_group_name  = "rg-bccweb-tfstate"
+tfstate_storage_account_name = "stbccweb13afe"
+stamp_rg_name                = "stamp-staging"
+
 allowed_origins = []
 tags            = {}
 

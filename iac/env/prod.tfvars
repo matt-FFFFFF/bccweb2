@@ -4,6 +4,10 @@
 stamp_name = "prod"
 location   = "uksouth"
 
+tfstate_resource_group_name  = "rg-bccweb-tfstate"
+tfstate_storage_account_name = "stbccweb13afe"
+stamp_rg_name                = "stamp-prod"
+
 allowed_origins = ["https://bcc.flyparagliding.org.uk"]
 tags            = {}
 

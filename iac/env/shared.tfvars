@@ -4,6 +4,8 @@
 environments = ["staging", "prod"]
 location     = "uksouth"
 
+shared_rg_name = "rg-bccweb-shared"
+
 acs_email_domain   = "mail.flyparagliding.org.uk"
 acs_sender_address = "no-reply@mail.flyparagliding.org.uk"
 
