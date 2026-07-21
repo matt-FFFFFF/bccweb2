@@ -203,3 +203,19 @@ run "mismatched_stamp_rg_is_rejected" {
     var.terraform_umis,
   ]
 }
+
+run "partially_immutable_oidc_subject_is_rejected" {
+  command = plan
+
+  providers = {
+    azapi  = azapi.mock
+    github = github.mock
+    local  = local.mock
+  }
+
+  variables {
+    github_oidc_subject_repo = "owner@1/repository"
+  }
+
+  expect_failures = [var.github_oidc_subject_repo]
+}

@@ -59,7 +59,7 @@ variable "github_oidc_subject_repo" {
   nullable    = false
 
   validation {
-    condition     = can(regex("^[^/:]+(?:@[0-9]+)?/[^/:]+(?:@[0-9]+)?$", var.github_oidc_subject_repo))
+    condition     = can(regex("^([^@/:]+/[^@/:]+|[^@/:]+@[0-9]+/[^@/:]+@[0-9]+)$", var.github_oidc_subject_repo))
     error_message = "github_oidc_subject_repo must be owner/repo or the immutable owner@id/repo@id form."
   }
 }
