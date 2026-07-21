@@ -14,6 +14,12 @@ variable "location" {
   default     = "swedencentral"
 }
 
+variable "swa_location" {
+  description = "Azure Static Web Apps deployment region; Sweden Central is not supported by the service."
+  type        = string
+  default     = "westeurope"
+}
+
 variable "shared_rg_name" {
   description = "Name of the pre-created shared resource group owned by iac/bootstrap."
   type        = string

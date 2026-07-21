@@ -3,6 +3,7 @@
 
 environments = ["staging", "prod"]
 location     = "swedencentral"
+swa_location = "westeurope"
 
 shared_rg_name = "rg-bccweb-shared"
 

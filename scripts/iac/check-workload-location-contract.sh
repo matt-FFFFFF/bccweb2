@@ -29,3 +29,8 @@ for config in \
 done
 
 printf 'Location contract passed: bootstrap, shared, staging, and prod use swedencentral.\n'
+
+if ! grep -Eq '^[[:space:]]*swa_location[[:space:]]*=[[:space:]]*"westeurope"[[:space:]]*$' iac/env/shared.tfvars; then
+  printf 'ERROR: iac/env/shared.tfvars must set the supported SWA exception swa_location = "westeurope".\n' >&2
+  exit 1
+fi
