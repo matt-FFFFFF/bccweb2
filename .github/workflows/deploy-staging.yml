@@ -34,6 +34,6 @@ jobs:
     uses: ./.github/workflows/deploy-app.yml
     with:
       environment: staging
-      swa_environment_name: staging
+      swa_environment_name: ""
       is_production: false
     secrets: inherit
