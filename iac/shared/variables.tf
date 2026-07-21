@@ -11,7 +11,7 @@ variable "environments" {
 variable "location" {
   description = "Azure region for shared regional resources."
   type        = string
-  default     = "uksouth"
+  default     = "swedencentral"
 }
 
 variable "shared_rg_name" {

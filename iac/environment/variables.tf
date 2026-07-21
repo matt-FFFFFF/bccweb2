@@ -61,7 +61,7 @@ variable "terraform_principal_type" {
 variable "location" {
   description = "Azure region for the deployment."
   type        = string
-  default     = "uksouth"
+  default     = "swedencentral"
 }
 
 variable "allowed_origins" {

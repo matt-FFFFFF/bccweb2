@@ -16,7 +16,7 @@
 # explicitly into TF_VAR_* job-environment entries by terraform-run.yml.
 
 stamp_name = "staging"
-location   = "uksouth"
+location   = "swedencentral"
 
 # Deterministic topology: committed-base-owned (matches the canonical
 # bootstrap storage account / stamp resource group names). CI loads these
