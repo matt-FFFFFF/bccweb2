@@ -319,8 +319,8 @@ run "no_diagnostic_settings" {
       for resource_type in [
         azapi_resource.storage_runtime.type,
         azapi_resource.storage_data.type,
-        azapi_resource.blob_service_runtime.type,
-        azapi_resource.blob_service_data.type,
+        azapi_update_resource.blob_service_runtime.type,
+        azapi_update_resource.blob_service_data.type,
         azapi_resource.storage_container_data.type,
         azapi_resource.storage_container_data_private.type,
         azapi_resource.storage_lifecycle.type,
@@ -365,25 +365,24 @@ run "storage_split_staging" {
       azapi_resource.storage_runtime.body.properties.allowBlobPublicAccess == false &&
       azapi_resource.storage_runtime.body.properties.supportsHttpsTrafficOnly == true &&
       azapi_resource.storage_runtime.body.properties.minimumTlsVersion == "TLS1_2" &&
-      azapi_resource.blob_service_runtime.parent_id == azapi_resource.storage_runtime.id &&
+      azapi_update_resource.blob_service_runtime.resource_id == "${azapi_resource.storage_runtime.id}/blobServices/default" &&
       azapi_resource.storage_container_deploy.name == "deploymentpackage" &&
-      azapi_resource.storage_container_deploy.parent_id == azapi_resource.blob_service_runtime.id &&
+      azapi_resource.storage_container_deploy.parent_id == "${azapi_resource.storage_runtime.id}/blobServices/default" &&
       azapi_resource.storage_container_deploy.body.properties.publicAccess == "None" &&
-      azapi_resource.queue_service.name == "default" &&
-      azapi_resource.queue_service.type == "Microsoft.Storage/storageAccounts/queueServices@2025-06-01" &&
-      azapi_resource.queue_service.parent_id == azapi_resource.storage_runtime.id &&
+      azapi_update_resource.queue_service.type == "Microsoft.Storage/storageAccounts/queueServices@2025-06-01" &&
+      azapi_update_resource.queue_service.resource_id == "${azapi_resource.storage_runtime.id}/queueServices/default" &&
       azapi_resource.queue_brief_pdf.name == "round-brief-pdf" &&
       azapi_resource.queue_brief_pdf.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
       azapi_resource.queue_brief_pdf_poison.name == "round-brief-pdf-poison" &&
       azapi_resource.queue_brief_pdf_poison.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
-      azapi_resource.queue_brief_pdf.parent_id == azapi_resource.queue_service.id &&
-      azapi_resource.queue_brief_pdf_poison.parent_id == azapi_resource.queue_service.id &&
+      azapi_resource.queue_brief_pdf.parent_id == "${azapi_resource.storage_runtime.id}/queueServices/default" &&
+      azapi_resource.queue_brief_pdf_poison.parent_id == "${azapi_resource.storage_runtime.id}/queueServices/default" &&
       azapi_resource.queue_signtofly_reflect.name == "signtofly-reflect" &&
       azapi_resource.queue_signtofly_reflect.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
       azapi_resource.queue_signtofly_reflect_poison.name == "signtofly-reflect-poison" &&
       azapi_resource.queue_signtofly_reflect_poison.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
-      azapi_resource.queue_signtofly_reflect.parent_id == azapi_resource.queue_service.id &&
-      azapi_resource.queue_signtofly_reflect_poison.parent_id == azapi_resource.queue_service.id
+      azapi_resource.queue_signtofly_reflect.parent_id == "${azapi_resource.storage_runtime.id}/queueServices/default" &&
+      azapi_resource.queue_signtofly_reflect_poison.parent_id == "${azapi_resource.storage_runtime.id}/queueServices/default"
     )
     error_message = "The runtime account must be private, always LRS, and own deploymentpackage plus the round-brief and sign-to-fly queues."
   }
@@ -392,10 +391,10 @@ run "storage_split_staging" {
     condition = (
       azapi_resource.queue_rescore_jobs.name == "rescore-jobs" &&
       azapi_resource.queue_rescore_jobs.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
-      azapi_resource.queue_rescore_jobs.parent_id == azapi_resource.queue_service.id &&
+      azapi_resource.queue_rescore_jobs.parent_id == "${azapi_resource.storage_runtime.id}/queueServices/default" &&
       azapi_resource.queue_rescore_jobs_poison.name == "rescore-jobs-poison" &&
       azapi_resource.queue_rescore_jobs_poison.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
-      azapi_resource.queue_rescore_jobs_poison.parent_id == azapi_resource.queue_service.id
+      azapi_resource.queue_rescore_jobs_poison.parent_id == "${azapi_resource.storage_runtime.id}/queueServices/default"
     )
     error_message = "The rescore-jobs queue and its poison queue must plan under the queue service with the exact expected names, types, and parent linkage."
   }
@@ -404,10 +403,10 @@ run "storage_split_staging" {
     condition = (
       azapi_resource.queue_puretrack_group.name == "round-puretrack-group" &&
       azapi_resource.queue_puretrack_group.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
-      azapi_resource.queue_puretrack_group.parent_id == azapi_resource.queue_service.id &&
+      azapi_resource.queue_puretrack_group.parent_id == "${azapi_resource.storage_runtime.id}/queueServices/default" &&
       azapi_resource.queue_puretrack_group_poison.name == "round-puretrack-group-poison" &&
       azapi_resource.queue_puretrack_group_poison.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
-      azapi_resource.queue_puretrack_group_poison.parent_id == azapi_resource.queue_service.id
+      azapi_resource.queue_puretrack_group_poison.parent_id == "${azapi_resource.storage_runtime.id}/queueServices/default"
     )
     error_message = "The round-puretrack-group queue and its poison queue must plan under the queue service with the exact expected names, types, and parent linkage."
   }
@@ -416,10 +415,10 @@ run "storage_split_staging" {
     condition = (
       azapi_resource.queue_igc_validation.name == "igc-validation" &&
       azapi_resource.queue_igc_validation.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
-      azapi_resource.queue_igc_validation.parent_id == azapi_resource.queue_service.id &&
+      azapi_resource.queue_igc_validation.parent_id == "${azapi_resource.storage_runtime.id}/queueServices/default" &&
       azapi_resource.queue_igc_validation_poison.name == "igc-validation-poison" &&
       azapi_resource.queue_igc_validation_poison.type == "Microsoft.Storage/storageAccounts/queueServices/queues@2025-06-01" &&
-      azapi_resource.queue_igc_validation_poison.parent_id == azapi_resource.queue_service.id
+      azapi_resource.queue_igc_validation_poison.parent_id == "${azapi_resource.storage_runtime.id}/queueServices/default"
     )
     error_message = "The igc-validation queue and its poison queue must plan under the queue service with the exact expected names, types, and parent linkage."
   }
@@ -430,22 +429,22 @@ run "storage_split_staging" {
       azapi_resource.storage_data.body.kind == "StorageV2" &&
       azapi_resource.storage_data.body.sku.name == var.storage_sku &&
       azapi_resource.storage_data.body.properties.allowBlobPublicAccess == true &&
-      azapi_resource.blob_service_data.parent_id == azapi_resource.storage_data.id &&
-      azapi_resource.blob_service_data.body.properties.isVersioningEnabled == true &&
-      azapi_resource.blob_service_data.body.properties.changeFeed.enabled == true &&
-      azapi_resource.blob_service_data.body.properties.deleteRetentionPolicy.days == 7 &&
-      azapi_resource.blob_service_data.body.properties.containerDeleteRetentionPolicy.days == 7 &&
-      length(azapi_resource.blob_service_data.body.properties.cors.corsRules) == 1 &&
-      azapi_resource.blob_service_data.body.properties.cors.corsRules[0].allowedOrigins == var.allowed_origins &&
-      azapi_resource.blob_service_data.body.properties.cors.corsRules[0].allowedMethods == ["GET", "HEAD", "OPTIONS"] &&
-      azapi_resource.blob_service_data.body.properties.cors.corsRules[0].allowedHeaders == ["Content-Type", "Authorization", "x-ms-version", "x-ms-date", "x-ms-blob-type", "If-Match", "If-None-Match", "If-Modified-Since", "Range"] &&
-      azapi_resource.blob_service_data.body.properties.cors.corsRules[0].exposedHeaders == ["x-ms-request-id", "x-ms-version", "Content-Length", "Content-Type", "ETag", "Last-Modified"] &&
-      azapi_resource.blob_service_data.body.properties.cors.corsRules[0].maxAgeInSeconds == 3600 &&
+      azapi_update_resource.blob_service_data.resource_id == "${azapi_resource.storage_data.id}/blobServices/default" &&
+      azapi_update_resource.blob_service_data.body.properties.isVersioningEnabled == true &&
+      azapi_update_resource.blob_service_data.body.properties.changeFeed.enabled == true &&
+      azapi_update_resource.blob_service_data.body.properties.deleteRetentionPolicy.days == 7 &&
+      azapi_update_resource.blob_service_data.body.properties.containerDeleteRetentionPolicy.days == 7 &&
+      length(azapi_update_resource.blob_service_data.body.properties.cors.corsRules) == 1 &&
+      azapi_update_resource.blob_service_data.body.properties.cors.corsRules[0].allowedOrigins == var.allowed_origins &&
+      azapi_update_resource.blob_service_data.body.properties.cors.corsRules[0].allowedMethods == ["GET", "HEAD", "OPTIONS"] &&
+      azapi_update_resource.blob_service_data.body.properties.cors.corsRules[0].allowedHeaders == ["Content-Type", "Authorization", "x-ms-version", "x-ms-date", "x-ms-blob-type", "If-Match", "If-None-Match", "If-Modified-Since", "Range"] &&
+      azapi_update_resource.blob_service_data.body.properties.cors.corsRules[0].exposedHeaders == ["x-ms-request-id", "x-ms-version", "Content-Length", "Content-Type", "ETag", "Last-Modified"] &&
+      azapi_update_resource.blob_service_data.body.properties.cors.corsRules[0].maxAgeInSeconds == 3600 &&
       azapi_resource.storage_container_data.name == "data" &&
-      azapi_resource.storage_container_data.parent_id == azapi_resource.blob_service_data.id &&
+      azapi_resource.storage_container_data.parent_id == "${azapi_resource.storage_data.id}/blobServices/default" &&
       azapi_resource.storage_container_data.body.properties.publicAccess == "Blob" &&
       azapi_resource.storage_container_data_private.name == "data-private" &&
-      azapi_resource.storage_container_data_private.parent_id == azapi_resource.blob_service_data.id &&
+      azapi_resource.storage_container_data_private.parent_id == "${azapi_resource.storage_data.id}/blobServices/default" &&
       azapi_resource.storage_container_data_private.body.properties.publicAccess == "None" &&
       azapi_resource.storage_lifecycle.parent_id == azapi_resource.storage_data.id &&
       length(azapi_resource.storage_lock) == 0 &&
@@ -484,7 +483,7 @@ run "storage_empty_allowed_origins_disables_cors" {
   }
 
   assert {
-    condition     = length(azapi_resource.blob_service_data.body.properties.cors.corsRules) == 0
+    condition     = length(azapi_update_resource.blob_service_data.body.properties.cors.corsRules) == 0
     error_message = "An empty allowed_origins list must disable Blob Storage CORS instead of emitting an invalid empty-origin rule."
   }
 }

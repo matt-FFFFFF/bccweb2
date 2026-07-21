@@ -18,6 +18,9 @@ creates the resource group itself.
   externally managed domain is verified, set `link_acs_email_domain = true` and
   re-apply to enable email. `listKeys` stays ephemeral — `acs.tf` never exports a
   connection string.
+  The email service and communication service retain deletion protection;
+  the customer-managed domain and sender children are replaceable so an
+  unverified bootstrap domain can be corrected through a reviewed plan.
 - **`swa.tf` + `dns.tf`**: one Standard-tier Static Web App (`swa-bccweb-shared`)
   in West Europe because Static Web Apps does not support Sweden Central,
   shared by every environment, plus (when `production_hostname`/`dns_zone_name`
