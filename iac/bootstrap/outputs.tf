@@ -55,6 +55,11 @@ output "terraform_umi_principal_ids" {
   value       = local.terraform_umi_principal_ids
 }
 
+output "shared_generated_tfvars_path" {
+  description = "Path to the non-secret generated principal-ID tfvars file that must be committed after bootstrap apply."
+  value       = local_file.shared_generated_tfvars.filename
+}
+
 output "terraform_umi_resource_ids" {
   description = "Map env → full Azure resource ID of that env's Terraform UMI."
   value       = { for k, v in azapi_resource.tf_umi : k => v.id }
@@ -106,18 +111,16 @@ output "github_actions_setup" {
          AZURE_TENANT_ID       = ${data.azapi_client_config.current.tenant_id}
          AZURE_SUBSCRIPTION_ID = ${data.azapi_client_config.current.subscription_id}
 
-       Terraform also publishes deterministic GitHub environment variables:
+       Terraform publishes exactly these six application deploy variables.
+       It does not publish the principal-ID map to GitHub:
 %{for k, v in local.application_umis~}
-         ${v.github_env}: TF_VAR_STAMP_RG_NAME = ${azapi_resource.pre_created_rg["stamp-${k}"].name}
+          ${v.github_env}: TF_VAR_STAMP_RG_NAME = ${azapi_resource.pre_created_rg["stamp-${k}"].name}
+          ${v.github_env}: SHARED_RG_NAME = ${azapi_resource.pre_created_rg["shared"].name}
+          ${v.github_env}: AZURE_LOCATION = ${var.location}
 %{endfor~}
-         shared: TF_VAR_shared_rg_name         = ${azapi_resource.pre_created_rg["shared"].name}
-         shared: TF_VAR_env_umi_principal_ids  = ${jsonencode(local.terraform_umi_principal_ids)}
-%{for k, v in local.application_umis~}
-         ${v.github_env}: SHARED_RG_NAME = ${azapi_resource.pre_created_rg["shared"].name}
-         ${v.github_env}: AZURE_LOCATION = ${var.location}
-         ${v.github_env}: TF_VAR_tfstate_resource_group_name  = ${azapi_resource.bootstrap_rg.name}
-         ${v.github_env}: TF_VAR_tfstate_storage_account_name = ${azapi_resource.tfstate_sa.name}
-%{endfor~}
+       Bootstrap writes that non-secret map to:
+         ${local_file.shared_generated_tfvars.filename}
+       Commit the generated file after bootstrap apply.
 %{else~}
        Automatic creation is disabled (manage_github_secrets = false).
        Set these as GitHub ENVIRONMENT-level secrets manually (each env gets
@@ -129,19 +132,16 @@ output "github_actions_setup" {
          AZURE_TENANT_ID       = ${data.azapi_client_config.current.tenant_id}
          AZURE_SUBSCRIPTION_ID = ${data.azapi_client_config.current.subscription_id}
 
-       Automatic variable publication is also disabled. Set the same GitHub
-       ENVIRONMENT-level variables manually:
+       Automatic variable publication is also disabled. Set these six GitHub
+       ENVIRONMENT-level application deploy variables manually:
 %{for k, v in local.application_umis~}
-         ${v.github_env}: TF_VAR_STAMP_RG_NAME = ${azapi_resource.pre_created_rg["stamp-${k}"].name}
+          ${v.github_env}: TF_VAR_STAMP_RG_NAME = ${azapi_resource.pre_created_rg["stamp-${k}"].name}
+          ${v.github_env}: SHARED_RG_NAME = ${azapi_resource.pre_created_rg["shared"].name}
+          ${v.github_env}: AZURE_LOCATION = ${var.location}
 %{endfor~}
-         shared: TF_VAR_shared_rg_name        = ${azapi_resource.pre_created_rg["shared"].name}
-         shared: TF_VAR_env_umi_principal_ids = ${jsonencode(local.terraform_umi_principal_ids)}
-%{for k, v in local.application_umis~}
-         ${v.github_env}: SHARED_RG_NAME = ${azapi_resource.pre_created_rg["shared"].name}
-         ${v.github_env}: AZURE_LOCATION = ${var.location}
-         ${v.github_env}: TF_VAR_tfstate_resource_group_name  = ${azapi_resource.bootstrap_rg.name}
-         ${v.github_env}: TF_VAR_tfstate_storage_account_name = ${azapi_resource.tfstate_sa.name}
-%{endfor~}
+       Bootstrap still writes the non-secret principal-ID map to:
+         ${local_file.shared_generated_tfvars.filename}
+       Commit the generated file after bootstrap apply.
 %{endif~}
 
     2. Federated credentials exist for these GitHub environments (subject

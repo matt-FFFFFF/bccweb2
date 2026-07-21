@@ -36,23 +36,56 @@ mock_provider "local" {
   override_during = plan
 }
 
-variables {
-  tfstate_storage_account_name = "stbccwebunittest"
-  manage_github_secrets        = true
-  github_environments          = ["staging", "shared"]
-
-  terraform_umis = {
-    staging = {
-      stamp_rg   = "stamp-staging"
-      github_env = "staging"
-    }
-    shared = {
-      github_env = "shared"
+override_resource {
+  target          = azapi_resource.tf_umi["prod"]
+  override_during = plan
+  values = {
+    id   = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-bccweb-unit/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-bccweb-terraform-prod"
+    name = "id-bccweb-terraform-prod"
+    output = {
+      properties = {
+        clientId    = "00000000-0000-0000-0000-000000000012"
+        principalId = "00000000-0000-0000-0000-000000000013"
+      }
     }
   }
 }
 
-run "published_github_variables_exclude_authored_stamp_name" {
+override_resource {
+  target          = azapi_resource.tf_umi["shared"]
+  override_during = plan
+  values = {
+    id   = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-bccweb-unit/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-bccweb-terraform-shared"
+    name = "id-bccweb-terraform-shared"
+    output = {
+      properties = {
+        clientId    = "00000000-0000-0000-0000-000000000022"
+        principalId = "00000000-0000-0000-0000-000000000023"
+      }
+    }
+  }
+}
+
+override_resource {
+  target          = azapi_resource.tf_umi["staging"]
+  override_during = plan
+  values = {
+    id   = "/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/rg-bccweb-unit/providers/Microsoft.ManagedIdentity/userAssignedIdentities/id-bccweb-terraform-staging"
+    name = "id-bccweb-terraform-staging"
+    output = {
+      properties = {
+        clientId    = "00000000-0000-0000-0000-000000000032"
+        principalId = "00000000-0000-0000-0000-000000000033"
+      }
+    }
+  }
+}
+
+variables {
+  manage_github_secrets = true
+}
+
+run "canonical_github_variables_and_shared_tfvars_are_generated" {
   command = plan
 
   providers = {
@@ -62,56 +95,95 @@ run "published_github_variables_exclude_authored_stamp_name" {
   }
 
   assert {
-    condition = alltrue([
-      for key in keys(github_actions_environment_variable.rg_names) :
-      !endswith(key, "/TF_VAR_stamp_name")
+    condition = toset(keys(github_actions_environment_variable.rg_names)) == toset([
+      "staging/TF_VAR_STAMP_RG_NAME",
+      "staging/AZURE_LOCATION",
+      "staging/SHARED_RG_NAME",
+      "prod/TF_VAR_STAMP_RG_NAME",
+      "prod/AZURE_LOCATION",
+      "prod/SHARED_RG_NAME",
     ])
-    error_message = "Bootstrap must not publish authored TF_VAR_stamp_name values."
+    error_message = "Bootstrap must publish exactly the six application deploy variables, with no missing or extra environment/name pair."
   }
 
   assert {
     condition = alltrue([
-      for retained_name in [
-        "TF_VAR_STAMP_RG_NAME",
-        "TF_VAR_shared_rg_name",
-        "TF_VAR_env_umi_principal_ids",
-        ] : contains([
-          for variable in github_actions_environment_variable.rg_names :
-          variable.variable_name
-      ], retained_name)
+      for key, expected in {
+        "staging/TF_VAR_STAMP_RG_NAME" = { environment = "staging", name = "TF_VAR_STAMP_RG_NAME", value = "stamp-staging" }
+        "staging/AZURE_LOCATION"       = { environment = "staging", name = "AZURE_LOCATION", value = "uksouth" }
+        "staging/SHARED_RG_NAME"       = { environment = "staging", name = "SHARED_RG_NAME", value = "rg-bccweb-shared" }
+        "prod/TF_VAR_STAMP_RG_NAME"    = { environment = "prod", name = "TF_VAR_STAMP_RG_NAME", value = "stamp-prod" }
+        "prod/AZURE_LOCATION"          = { environment = "prod", name = "AZURE_LOCATION", value = "uksouth" }
+        "prod/SHARED_RG_NAME"          = { environment = "prod", name = "SHARED_RG_NAME", value = "rg-bccweb-shared" }
+        } : (
+        github_actions_environment_variable.rg_names[key].environment == expected.environment &&
+        github_actions_environment_variable.rg_names[key].variable_name == expected.name &&
+        github_actions_environment_variable.rg_names[key].value == expected.value
+      )
     ])
-    error_message = "Bootstrap must retain the generated stamp RG, shared RG, and environment UMI principal ID variables."
+    error_message = "Each application environment publication must target its canonical environment, name, and topology value."
   }
 
   assert {
-    condition = length(setsubtract(
-      toset([for variable in github_actions_environment_variable.rg_names : variable.variable_name]),
-      toset([
-        "TF_VAR_STAMP_RG_NAME",
-        "TF_VAR_shared_rg_name",
-        "TF_VAR_env_umi_principal_ids",
-        "AZURE_LOCATION",
-        "SHARED_RG_NAME",
-        "TF_VAR_tfstate_resource_group_name",
-        "TF_VAR_tfstate_storage_account_name",
-      ])
-    )) == 0
-    error_message = "Bootstrap must not publish any GitHub environment variable outside the exact expected set."
+    condition = alltrue([
+      for variable in github_actions_environment_variable.rg_names :
+      variable.variable_name != "TF_VAR_env_umi_principal_ids"
+    ])
+    error_message = "Bootstrap must not publish TF_VAR_env_umi_principal_ids to GitHub."
   }
 
   assert {
-    condition = length(setsubtract(
-      toset([
-        "TF_VAR_STAMP_RG_NAME",
-        "TF_VAR_shared_rg_name",
-        "TF_VAR_env_umi_principal_ids",
-        "AZURE_LOCATION",
-        "SHARED_RG_NAME",
-        "TF_VAR_tfstate_resource_group_name",
-        "TF_VAR_tfstate_storage_account_name",
-      ]),
-      toset([for variable in github_actions_environment_variable.rg_names : variable.variable_name])
-    )) == 0
-    error_message = "Bootstrap must publish EXACTLY this set of GitHub environment variables for the staging+shared fixture — none missing."
+    condition     = local_file.shared_generated_tfvars.filename == "${path.module}/../env/shared.generated.tfvars"
+    error_message = "Bootstrap must generate the shared principal-ID tfvars at iac/env/shared.generated.tfvars."
   }
+
+  assert {
+    condition     = local_file.shared_generated_tfvars.file_permission == "0644"
+    error_message = "The generated shared tfvars must be non-secret, repository-readable mode 0644."
+  }
+
+  assert {
+    condition     = local_file.shared_generated_tfvars.content == <<-EOT
+      # SPDX-FileCopyrightText: 2026 British Club Challenge authors
+      # SPDX-License-Identifier: MPL-2.0
+      # Generated by iac/bootstrap; non-secret and must be committed after bootstrap apply.
+
+      env_umi_principal_ids = {
+        prod    = "00000000-0000-0000-0000-000000000013"
+        shared  = "00000000-0000-0000-0000-000000000023"
+        staging = "00000000-0000-0000-0000-000000000033"
+      }
+      EOT
+    error_message = "The generated shared tfvars must contain the exact SPDX header, provenance comment, and complete sorted principal-ID map."
+  }
+}
+
+run "mismatched_stamp_rg_is_rejected" {
+  command = plan
+
+  providers = {
+    azapi  = azapi.mock
+    github = github.mock
+    local  = local.mock
+  }
+
+  variables {
+    terraform_umis = {
+      staging = {
+        stamp_rg   = "stamp-staging"
+        github_env = "staging"
+      }
+      prod = {
+        stamp_rg   = "stamp-wrong"
+        github_env = "prod"
+      }
+      shared = {
+        github_env = "shared"
+      }
+    }
+  }
+
+  expect_failures = [
+    var.terraform_umis,
+  ]
 }
