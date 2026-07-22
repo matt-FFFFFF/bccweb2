@@ -82,6 +82,19 @@ jobs:
         with:
           build: build-web
 
+      - name: Verify production SPA artifact
+        run: |
+          set -euo pipefail
+          test -f dist/web/index.html
+          if grep -Fq '/src/main.tsx' dist/web/index.html; then
+            echo "::error::Vite source entry found in production SPA artifact"
+            exit 1
+          fi
+          if ! grep -Eq 'src="/assets/index-[^"]+\.js"' dist/web/index.html; then
+            echo "::error::Hashed production JavaScript asset missing from SPA artifact"
+            exit 1
+          fi
+
       - uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -106,8 +119,8 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ steps.swa_token.outputs.token }}
           action: upload
-          app_location: "apps/web"
-          output_location: "../../dist/web"
+          app_location: "dist/web"
+          output_location: ""
           skip_app_build: true
           api_location: ""
           deployment_environment: ${{ inputs.swa_environment_name }}
@@ -118,8 +131,8 @@ jobs:
         with:
           azure_static_web_apps_api_token: ${{ steps.swa_token.outputs.token }}
           action: upload
-          app_location: "apps/web"
-          output_location: "../../dist/web"
+          app_location: "dist/web"
+          output_location: ""
           skip_app_build: true
           api_location: ""
 
@@ -250,8 +263,17 @@ jobs:
             exit 1
           fi
 
-          if ! curl -fsS "$root_url" | grep -Eiq 'BCC'; then
+          root_html="$(curl -fsS "$root_url")"
+          if ! printf '%s' "$root_html" | grep -Eiq 'BCC'; then
             echo "::error::SWA web content smoke failed"
+            exit 1
+          fi
+          if printf '%s' "$root_html" | grep -Fq '/src/main.tsx'; then
+            echo "::error::SWA served Vite source HTML instead of the production build"
+            exit 1
+          fi
+          if ! printf '%s' "$root_html" | grep -Eq 'src="/assets/index-[^"]+\.js"'; then
+            echo "::error::SWA production JavaScript asset reference missing"
             exit 1
           fi
 
@@ -298,7 +320,16 @@ jobs:
             exit 1
           fi
 
-          if ! curl -fsS "$root_url" | grep -Eiq 'BCC'; then
+          root_html="$(curl -fsS "$root_url")"
+          if ! printf '%s' "$root_html" | grep -Eiq 'BCC'; then
             echo "::error::Production-host web content smoke failed"
+            exit 1
+          fi
+          if printf '%s' "$root_html" | grep -Fq '/src/main.tsx'; then
+            echo "::error::Production host served Vite source HTML instead of the production build"
+            exit 1
+          fi
+          if ! printf '%s' "$root_html" | grep -Eq 'src="/assets/index-[^"]+\.js"'; then
+            echo "::error::Production-host JavaScript asset reference missing"
             exit 1
           fi
